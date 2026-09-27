@@ -1,18 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The host's GPU ABI types, compiled so the compiler can hold C++ to them:
-// tools/zshader reflects this module's own bytes into the generated host
-// structs (<GeneratedGpuTypes.hpp>), and src/render/GpuAbi.hpp checks every
-// struct of that inventory against the declaration here, at build time.
-//
-// One ConstantBuffer of nested structs: a UBO cannot drop unused members, so
-// every field keeps its Offset decoration and the element type names survive.
-//
-// What it mirrors is exactly `GeneratedGpu`: the buffers and uniform blocks
-// the engine publishes, the scene-pass push struct, and DescriptorHeapPushData.
-// Other push blocks are not here: each is held against the module that reads
-// it, where it is pushed (src/render/RenderInternal.hpp).
 module gpu_abi;
 
 import cluster_math;

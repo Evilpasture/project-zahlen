@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/system/ParticleSystem.cpp
 #include "ParticleSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
@@ -12,17 +11,15 @@
 
 namespace ZHLN {
 
-void ParticleSystem::Update(SystemContext& ctx, float /*dt*/) {
+void ParticleSystem::Update(SystemContext& ctx, float ) {
     using namespace ZHLN::Ranges;
     auto&       reg = ctx.registry;
     auto&       rc  = *ctx.render;
     const auto& cam = *ctx.camera;
 
-    // Pull the general-purpose tracked buffers from the RenderContext
     auto& active2D = rc.GetTracked2DEmitters();
     auto& active3D = rc.GetTracked3DEmitters();
 
-    // 1. Garbage Collect Dead 2D and 3D Particle Buffers using custom EraseIf pipe
     active2D | EraseIf([&](const auto& pair) {
         if (!reg.IsAlive(Entity::Unpack(pair.first))) {
             rc.DestroyBuffer(pair.second);
@@ -39,7 +36,6 @@ void ParticleSystem::Update(SystemContext& ctx, float /*dt*/) {
         return false;
     });
 
-    // 2. Process 2D Emitters
     auto entities = reg.GetEntitiesWith<Components::ParticleEmitterComponent>();
     auto emitters = reg.GetRawArray<Components::ParticleEmitterComponent>();
 
@@ -64,7 +60,6 @@ void ParticleSystem::Update(SystemContext& ctx, float /*dt*/) {
         rc.SubmitParticleEmitter(buffer, emitter.maxParticles, params);
     }
 
-    // 3. Process 3D Mesh Emitters
     auto mesh_entities = reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>();
     auto mesh_emitters = reg.GetRawArray<Components::MeshParticleEmitterComponent>();
 
@@ -85,4 +80,4 @@ void ParticleSystem::Update(SystemContext& ctx, float /*dt*/) {
     }
 }
 
-} // namespace ZHLN
+}

@@ -12,14 +12,6 @@
 
 namespace ZHLN::Vk::Debug {
 
-/**
- * @brief Best-effort VK_EXT_debug_utils object naming.
- *
- * The instance only receives VK_EXT_debug_utils while validation layers are
- * active, so vkSetDebugUtilsObjectNameEXT stays NULL otherwise and every
- * call degrades to a silent no-op. With validation on, VUID messages and
- * RenderDoc captures print these semantic names instead of raw handles.
- */
 inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle, VkObjectType type, const char* name) noexcept {
     if ((instance == VK_NULL_HANDLE) || (device == VK_NULL_HANDLE) || handle == 0 || name == nullptr) {
         return;
@@ -37,7 +29,6 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
     vkSetDebugUtilsObjectNameEXT(device, &info);
 }
 
-// @overload Guarantees NUL termination for non-terminated string views.
 inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle, VkObjectType type, std::string_view name) noexcept {
     if (name.size() < 64) {
         std::array<char, 64> buf;
@@ -45,7 +36,6 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
         buf[name.size()] = '\0';
         SetObjectName(instance, device, handle, type, buf.data());
     } else {
-        // Fallback for long strings (allocation only occurs when necessary)
         std::string name_str(name);
         SetObjectName(instance, device, handle, type, name_str.c_str());
     }
@@ -61,4 +51,4 @@ inline void SetImageViewName(const CtxT& ctx, VkImageView view, std::string_view
     SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name);
 }
 
-} // namespace ZHLN::Vk::Debug
+}

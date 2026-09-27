@@ -4,7 +4,7 @@
 #pragma once
 
 // tools/fidelity/ImageIO.hpp — PNG decode/encode for the fidelity runner.
-// Decode symbols arrive through zahlen_engine (extern/stbi_impl.c); the write
+// Decode symbols arrive through zahlen_engine (src/engine/stbi_impl.c); the write
 // implementation is the single TU ImageIO.cpp.
 
 #include <cstdint>

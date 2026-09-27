@@ -1,4 +1,3 @@
-// resources/shaders/particle_render.hlsl
 
 import common;
 import uniforms;
@@ -7,7 +6,7 @@ struct Particle {
     float4 position;
     float4 velocity;
     float4 color;
-    float4 params; // x = age, y = lifetime, z = size, w = rotation
+    float4 params;
 };
 
 struct RenderPushConstants {
@@ -18,7 +17,6 @@ struct RenderPushConstants {
 [vk::push_constant]
 RenderPushConstants pc;
 
-// Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct ParticleVSOutput {
     float4 pos : SV_Position;
@@ -45,14 +43,12 @@ ParticleVSOutput VSMain(uint vertexID: SV_VertexID, uint instanceID: SV_Instance
     float3 worldPos = p.position.xyz;
 
     if (pc.alignment == 0) {
-        // Mode 0: Camera-Facing Billboard
         float3 camDir   = normalize(scene.frame.camPos.xyz - p.position.xyz);
         float3 camRight = normalize(cross(float3(0.0f, 1.0f, 0.0f), camDir));
         float3 camUp    = normalize(cross(camDir, camRight));
 
         worldPos += camRight * rotatedOffset.x + camUp * rotatedOffset.y;
     } else if (pc.alignment == 1) {
-        // Mode 1: Velocity-Stretched Billboard
         float speed   = length(p.velocity.xyz);
         float3 velDir = (speed > 0.001f) ? (p.velocity.xyz / speed) : float3(0, 1, 0);
         float3 camDir = normalize(scene.frame.camPos.xyz - p.position.xyz);
@@ -60,7 +56,6 @@ ParticleVSOutput VSMain(uint vertexID: SV_VertexID, uint instanceID: SV_Instance
 
         worldPos += side * offset.x + velDir * offset.y;
     } else {
-        // Mode 2: Ground-Flat Plane
         worldPos += float3(rotatedOffset.x, 0.0f, rotatedOffset.y);
     }
 

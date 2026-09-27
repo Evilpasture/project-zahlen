@@ -102,7 +102,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)
     endif()
 
-    if(NOT MSVC AND WIN32)
+    if(WIN32)
         target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
     endif()
 

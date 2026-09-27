@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/execution/ParallelRecorder.hpp
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -14,14 +13,9 @@ struct RecordingSlot {
     uint32_t        slotIndex = 0;
 };
 
-// Scheduler policy concept (Compile-time duck typing)
 template <typename S, typename... Tasks>
 concept TaskScheduler = requires(S&& scheduler, Tasks&&... tasks) { scheduler.Dispatch(std::forward<Tasks>(tasks)...); };
 
-// `MaxFrameAddresses` sizes the per-frame device-address block re-pushed into
-// every secondary: the frame-address run belongs to whichever schema drives
-// the recorder, and the default is headroom for the scene's six, so the
-// recorder stays on the stack without the mechanism naming a scene.
 template <size_t ConcurrentSlots, size_t MaxFrameAddresses = 8>
 class ParallelCommandRecorder {
   public:
@@ -36,10 +30,6 @@ class ParallelCommandRecorder {
 
     void Reset() noexcept;
 
-    // VK_EXT_descriptor_heap: secondaries must INHERIT the primary's heap
-    // bindings (binding their own would invalidate the primary's heap state
-    // after vkCmdExecuteCommands). The per-frame push-data fields are re-pushed
-    // into every secondary right after it begins (push data is not inherited).
     void SetHeapState(
         const VkBindHeapInfoEXT*         samplerHeapBindInfo,
         const VkBindHeapInfoEXT*         resourceHeapBindInfo,
@@ -57,14 +47,9 @@ class ParallelCommandRecorder {
         }
     }
 
-    /**
-     * @brief Entry point for static parallel recording.
-     * Enforces slot limits at compile-time and uses zero heap allocations.
-     */
     template <typename SchedulerPolicy, typename... Callables>
     void Record(SchedulerPolicy&& scheduler, Callables&&... callables);
 
-    // Kept in header (3 lines)
     [[nodiscard]] constexpr auto GetCommandBuffers() const noexcept -> std::span<const VkCommandBuffer, ConcurrentSlots> {
         return _cmds;
     }
@@ -75,13 +60,12 @@ class ParallelCommandRecorder {
 
   private:
     template <typename SchedulerPolicy, size_t... Is, typename... Callables>
-    void RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables);
+    void RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables);
 
     VkDevice                                                      _device = VK_NULL_HANDLE;
     std::array<CommandPool<QueueType::Graphics>, ConcurrentSlots> _pools;
     std::array<VkCommandBuffer, ConcurrentSlots>                  _cmds;
 
-    // VK_EXT_descriptor_heap: secondary inheritance + per-secondary push data.
     const VkBindHeapInfoEXT*                            _samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT*                            _resourceHeapBindInfo = nullptr;
     std::array<uint32_t, MaxFrameAddresses>        _frameAddressOffsets {};
@@ -89,6 +73,6 @@ class ParallelCommandRecorder {
     uint32_t                                            _frameAddressCount = 0;
 };
 
-} // namespace ZHLN::Vk
+}
 
 #include "ParallelRecorder.inl"

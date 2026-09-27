@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/SamplerBuilder.cpp
 // clang-format off
 #include "Rendering.hpp"
 // clang-format on
@@ -9,8 +8,6 @@
 
 namespace ZHLN::Vk {
 
-// Private sampler-creation error (Tier 1): declared at file scope in this
-// translation unit so no header exposes it.
 enum class SamplerCreationError : uint8_t {
     NullDevice ZHLN_ANNOTATION(ZHLN::Description<"Null device for sampler creation">{}) = 1,
     CreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Sampler creation failed">{}),
@@ -106,4 +103,4 @@ auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Samp
     return Sampler {device, sampler};
 }
 
-} // namespace ZHLN::Vk
+}

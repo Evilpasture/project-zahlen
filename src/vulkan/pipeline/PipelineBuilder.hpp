@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/PipelineBuilder.hpp
 
 #pragma once
 
@@ -15,7 +14,6 @@
 
 namespace ZHLN::Vk {
 
-// Pipeline Builder Result Codes
 
 enum class PipelineBuilderError : uint8_t {
     MissingShaders ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages.">{})        = 1,
@@ -26,67 +24,44 @@ enum class PipelineBuilderError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
 };
 
-// PipelineConfig — compile-time-friendly POD carrying all pipeline state
 
 struct PipelineConfig {
-    // Shaders (required)
     const ZHLN_ShaderStages* stages = nullptr;
     VkPipelineLayout         layout = VK_NULL_HANDLE;
 
-    // Optional driver pipeline cache. VK_NULL_HANDLE creates the pipeline
-    // without recording it.
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
-    // VK_EXT_descriptor_heap: when true the pipeline is created with
-    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT and each stage maps its
-    // legacy set/binding decorations onto the bound heaps via its mapping
-    // chain. `layout` must then be VK_NULL_HANDLE
-    // (VUID-VkGraphicsPipelineCreateInfo-flags-11311); push data replaces
-    // both descriptor set layouts and push constant ranges.
     bool                                                 descriptor_heap = false;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping      = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping      = nullptr;
 
-    // Vertex input (populated by Vertex<T>())
     const VkVertexInputBindingDescription*   bindings       = nullptr;
     const VkVertexInputAttributeDescription* attributes     = nullptr;
     uint32_t                                 bindingCount   = 0;
     uint32_t                                 attributeCount = 0;
 
-    // Formats
     std::vector<VkFormat> color_formats = {VK_FORMAT_B8G8R8A8_SRGB};
     VkFormat              depth_format  = VK_FORMAT_D32_SFLOAT;
 
-    // Rasterization
     VkPrimitiveTopology topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPolygonMode       polygon_mode = VK_POLYGON_MODE_FILL;
     VkCullModeFlags     cull_mode    = VK_CULL_MODE_BACK_BIT;
     VkFrontFace         front_face   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
-    // Depth
     bool depth_test  = true;
     bool depth_write = true;
 
-    // Blending
     bool blend_enable   = false;
     bool additive_blend = false;
 
-    // Multiview
     uint32_t view_mask = 0;
 
-    // Specialization
     const VkSpecializationInfo* specialization_info = nullptr;
 
-    // Present = the stencil test is on, with both faces carrying what it holds.
-    // The state and its enable are one field rather than three, because Vulkan
-    // ignores front/back while stencilTestEnable is VK_FALSE: separate fields
-    // could say "enabled" with no state to apply, and the C layer would then
-    // build a pipeline that silently has no stencil test.
     std::optional<ZHLN_StencilState> stencil {};
     bool                             color_write_enable = true;
 };
 
-// PipelineBuilder — strongly-typed typestate builder
 
 template <size_t ColorCount = 1, bool HasDepth = true>
 class PipelineBuilder {
@@ -97,9 +72,6 @@ class PipelineBuilder {
 
     auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
         _cfg.stages = s.Get();
-        // VK_EXT_mesh_shader: a mesh stage set has no vertex input at all, so
-        // clear anything a previous Vertex<V>() call installed. The C layer
-        // additionally passes pVertexInputState/pInputAssemblyState as NULL.
         if (s.IsMeshPipeline()) {
             _cfg.bindings       = nullptr;
             _cfg.attributes     = nullptr;
@@ -114,17 +86,11 @@ class PipelineBuilder {
         return *this;
     }
 
-    // Records the compiled pipeline into a driver cache so the next run can
-    // skip shader compilation. Omitting it keeps the old uncached behaviour.
     auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
         _cfg.pipeline_cache = cache;
         return *this;
     }
 
-    // Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
-    // per-stage set/binding -> heap mappings (may be null for stages whose
-    // resources are all BDA/push-data backed). The layout must be
-    // VK_NULL_HANDLE (spec-required for heap pipelines).
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
         -> PipelineBuilder& {
         _cfg.descriptor_heap = true;
@@ -260,24 +226,11 @@ class PipelineBuilder {
         return PipelineBuilder<ColorCount, false> {std::move(_cfg)};
     }
 
-    // Installs a stencil state on both faces. The test comes on with the state,
-    // because Vulkan ignores `front`/`back` while `stencilTestEnable` is false:
-    // a builder that let a caller install one without the other could hand a
-    // pipeline a state it silently does not apply, so there is no
-    // `StencilTest(bool)` here to be left behind (or forgotten) -- the state is
-    // a single field (`PipelineConfig::stencil`) and the C layer reads the
-    // enable out of its presence. A depth format with no stencil aspect is
-    // refused at creation rather than accepted and unused.
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
         _cfg.stencil = ZHLN_StencilState {.front = front, .back = back};
         return *this;
     }
 
-    // The stencil state a pass writes a tag with: a fragment the depth test
-    // lets through replaces the stored value with `ref`, over `mask`, whatever
-    // the stencil held before -- the state a CSG volume stamps itself into the
-    // buffer with. Both faces get it, and the test comes on with it; a caller
-    // that needs the faces to differ says `StencilOp` itself.
     auto StencilWriteMask(uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
         const VkStencilOpState state = {
             .failOp      = VK_STENCIL_OP_KEEP,
@@ -291,12 +244,6 @@ class PipelineBuilder {
         return StencilOp(state, state);
     }
 
-    // The stencil state a pass tests a tag with: a fragment survives only where
-    // `ref` compares `op` against the stored value, over `mask`, and the
-    // stencil is left exactly as it was -- the read half of the CSG pair, whose
-    // write half is `StencilWriteMask`. CSG Difference asks NOT_EQUAL (draw
-    // where nothing was stamped) and CSG Intersection asks EQUAL (draw only
-    // where it was); both are this call.
     auto StencilCompareMask(VkCompareOp op, uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
         const VkStencilOpState state = {
             .failOp      = VK_STENCIL_OP_KEEP,
@@ -304,7 +251,7 @@ class PipelineBuilder {
             .depthFailOp = VK_STENCIL_OP_KEEP,
             .compareOp   = op,
             .compareMask = mask,
-            .writeMask   = 0x00, // KEEP already writes nothing; the zero mask says the pass may not write at all
+            .writeMask   = 0x00,
             .reference   = ref,
         };
         return StencilOp(state, state);
@@ -338,20 +285,12 @@ class PipelineBuilder {
         if (_cfg.stages == nullptr) {
             return std::unexpected(MissingShaders);
         }
-        // Either a vertex stage or a mesh stage must be present; the C layer
-        // rejects a set that has neither.
         if (_cfg.stages->vert.handle == VK_NULL_HANDLE && _cfg.stages->mesh.handle == VK_NULL_HANDLE) {
             return std::unexpected(MissingShaders);
         }
-        // VUID-VkGraphicsPipelineCreateInfo-flags-11311: descriptor-heap
-        // pipelines require layout == VK_NULL_HANDLE, so a null layout is
-        // valid (and in fact required) in heap mode.
         if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return std::unexpected(MissingLayout);
         }
-        // The C layer's blend table is a fixed array (ZHLN_MAX_COLOR_ATTACHMENTS)
-        // and refuses more; refusing here names the limit instead of arriving as
-        // a generic creation failure.
         if (_cfg.color_formats.size() > ZHLN_MAX_COLOR_ATTACHMENTS) {
             return std::unexpected(TooManyColorAttachments);
         }
@@ -391,24 +330,18 @@ class PipelineBuilder {
     PipelineConfig _cfg;
 };
 
-// ComputePipelineBuilder — builder for compute pipelines
 
 class ComputePipelineBuilder {
   public:
     ComputePipelineBuilder() = default;
 
-    // entry == nullptr → the entry point is reflected from the SPIR-V module.
     auto Shader(const uint32_t* code, size_t size, const char* entry = nullptr) noexcept -> ComputePipelineBuilder&;
     auto Shader(const ZHLN_ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-    // Records the compiled pipeline into a driver cache; see
-    // PipelineBuilder::Cache. VK_NULL_HANDLE keeps the uncached behaviour.
     auto Cache(VkPipelineCache cache) noexcept -> ComputePipelineBuilder&;
 
-    // Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
-    // set/binding -> heap mapping for the compute stage.
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
     auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
 
@@ -431,9 +364,6 @@ class PipelineLayoutBuilder {
   public:
     explicit PipelineLayoutBuilder(VkDevice device) noexcept;
 
-    // NOTE: AddDescriptorSetLayout was removed with the descriptor-set model;
-    // heap pipelines use a null layout and only push ranges remain relevant
-    // (skinning).
     PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
 
     [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ZHLN::ErrorCode>;
@@ -443,4 +373,4 @@ class PipelineLayoutBuilder {
     std::vector<VkPushConstantRange> _pushConstants;
 };
 
-} // namespace ZHLN::Vk
+}

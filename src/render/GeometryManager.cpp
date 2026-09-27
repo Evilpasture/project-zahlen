@@ -1,12 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/GeometryManager.cpp
 
 #include "GeometryManager.hpp"
 
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Vertex.hpp> // VertexPosition, VertexAttributes: what a skinned scratch buffer holds
+#include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstring>
 
@@ -14,13 +13,6 @@ namespace ZHLN {
 
 auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsage usage) const
     -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
-    // Buffers uploaded on the transfer queue get read (and sometimes written)
-    // by the graphics AND compute families (cluster culling, particles,
-    // skinning all dispatch on the compute queue). Buffers have no hardware
-    // compression state to lose, so sharing them CONCURRENT across every
-    // family that may touch them is free -- and it removes queue-family
-    // ownership transfers from the upload path entirely. Deduplicate: on
-    // unified hardware two or three of these indices are identical.
     const auto&    familyInfo    = _ctx.PhysicalInfo();
     const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
     uint32_t       families[3];
@@ -36,10 +28,6 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
     }
     const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 
-    // The ray-tracing build-input bit is the manager's one usage-flag decision:
-    // it depends only on whether the device enabled the RT extensions, which the
-    // injected context already answers. Adding it unconditionally would violate
-    // its VUID on hardware without the feature, so it rides on the predicate.
     const Vk::BufferUsage rtBit =
         _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
 
@@ -53,15 +41,9 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
             if (data != nullptr) {
                 std::memcpy(stagingAlloc.mappedData, data, size);
             } else {
-                // Zero rather than leave uninitialised: the temporal passes read
-                // a buffer on the frame it is created, before anything wrote it.
                 std::memset(stagingAlloc.mappedData, 0, size);
             }
 
-            // No release/acquire handoff: the buffer is CONCURRENT across the
-            // families above. ExecuteImmediate's timeline-semaphore wait retires
-            // the copy before this function returns, which orders it ahead of
-            // every later queue submission.
             Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
                 Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
             });
@@ -93,7 +75,6 @@ auto GeometryManager::CreateIndexBuffer(const void* data, size_t size, Vk::Buffe
 }
 
 auto GeometryManager::CreateStorageBuffer(size_t size, Vk::BufferUsage usage) -> BufferHandle {
-    // No initial contents and no vertex count: a plain storage allocation.
     return CreateBuffer(size, nullptr, usage)
         .transform([this](auto&& pair) -> BufferHandle { return Adopt(std::move(pair.first), 0, pair.second); })
         .value_or(BufferHandle::Invalid);
@@ -141,9 +122,6 @@ auto GeometryManager::GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t pack
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexAttributes));
 
-    // The skinning dispatch writes it and the RT passes read it as BLAS input;
-    // nothing stages initial contents into it, so it bypasses CreateBuffer's
-    // transfer path. The build-input bit rides on the same predicate as there.
     Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     if (_ctx.RayTracingSupported()) {
         usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
@@ -171,7 +149,7 @@ auto GeometryManager::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32
 }
 
 void GeometryManager::ReleaseSkinnedScratchBuffers() {
-    _skinnedScratch.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { Destroy(handle); });
+    _skinnedScratch.ForEach([this](uint64_t , BufferHandle handle) -> void { Destroy(handle); });
     _skinnedScratch.Clear();
 }
 
@@ -187,7 +165,7 @@ void GeometryManager::ReleaseMeshBuffers() {
 }
 
 void GeometryManager::ReleaseParticleBuffers() {
-    _particleBuffers.ForEach([this](uint64_t /*key*/, const auto& tracked) -> void { Destroy(tracked.second); });
+    _particleBuffers.ForEach([this](uint64_t , const auto& tracked) -> void { Destroy(tracked.second); });
     _particleBuffers.Clear();
 }
 
@@ -217,9 +195,6 @@ void GeometryManager::SweepLedgers(DeadFn&& isDead) {
     sweep(_emitters3D);
     sweep(_entityBuffers);
 
-    // The particle cache is keyed by subresource rather than by owner, so the
-    // owner is carried in the value and the dead keys have to be collected
-    // before erasing -- the map cannot be mutated inside its own ForEach.
     ZHLN::Array<uint64_t> deadKeys;
     _particleBuffers.ForEach([&](uint64_t key, const auto& tracked) {
         if (isDead(tracked.first)) {
@@ -242,12 +217,9 @@ void GeometryManager::Reconcile(EntityAliveQuery alive) {
 
 void GeometryManager::Destroy(BufferHandle handle) {
     if (handle != BufferHandle::Invalid) {
-        // Defer destruction for 2 frames so the GPU finishes reading from the
-        // buffer. The pool releases the Vk::Buffer; the scoped guard routes it
-        // into the deletion queue instead of destroying it inline.
         Vk::ScopedDeletionQueue guard(_deletionQueue);
         _buffers.Destroy(handle);
     }
 }
 
-} // namespace ZHLN
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/execution/Commands.hpp
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -9,10 +8,6 @@
 
 namespace ZHLN::Vk {
 
-// Graphics draw state
-// One bind prefix (pipeline / layout / set / heap) plus the payload each
-// Vulkan draw command needs. Indirect variants are a single template keyed by
-// the command struct so vertex, indexed, and mesh-task draws share the type.
 
 struct DrawState {
     VkPipeline       pipeline      = VK_NULL_HANDLE;
@@ -82,10 +77,7 @@ using DrawIndirectCountState        = IndirectCountDrawState<VkDrawIndirectComma
 using DrawIndexedIndirectCountState = IndirectCountDrawState<VkDrawIndexedIndirectCommand>;
 using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndirectCommandEXT>;
 
-// Immediate Commands
 
-// Command-ring bring-up failures. Pool and command-buffer failures are reported
-// by CommandPool as CommandPoolError; only the per-slot fence has no owner.
 enum class CommandRingError : uint8_t {
     FenceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Synchronization fence creation failed for a command ring slot">{}) = 1,
 };
@@ -98,12 +90,6 @@ class CommandRing {
         Cleanup();
     }
 
-    // Move-only RAII semantics. The move operations are spelled out rather than
-    // defaulted because std::atomic has no move constructor: defaulting them
-    // defined them as deleted, so the ring was neither copyable nor movable and
-    // an owner could not reset it by assignment. A defaulted move-assign would
-    // also have copied the raw fences without nulling the source, destroying
-    // them twice.
     CommandRing(const CommandRing&)            = delete;
     CommandRing& operator=(const CommandRing&) = delete;
 
@@ -128,13 +114,8 @@ class CommandRing {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(_device, queueFamily);
-            // Allocate() runs EnsureValid() first, so a pool that failed to
-            // build reports PoolNotReady and an exhausted driver reports
-            // CommandBufferAllocationFailed -- no raw VkResult escapes here.
             auto alloc = _pools[i].Allocate(1);
             if (!alloc) [[unlikely]] {
-                // Leave the ring empty rather than half-built: Acquire() must
-                // never be able to hand out a slot without a fence.
                 Cleanup();
                 return std::unexpected(alloc.error());
             }
@@ -143,12 +124,9 @@ class CommandRing {
             VkFenceCreateInfo fence_info = {
                 .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
                 .pNext = nullptr,
-                // Start signaled so the first Acquire() call passes through without stalling
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT
             };
             if (vkCreateFence(_device, &fence_info, nullptr, &_fences[i]) != VK_SUCCESS) [[unlikely]] {
-                // pFence is undefined on failure; restore the null invariant so
-                // Cleanup() below does not wait on or destroy a garbage handle.
                 _fences[i] = VK_NULL_HANDLE;
                 Cleanup();
                 return std::unexpected(CommandRingError::FenceCreationFailed);
@@ -165,7 +143,7 @@ class CommandRing {
                     vkDestroyFence(_device, _fences[i], nullptr);
                     _fences[i] = VK_NULL_HANDLE;
                 }
-                _pools[i] = {}; // Safely calls destructor (triggers C-core CommandPool destruction)
+                _pools[i] = {};
                 _cmds[i]  = {};
             }
             _device = VK_NULL_HANDLE;
@@ -180,11 +158,9 @@ class CommandRing {
     [[nodiscard]] auto Acquire() noexcept -> Slot {
         uint32_t slot_idx = _index.fetch_add(1, std::memory_order::relaxed) % Capacity;
 
-        // If the GPU is still processing this slot's last submission, block here
         vkWaitForFences(_device, 1, &_fences[slot_idx], VK_TRUE, UINT64_MAX);
         vkResetFences(_device, 1, &_fences[slot_idx]);
 
-        // Recycle the command pool instantly without any driver reallocation
         _pools[slot_idx].Reset();
 
         return {_cmds[slot_idx], _fences[slot_idx]};
@@ -198,13 +174,8 @@ class CommandRing {
     std::atomic<uint32_t>                      _index {0};
 };
 
-/**
- * @brief Recycles a command buffer from the ring, records operations,
- *        and submits it. Stalls the CPU only if blockCPU is true.
- */
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, RecordFn&& record, bool blockCPU = true) {
-    // 1. Recycle command buffer and fence from the ring (O(1) / Allocation-Free)
     auto [cmd, fence] = ring.Acquire();
     {
         CommandBufferGuard guard(cmd);
@@ -213,42 +184,31 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, Re
 
     VkQueue queue = ResolveQueue<QType>(ctx);
 
-    // Bail early on submission failure to prevent vkWaitForFences from hanging
     if (auto res =
             QueueSubmit(queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence);
         !res) [[unlikely]] {
         return;
     }
 
-    // 2. Synchronization Strategy
     if (blockCPU) {
-        // Hard stall: waits immediately (e.g. for synchronous debug hooks)
         vkWaitForFences(ctx.Device(), 1, &fence, VK_TRUE, UINT64_MAX);
     }
 }
 
-/**
- * @brief Recycles a command buffer from the ring, records operations,
- *        submits via StagingRingBuffer (properly stamping its timeline value),
- *        and blocks the CPU until the staging transfer completes.
- */
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record) {
-    // 1. Recycle command buffer and fence from the ring
     auto [cmd, fence] = ring.Acquire();
     {
         CommandBufferGuard guard(cmd);
         std::forward<RecordFn>(record)(cmd);
     }
 
-    // 2. Submit command buffer and fence in a single submission
     uint64_t submit_val = ringBuffer.Submit(cmd, fence);
 
     if (submit_val == 0) [[unlikely]] {
         return;
     }
 
-    // 3. Synchronously wait on the timeline semaphore to retire staging memory
     VkSemaphore         semaphore = ringBuffer.GetSemaphore();
     VkSemaphoreWaitInfo wait_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submit_val
@@ -256,10 +216,7 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
 }
 
-// Command Encoder (Stateful Bind Filtering with Unified Push Constants)
 
-// Push-constant stages for the mesh path (the fragment stage keeps reading the
-// same block, and the task stage needs the instance id to cull against).
 inline constexpr VkShaderStageFlags kMeshTaskPushStages = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
 class CommandEncoder {
@@ -320,28 +277,14 @@ class CommandEncoder {
         vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
     }
 
-    // VK_EXT_descriptor_heap draw: heaps are bound on the command buffer, the
-    // pipeline was bound with BindPipeline, and per-draw data travels through
-    // vkCmdPushDataEXT at offset 0.
-    // `Modules...` are the shader programs the bound pipeline was built from:
-    // the push struct travels to their push-constant blocks, and this call is
-    // where it is held against them (see PushDrawData).
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawHeap(uint32_t vertexCount, uint32_t instanceCount, const T& pushConstants) noexcept {
         PushDrawData<Modules...>(pushConstants);
         vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
     }
 
-    // Heap mode (VK_EXT_descriptor_heap): the resource/sampler heaps are bound
-    // on the command buffer itself, so no descriptor set is bound here, and
-    // per-draw data travels through vkCmdPushDataEXT at offset 0 (legacy
-    // PushConstant blocks in the SPIR-V read the push-data blob directly).
-    // The sink every heap-mode draw's payload goes through, with the module
-    // list every entry point above requires: the bytes are written for the
-    // shader programs named at the call site, and a struct no one of them
-    // declares stops the build here rather than on the device.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void PushDrawData(const T& pushConstants, VkShaderStageFlags /*stages*/ = 0) noexcept {
+    void PushDrawData(const T& pushConstants, VkShaderStageFlags  = 0) noexcept {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw's push struct is written for: DrawInstanced<Shaders::Modules::X>(...)");
         static_assert(
             PushConstantLayoutMatchesAll<T, Modules...>(),
@@ -400,23 +343,13 @@ class CommandEncoder {
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
-    // VK_EXT_mesh_shader
 
-    // Dispatches task (or, without amplification, mesh) workgroups. The bound
-    // pipeline must be a mesh pipeline; per-draw data travels through push
-    // data at offset 0 exactly like the vertex path, so the task and mesh
-    // stages read the same per-draw block the vertex shader used to -- this
-    // layer only carries the bytes, and the caller names the modules they are
-    // for.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
         vkCmdDrawMeshTasksEXT(cmd, state.groupCountX, state.groupCountY, state.groupCountZ);
     }
 
-    // Indirect variant. `argumentBuffer` must hold VkDrawMeshTasksIndirectCommandEXT
-    // records (groupCountX/Y/Z) — note there is no firstInstance field, so the
-    // instance index has to be supplied through push data.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
@@ -444,4 +377,4 @@ class CommandEncoder {
     }
 };
 
-} // namespace ZHLN::Vk
+}

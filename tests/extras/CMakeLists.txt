@@ -31,7 +31,7 @@ endfunction()
 # build. The aggregate is still what tests/render/extras and the samples link,
 # because those genuinely span domains.
 #
-# No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_gltf
+# No extras/glTF/cgltf_impl.c here: the importer moved into extras, so zahlen_gltf
 # compiles the one copy of it and this target gets the cgltf symbols (and the
 # header path) through that link. Compiling it again would be a duplicate
 # definition at link time. The suite needs two domains: zahlen_animation for the

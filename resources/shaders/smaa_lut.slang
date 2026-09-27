@@ -1,15 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// GPU SMAA area + search LUT generation. Ports the CPU trapezoidal / diagonal
-// integrators so the textures consumed by SMAA.slang are produced by the same
-// language as the filter itself.
 import sampling;
 
 public struct SMAALUTPush {
     public uint width;
     public uint height;
-    public uint mode; // 0 = area (160x560), 1 = search (64x16)
+    public uint mode;
 };
 
 [vk::push_constant]
@@ -205,7 +202,6 @@ float2 AreaDiag(int pattern, float left, float right, float2 offset) {
 }
 
 float4 BakeAreaPixel(uint px, uint py) {
-    // Left half: orthogonal mappings. Right half: diagonal mappings.
     if (px < 80) {
         int yOff = int(py) / (5 * 16);
         if (yOff < 0 || yOff > 6)
@@ -289,15 +285,12 @@ int DeltaRight(int left[4], int top[4]) {
 }
 
 float4 BakeSearchPixel(uint fx, uint fy) {
-    // Search LUT: 66x33 workspace, crop (0,17,64,33), flip Y.
     uint cy = 15 - fy;
     uint y  = 17 + cy;
     uint x  = fx;
     if (x >= 64 || fy >= 16)
         return float4(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Reconstruct the workspace value at (x, y) of the 66-wide temp buffer.
-    // x in [0,32] is left deltas, [33,65] is right deltas.
     int srcX = int(x);
     bool rightHalf = srcX >= 33;
     int comboX = rightHalf ? (srcX - 33) : srcX;

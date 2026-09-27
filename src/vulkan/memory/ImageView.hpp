@@ -7,7 +7,6 @@
 
 namespace ZHLN::Vk {
 
-// Image View Helpers
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 
@@ -72,5 +71,5 @@ template <VkFormat F>
 [[nodiscard]] auto
     CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect = GetFormatAspect(F)) -> std::expected<ImageView, ErrorCode>;
 
-} // namespace ZHLN::Vk
+}
 #include "ImageView.inl"

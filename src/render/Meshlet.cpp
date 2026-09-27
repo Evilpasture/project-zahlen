@@ -1,14 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/render/Meshlet.cpp
-//
-// The single translation unit that speaks meshoptimizer. BuildMeshlets used
-// to be inline in the public header, which forced every consumer (the
-// engine, zcook, the glTF importer, terrain, both meshlet test suites) to
-// carry the meshoptimizer include path and link the library themselves.
-// Compiled once here into zahlen_render, the ZHLN_API symbols travel through
-// libzahlen_engine and the header is a plain declaration.
 #include <Zahlen/Meshlet.hpp>
 #include <cstring>
 #include <meshoptimizer.h>
@@ -40,7 +32,6 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float*
         return out;
     }
 
-    // meshopt_buildMeshlets over-allocates; trim to the tail of the last meshlet.
     const meshopt_Meshlet& last = raw[meshletCount - 1];
     meshletVertices.resize(last.vertex_offset + last.vertex_count);
     meshletTriangles.resize(last.triangle_offset + (last.triangle_count * 3));
@@ -51,17 +42,12 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float*
     for (size_t i = 0; i < meshletCount; ++i) {
         const meshopt_Meshlet& m = raw[i];
 
-        // Per-meshlet optimisation improves both vertex-cache behaviour and the
-        // tightness of the cone that the task shader tests against.
         meshopt_optimizeMeshlet(&meshletVertices[m.vertex_offset], &meshletTriangles[m.triangle_offset], m.triangle_count, m.vertex_count);
 
         const meshopt_Bounds bounds = meshopt_computeMeshletBounds(
             &meshletVertices[m.vertex_offset], &meshletTriangles[m.triangle_offset], m.triangle_count, positions, vertexCount, posStride
         );
 
-        // meshoptimizer packs micro-index runs back to back, but the mesh
-        // shader loads them as 32-bit words (no 8-bit storage requirement), so
-        // re-emit every meshlet at a 4-byte aligned offset.
         const uint32_t alignedOffset = static_cast<uint32_t>((out.triangles.size() + 3u) & ~size_t {3u});
         out.triangles.resize(alignedOffset, 0u);
         out.triangles.insert(
@@ -85,7 +71,6 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float*
 
     out.vertices.assign(meshletVertices.begin(), meshletVertices.end());
 
-    // Tail padding so the last word-sized load stays in bounds.
     out.triangles.resize((out.triangles.size() + 3u) & ~size_t {3u}, 0u);
 
     return out;
@@ -98,4 +83,4 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, std::span<co
     return BuildMeshlets(indices, &positions[0].position[0], positions.size(), sizeof(VertexPosition));
 }
 
-} // namespace ZHLN
+}

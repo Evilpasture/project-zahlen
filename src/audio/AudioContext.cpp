@@ -1,22 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/audio/AudioContext.cpp
 
 #include <filesystem>
 
-// miniaudio runtime-links the JACK client library: ma_context_init__jack
-// dlopen()s libjack.so even when it is only probing backends and no JACK
-// server is reachable. Loading the library runs its ELF initializers, which
-// allocate a couple of small objects (2 x 48 bytes per dlopen) that are never
-// freed, and miniaudio keeps the handle around for the rest of the context's
-// lifetime. Any host that merely has libjack installed -- e.g. the CI
-// container, where it arrives as a transitive dependency -- therefore makes
-// LeakSanitizer report "direct leak of 48 bytes" from ma_dlopen inside
-// ma_context_init__jack, while hosts without libjack never load it and see
-// nothing. The backend is unusable in the sanitizer-test environment anyway
-// (no sound hardware, no JACK server), so drop it from sanitizer builds.
-// Non-sanitized builds keep the JACK backend untouched.
 #if defined(ZHLN_SANITIZER_BUILD)
 #define MA_NO_JACK
 #endif
@@ -190,7 +177,6 @@ auto CalculateBiquadConfig(AudioFilterType type, uint32_t sampleRate, float freq
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
-// --- NOISE BURST VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto noise_burst_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
@@ -284,7 +270,6 @@ ma_data_source_vtable g_noise_burst_vtable = {
     .onGetLength     = noise_burst_get_length
 };
 
-// --- TONE SWEEP VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
@@ -395,7 +380,6 @@ ma_data_source_vtable g_tone_sweep_vtable = {
     .onGetLength     = tone_sweep_get_length
 };
 
-// --- LOOP SYNTH VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<LoopSynthData*>(static_cast<void*>(pDataSource));
@@ -465,7 +449,7 @@ auto loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, m
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
-auto loop_synth_seek_pcm_frames(ma_data_source* /*pDataSource*/, ma_uint64 /*frameIndex*/) -> ma_result {
+auto loop_synth_seek_pcm_frames(ma_data_source* , ma_uint64 ) -> ma_result {
     return MA_SUCCESS;
 }
 
@@ -495,14 +479,14 @@ auto loop_synth_get_data_format(
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
-auto loop_synth_get_cursor(ma_data_source* /*pDataSource*/, ma_uint64* pCursor) -> ma_result {
+auto loop_synth_get_cursor(ma_data_source* , ma_uint64* pCursor) -> ma_result {
     if (pCursor != nullptr) {
         *pCursor = 0;
     }
     return MA_SUCCESS;
 }
 
-auto loop_synth_get_length(ma_data_source* /*pDataSource*/, ma_uint64* pLength) -> ma_result {
+auto loop_synth_get_length(ma_data_source* , ma_uint64* pLength) -> ma_result {
     if (pLength != nullptr) {
         *pLength = 0;
     }
@@ -547,13 +531,12 @@ struct SynthSlot {
     return {static_cast<uint32_t>(raw & kHandleIndexMask), static_cast<uint32_t>(raw >> kHandleGenerationShift)};
 }
 
-} // namespace
+}
 
 struct AudioContext::Impl {
     ma_engine engine {};
     bool      initialized = false;
 
-    // Transient memory pools for Fire-And-Forget DSP Events
     ZHLN::ObjectPool<ma_sound, SOUND_POOL_SIZE>           soundPool;
     ZHLN::ObjectPool<ProceduralBeep, BEEP_POOL_SIZE>      beepPool;
     ZHLN::ObjectPool<NoiseBurstData, BURST_POOL_SIZE>     burstPool;
@@ -565,7 +548,6 @@ struct AudioContext::Impl {
     std::vector<NoiseBurstData*> activeBursts;
     std::vector<ToneSweepData*>  activeSweeps;
 
-    // Generational Tables for Stateful Components
     std::array<VoiceSlot, MAX_VOICE_SLOTS> voiceSlots {};
     std::array<SynthSlot, MAX_SYNTH_SLOTS> synthSlots {};
 
@@ -576,7 +558,6 @@ struct AudioContext::Impl {
     ZHLN::Mutex synthMutex {};
     ZHLN::Mutex eventMutex {};
 
-    // --- Direct Event Dispatchers on Impl
 
     void DispatchOneShot2D(const char* filepath, float volume) {
         if (!initialized || filepath == nullptr || filepath[0] == '\0' || !std::filesystem::exists(filepath)) {
@@ -688,7 +669,7 @@ struct AudioContext::Impl {
     // NOLINTEND(bugprone-easily-swappable-parameters)
 };
 
-AudioContext::AudioContext(const AudioConfig& /*cfg*/): _impl(std::make_unique<Impl>()) {
+AudioContext::AudioContext(const AudioConfig& ): _impl(std::make_unique<Impl>()) {
     ma_result result = ma_engine_init(nullptr, &_impl->engine);
     if (result == MA_SUCCESS) {
         _impl->initialized = true;
@@ -715,7 +696,6 @@ AudioContext::~AudioContext() {
                 _impl->loopSynthPool.Destroy(slot.synthData);
             }
         }
-        // Cleanup transients
         for (auto* sound: _impl->activeOneShots) {
             ma_sound_uninit(sound);
             _impl->soundPool.Destroy(sound);
@@ -740,7 +720,6 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
     ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
 }
 
-// Fire and Forget Events
 
 void AudioContext::PostEvent(const AudioEvent& event) noexcept {
     Lock(_impl->eventMutex, [&] -> void { _impl->eventQueue.push_back(event); });
@@ -771,7 +750,6 @@ void AudioContext::FlushEvents() noexcept {
     }
 }
 
-// Generational Voice Management
 
 auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
     if (!_impl->initialized || filepath.empty() || !std::filesystem::exists(filepath)) {
@@ -905,7 +883,6 @@ auto AudioContext::IsVoiceValid(AudioHandle handle) const noexcept -> bool {
     return slot.inUse.load(std::memory_order::acquire) && slot.generation.load(std::memory_order::relaxed) == gen;
 }
 
-// Generational Synth Management
 
 auto AudioContext::CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle {
     if (!_impl->initialized) {
@@ -989,9 +966,6 @@ void AudioContext::ReleaseOwner(Entity owner) noexcept {
         return;
     }
 
-    // Do not uninitialise active miniaudio objects synchronously: its mixer may
-    // still be reading them. This is the same stop-and-reclaim protocol used by
-    // ReconcileVoices for ordinary Registry::Destroy, just notified earlier.
     Lock(_impl->voiceMutex, [&] -> void {
         for (auto& slot: _impl->voiceSlots) {
             if (slot.inUse.load(std::memory_order::relaxed) && slot.owner == owner) {
@@ -1011,7 +985,6 @@ void AudioContext::ReleaseOwner(Entity owner) noexcept {
 }
 
 void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
-    // 1. Clean Transients
     Lock(_impl->transientMutex, [&] -> void {
         using namespace ZHLN::Ranges;
         _impl->activeOneShots | EraseIf([&](ma_sound* sound) -> bool {
@@ -1035,7 +1008,6 @@ void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
         });
     });
 
-    // 2. Reconcile Stateful Voices
     Lock(_impl->voiceMutex, [&] -> void {
         for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
             auto& slot = _impl->voiceSlots[i];
@@ -1068,7 +1040,6 @@ void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
         }
     });
 
-    // 3. Reconcile Stateful Synths
     Lock(_impl->synthMutex, [&] -> void {
         for (uint32_t i = 0; i < MAX_SYNTH_SLOTS; ++i) {
             auto& slot = _impl->synthSlots[i];
@@ -1096,9 +1067,8 @@ void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
     });
 }
 
-} // namespace ZHLN
+}
 
-// --- FFI Exporter overrides for Lua Bindings
 extern "C" {
 
 using namespace ZHLN;
@@ -1111,4 +1081,4 @@ void ZHLN_PostAudioEvent(ZHLN_Engine* engine_handle, const AudioEvent* event) {
     }
 }
 
-} // extern "C"
+}

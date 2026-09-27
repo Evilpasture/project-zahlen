@@ -19,16 +19,6 @@
 
 namespace ZHLN {
 
-// Frame-level binding sources
-// Specializations of Vk::ResourceResolver for the tags the reflected
-// GraphResources bundle does not supply: presentation depth (owned by the
-// active destination), the shadow map (kept out of the bundle's metadata),
-// the ping-ponged accumulation pair, and the swapchain image (three possible
-// sources). Everything the frame graph binds comes from either one of these
-// or the bundle itself -- Vk::ResourceBinder::AutoBind folds both in a single
-// pass, replacing the old reflected loop plus per-tag external bindings.
-// (Plain nested `namespace Vk`, not `namespace ZHLN::Vk`: the qualified form
-// inside `namespace ZHLN` would define a new ZHLN::ZHLN::Vk namespace.)
 namespace Vk {
 
 template <>
@@ -69,9 +59,6 @@ struct ResourceResolver<Res_Swapchain> {
         auto& dest = impl.ActivePresentation();
         if (dest.swapchain.Valid()) {
             const auto& sc = dest.swapchain.Get();
-            // The image the frame's destination acquired, read from the
-            // destination itself: the frame does not remember an image index
-            // beside the window it belongs to.
             const uint32_t imageIndex = impl.destinations.ActiveImageIndex();
             return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], impl.graphResources.sceneColor.extent);
         }
@@ -81,7 +68,7 @@ struct ResourceResolver<Res_Swapchain> {
     }
 };
 
-} // namespace Vk
+}
 
 namespace {
 
@@ -122,11 +109,6 @@ struct PassFactory {
         return Vk::MakePass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             uint32_t width  = self.graphResources.hizMap.extent.width;
             uint32_t height = self.graphResources.hizMap.extent.height;
-            // Generate down to kMaxGeneratedHiZMips levels only: every level
-            // costs a full compute-to-compute pipeline barrier, and the
-            // culling consumer clamps its sample level to maxHiZMipLevel
-            // (derived from the same constant), so deeper mips were written
-            // but never read.
             uint32_t mips = std::min(self.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
@@ -148,8 +130,6 @@ struct PassFactory {
                 };
                 PC hizPC = {1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u};
 
-                // VK_EXT_descriptor_heap: every mip reads a different pair of
-                // views, so it gets its own block from the frame's partition.
                 const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
                     .handle   = self.graphResources.hizMap.image.Handle(),
                     .view     = self.graphResources.hizMap.mipViews[mip].Get(),
@@ -158,9 +138,6 @@ struct PassFactory {
                     .format   = VK_FORMAT_R32_SFLOAT,
                     .viewInfo = &self.graphResources.hizMap.mipViewInfos[mip]
                 };
-                // The previous mip is the shader's sampled input and this pass's
-                // storage output, so the graph holds it in GENERAL; mip 0 samples
-                // the depth target instead.
                 const Vk::ImageWrite inDepth =
                     mip == 0 ? Vk::ImageWrite {
                                    .view     = self.presenter.depthTarget.view.Get(),
@@ -202,14 +179,7 @@ struct PassFactory {
                 Vk::Slot<"lights">(self.frames.lightStorageBuffers[fIdx])
             );
 
-            // Both the logical grid and [numthreads] are reflected from Slang;
-            // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, block);
-            // No manual barrier here: the frame graph tracks cluster grid / light-index
-            // as resources and inserts the necessary compute->compute and
-            // compute->fragment dependencies itself. A manual MemoryBarrier
-            // here fights that tracking and is unnecessary (no validation errors
-            // before it was added). Recovered from user's outline commit f4a5b6e.
         });
     }
 
@@ -222,15 +192,8 @@ struct PassFactory {
         });
     }
 
-    // Shadow cascades. Declares *only* the shadow targets it writes; the
-    // G-buffer work it used to inline is its own pass now. The two touch
-    // disjoint resources, so the automatic forking in BuildFrameGraph
-    // bundles them into one concurrently recorded run.
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
-            // InheritsHeaps(): the same body records either straight into the
-            // primary (no fork executor) or into a forked secondary that
-            // inherits the primary's heap bindings.
             FrameRecorder shadowRec(c, self, self.InheritsHeaps());
             Passes::ShadowPass {}.Execute(shadowRec);
         });
@@ -293,9 +256,6 @@ struct PassFactory {
             const Vk::HeapBlockBase block = self.volumetricFogInjectPass.WriteHeapParameters<Shaders::VolumetricFogInject>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia)),
-                // The 3D noise tile is a plain sampled image: its static sampler
-                // lives in the sampler heap (InitHeapPassSamplers), the image is
-                // named per block.
                 Vk::Slot<"noiseTexture">(
                     Vk::ImageWrite {
                         .view = self.volumetricNoiseView.Get(), .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = &self.volumetricNoiseViewInfo
@@ -360,13 +320,6 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeGtaoPass() const noexcept {
-        // Half-resolution GTAO horizon search for the AO-only GI modes
-        // (giMode 3/4), split out of the lighting pass: the 4-slice loop is
-        // the most expensive term in the inline ambient evaluation and its
-        // result is low-frequency, so it is evaluated here at quarter pixel
-        // count into a single-channel R8 target that lighting
-        // depth-weighted-upsamples. Needs only the final G-buffer (depth +
-        // normals), so it runs right before Lighting consumes the result.
         return Vk::MakePass<"GtaoAo", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>>(
             [this](VkCommandBuffer c) noexcept {
                 const int giMode = self.settings.post.mode;
@@ -439,8 +392,6 @@ struct PassFactory {
                 .format   = VK_FORMAT_D32_SFLOAT,
                 .viewInfo = &self.targets.Atlas2DViewInfo()
             };
-            // Blue noise tile, matching the tail declaration in lighting.slang
-            // (after pointSampler, before the reserved trailing TLAS slot).
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
                 .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
@@ -479,18 +430,9 @@ struct PassFactory {
     }
 
     [[nodiscard]] auto MakeRtrHalfTracePass() const noexcept {
-        // Half-resolution RT reflection tracing for the VNDF roughness band
-        // (0.04, 0.40]: the divergent lobe rays are traced here at quarter
-        // count instead of per fragment, and the reflection pass bilinearly
-        // upsamples the composed result. Runs after Lighting (the
-        // reprojection fast path reads Res_Lighting) and before Reflection.
         return Vk::MakePass<
             "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
             [this](VkCommandBuffer c) noexcept {
-                // The pass exists iff the device ray-traces (BuildBloomPipelines
-                // gates its creation the same way), so the device predicate
-                // remains the higher-level feature guard even though the compute
-                // wrapper now also exposes Valid().
                 if (!self.ctx.RayTracingSupported() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
                     return;
                 }
@@ -658,11 +600,6 @@ struct PassFactory {
         });
     }
 
-    // The forward pass writes hdrSceneColor, so it cannot sample that image.
-    // Transmission needs the lit opaque color (olives, plate, background).
-    // Copy it into the otherwise-unused translucent target, which the forward
-    // shader already has a binding for. The translucent reflection that used
-    // to land here draws nothing: its pre-pass pipeline is never compiled.
     [[nodiscard]] auto MakeOpaqueSceneCopyPass() const noexcept {
         return Vk::MakePass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWrite<Res_TransLighting>>(
             [this](VkCommandBuffer c) noexcept {
@@ -703,14 +640,7 @@ struct PassFactory {
 
             auto& heap = self.heapManager;
 
-            // Everything stays in GENERAL layout for the whole chain: each
-            // level is written by an imageStore and re-read as a sampled image
-            // by the next dispatch, so only in-pass compute->compute barriers
-            // separate the dispatches -- no render pass boundaries, no layout
-            // ping-pong.
             const auto srcHdr     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
-            // Sampled in its post-lighting layout rather than dragged into
-            // GENERAL with the rest of the chain: the bright pass only reads it.
             const auto emissive   = Vk::Assume<Vk::ComputeRead<Res_Emissive>>(self.graphResources.emissiveBuffer);
             const auto thresh     = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomThresholdTarget);
             const auto down1      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomDown1);
@@ -720,11 +650,6 @@ struct PassFactory {
             const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomUp1);
             const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomFinalTarget);
 
-            // One ComputeChain per binding table: each allocates a block per
-            // step and owns the barriers between its own steps. The chain is
-            // three levels deep because there are three down and three up
-            // targets to write -- a level is a graph resource, not a count --
-            // so the steps below are spelled out one per target.
             Vk::ComputeChain thresholdChain(self.ctx, heap, c);
             Vk::ComputeChain downChain(self.ctx, heap, c);
             Vk::ComputeChain upChain(self.ctx, heap, c);
@@ -738,14 +663,9 @@ struct PassFactory {
                 };
             };
 
-            // Only the bright pass reads the glow feed; the rest of the chain
-            // is blurring whatever it produced.
             auto thresholdPush          = Kawase(0, self.graphResources.hdrSceneColor);
             thresholdPush.glowIntensity = std::max(self.settings.post.glowIntensity, 0.0f);
 
-            // 0. Bright pass: HDR scene color -> half-res threshold target,
-            //    plus the emission channel ungated (the glow layer -- see
-            //    bloom_threshold_cs.slang).
             thresholdChain.Step<Shaders::BloomThreshold>(
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush,
                 Vk::Slot<"texInput">(srcHdr),
@@ -753,14 +673,10 @@ struct PassFactory {
                 Vk::Slot<"outImage">(thresh)
             );
 
-            // Separate heap tables, so separate chains: each prepends barriers
-            // between its own steps. Cross-chain (threshold -> down, down -> up)
-            // is a domain boundary and names the hazard explicitly.
             Vk::MemoryBarrier(
                 c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
             );
 
-            // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
             downChain.Step<Shaders::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh),
                 Vk::Slot<"texInput">(thresh),
@@ -781,8 +697,6 @@ struct PassFactory {
                 c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
             );
 
-            // 4-6. Upsample chain with additive recombination of the same-
-            //      resolution downsample stages.
             upChain.Step<Shaders::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3),
                 Vk::Slot<"texInput">(down3),
@@ -804,16 +718,7 @@ struct PassFactory {
         });
     }
 
-    // A-Trous wavelet denoise of the composited HDR color. Runs after the
-    // reflection/forward passes have deposited their 1 SPP ray-traced grain
-    // into hdrSceneColor and before bloom reads it. Ping-pongs through the
-    // DenoiseA/B scratch targets and writes the final iteration back into
-    // hdrSceneColor, so every downstream consumer (bloom, AA, blit) sees the
-    // denoised result without changes.
     [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
-        // HdrSceneColor is a compute write (still GENERAL, same layout BloomKawase
-        // then reads): the graph orders the write-back against bloom. The chain
-        // prepends barriers between wavelet steps and never trails.
         return Vk::MakePass<
             "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
@@ -833,10 +738,6 @@ struct PassFactory {
             const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget);
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
-            // Heap descriptor writes are immediate host writes, so each in-frame
-            // iteration dispatches through its OWN block: the chain allocates one
-            // per step, so a later iteration's descriptors cannot clobber an
-            // earlier one's before the GPU has read them.
             Vk::ComputeChain atrousChain(self.ctx, heap, c);
 
             const auto Atrous = [](uint32_t stepSize) noexcept {
@@ -853,13 +754,6 @@ struct PassFactory {
                 );
             };
 
-            // Wavelet ladder: doubling tap spacing reaches a wide footprint
-            // with narrow kernels, and the last dispatch always lands back on
-            // hdrSceneColor, so bloom and the AA chain read a denoised scene
-            // color without knowing the ladder ran. `denoiserPasses` picks the
-            // shape: 1 runs scales 1, 2; 2 runs 1, 2, 2; the full ladder --
-            // scales 1, 2, 4, three dispatches, the most any setting runs --
-            // is what this default branch is.
             switch (passes) {
                 case 1:
                     Dispatch(hdr, denoiseA, 1);
@@ -891,10 +785,6 @@ struct PassFactory {
             FrameRecorder recorder(c, self);
             recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
 
-            // The decal PS needs invWorld * invViewProj per fragment; compose
-            // it once per decal on the CPU instead. Must use the same
-            // unjittered inverse the frame CB publishes, because that is the
-            // matrix the depth-reconstruction it replaces was using.
             const JPH::Mat44 invViewProj = self.unjittered_view_proj.Inversed();
 
             for (const auto& decalCmd: self.queues.Decals()) {
@@ -1103,16 +993,10 @@ struct PassFactory {
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget)),
-                    // blit.slang declares both of these without reading them, so
-                    // the cook strips the bindings and the write is a no-op --
-                    // the depth read is still what the pass declares to the
-                    // graph, and both stay written for a shader that reads them.
                     Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                     Vk::Unread<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
-                // The overlay is drawn by the frame's present path, after this
-                // blit, so this one leaves drawUI at its default.
                 Passes::BlitPass {}.Execute(
                     blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), block,
                     self.currentUniforms.fullBright != 0 ? 1 : 0
@@ -1134,10 +1018,6 @@ struct PassFactory {
 };
 
 auto BuildComputeGraph(const PassFactory& factory) {
-    // Automatic forking partitions this flat list at compile time (see
-    // Vk::AutoForkPasses). This graph executes without a fork executor, so any
-    // bundle it forms replays its bodies sequentially in order -- the bundling
-    // is pure bookkeeping here, and the hazard check is what keeps it honest.
     return Vk::MakePassPack(
         factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
@@ -1149,14 +1029,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    // The whole frame is a few flat pass packs, concatenated at compile time.
-    // BuildGraph partitions the joined list (Vk::AutoForkPasses): every maximal
-    // run of neighbour passes that are pairwise hazard-free (ArePassesDisjoint
-    // over their declared usages) becomes one ParallelPass, so the graph emits
-    // the union of the run's barriers up front and records its bodies
-    // concurrently through the fork executor -- no hand-written Vk::Fork. A
-    // run of one pass stays exactly as it was, so hazard-adjacent passes keep
-    // their original stream behaviour.
     auto core = Vk::MakePassPack(
         factory.MakeShadowPass(), factory.MakeMainPass1(), factory.MakeHiZGeneratePass(),
         factory.MakeMainPass2(),   factory.MakeDecalPass(),   factory.MakeViewmodelPass(),
@@ -1165,9 +1037,6 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
         factory.MakeOpaqueSceneCopyPass(), factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
     );
 
-    // The anti-aliasing tail; empty in mode None. Every branch is inside the
-    // constexpr-if chain (an unguarded trailing return would be a second,
-    // differently-typed return statement for every non-None mode).
     auto aa = [&] {
         if constexpr (Mode == TAA) {
             return Vk::MakePassPack(factory.MakeTAAPass());
@@ -1187,10 +1056,6 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
-// Bind one target outside `AutoBind`, but only when the compiled graph
-// actually declares the tag. `makeRef` is a callable rather than a value so
-// the lookup is never instantiated — let alone evaluated — for a graph that
-// does not use the tag.
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {
@@ -1215,7 +1080,7 @@ void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const PassFact
     Reflect::DispatchEnum(mode, [&]<AAMode Val>() { ExecuteFrameGraph<Val>(self, cmd, factory, std::forward<GetSwapchainImageT>(getSwapchainImage)); });
 }
 
-} // namespace
+}
 
 std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
     using enum AAMode;
@@ -1264,8 +1129,6 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     BindHeapsAndPushFrame(compCmd);
 
     if (frameState.clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
-        // The pass dispatches only when the bounds are dirty, so its block is
-        // written here rather than cached across frames.
         const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
             ctx, clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(clusterBoundsBuffer), Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
@@ -1287,9 +1150,6 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     compBinder.AutoBind(*this);
 
-    // The compute graph reads last frame's shadow map, not the current one:
-    // AutoBind resolved the tag from the frame's resolver, so the previous
-    // frame's atlas overwrites that binding here.
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(targets.ShadowMapPrev()); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
@@ -1302,14 +1162,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     using namespace ZHLN::Vk;
     using enum AAMode;
 
-    // The scene's output goes exactly where the caller pointed the view: a
-    // window's acquired image or an offscreen render texture. Falling back to
-    // the active destination keeps a caller that rendered into a vended window
-    // attachment without resolving it working unchanged.
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-        // A destination is a slice and the layout is what this pass declares
-        // over it, so the three ways a frame can have an image differ only in
-        // where the slice comes from.
         if (sceneTarget.has_value()) {
             return sceneTarget->image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
@@ -1319,9 +1172,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
             const uint32_t imageIndex = destinations.ActiveImageIndex();
             return MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format).Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
-        // The headless target is an owned RenderTarget, so the conversion that
-        // already exists for one applies -- and it carries the view's
-        // create-info, which a slice built from raw handles has none of.
         return AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
     };
 
@@ -1329,8 +1179,6 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     uint32_t   lightVariant = rtrActive ? 1 : 0;
     uint32_t   reflVariant  = (sceneSettings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
-    // Pass constants are the view's optics, not the renderer's cached state:
-    // the same frame may render two views, and each must push its own matrices.
     PassFactory factory {
         .self = *this,
         .fIdx = fIdx,
@@ -1354,4 +1202,4 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, factory, getSwapchainImage);
 }
 
-} // namespace ZHLN
+}

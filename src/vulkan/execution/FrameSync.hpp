@@ -25,9 +25,6 @@ class FrameSync {
         return _frames[frame % N];
     }
 
-    // Named accessors: the raw ZHLN_FrameSync stays inside this class. Frame
-    // orchestration (presentation waits, compute signals) asks for the
-    // semaphore it means by name instead of reading the C struct's fields.
     [[nodiscard]] constexpr auto ComputeTimeline(const uint32_t frame) const noexcept -> VkSemaphore {
         return _frames[frame % N].compute_timeline;
     }
@@ -44,16 +41,10 @@ class FrameSync {
     constexpr auto Valid() const noexcept -> bool {
         return _device != VK_NULL_HANDLE;
     }
-    /**
-     * @brief Blocks the CPU until the target frame's fence is signaled.
-     */
     [[nodiscard]] auto Wait(uint32_t frameIndex) const noexcept -> VkResult {
         return vkWaitForFences(_device, 1, &_frames[frameIndex % N].in_flight, VK_TRUE, UINT64_MAX);
     }
 
-    /**
-     * @brief Resets the target frame's in-flight fence (reuse before recording).
-     */
     void ResetFence(uint32_t frameIndex) const noexcept {
         if (_device != VK_NULL_HANDLE) {
             vkResetFences(_device, 1, &_frames[frameIndex % N].in_flight);
@@ -73,6 +64,6 @@ class FrameSync {
     std::array<ZHLN_FrameSync, N> _frames {};
     std::array<uint64_t, N>       _timelineValues {};
 };
-} // namespace ZHLN::Vk
+}
 
 #include "FrameSync.inl"

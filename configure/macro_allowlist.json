@@ -1,5 +1,9 @@
 {
     "_comment": "WARNING: This file is protected. Do not modify allowed/banned macros without team approval.",
+    "allowed_macro_suffixes_comment": "A macro ending in one of these suffixes is exempt from the allowlist in both passes. _IMPLEMENTATION is the canonical one-shot consumption idiom of every single-header vendor (stb_*, cgltf, miniaudio, clay, VMA, ...): our shim files define it exactly once and never use it, so naming it here per vendor would be ceremony, and a future vendored header must not require touching this file. First-party macros never take this shape.",
+    "allowed_macro_suffixes": [
+        "_IMPLEMENTATION"
+    ],
     "allowed_macros": [
         "_WIN32_WINNT",
         "ARCH_ARM64",

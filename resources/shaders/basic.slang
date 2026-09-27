@@ -1,38 +1,16 @@
-// resources/shaders/basic.slang
 import common;
 import material_model;
 import pbr_helpers;
 
-// The geometry->fragment interfaces live in common.slang: one varying struct
-// per pass (ShadowGeometryOutput / GBufferGeometryOutput /
-// ForwardGeometryOutput), so the vertex path, the VK_EXT_mesh_shader path
-// (basic_mesh.slang) and the fragment shaders below type-check against the
-// exact interface each pass rasterises - no preprocessor, no pass defines.
-// Each pass compiles its own named entry points.
 
 struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
-    // Emission is its own attachment. Folding it into SV_Target0 made the
-    // deferred lighting pass treat it as reflectance, so an emissive surface
-    // went black as soon as nothing was shining on it.
     float4 emissive : SV_Target3;
-    // xy octahedral coat normal, z coat roughness, w coat factor. Factor 0 is no lacquer.
     float4 clearcoat : SV_Target4;
 };
 
-// NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
-// to (InstanceIndex - BaseInstance) -- D3D semantics, i.e. it EXCLUDES
-// firstInstance -- whereas the old DXC build received raw InstanceIndex. All
-// of this engine's indirect draws encode the instance slot in firstInstance
-// (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
-// required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
-// Shared scene-vertex payload build: index fetch, skinning, morphing and the
-// world transform, identical for every pass. Fills everything EXCEPT the
-// clip-space position (each pass selects its own matrix) and, when
-// withMotion is true, the motion-vector pair. Instantiations with
-// withMotion == false fold the previous-frame skin evaluation away entirely.
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint vertexId, uint instanceId, out float4 worldPos, out float4 activeVPPos
 ) {
@@ -41,9 +19,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
 
-    // Typed BDA indexing keeps the byte-stride contract in one place.
     uint actualVertexId = inst.fetchIndex(vertexId);
-    // Preserve the legacy defensive clamp before any BDA vertex fetch.
     actualVertexId = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
 
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
@@ -132,9 +108,6 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
 ShadowGeometryOutput VSMainShadow(uint vertexId: SV_VulkanVertexID, uint instanceId: SV_VulkanInstanceID, uint viewId: SV_ViewID) {
     float4 worldPos, activeVPPos;
     SceneGeometryVertex p = BuildSceneGeometryPayload<false>(vertexId, instanceId, worldPos, activeVPPos);
-    // Multiview cascades: the shadow render pass fans every draw out to all
-    // four cascade layers in one dispatch (viewMask 0x0F), so the light-space
-    // matrix -- and the destination layer, implicitly -- comes from ViewIndex.
     p.pos = mul(scene.frame.lightSpaceMatrices[min(viewId, 3u)], worldPos);
     return PackShadowOutput(p);
 }
@@ -155,9 +128,6 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
     return PackForwardOutput(p);
 }
 
-// The three fragment shaders share this module and are type-checked together;
-// each consumes exactly the varying struct its pass rasterises (see
-// common.slang), so no fragment can accidentally read a dropped varying.
 void PSShadow(ShadowGeometryOutput input) {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
@@ -192,15 +162,10 @@ PSOutput PSMain(GBufferGeometryOutput input) {
 
     float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
 
-    // Allow mirror tier (roughness <0.04) for glossy floors: clamp only to avoid
-    // exact zero / division by zero in DistributionGGX, not to 0.045 which forced
-    // 0.03 floor into half-res rtr_half path and exposed bilinear bleed white outline.
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
     if (input.alphaMode == 1) {
-        // Alpha-tested: keep at least 0.045 to avoid 0/0 NaN at NdotH=1, but main
-        // opaque path can go to 0.001 for mirror tier.
         roughness = max(roughness, 0.045f);
     }
 
@@ -224,8 +189,6 @@ PSOutput PSMain(GBufferGeometryOutput input) {
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
     }
 
-    // Coat factor from R, coat roughness from G. The coat normal perturbs
-    // only the geometric normal; a missing coat normal leaves it geometric.
     float coatFactor = input.coatParams.x;
     float coatRough  = input.coatParams.y;
     if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
@@ -278,17 +241,12 @@ float3 RotateVector(float3 V, float3 lightDir) {
     return V;
 }
 
-// Khronos rgb_mix: the strongest fresnel channel knocks out the background,
-// the colored channels tint the reflection. A plain lerp would leave the
-// scene in the weak channels and wash the film toward white.
 float3 RgbMix(float3 base, float3 layer, float3 rgbAlpha) {
     float3 w = max(rgbAlpha, 0.0f);
     float wMax = min(max(w.r, max(w.g, w.b)), 1.0f);
     return (1.0f - wMax) * base + w * layer;
 }
 
-// The cover mesh has no tangents. A screen-space frame is what the normal
-// map was authored against; a constant (1, 0, 0) tangent is not.
 float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, float2 uv) {
     mapNormal = float3(mapNormal.xy * scale, mapNormal.z);
     float3 dp1 = ddx(worldPos);
@@ -309,9 +267,6 @@ float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, f
 }
 
 float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, bool isFrontFace) {
-    // glTF doubleSided reverses the back-face normal before lighting. This
-    // asset is not double sided: inward shells are back-facing and culled,
-    // so the flip does not run on the dish.
     if (!isFrontFace) {
         N = -N;
     }
@@ -352,9 +307,6 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     }
     F = max(F, 0.0f);
 
-    // Volume thickness is local metres, scaled by the node. Zero keeps the
-    // sample on this pixel; a non-zero offset is the rasterizer refraction
-    // the thickness texture exists to drive.
     float ior = max(input.volumeParams.y, 1.0001f);
     float thickness = input.volumeParams.x * input.volumeParams.z;
     if (tex.z != 0xFFFFu) {
@@ -363,7 +315,6 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float2 refractUV = screenUV;
     if (thickness > 1.0e-5f) {
         float3 bent = refract(-V, N, 1.0f / ior);
-        // refract returns 0 on total internal reflection. Keep this pixel then.
         if (dot(bent, bent) > 1.0e-6f) {
             float3 exitPos = worldPos + normalize(bent) * thickness;
             float4 clip = mul(scene.frame.viewProj, float4(exitPos, 1.0f));
@@ -395,17 +346,12 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
         return float4(albedo.rgb + emissive, albedo.a);
     }
 
-    // Read up front so the forward interface keeps the normal and the
-    // transmission payload on the ordinary blend path as well.
     float4 params = input.transmissionParams;
     float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     if (params.x > 0.0f) {
         return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
     }
 
-    // Ordinary blend draws (Partial_Coating) never reach the deferred reflection
-    // pass. Split-sum IBL, authored alpha, specular left unpremultiplied so
-    // SRC_ALPHA scales the highlight with the base.
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
     float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);

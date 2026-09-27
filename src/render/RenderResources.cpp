@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/RenderResources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
@@ -29,12 +28,6 @@
 #include <utility>
 #include <vector>
 
-// Private Resource Errors (Tier 1)
-// Produced only while building materials / resizing shadow targets inside
-// this translation unit; no header exposes them, so callers just log the
-// type-erased ZHLN::ErrorCode. Declared at file scope (not an anonymous
-// namespace) to keep reflected category names stable for both native
-// reflection and the AST transpiler fallback.
 
 namespace ZHLN {
 
@@ -42,11 +35,10 @@ enum class BlueNoiseError : uint8_t {
     UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
-} // namespace ZHLN
+}
 
 namespace ZHLN {
 
-// High-Level GPU Asset Registry & Resolution API
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     const Mesh* found = _impl->geometry.FindMesh(id);
@@ -81,9 +73,6 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
         return BufferHandle::Invalid;
     }
 
-    // The key folds the owner and the subresource, and the size comes from the
-    // shader's particle struct -- both belong to the caller, so the manager is
-    // handed the key, the packed owner and a byte count.
     const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
     return _impl->geometry.GetOrCreateParticleBuffer(cacheKey, owner.Pack(), maxParticles * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
 }
@@ -109,7 +98,6 @@ auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uin
 }
 
 void RenderContext::ClearGPUCaches() noexcept {
-    // 1. Wait for GPU to finish all in-flight work before destroying any pipelines or buffers
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {
@@ -118,13 +106,8 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
-    // 2. Reclaim the buffers the registered meshes hold. What a cached material
-    //    holds instead is pipelines, so that half stays here until the pipeline
-    //    registry exists to own it.
     _impl->geometry.ReleaseMeshBuffers();
 
-    // 3. Reclaim all pipeline slots from registered materials (safe now: the
-    //    device was idled above).
     _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
         if (mat.pipeline != PipelineHandle::Invalid) {
             _impl->pipelines.Destroy(mat.pipeline);
@@ -139,14 +122,8 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->geometry.ReleaseParticleBuffers();
     _impl->geometry.ReleaseLedgers();
 
-    // The records are the only owner of a texture's bindless index, so the
-    // slots go back to the allocator with them. The images are parked until the
-    // next frame boundary, which is safe here because the device was idled
-    // above. Clearing is the manager's own teardown: it knows which slots are
-    // in use, so the caller does not collect the indices and hand them back.
     _impl->textureManager.Clear();
 
-    // 5. Drain the deferred deletion queues
     _impl->deletionQueue.BeginFrame(0);
     _impl->deletionQueue.BeginFrame(1);
 }
@@ -186,9 +163,6 @@ uint32_t RenderContext::DeviceLostCount() noexcept {
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    // The frame's stream is the destination it is drawing into; a checkpoint
-    // written outside a frame's target has no stream to go into, and says so by
-    // doing nothing.
     if (const VkCommandBuffer cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
         _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
@@ -198,8 +172,6 @@ PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
     if (!_impl->gpuProfiler.PipelineStatsAvailable()) {
         return {};
     }
-    // A fresh capture window: leftovers from an earlier capture must not
-    // contaminate this one.
     _impl->pendingPipelineCounters = {};
     _impl->gpuProfiler.SetPipelineStatsEnabled(true);
     return PipelineStatsCapture {_impl.get()};
@@ -235,7 +207,6 @@ void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
-// RenderContext Subsystem Implementation
 
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
@@ -272,8 +243,6 @@ auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->presenter.frameIndex;
 }
 
-// Both read the primary presenter's pacer: the engine paces simulation off
-// the display-locked interval and scales fidelity off the present margin.
 auto RenderContext::GetPacedDeltaTime() const noexcept -> std::optional<float> {
     return _impl->presenter.GetPacedDeltaTime();
 }
@@ -283,12 +252,6 @@ auto RenderContext::GetPresentTiming() const noexcept -> PresentTimingMetrics {
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
-    // With a real window the compositor owns the size: the request is advisory
-    // and the recreate re-queries the target's framebuffer extent, which is why this
-    // used to ignore its argument entirely. Headless (and TTY) there is nothing
-    // to ask -- Window::GetSize just returns what it was told -- so the extent
-    // has to be written there or the recreate reproduces the old size and the
-    // call is a no-op.
     if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
         _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
@@ -303,8 +266,6 @@ void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
 }
 
 auto RenderContext::GetViewport() const noexcept -> ViewportRect {
-    // The impl works in VkViewport (see EffectiveViewport); its values are
-    // whole pixels, so narrowing back into the API-neutral rect is exact.
     const VkViewport vp = _impl->EffectiveViewport();
     return ViewportRect {
         .x      = static_cast<uint32_t>(vp.x),
@@ -338,20 +299,11 @@ void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy
 
 void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
 
-// Material pipeline compilation moved to PipelineRegistry::CreateMaterial, which
-// owns the table the resulting handle indexes.
 
 namespace {
 
-// The scene-geometry variants, as generated modules: picking a variant picks
-// the geometry module AND the fragment module together -- they are compiled
-// against one varying set, so pairing across variants mismatches locations --
-// plus the mesh-shader twin of that geometry. The vertex pipeline is always
-// built; the mesh stages only feed the optional second pipeline.
 template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
 [[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh, bool depthWrite) -> PipelineDesc {
-    // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
-    // carries borrowed bytes, so it is not copy-assignable.
     if (withMesh) {
         return PipelineDesc {
             .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
@@ -376,11 +328,9 @@ template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgra
     };
 }
 
-} // namespace
+}
 
 auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
-    // Translucent materials rasterise through PSForward, so they take the
-    // Forward modules; the modules themselves carry the pairing invariant.
     const bool               translucent = alphaBlend || additiveBlend;
     const PipelineDesc desc = translucent
         ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
@@ -400,15 +350,8 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    // alphaMode 2 without alphaBlend used to compile a G-buffer pipeline and
-    // then get skipped by the G-buffer passes. Transmission is the same class
-    // of draw: glTF leaves alphaMode OPAQUE and baseColor alpha at 1, so the
-    // factor is what routes it. baseColor alpha is not consulted -- OPAQUE
-    // ignores it.
     const bool transmission = desc.transmissionFactor > 0.0f;
     const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
-    // Transmission writes a finished composite and must win the depth test
-    // against its own far shell. Ordinary blend still does not write depth.
     auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
@@ -463,10 +406,6 @@ void RenderContext::Impl::BeginShaderObservation() {
 
 void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
-        // The registry owns the matching and the two hazards of iterating a
-        // table that rebuilds can mutate; the device-idle wait is the part that
-        // touches Vulkan, so it stays here and is handed in to run once, only
-        // if something actually needs rebuilding.
         shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
     }
 }
@@ -484,17 +423,11 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
 }
 
 void RenderContext::UnloadTexture(TextureHandle handle) {
-    // The record goes away now, so later GetBindlessIndex calls resolve to the
-    // white fallback; the slot itself is only recycled once the frames that
-    // could still read its descriptor have retired.
     _impl->textureManager.Unload(handle);
 }
 
 namespace {
 
-// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
-// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
-// bytes arrive at the uploader as a plain block.
 [[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
     const size_t count = static_cast<size_t>(size) * size * size;
     std::vector<uint8_t> pixels(count * 4);
@@ -517,7 +450,7 @@ namespace {
     return pixels;
 }
 
-} // namespace
+}
 
 auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
     constexpr uint32_t kVolumetricNoiseSize = 64;
@@ -537,22 +470,8 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
 }
 
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
-    // Single-mip on purpose. A noise texture must never be mipmapped: every
-    // level averages neighbouring texels toward the mean, so the high-frequency
-    // content the dither depends on is destroyed exactly where a filter would
-    // reach for it. The shader always samples LOD 0.
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-    // The tile arrives already decoded: configure/cook_blue_noise.py turns the
-    // PNG into raw 8-bit RGBA at build time, so this is a memcpy of a block
-    // whose layout the renderer asked for rather than an image decode. The
-    // renderer cannot pull it through the VFS -- it is uploaded inside
-    // RenderContext::Create, and the Kernel builds its AssetManager and mounts
-    // data/base.pak only after that returns.
-    //
-    // Square by definition (it tiles), so the extent comes off the byte count
-    // and the count is what validates the blob: anything that is not a whole
-    // square of RGBA texels is a cook that disagrees with this reader.
     const size_t   bytes = Resource::blue_noise_rgba.size();
     const size_t   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes / 4)));
     if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
@@ -601,9 +520,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    // NEAREST + REPEAT. Repeat lets the shader scroll the tile by adding an
-    // offset in UV space and letting the sampler wrap, so there is no integer
-    // mask in the hot path and the texture need not be power-of-two.
     auto samplerBuilder = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F);
     auto samplerRes     = samplerBuilder.Build(ctx.Device());
     if (!samplerRes) {
@@ -626,9 +542,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     return {};
 }
 
-// GPU buffer allocation lives in GeometryManager::CreateBuffer, which also
-// makes the one usage-flag decision left: the ray-tracing build-input bit,
-// gated on the device predicate ctx.RayTracingSupported().
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
@@ -661,8 +574,6 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         if (!blasBufOpt) {
             return;
         }
-        // The BLAS handle carries the device it is created on; ~NativeMesh
-        // retires it through the DeviceHandle.
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
         scratchMesh->blas       = Vk::AccelerationStructure(
             ctx.Device(),
@@ -680,7 +591,6 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     Vk::Buffer      scratchBuf     = std::move(*scratchBufOpt);
     VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
 
-    // Record the build command directly onto the active graphics queue command buffer
     Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), scratchAddress, primitiveCount);
 }
 
@@ -733,34 +643,23 @@ auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> 
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-// Resizes the GPU cascade shadow targets. On success the canonical settings'
-// shadows.resolution is updated by the caller (ApplySettings / the public
-// SetShadowResolution bridge).
-// Shadow-target reallocation moved to TargetManager::ResizeShadows, which owns
-// the cascade map pair and the views carved out of it.
 
 auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, ErrorCode> {
     auto* impl = _impl.get();
 
     return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
-        // Keep the informational preset tier honest after an out-of-band change.
         impl->settings.qualityPreset = impl->settings.DetectPreset();
     });
 }
 
 void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
-    // --- Delta detection
-    // Reactive consequences key off specific fields; plain knob changes
-    // simply become part of the canonical state consumed by the next frame.
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
         if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
-            // Keep the GPU-consistent resolution so uniforms and samplers
-            // match the actual targets; the rejected value is dropped.
             ZHLN::Log(
                 "WARN: failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
@@ -885,9 +784,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             )
                 .transform_error([](auto err) -> ErrorCode { return err; })
                 .transform([&]() -> void {
-                    // The BLAS handle carries its device; ~NativeMesh retires
-                    // it through the DeviceHandle. Address first: the move
-                    // below empties b.blas.
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
                     b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas.Get());
                     b.posMesh->blas        = std::move(b.blas);
@@ -902,8 +798,6 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
 }
 
 auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
-    // Pixels arrive already generated: the renderer uploads them and names the
-    // slot, and the caller stays the owner of the source.
     const auto uploaded = _impl->textureManager.Upload(name, pixels, width, height, Rgba8Format(isSRGB));
     if (!uploaded) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, width, height, uploaded.error());
@@ -923,11 +817,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto* const impl = _impl.get();
 
     if (!impl->presenter.swapchain.Valid()) {
-        // Capture the frame, not "whatever the primary presenter's offscreen
-        // target happens to be". Those are the same image until a destination
-        // rebuild, and different ones after: the frame writes the record it
-        // vended, and copying the other image reads a target nothing has drawn
-        // into since it was created -- a black capture with no other symptom.
         VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
         VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -937,11 +826,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
                 const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
 
-                // What the frame put in this image, in the frame vocabulary:
-                // gone, nothing yet, or written. What a capture must not do is
-                // read an image whose contents nothing established, and the
-                // fallback fill -- defined pixels, no frame -- is not something
-                // to hand back as one either, so both are refused by name.
                 const auto receipt = record.GetRenderedContent();
                 if (!receipt) {
                     ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
@@ -955,11 +839,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
                 if (!(*receipt)->Drawn()) {
-                    // EndFrame fills a vended-but-unwritten destination with the
-                    // background colour. Reading it back hands the caller a
-                    // black frame that no lighting metric can tell from "no
-                    // light reached the scene", so refuse the capture instead
-                    // and name the actual cause.
                     ZHLN::Log(
                         "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
                         record.handle.Raw()
@@ -967,9 +846,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
 
-                // A pass drew it: the image is the frame's, and the receipt
-                // having refused every case where it is not is why this needs
-                // no validity check of its own.
                 if (record.image.handle != source) {
                     ZHLN::Log(
                         "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
@@ -978,10 +854,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                 }
                 source = record.image.handle;
                 extent = record.image.Extent2D();
-                // The frame's own bookkeeping, not a guessed layout: a barrier
-                // whose oldLayout lies about the contents is allowed to discard
-                // them, and saying "colour attachment" about an image nothing
-                // wrote is exactly such a lie.
                 sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
             }
         }
@@ -1036,8 +908,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(ScreenshotError::FileOpenFailed);
         }
 
-        // .pam keeps alpha (fidelity omitBackground). Every other path stays
-        // P6: render tests assert that header, and P6 has no alpha channel.
         const bool writeAlpha = outputPath.ends_with(".pam") || outputPath.ends_with(".PAM");
         if (writeAlpha) {
             ofs << "P7\nWIDTH " << extent.width << "\nHEIGHT " << extent.height << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
@@ -1050,11 +920,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         uint64_t     lumaSum = 0;
         uint64_t     lit     = 0;
         uint64_t     transparent = 0;
-        // Per-channel detail, because a frame's luma alone cannot tell "no
-        // light reached the scene" from "one hue never survived shading": the
-        // suite's chroma gates classify pixels by channel ratios above an
-        // 8-bit floor of 45, so the floor count and the channel maxima are the
-        // numbers that say which of the two happened.
         std::array<uint64_t, 3> channelSum {};
         std::array<uint64_t, 3> aboveFloor {};
         std::array<uint8_t, 3>  channelMax {};
@@ -1088,10 +953,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         }
         ofs.close();
 
-        // Say what the capture holds, not only where it went. A capture that
-        // read the wrong image and a capture of a frame nothing drew into are
-        // the same "black frame" downstream, and the readback is the only place
-        // where the difference is still visible.
         const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
         const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
         ZHLN::Log(
@@ -1107,14 +968,12 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
-    // 1. Allocate host-visible readback buffer via engine Allocator
     auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }
     auto stagingBuffer = std::move(*stagingRes);
 
-    // 2. Record and submit transfer from internal hdrSceneColor
     Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
         auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
 
@@ -1123,14 +982,12 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
     });
 
-    // 3. Map memory with typed pointer accessor
     auto mapped = stagingBuffer.Map();
     if (mapped.data == nullptr) {
         return std::unexpected(ScreenshotError::ReadbackFailed);
     }
     const auto* const halfFloats = mapped.As<const uint16_t>();
 
-    // 4. Output image file
     std::ofstream ofs(std::string(outputPath), std::ios::binary);
     if (!ofs.is_open()) {
         return std::unexpected(ScreenshotError::FileOpenFailed);
@@ -1194,4 +1051,4 @@ void RenderContext::ProvokeDeviceLost() {
     _impl->ProvokeDeviceLostInternal();
 }
 
-} // namespace ZHLN
+}

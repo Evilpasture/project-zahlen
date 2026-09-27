@@ -11,24 +11,12 @@
 
 namespace ZHLN {
 
-// Forward declare the Fiber system
 struct Fiber;
 extern auto GetCurrentFiber() noexcept -> Fiber*;
 extern void YieldFiber() noexcept;
 
 namespace detail {
 
-/**
- * @brief Remembers which context owns a mutex, so that Mutex.cpp can catch
- * recursive locking and unlocking a mutex someone else holds.
- *
- * Both variants answer the same questions. `NoMutexOwner` is the release variant and
- * carries no state at all, which is what keeps Mutex a single C-compatible byte
- * -- see the static_asserts below. The shared shape is also what lets the
- * checks in Mutex.cpp be written once and guarded by `if constexpr (isDebug)`
- * instead of being preprocessed away: the discarded branch still has to
- * type-check, so the calls it makes have to exist in both configurations.
- */
 struct MutexOwner {
     alignas(16) ZHLN::Atomic<bool>      hasOwner;
     alignas(16) ZHLN::Atomic<uintptr_t> owner;
@@ -67,12 +55,8 @@ struct NoMutexOwner {
     }
 };
 
-} // namespace detail
+}
 
-/**
- * @brief High-Performance, 1-Byte Mutex.
- * Satisfies the C++ `BasicLockable` requirement (`std::lock_guard` compatible).
- */
 class Mutex {
   public:
     constexpr Mutex() noexcept = default;
@@ -132,31 +116,19 @@ class Mutex {
 
     using Owner = std::conditional_t<isDebug, detail::MutexOwner, detail::NoMutexOwner>;
 
-    // Raw zero is the unlocked C/FFI representation. Keep this member free of
-    // NSDMI so Mutex remains trivially default constructible; C++ owners must
-    // value-initialize (`Mutex mutex {}`), and FFI storage must be zeroed.
     ZHLN::Atomic<uint8_t> _bits;
 
-    // Ownership bookkeeping for the deadlock detector: two atomics in a debug
-    // build, an empty type in a release one, where [[no_unique_address]] lets it
-    // take up no space at all. Deliberately no NSDMI, for the same reason as
-    // _bits -- MutexOwner initializes its own members.
     [[no_unique_address]] Owner _owner;
 
     [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
 
-    // --- Debug Hooks
-    // Mutex.cpp defines these for both configurations and guards the bodies
-    // with `if constexpr (isDebug)`, so a release build keeps the detector out
-    // of the binary without a second, empty copy of every check living here.
     void CheckPreLock() noexcept;
     void PostLock() noexcept;
     void PreUnlock() noexcept;
     void ClearOwner() noexcept;
 };
 
-// Guarantee 1-byte footprint in Release builds
 static_assert(isDebug || sizeof(Mutex) == 1, "ZHLN::Mutex must be exactly 1 byte in Release mode!");
 
 static_assert(
@@ -164,9 +136,6 @@ static_assert(
     "Mutex must remain a trivial C-compatible byte in Release mode!"
 );
 
-/**
- * @brief Trivial RAII guard to avoid including <mutex> in interface headers.
- */
 struct MutexGuard {
     Mutex& _m;
     explicit MutexGuard(Mutex& m) noexcept: _m(m) {
@@ -180,19 +149,10 @@ struct MutexGuard {
     auto operator=(const MutexGuard&) -> MutexGuard& = delete;
 };
 
-/**
- * @brief Higher-order functional mutex lock.
- * Locks the mutex, runs the lambda, and unlocks on exit.
- *
- * Usage:
- *   ZHLN::Lock(myMutex, [&] {
- *       return registry.Create();
- *   });
- */
 template <typename MutexT, typename Func>
 decltype(auto) Lock(MutexT& mutex, Func&& func) {
     MutexGuard guard(mutex);
     return std::forward<Func>(func)();
 }
 
-} // namespace ZHLN
+}

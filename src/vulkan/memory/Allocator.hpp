@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/memory/Allocator.hpp
 
 #pragma once
 
@@ -11,7 +10,7 @@
 
 namespace ZHLN::Vk {
 
-class Context; // Forward declaration
+class Context;
 
 struct DeferredDeletionEntry {
     enum class Type : uint8_t { Buffer, Image };
@@ -44,7 +43,6 @@ class DeletionQueue {
     uint32_t                                        _currentFrameIndex = 0;
 };
 
-// Overloaded C-helpers to decouple VmaHandle from DeletionQueue definition
 void                               DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
 void                               DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
 extern thread_local DeletionQueue* t_active_deletion_queue;
@@ -97,17 +95,12 @@ class VmaHandle {
     void Cleanup() noexcept {
         if (_handle != T {}) {
             if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
-                // Buffer/image memory can still be referenced by in-flight GPU work, so
-                // destruction is deferred to the frame boundary while a deletion queue
-                // is active; without one there is nothing to sequence against.
                 if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
                     DeferVmaDestruction(_allocator, _handle, _allocation);
                 } else {
                     DeleterFn(_allocator, _handle, _allocation);
                 }
             } else {
-                // Everything else (e.g. Buffer::MappedRegion) is released immediately;
-                // the deletion queue only tracks buffers and images.
                 DeleterFn(_allocator, _handle, _allocation);
             }
             _handle     = T {};
@@ -122,7 +115,6 @@ class VmaHandle {
     VmaAllocation _allocation = nullptr;
 };
 
-// Allocator RAII
 
 class Allocator {
   public:
@@ -154,7 +146,6 @@ class Allocator {
 };
 
 
-// Resource usage enums (scoped wrappers over Vulkan / VMA flags)
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class MemoryUsage : std::underlying_type_t<VmaMemoryUsage> {
@@ -231,7 +222,6 @@ constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
     return (ToVk(flags) & ToVk(bits)) != 0;
 }
 
-// Buffer RAII
 
 class Buffer {
   public:
@@ -247,16 +237,9 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
 
-    // Creates a buffer whose memory block obeys an additional minimum alignment
-    // (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
-    // for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, ErrorCode>;
 
-    // Cross-queue-family form. Buffers carry no hardware compression state,
-    // so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
-    // costs nothing and removes queue-family-ownership transfers entirely;
-    // @p queueFamilyIndices is consulted only for CONCURRENT sharing.
     [[nodiscard]] static auto Create(
         VmaAllocator              allocator,
         size_t                    size,
@@ -305,9 +288,6 @@ class Buffer {
         return _handle.Get();
     }
     [[nodiscard]] auto Size() const noexcept -> size_t {
-        // The size REQUESTED at creation (VkBufferCreateInfo::size), not the
-        // VMA allocation size: allocation sizes are rounded up, which would
-        // make descriptor address ranges overrun the buffer.
         return _requestedSize;
     }
     [[nodiscard]] auto Valid() const noexcept -> bool {
@@ -325,7 +305,6 @@ class Buffer {
 
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
-// Image RAII
 
 class Image {
   public:
@@ -369,7 +348,6 @@ class ImageBuilder {
     auto SharingMode(VkSharingMode mode) noexcept -> ImageBuilder&;
     auto Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder&;
 
-    // Semantic helpers for common configurations
     auto Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
     auto TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
 
@@ -379,7 +357,6 @@ class ImageBuilder {
     VkImageCreateInfo _info {};
 };
 
-// Buffer Utilities
 
 template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
@@ -388,17 +365,11 @@ void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset =
     vkCmdFillBuffer(cmd, buffer.Handle(), offset, VK_WHOLE_SIZE, *reinterpret_cast<const uint32_t*>(&data));
 }
 
-/**
- * @brief Base buffer copy helper utilizing raw VkBuffer handles.
- */
 inline void CopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
     const ZHLN_BufferCopyDesc copy = {.src = src, .dst = dst, .size = size, .src_offset = srcOffset, .dst_offset = dstOffset};
     ZHLN_CmdCopyBuffer(cmd, &copy);
 }
 
-/**
- * @brief High-level buffer copy helper utilizing RAII Buffer wrappers.
- */
 inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
     CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
 }
@@ -414,7 +385,6 @@ inline void BufferBarrier(
     BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
 }
 
-// Staging Ring Buffer (Timeline Semaphore Synchronized)
 
 class StagingRingBuffer {
   public:
@@ -473,7 +443,7 @@ class StagingRingBuffer {
     VkDeviceSize _head = 0;
     VkDeviceSize _tail = 0;
 
-    Semaphore _timelineSemaphore; // Upgraded to RAII handle
+    Semaphore _timelineSemaphore;
     uint64_t  _timelineValue = 0;
 
     struct ActiveAllocation {
@@ -494,9 +464,7 @@ inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation st
     CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
 }
 
-// Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
 
-// Thread-local scope guard hook
 
 struct ScopedDeletionQueue {
     DeletionQueue* prev;
@@ -511,4 +479,4 @@ struct ScopedDeletionQueue {
     ScopedDeletionQueue& operator=(const ScopedDeletionQueue&) = delete;
 };
 
-} // namespace ZHLN::Vk
+}

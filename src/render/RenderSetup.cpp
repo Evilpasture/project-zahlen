@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/render/RenderSetup.cpp
 #include "RenderInternal.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -45,14 +44,6 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
         corner = invCamView * corner;
     }
 
-    // Orientation-invariant fit: center the ortho on the frustum slice's
-    // midpoint and take the radius as the farthest slice corner. Both depend
-    // only on (fov, aspect, nearDist, farDist), so the ortho size is CONSTANT
-    // under rigid camera motion. The previous AABB-centroid fit changed size
-    // with camera orientation, and the 1/16 m radius quantization let every
-    // texel edge crawl by up to half a texel (7.5-88 cm texels) on each step
-    // - visible shadow-edge shimmer while moving at any distance, worst on
-    // the far cascades.
     JPH::Vec3 nearCenter = JPH::Vec3::sZero();
     JPH::Vec3 farCenter  = JPH::Vec3::sZero();
     for (int i = 0; i < 4; ++i) {
@@ -66,9 +57,6 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
         radius = std::max(radius, (corner - center).Length());
     }
     radius = std::ceil(radius * 16.0f) / 16.0f;
-    // Snap the ortho half-extent to a whole number of shadow-map texels so
-    // split/far changes cannot shift the texel lattice by a sub-texel
-    // remainder either.
     const float invTexels = 2.0f / static_cast<float>(shadowResolution);
     radius                = std::ceil(radius / invTexels) * invTexels;
 
@@ -95,7 +83,7 @@ JPH::Mat44 ComputeCascadeLightSpaceMatrix(
     return cascadeLightProj * cascadeLightView;
 }
 
-} // namespace
+}
 
 void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept {
     _impl->current_view_proj    = viewProj;
@@ -117,8 +105,6 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.farZ               = cam.farZ;
     std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
 
-    // Patch the live GPU slot. Full memcpy of currentUniforms would drop
-    // cascade matrices / SH / screenResolution that SetFrameData wrote.
     auto        mapped = _impl->frames.frameUniformBuffers->Map();
     auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
     gpu->viewProj           = unjittered;
@@ -142,14 +128,6 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
-    // invProj, cascade slices and cluster bounds must match how the scene
-    // geometry was rasterized: when a sub-region viewport is active the
-    // camera renders into that rectangle, so its projection aspect -- and
-    // anything fitted to that frustum -- has to be the viewport's, not the
-    // framebuffer's. Using the full window here (the previous cascade path)
-    // stretched CSM slices across a wider frustum than the camera, which is
-    // why --editor (center-band SetViewport) showed swimming / halo shadows
-    // that gameplay never did.
     const auto  sceneVp  = _impl->EffectiveViewport();
     const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
@@ -163,14 +141,6 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
     gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
 
-    // lightCount is not the caller's to set: the lighting shader uses it as the
-    // upper bound for the indices the cluster culler wrote into the light
-    // storage buffer, so it has to describe that buffer's live entries. SetLights
-    // is the only writer of both, and it records the count it clamped to before
-    // this runs (LightingSystem updates in the render graph, RenderSystem in the
-    // Present phase, so the order is fixed). Deriving this from an independent
-    // entity query instead let the bound and the buffer disagree -- the cluster
-    // loop then drops every light past the shorter of the two, silently.
     gpuUniforms.lightCount = _impl->packedLightCount;
 
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
@@ -179,8 +149,6 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
-    // Stamped here, like lightCount: the environment component is resolved
-    // before this runs, and the bake records which background the shader draws.
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
     JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
@@ -211,9 +179,6 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 }
 
 void RenderContext::SetGISettings(const GISettings& settings) noexcept {
-    // Legacy bridge: splice into the canonical GraphicsSettings so the next
-    // frame's push constants and uniforms observe it. The ECS components
-    // (re-collected every frame by RenderSystem) remain authoritative.
     _impl->settings.post = settings;
 }
 
@@ -227,9 +192,7 @@ void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {
         safeCount = 0;
     }
 
-    // The frame uniform's lightCount is stamped from this on upload; the storage
-    // buffer above and the shader's index bound are one value, written here.
     _impl->packedLightCount = safeCount;
 }
 
-} // namespace ZHLN
+}

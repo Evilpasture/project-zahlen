@@ -33,4 +33,4 @@ void DecalSystem::Update(SystemContext& ctx) {
     }
 }
 
-} // namespace ZHLN
+}

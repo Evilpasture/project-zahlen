@@ -1,14 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// GPU IBL precomputation: diffuse SH projection and specular cubemap mips.
-// Specular writes a storage image (one 2D-array mip, layer = face). SH still
-// writes nine float4 coefficients through a device address for the host array.
-//
-// Specular writes outTexture. SH does not: it writes coefficients through
-// outAddr, and a store here would race the specular dispatches that follow.
-// Slang drops the unreferenced image from SHMain. The host table is built
-// from the specular entry point, which still declares it.
 import sampling;
 
 public struct IBLBakePush {
@@ -28,17 +20,10 @@ public struct IBLBakePush {
 [vk::push_constant]
 IBLBakePush pc;
 
-// Equirect the host uploaded (RGBA32F). Procedural bakes bind a 1x1 dummy
-// and set hasRadiance to 0. Repeat U, clamp V: longitude wraps, the poles
-// do not.
 Texture2D<float4> radianceMap;
 SamplerState radianceSampler;
 RWTexture2DArray<float4> outTexture;
 
-// v = 0 at +Y. No equirect solid-angle jacobian: the GGX split-sum weight
-// is NdotL, and the panorama's texel area is the wrong measure for it.
-// HDR samples are not rotated by lightDir; the asset's orientation is the
-// orientation. ambientExposure is applied at shade time, not here.
 float3 SampleEquirect(float3 dir) {
     float u = atan2(dir.z, dir.x) * (0.5f / PI) + 0.5f;
     float v = acos(clamp(dir.y, -1.0f, 1.0f)) * (1.0f / PI);
@@ -46,9 +31,6 @@ float3 SampleEquirect(float3 dir) {
 }
 
 float3 SampleEnvironment(float3 dir) {
-    // Unconditional sample so the radiance binding stays in both entry
-    // points even when hasRadiance is 0. The dummy is 1x1; this bake is
-    // once, not per frame.
     float3 equirect = SampleEquirect(dir);
     if (pc.hasRadiance != 0u) {
         return equirect;

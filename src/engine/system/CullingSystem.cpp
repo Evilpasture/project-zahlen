@@ -25,13 +25,6 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
     auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
     auto meshes   = reg.GetRawArray<Components::MeshComponent>();
 
-    // The invariant must mirror the REAL culling predicate exactly:
-    //   * Hidden meshes are skipped before the frustum tests.
-    //   * `outVisible` holds MAIN-camera visibility only (the shadow list is
-    //     separate), so OR-ing the shadow frustum in here over-counted every
-    //     off-screen mesh that merely intersects the huge ortho shadow volume.
-    //   * The system inflates the test radius by the world-matrix max axis
-    //     scale; the old verifier compared against the unscaled local radius.
     size_t expectedVisible = 0;
     for (size_t i = 0; i < entities.size(); ++i) {
         if ((meshes[i].flags & DrawFlags::Hidden) != DrawFlags::None) {
@@ -63,15 +56,12 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
         ZHLN::Log("[Test Fail] Culling: Visible count {} does not match expected {}", visible.size(), expectedVisible);
     }
 }
-}} // namespace ZHLN::Tests
+}}
 
 namespace ZHLN {
 
 namespace {
 
-// This Jolt build exposes only GetX/GetY/GetZ/GetW on Vec4 (no per-lane
-// GetComponent like Vec3 has), so lane extraction goes through a switch that
-// the compiler folds on constant lane indices.
 [[nodiscard]] inline float GetLane(const JPH::Vec4& v, uint32_t lane) noexcept {
     switch (lane) {
         case 0:  return v.GetX();
@@ -81,19 +71,9 @@ namespace {
     }
 }
 
-// 4-wide SIMD frustum culling.
-//
-// Frustum::IsSphereVisible replicates ONE sphere across the SIMD lanes and
-// tests 4 planes per instruction, wasting 3 of 4 lanes per test. This helper
-// transposes the problem instead: 4 spheres ride in the lanes and each
-// instruction tests one plane against all 4 of them, cutting the plane-test
-// instruction count 4x. The predicate is bit-for-bit the one IsSphereVisible
-// implements: strict `<` against the plane distance, radius inflated by the
-// 0.5 m anti-flicker margin, and sentinel planes 6/7 that can never reject.
 struct BatchedFrustum {
     static constexpr uint32_t kPlaneCount = 8;
 
-    // Plane p: dot(n_p, center) + d_p < -(r + 0.5)  =>  sphere p rejected.
     std::array<float, kPlaneCount> nx {};
     std::array<float, kPlaneCount> ny {};
     std::array<float, kPlaneCount> nz {};
@@ -112,11 +92,7 @@ struct BatchedFrustum {
         return out;
     }
 
-    // Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
-    // Frustum::IsSphereVisible(centers[j], radii[j]).
     void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
-        // Track the largest per-lane violation of `dist >= negRadius` across
-        // all planes; a lane is visible iff the violation never goes positive.
         JPH::Vec4 worstViolation = JPH::Vec4::sReplicate(-1.0f);
 
         for (uint32_t p = 0; p < kPlaneCount; ++p) {
@@ -131,7 +107,7 @@ struct BatchedFrustum {
     }
 };
 
-} // namespace
+}
 
 
 template <bool UsePhysicsTransforms>
@@ -141,7 +117,6 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    // Imperative callers (RenderSystem) hold an Engine, not a SystemContext.
     SystemContext ctx {.registry = engine.GetRegistry(), .render = &engine.GetRenderContext(), .camera = &engine.GetCamera()};
     Update<UsePhysicsTransforms>(ctx, cam, outVisible, outVisibleShadow);
 }
@@ -184,9 +159,6 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
         }
     }
 
-    // Extra SceneCamera copies are not the main camera: keep the caller's
-    // frustum (BindCamera / PrepareSceneCamera already built it). The main
-    // CameraComponent still owns jittered matrices for the context camera.
     const bool engineCam = (ctx.camera != nullptr) && (&cam == ctx.camera);
 
     if (m_stats.FreezeFrustum && engineCam) {
@@ -269,16 +241,14 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
     outVisible.clear();
     outVisibleShadow.clear();
 
-    // SIMD batching: gather 4 entities at a time, run both frustum tests
-    // 4-wide, then do the per-entity bookkeeping from the visibility bits.
     constexpr size_t     kBatch = 4;
     const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(cam.frustum);
     const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(cam.shadowFrustum);
 
     std::array<Entity, kBatch>  batchEntities {};
     std::array<JPH::Vec3, kBatch> batchCenters {};
-    std::array<float, kBatch>   batchRadii {};       // shadow-frustum radius (unscaled, matches the original test)
-    std::array<float, kBatch>   batchScaledRadii {}; // main-frustum radius (inflated by world max scale)
+    std::array<float, kBatch>   batchRadii {};
+    std::array<float, kBatch>   batchScaledRadii {};
     std::array<uint32_t, kBatch> batchTris {};
     std::array<bool, kBatch>    batchHidden {};
     std::array<bool, 4>         mainVisible {};
@@ -314,7 +284,6 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
             ++n;
         }
 
-        // Lanes beyond `n` are padding: their results are never read.
         const JPH::Vec4 centersX(batchCenters[0].GetX(), batchCenters[1].GetX(), batchCenters[2].GetX(), batchCenters[3].GetX());
         const JPH::Vec4 centersY(batchCenters[0].GetY(), batchCenters[1].GetY(), batchCenters[2].GetY(), batchCenters[3].GetY());
         const JPH::Vec4 centersZ(batchCenters[0].GetZ(), batchCenters[1].GetZ(), batchCenters[2].GetZ(), batchCenters[3].GetZ());
@@ -392,4 +361,4 @@ template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Arr
 template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<true>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<false>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
-} // namespace ZHLN
+}

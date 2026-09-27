@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/DestinationRegistry.cpp
 
 #include "DestinationRegistry.hpp"
 #include <algorithm>
@@ -13,7 +12,6 @@ DestinationRegistry::~DestinationRegistry() noexcept                            
 DestinationRegistry::DestinationRegistry(DestinationRegistry&&) noexcept                     = default;
 auto DestinationRegistry::operator=(DestinationRegistry&&) noexcept -> DestinationRegistry& = default;
 
-// Window table
 
 auto DestinationRegistry::Find(const PresentationTarget& target) noexcept -> WindowEntry* {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.target == &target; });
@@ -34,9 +32,6 @@ auto DestinationRegistry::Full() const noexcept -> bool {
 
 auto DestinationRegistry::Attach(WindowEntry entry) noexcept -> WindowEntry* {
     if (Full()) {
-        // The caller checks Full() before it builds a surface and a presenter --
-        // that is the caller's error to report, with its own vocabulary. This
-        // is the backstop that keeps the table at kMaxWindows either way.
         return nullptr;
     }
     windows.push_back(std::move(entry));
@@ -51,8 +46,6 @@ void DestinationRegistry::Detach(const PresentationTarget& target) noexcept {
     if (activeTarget == it->target) {
         activeTarget = nullptr;
     }
-    // The presenter this recording's buffer came from is going away with the
-    // entry, so the buffer is forgotten, not ended.
     it->recording.Discard();
     windows.erase(it);
 }
@@ -73,13 +66,8 @@ auto DestinationRegistry::LiveGeneration(const PresentationTarget& target) noexc
     return 0;
 }
 
-// Records
 
 auto DestinationRegistry::Register(Record record) noexcept -> Handle {
-    // A retired slot (no handle, no view) is free again. Reusing it instead of
-    // appending keeps the registry bounded by live records rather than by every
-    // registration ever made; the handle carries the index explicitly, so a
-    // recycled slot is still addressable by the callers that hold its handle.
     size_t index = records.size();
     for (size_t i = 0; i < records.size(); ++i) {
         const Record& slot = records[i];
@@ -89,9 +77,6 @@ auto DestinationRegistry::Register(Record record) noexcept -> Handle {
         }
     }
 
-    // The serial is minted per registration, so a handle vended before this
-    // record existed cannot resolve to it even though the slot index is reused.
-    // 0 is the retired marker, so the counter steps over it.
     uint32_t serial = Handle::WrapSerial(nextSerial++);
     if (serial == 0) {
         serial = Handle::WrapSerial(nextSerial++);
@@ -120,19 +105,10 @@ auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -
     }
 
     const Record& record = records[handle->Index()];
-    // Slot identity, not just slot number: a record retired since this handle
-    // was vended has serial 0, and a different image living in the same slot
-    // has a different one.
     if (record.serial != handle->Serial()) {
-        // Two ways for the slot to be someone else's, and they are not the same
-        // news. Retired: the destination is gone and nothing took its place.
         if (record.serial == 0 || !record.image.Valid()) {
             return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired, .asked = *handle});
         }
-        // Re-vended: a live record holds the slot. Whether that record is the
-        // *frame's* destination is the one distinction a caller cannot make for
-        // itself without asking around -- so it is answered here, because this
-        // is the object that knows which window the frame is rendering into.
         const bool thisFrames = [&] {
             const auto active = ActiveRecord();
             return active.has_value() && active->handle.Index() == handle->Index();
@@ -144,12 +120,6 @@ auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -
         });
     }
 
-    // A window-backed record is only valid while the presentation resources it
-    // was built from are still the live ones. Resolving after a rebuild would
-    // bind a destroyed VkImage/VkImageView, which is a use-after-free the
-    // driver reports as an invalid handle at best and segfaults on at worst --
-    // so refuse, and let the caller draw nothing this frame. The window is
-    // named in the miss: it is the one whose rebuild invalidated the record.
     if (record.target != nullptr && record.generation != LiveGeneration(*record.target)) {
         return std::unexpected(Miss {.reason = Miss::Reason::StaleGeneration, .asked = *handle, .target = record.target});
     }
@@ -172,29 +142,19 @@ void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Render
     if (record.serial != handle->Serial()) {
         return;
     }
-    // One writer at a time: whoever recorded last is what the receipt names,
-    // and setting it is what makes any earlier answer -- including the frame's
-    // own fill -- stop being the answer.
     record.content       = Rendered {.by = by};
     record.trackedLayout = layout;
-    // A frame that writes its destination again re-arms the unwritten warning,
-    // so the next episode is reported too.
     unwrittenWarned = false;
 }
 
 void DestinationRegistry::Retire(const PresentationTarget* owner) noexcept {
     if (owner == nullptr) {
-        // A null owner is the render-to-texture family (not owned by a window);
-        // retiring "everything without a window" is never what a caller means.
         return;
     }
     for (Record& record: records) {
         if (record.target != owner) {
             continue;
         }
-        // Neutralize in place: the slot index stays allocated so no other
-        // destination's recordHandles entry shifts, but every handle and image
-        // it named is gone. Resolve rejects the mismatch.
         record.handle           = {};
         record.serial           = 0;
         record.image            = {};
@@ -205,40 +165,22 @@ void DestinationRegistry::Retire(const PresentationTarget* owner) noexcept {
     }
 }
 
-// What a record holds
 
 auto DestinationRegistry::Record::GetRenderedContent() const noexcept -> FrameOutcome<Rendered> {
-    // A record with no image holds nothing to report on: its slot was retired
-    // or re-vended since the handle naming it was minted. The caller holding
-    // that handle hears about it here rather than reading an image that is
-    // gone -- and Resolve, on the path callers normally take, has already
-    // answered the same question as a Miss that names the way it went.
     if (!image.Valid()) {
         return std::unexpected(DestinationError::SlotRetired);
     }
-    // Nothing has touched the image this frame: not a pass, not the frame's own
-    // fill. std::nullopt is "there is nothing here to read", which is what both
-    // "acquired and never written" and "the frame could not clear it" are.
     if (!content.has_value()) {
         return std::nullopt;
     }
     return *content;
 }
 
-// The frame's active destination
 
 void DestinationRegistry::BeginFrame() noexcept {
     activeTarget = nullptr;
-    // Every window starts the frame un-acquired. The image it was presenting is
-    // still being read by the fence this frame waited on, and the recording that
-    // was writing into it was ended at the end of the last frame (or by the
-    // frame's own guard); both are re-established by the next acquisition.
     for (WindowEntry& entry: windows) {
         entry.imageAcquired = false;
-        // A recording that is somehow still open belongs to the frame that just
-        // ended, and the pool it names is reset before the next acquire -- so
-        // the handle is dropped rather than ended. Ending a buffer from a pool
-        // that is about to be reset would be the only wrong move here.
         entry.recording.Discard();
     }
 }
@@ -264,9 +206,6 @@ auto DestinationRegistry::DestinationOf(const Record& record) const noexcept -> 
     if (record.target != nullptr) {
         return Find(*record.target);
     }
-    // A record with no window is a render texture. It has no submission of its
-    // own -- nothing presents it -- so its commands ride the frame's stream,
-    // which is the destination the frame is drawing into.
     return ActiveDestination();
 }
 
@@ -278,8 +217,6 @@ void DestinationRegistry::CloseRecordings() noexcept {
 
 auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss> {
     if (activeTarget == nullptr) {
-        // Nothing was vended this frame, so there is no destination to have
-        // missed: the frame has not asked for one yet.
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
     WindowEntry* entry = Find(*activeTarget);
@@ -294,14 +231,12 @@ auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss>
         return std::unexpected(Miss {.reason = Miss::Reason::SlotNeverHeld});
     }
     const Record& record = records[handle.Index()];
-    // A retired slot keeps its index but loses its image, view and serial.
     if (record.serial == 0 || !record.image.Valid()) {
         return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired});
     }
     return record;
 }
 
-// Unwritten-destination warning
 
 auto DestinationRegistry::UnwrittenWarned() const noexcept -> bool {
     return unwrittenWarned;
@@ -311,4 +246,4 @@ void DestinationRegistry::NoteUnwrittenWarned() noexcept {
     unwrittenWarned = true;
 }
 
-} // namespace ZHLN
+}

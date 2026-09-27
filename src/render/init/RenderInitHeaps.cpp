@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/init/RenderInitHeaps.cpp
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
 #include <ShaderBindings.hpp>
@@ -14,20 +13,11 @@
 
 namespace ZHLN {
 
-// Private bindless/heap setup failure (Tier 1): declared at file scope in this
-// translation unit so no header exposes it.
 enum class BindlessSetupError : uint8_t {
     DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices">{}) = 1,
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
-    // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
-    // scene shaders. The union across every `scene`-consuming entry point
-    // (basic VS/PS, forward PS, punctual-shadow VS) covers exactly the registry
-    // members in live use: {0,1,2,3,4,5,6,10,11}. Under the descriptor-heap
-    // model the reflection no longer produces descriptor set layouts — it only
-    // reports which set-0 bindings exist, and the engine maps them onto the
-    // heaps below (see BuildSceneHeapMappings).
     return LoadAndCreateShaders(
                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
@@ -38,10 +28,6 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
-                // Compute consumers widen the stage flags of the members they
-                // touch (`scene.frame` for both particle simulations). Without
-                // them the union reflection would only carry VS|FS stages and
-                // the compute-side mappings would be incomplete.
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
@@ -49,16 +35,10 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
 
-            // Descriptor-heap pipelines are created with VK_NULL_HANDLE as
-            // their pipeline layout (VUID-VkGraphicsPipelineCreateInfo-
-            // flags-11311); there is no layout object to own. The member
-            // exists only as a named alias for the null layout.
             emptyPipelineLayout = VK_NULL_HANDLE;
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // Build the samplers first: their VkSamplerCreateInfo values are
-            // what vkWriteSamplerDescriptorsEXT consumes for the sampler heap.
             auto globalBuilder =
                 Vk::SamplerBuilder {}.Linear().Repeat().Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).LodRange(0.0f, 0.0f);
             auto clampBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
@@ -83,11 +63,6 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return InitializeBlueNoiseTexture();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // IBL images exist after InitLightingLUTs. A later
-            // SetEnvironmentRadiance replaces them and writes these slots
-            // again. The translucent
-            // lighting + decal depth descriptors are (re)written whenever the
-            // targets are recreated.
             WriteSceneStaticImageDescriptors();
             return {};
         })
@@ -112,14 +87,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
     -> std::expected<void, ErrorCode> {
-    // The push-data layout is not reflected here any more: GpuAbi.hpp reads
-    // the ABI module's own bytes at compile time and refuses to build when the
-    // reflected DescriptorHeapPushData is not writable or its addresses crowd
-    // the scene-pass payload, so by the time this runs the layout is a fact
-    // (`GpuAbi::kScenePushLayout`) rather than a reflection that can fail.
 
-    // Static resource slots hold the scene registry head and the offset-addressed
-    // bindless array; every pass block comes from the transient partitions below.
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots,
         kFrameTransientResourceSlots, kImmediateTransientResourceSlots, 2
@@ -128,15 +96,10 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
         return std::unexpected(init_res.error());
     }
 
-    // Slang is still the layout authority for the frame-address fields and the
-    // per-dispatch descriptor index; the check above is what keeps the constant
-    // honest. What is left to ask at runtime is whether this device's push-data
-    // budget fits the layout at all.
     if (heapManager.PushDataMaxSize() < GpuAbi::kScenePushLayout.requiredSize) [[unlikely]] {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // --- Static slot allocation (sampler heap)
     auto globalSlot = heapManager.AllocateStaticSampler();
     auto clampSlot  = heapManager.AllocateStaticSampler();
     auto pointSlot  = heapManager.AllocateStaticSampler();
@@ -147,7 +110,6 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     clampSamplerSlot  = *clampSlot;
     pointSamplerSlot  = *pointSlot;
 
-    // --- Static slot allocation (resource heap)
     auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
@@ -160,38 +122,19 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     transLightingSlot  = *transSlot;
     decalDepthSlot     = *depthSlot;
 
-    // globalTextures[] is one offset-addressed region: the reservation decides
-    // where it lands and hands the base back, which is what the set-0 mapping
-    // points at. A static allocation added above moves the array instead of
-    // silently overlapping it, so the four scene allocations no longer have to
-    // be kept in step with a hand-counted cursor skip. The texture manager owns
-    // the array, so it makes the reservation and reports the base.
     if (auto reserved = textureManager.ReserveBindlessRegion(); !reserved) [[unlikely]] {
         return std::unexpected(reserved.error());
     }
 
-    // --- Write the static sampler descriptors into the sampler heap
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
     heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
-    // pointSamplerSlot is written by WritePointSamplerToHeap once the sampler exists.
 
-    // --- Bake the set/binding -> heap mapping tables for pipeline creation
     BuildSceneHeapMappings();
 
     return {};
 }
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
-    // GlobalSceneRegistry (common.slang) member order -> binding numbers:
-    //   0 defaultSampler    4 g_joints        8 brdfLUT
-    //   1 frame             5 g_prevJoints    9 clampSampler
-    //   2 lights            6 g_morphDeltas  10 texTransLighting
-    //   3 g_instances       7 prefilteredMap 11 globalTextures[]
-    //
-    // Static samplers/images resolve through constant offsets into the heaps;
-    // the per-frame buffers (1..6) carry device addresses in the push-data
-    // blob at the layout's frame-address offsets. May run more than once
-    // (initial bake + decal-pipeline bake): each run rebuilds both tables.
     sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(0, 0, globalSamplerSlot)
         .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
@@ -207,9 +150,6 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
         .BindlessTextureArray(0, 11, textureManager.BindlessBaseSlot())
         .Build();
 
-    // decal.slang only touches three registry members (defaultSampler, frame
-    // and globalTextures -- see the shader), so its scene subset (set 1) maps
-    // exactly those.
     decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(1, 0, globalSamplerSlot)
         .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
@@ -218,12 +158,8 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
-    // The scene tables are baked from constants (no reflection input), so this
-    // is a plain rebuild of both -- kept so the decal bake re-bakes everything
-    // it touches.
     BuildSceneHeapMappings();
 
-    // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
     decalHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .SampledImage(0, 0, decalDepthSlot)
         .Sampler(0, 1, pointSamplerSlot)
@@ -232,7 +168,7 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
-        constexpr uint32_t kIblMipLevels = 6; // Mirrors the IBL processor's prefiltered cube chain
+        constexpr uint32_t kIblMipLevels = 6;
         const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), iblPayload.prefilteredFormat, kIblMipLevels);
         heapManager.WriteImage(iblPrefilteredSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
@@ -255,36 +191,19 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
-    // Write the static sampler descriptors of every descriptor-heap pass into
-    // their allocated sampler-heap slots (each pass baked its own slot at
-    // pipeline-build time). Every argument is a Vk::SamplerSlot<"name"> matched
-    // against the name SPIRV-Reflect reported for that sampler, so neither
-    // declaration order nor the samplers a configuration drops (Slang removes
-    // unreferenced parameters) affects which create info lands where.
     const VkSamplerCreateInfo defaultInfo = defaultSamplerInfo;
     const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
     const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
     const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo {
-        // clampSampler is the linear clamp-to-edge sampler; its create info was
-        // captured at InitBindless time (kept in the heap slot already) — for
-        // pass slots we re-derive it identically.
         return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info();
     }();
 
-    // hiz_generate.slang declares pointSampler without ever sampling with it, so
-    // Slang strips the binding and this write is a no-op -- naming it keeps the
-    // call correct if a future HiZ pass starts using the sampler.
     Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointInfo));
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
-    // ao_gtao.slang declares exactly one sampler, pointSampler (fixed-lod
-    // nearest taps for depth, normals and the half-res AO target).
     Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
     Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    // Blue noise tile sampler. Re-derived here rather than read from
-    // blueNoiseSamplerInfo for the same reason clampInfo is: it keeps
-    // sampler-slot init independent of texture-init ordering.
     const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
         heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"shadowSampler">(shadowInfo),
@@ -298,18 +217,12 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
-    // rtr_half.slang now uses only pointSampler + blueNoiseSampler after
-    // white-outline fix (all depth/normal/lighting are point to avoid
-    // bilinear bleed). smp is unused and stripped by Slang, so heap must not
-    // require it (would be UndeclaredBinding).
     Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
         heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
-    // SMAA's EDGE module is the only one that samples pointSampler; WEIGHT and
-    // BLEND use linearSampler only.
     Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
@@ -410,15 +323,8 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
         });
 }
 
-// The globalTextures[] slot table -- adopt, release, reclaim and the heap
-// write behind them -- lives on TextureManager (src/render/TextureManager.cpp).
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
-    // Procedural / BRDF / SMAA share one table (storage image only). IBL
-    // specular and SH share another, because they also sample the radiance
-    // equirect. Each bake calls BeginImmediate and writes fresh blocks into
-    // the immediate partition: ExecuteImmediate is synchronous, so a rewound
-    // partition can never hold descriptors the GPU is still reading.
     const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>();
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -440,8 +346,6 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         !built) {
         return std::unexpected(built.error());
     }
-    // Repeat longitude, clamp the poles. Written before the init bake: the
-    // sampler heap slot is static, the image descriptors are per bake.
     VkSamplerCreateInfo equirectInfo = Vk::SamplerBuilder {}.Linear().Info();
     equirectInfo.addressModeV        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     equirectInfo.addressModeW        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -512,4 +416,4 @@ auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<v
     });
 }
 
-} // namespace ZHLN
+}

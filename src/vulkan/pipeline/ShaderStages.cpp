@@ -62,7 +62,6 @@ auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, cons
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
 
-    // No vertex stage: a graphics pipeline may not mix VERTEX with MESH.
     const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = {}, .frag = frag, .task = task, .mesh = mesh};
 
     ZHLN_ShaderStages stages {};
@@ -70,8 +69,6 @@ auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, cons
         return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
     }
 
-    // Multiview: the shadow pass renders all cascades from one dispatch, so the
-    // view mask lives on the mesh stage exactly like it did on the vertex one.
     stages.mesh.view_mask = ZHLN_DetectShaderViewMask(&mesh);
     stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
     if (stages.task.handle != VK_NULL_HANDLE) {
@@ -88,4 +85,4 @@ auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, cons
     return ShaderStages {device, stages, {}, copy(frag), copy(task), copy(mesh)};
 }
 
-} // namespace ZHLN::Vk
+}

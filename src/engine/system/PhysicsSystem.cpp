@@ -1,4 +1,3 @@
-// src/engine/system/PhysicsSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -42,7 +41,7 @@ void CommitImpulses(Engine& engine) {
     }
 }
 
-} // namespace
+}
 
 void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcept {
     PhysicsStateSystem::Reconcile(engine);
@@ -52,12 +51,6 @@ void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcep
 
     accumulator = std::min(accumulator, TargetDt * 4.0f);
 
-    // Character locomotion rides the substep through the engine's
-    // CharacterStepHooks (installed by extras/CharacterController): preStep
-    // integrates locomotion and commits CharacterVirtual velocities, postStep
-    // reads the grounded flags back. With no controller installed both are
-    // null and physics steps pure -- impulses and rigid/character bodies
-    // only. The order around Step() is unchanged from the inline version.
     const auto& character = engine.GetCharacterStepHooks();
 
     {
@@ -79,4 +72,4 @@ void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcep
     engine.GetCurrentAlpha() = accumulator / TargetDt;
 }
 
-} // namespace ZHLN
+}

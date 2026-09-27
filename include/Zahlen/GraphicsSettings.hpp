@@ -2,51 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-// GraphicsSettings — the single canonical graphics configuration model.
-//
-// Data flow (one direction, one writer per hop):
-//
-//   UI / Lua scripts / quality presets
-//        │ write
-//        ▼
-//   ECS components (editing surface: PostProcessSettingsComponent,
-//   ShadowSettingsComponent, AASettingsComponent — script & inspector bound)
-//        │ CollectGraphicsSettings() — once per frame in RenderSystem
-//        ▼
-//   GraphicsSettings (this struct — the canonical model)
-//        │ RenderContext::ApplySettings() — delta-detected
-//        ▼
-//   RenderContext state (FrameUniforms assembly and the scene-pass push block,
-//   pipeline-variant selection, reactive GPU target resizes)
-//
-// The renderer never queries the ECS components directly, and the loose per-field setters
-// (SetGISettings/SetAAState/SetShadowResolution) remain only as legacy bridges for tools and
-// tests. RayTracingConfig is the extension point for the RT shadow mask pass, A-Trous
-// denoiser and VNDF glossy reflections: their knobs belong there and reach UI, scripts and
-// GPU pushes through this same pipeline.
-//
-// Deliberately dependency-free (no Jolt, no Vulkan) so tools and tests can include it alone.
 
 #include <array>
 #include <cstdint>
 
 namespace ZHLN {
 
-// --- Quality tiers
-// A preset pins the fields of GraphicsSettings::QualitySignature; every other field
-// (vignette, sky, probes, exposure, per-AA knobs) stays user-tuned and does not affect the
-// detected tier. Names for UI/logging come from the reflection machinery like every other
-// engine enum -- `{}` formats a tier and Reflect::EnumNames lists them -- so there is no
-// hand-rolled helper here.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
-// Anti-aliasing configuration. Mixes designer-facing knobs (mode, feedback,
-// thresholds) with per-frame jitter state the camera system advances; the
-// whole struct is carried inside GraphicsSettings so the renderer reads it
-// from exactly one place.
 struct AAState {
     AAMode mode = AAMode::TAA;
 
@@ -64,10 +30,6 @@ struct AAState {
     uint32_t mlaaMaxSearchSteps   = 16;
 };
 
-// Post-process / GI / AO knobs (legacy "GI settings" bag). `enableSSR` and
-// `enableRTR` are the screen-space / ray-traced reflection toggles the
-// lighting + reflection pipelines specialise on; they also feed the raw GPU
-// ABI words (FrameUniforms::enableRTR and the lighting push block's SSR/RTR).
 struct GISettings {
     int   mode              = 1;
     float aoRadius          = 0.5f;
@@ -77,27 +39,20 @@ struct GISettings {
     int   giSamples         = 8;
     float vignetteIntensity = 1.1f;
     float vignettePower     = 1.5f;
-    // Emissive -> bloom feed (see PostProcessSettingsComponent::glowIntensity).
-    // Not a preset signature field: a tier change leaves it alone.
     float glowIntensity     = 0.15f;
     int   enableSSR         = 1;
     int   enableRTR         = 0;
 
-    // Final Blit colour style. These deliberately are not QualitySignature
-    // fields: quality tiers choose rendering cost, not a scene's look.
     float                exposure      = 0.015f;
     float                bloomStrength = 0.5f;
     float                contrast      = 1.0f;
     float                saturation    = 1.0f;
-    int                  tonemapper    = 1; // 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral
+    int                  tonemapper    = 1;
     std::array<float, 3> colorFilter   = {1.0f, 1.0f, 1.0f};
 
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
 
-// Directional shadow configuration. `resolution` is delta-detected by
-// RenderContext::ApplySettings and reactively resizes the GPU cascade targets
-// (shadowMap + shadowMapPrev) — no caller needs to trigger the resize.
 struct ShadowSettings {
     float    width              = 200.0f;
     uint32_t resolution         = 2048;
@@ -107,14 +62,6 @@ struct ShadowSettings {
     auto operator==(const ShadowSettings&) const noexcept -> bool = default;
 };
 
-// Ray-tracing configuration — the extension point for the upcoming passes:
-//   - RT shadow mask pass    (enableShadows, shadowSamples)
-//   - A-Trous denoiser       (denoiserPasses: 0 = off, 1 = spatial,
-//                             2 = spatio-temporal)
-//   - VNDF glossy reflections (reflectionSamples, roughnessCutoff, maxBounces)
-// `enableReflections` mirrors `GISettings::enableRTR` (the ABI-level toggle
-// the current reflection pipelines read); CollectGraphicsSettings is the
-// single writer keeping the pair in sync.
 struct RayTracingConfig {
     bool     enableReflections = false;
     bool     enableShadows     = false;
@@ -128,9 +75,6 @@ struct RayTracingConfig {
     auto operator==(const RayTracingConfig&) const noexcept -> bool = default;
 };
 
-// Environment / sky / probe values that feed FrameUniforms every frame.
-// Stored as plain arrays (not JPH vectors) to keep this header standalone;
-// the collector converts from the ECS component's Jolt types.
 struct EnvironmentSettings {
     float ambientExposure = 25.0f;
     int   fullBright      = 0;
@@ -148,16 +92,13 @@ struct EnvironmentSettings {
 };
 
 struct GraphicsSettings {
-    QualityLevel        qualityPreset = QualityLevel::Medium; // informational; DetectPreset() is authoritative
+    QualityLevel        qualityPreset = QualityLevel::Medium;
     GISettings          post;
     AAState             antiAliasing;
     ShadowSettings      shadows;
     RayTracingConfig    rayTracing;
     EnvironmentSettings environment;
 
-    // The fields a quality preset pins. DetectPreset() compares a settings
-    // object's signature against each preset's signature; any other field is
-    // user-tuned and never disqualifies a tier.
     struct QualitySignature {
         AAMode   antiAliasMode       = AAMode::TAA;
         float    taaFeedback         = 0.95f;
@@ -173,7 +114,6 @@ struct GraphicsSettings {
         auto operator==(const QualitySignature&) const noexcept -> bool = default;
     };
 
-    // Quality-relevant projection of the settings (what presets control).
     [[nodiscard]] constexpr auto Signature() const noexcept -> QualitySignature {
         return QualitySignature {
             .antiAliasMode       = antiAliasing.mode,
@@ -189,8 +129,6 @@ struct GraphicsSettings {
         };
     }
 
-    // Writes the preset's pinned fields. QualityLevel::Custom is a no-op.
-    // Fields not part of QualitySignature are left untouched.
     constexpr void ApplyPreset(QualityLevel preset) noexcept {
         switch (preset) {
             case QualityLevel::Low:
@@ -203,8 +141,6 @@ struct GraphicsSettings {
                 rayTracing.reflectionSamples = 1;
                 rayTracing.denoiserPasses    = 0;
                 rayTracing.maxBounces        = 1;
-                // No RT shadow mask and no denoiser: the sun shadow comes
-                // entirely from the cascade maps.
                 rayTracing.enableShadows     = false;
                 break;
             case QualityLevel::Medium:
@@ -245,9 +181,6 @@ struct GraphicsSettings {
                 rayTracing.denoiserPasses    = 3;
                 rayTracing.maxBounces        = 2;
                 rayTracing.enableShadows     = true;
-                // Cutout geometry casts shaped shadows: BLAS geometries for
-                // masked materials are built without VK_GEOMETRY_OPAQUE_BIT_KHR
-                // so the mask can be evaluated per candidate hit.
                 rayTracing.alphaTestingInBVH = true;
                 break;
             case QualityLevel::Custom:
@@ -256,10 +189,6 @@ struct GraphicsSettings {
         qualityPreset = preset;
     }
 
-    // Returns the tier whose signature matches, or Custom when the pinned
-    // fields were tweaked by hand. Note: RTR-heavy tiers remain valid
-    // presets on devices without acceleration structures — the renderer
-    // gates those paths on device capability at execution time.
     [[nodiscard]] constexpr auto DetectPreset() const noexcept -> QualityLevel {
         const QualitySignature current = Signature();
         for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
@@ -272,12 +201,6 @@ struct GraphicsSettings {
         return QualityLevel::Custom;
     }
 
-    // Configuration equality for delta detection. The AA jitter state
-    // (jitterX/Y, prevJitterX/Y, frameIndex) legitimately changes every
-    // frame and therefore never counts as a configuration change. The
-    // renderer's reactive paths key off specific fields (shadow resolution,
-    // quality tier); this predicate covers whole-model comparisons for
-    // tools and tests.
     [[nodiscard]] constexpr auto ConfigEquals(const GraphicsSettings& other) const noexcept -> bool {
         const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode && antiAliasing.taaFeedback == other.antiAliasing.taaFeedback &&
                                antiAliasing.fxaaSubpix == other.antiAliasing.fxaaSubpix &&
@@ -289,8 +212,6 @@ struct GraphicsSettings {
     }
 };
 
-// The engine defaults (and therefore a freshly-created default scene) form
-// exactly the Medium tier; applying a preset pins its signature fields.
 static_assert(GraphicsSettings {}.DetectPreset() == QualityLevel::Medium);
 static_assert([] -> bool {
     GraphicsSettings s {};
@@ -301,10 +222,10 @@ static_assert([] -> bool {
 static_assert([] -> bool {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::High);
-    s.shadows.sunSize        = 0.02f; // non-signature tweaks keep the tier
+    s.shadows.sunSize        = 0.02f;
     s.post.vignetteIntensity = 1.4f;
     s.post.tonemapper        = 3;
     return s.DetectPreset() == QualityLevel::High;
 }());
 
-} // namespace ZHLN
+}

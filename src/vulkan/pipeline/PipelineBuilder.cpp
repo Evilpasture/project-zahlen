@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/PipelineBuilder.cpp
 // clang-format off
 #include "Rendering.hpp"
 // clang-format on
@@ -9,7 +8,6 @@
 
 namespace ZHLN::Vk {
 
-// ComputePipelineBuilder Implementation
 
 auto ComputePipelineBuilder::Shader(const uint32_t* code, size_t size, const char* entry) noexcept -> ComputePipelineBuilder& {
     _code  = code;
@@ -85,7 +83,6 @@ auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Er
     return {};
 }
 
-// PipelineLayoutBuilder Implementation
 
 PipelineLayoutBuilder::PipelineLayoutBuilder(VkDevice device) noexcept: _device(device) {
 }
@@ -111,4 +108,4 @@ auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayo
     return PipelineLayout(_device, layout);
 }
 
-} // namespace ZHLN::Vk
+}

@@ -1,4 +1,3 @@
-// resources/shaders/reflection.slang
 
 import instance_data;
 import pbr_helpers;
@@ -41,10 +40,6 @@ struct PushConstants {
     float aoPower;
     float giIntensity;
     int giSamples;
-    // Named exactly what RenderContext::Impl::PPPushConstants calls these two
-    // words: the block is the same struct lighting.slang pushes, and
-    // src/render/GpuAbi.hpp holds the host struct against every module that
-    // declares it.
     int enableSSR;
     int enableRTR;
     int _pad;
@@ -65,18 +60,11 @@ Texture2D<float4> texLighting;
 Texture3D<float4> texVoxelIntegrated;
 StructuredBuffer<InstanceData> g_instances;
 
-// Blue noise tile for the VNDF lobe jitter. Declared before the TLAS so the
-// NoRT variant still receives both bindings.
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
-// Half-resolution composed RTR result for the roughness band (0.04, 0.40],
-// produced by the RtrHalfTrace compute pass: rgb = reflection color,
-// a = confidence. Declared before the TLAS so the NoRT variant (which drops
-// only the trailing AS slot) keeps the same positional table.
 Texture2D<float4> texRtrHalf;
 
-// Same G-buffer the lighting pass reads. Before the TLAS so NoRT stays aligned.
 Texture2D<float4> texClearcoat;
 
 #ifndef DISABLE_RTR
@@ -91,28 +79,6 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         return float2(-1.0f, -1.0f);
     }
 
-    // Reflect about a *microfacet* normal drawn from the GGX VNDF instead of
-    // the geometric normal. Reflecting about N makes every roughness a mirror:
-    // one ray per pixel carries the whole lobe, so brushed metal and polished
-    // chrome differ only in how far the ray is allowed to travel. Sampling H
-    // from the visible-normal distribution makes the ray follow the actual
-    // specular lobe -- wide for rough surfaces, collapsing onto the mirror
-    // direction as roughness -> 0 (the unstretch step zeroes H.xy when
-    // alpha -> 0, so no separate sharp path is needed).
-    //
-    // Blue noise seeds the draw so the per-pixel residual is high frequency and
-    // the roughness-aware filter downstream can integrate it, rather than the
-    // diagonal lattice the old dither produced.
-    // Roughness tiering, the standard production concession:
-    //   roughness <  0.04 -> mirror ray about N (this branch)
-    //   0.04 .. 0.40      -> VNDF lobe ray (else branch)
-    //   > 0.40            -> never traced (gated in PSMain), IBL only.
-    // At roughness 0.04 the VNDF lobe is alpha = 0.0016, a near-delta
-    // distribution: the mirror ray is visually identical, but neighboring
-    // pixels on a polished surface then emit parallel rays that traverse
-    // the same BVH nodes in lockstep instead of fanning out per pixel and
-    // stalling the warp on the slowest divergent traversal. The tier also
-    // skips the blue-noise fetch, the tangent frame, and the VNDF math.
     float3 R;
     if (roughness < 0.04f) {
         R = reflect(-V, N);
@@ -124,17 +90,12 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float3x3 toWorld = transpose(toLocal);
 
         float3 V_local = mul(toLocal, V);
-        // .zw is the second decorrelated pair from the same fetch: the
-        // shadow path uses .xy for its sun disk, so the two never share a
-        // lattice.
         float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
         float alpha    = max(roughness * roughness, 1e-5f);
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
 
         R = reflect(-V, H);
-        // A microfacet normal tilted away from N can reflect below the
-        // surface; such a ray would only ever hit the surface it started on.
         if (dot(R, N) <= 0.0f) {
             R = reflect(-V, N);
         }
@@ -156,23 +117,11 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float rayT         = q.CommittedRayT();
         float3 hitWorldPos = ray.Origin + ray.Direction * rayT;
 
-        // Fast path: most in-view hits (mirrors, floors, metal) land on
-        // screen where the lighting pass already shaded the surface. Project
-        // first and take that shaded color directly; the BDA vertex fetch,
-        // geometric-normal reconstruction, and analytic sun+SH lighting below
-        // then only run for hits the reprojection rejects, instead of for
-        // every hit. Accepted hits resolve to pure screen lighting, without
-        // the analytic max-floor the slow path blends under it.
         float4 fastClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (fastClip.w > 0.1f) {
             float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
             if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
                 float sampledDepth = texDepth.SampleLevel(pointSampler, fastUV, 0);
-                // Linear view depth of the sampled pixel, without the
-                // invViewProj -> world -> viewProj round-trip (M * M^-1):
-                // the same value for two 4x4s and a divide less. Jitter
-                // lives in the projection's column-2 xy entries, so the z/w
-                // linearization against the unjittered invProj is exact.
                 float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledDepth, 1.0f));
                 float distToSampled = abs(linClip.z / linClip.w);
                 if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
@@ -183,20 +132,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             }
         }
 
-        // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
-        // as the draw-queue slot. CommittedInstanceIndex is the compacted
-        // TLAS slot and must not be used to index g_instances.
         uint instanceID      = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
-        // 1. Reconstruct exact geometric hit normal from mesh vertices.
-        //
-        // The hit position itself is already known analytically (origin +
-        // t * dir), and translation cancels inside the edge cross product, so
-        // only the linear part of the instance matrix ever matters here:
-        // transforming the two edges with the 3x3 and crossing them is
-        // mathematically identical to transforming all three points with the
-        // full 4x4 -- at two 3x3 multiplies instead of three 4x4 ones.
         float3 hitNormal = float3(0.0f, 1.0f, 0.0f);
         if (hitInst.posAddress != 0) {
             uint primIdx = q.CommittedPrimitiveIndex();
@@ -224,27 +162,17 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             }
         }
 
-        // Ensure normal opposes incoming ray
         if (dot(hitNormal, ray.Direction) > 0.0f) {
             hitNormal = -hitNormal;
         }
 
-        // 2. Full PBR Lighting on the Hit Point (Sun Directional + SH Ambient)
-        // NOTE: This fallback is white for glTF where baseColorFactor=1 and no albedo
-        // sampled (DamagedHelmet). It must NOT be used with confidence=1 when
-        // reprojection fails, or silhouette becomes blinding white outline.
-        // Tone down: no unshadowed sun (60 intensity -> ~19 white), use ambient only.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
         float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
         fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
-        // Do NOT set confidence=1 here. Only when hitUV is validated on-screen
-        // do we claim confidence. Failed reprojection returns -1 with 0 confidence
-        // so caller falls back to IBL instead of white analytical.
         confidence = 0.0f;
 
-        // 3. Project to Screen Space for high-res specular/reflection caching
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (hitClip.w < 0.1f) {
             return float2(-1.0f, -1.0f);
@@ -257,20 +185,13 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            // Depth must be point-sampled: bilinear smp bleeds sky depth (1.0)
-            // into helmet silhouette (3m) producing fictitious depth and failing
-            // the tolerance check along entire boundary -> white outline.
             float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 
             float distToHit = hitClip.w;
-            // Same round-trip removal as fast path: linearize sampled depth
-            // instead of reconstructing and reprojecting it.
             float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
             float distToSampled = abs(linClip.z / linClip.w);
             float depthDiff     = abs(distToHit - distToSampled);
 
-            // Normal/roughness also point-sampled to avoid bleeding background
-            // normal into foreground at silhouette.
             float4 normRough      = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
             float3 sampledNorm    = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
             float normalAlignment = saturate(dot(hitNormal, sampledNorm));
@@ -279,14 +200,11 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
 
             if (depthMask > 0.1f) {
-                // Continuous 0-1 ramp, not 0.8-1 floor that mixed 20% white fallback
-                // (0.2*20=4 HDR white) even at grazing silhouette.
                 confidence = saturate(onScreen * depthMask);
                 return hitUV;
             }
         }
 
-        // Reprojection failed -> 0 confidence, caller falls back to IBL
         return float2(-1.0f, -1.0f);
     }
 
@@ -312,8 +230,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float viewDepth = 250.0f;
 
     if (depth >= 1.0f) {
-        // 2 omits the background (fidelity omitBackground). Return before
-        // volumetrics, which would otherwise paint the skipped pixel opaque.
         if (frame.environmentMode == 2) {
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
         }
@@ -322,8 +238,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
         if (frame.environmentMode == 1) {
-            // Cube mip 0 is the unfiltered panorama. Do not rotate by
-            // lightDir: the asset's orientation is the orientation.
             litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
         } else {
             rayDir = RotateVector(rayDir, frame.lightDir.xyz);
@@ -378,9 +292,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float ao = litColorRaw.a;
 
         float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
-        // The lighting pass already occluded its own diffuse ambient term;
-        // the occlusion factor rides in alpha so the environment reflection
-        // added here gets the same contact darkening.
         float3 specularIBL = prefilteredColor * FssEss * ao;
         float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
         if (coatRaw.a > 1.0f / 255.0f) {
@@ -404,7 +315,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 #ifndef DISABLE_RTR
             if (wantRTR && roughness < 0.04f) {
-                // Mirror tier: warp-coherent rays, traced in-shader.
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
                 float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
 
@@ -414,23 +324,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                         float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
                         if (hitNormRough.z != 0.0f) {
                             float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
-                            // Previously max(rtrFallback, lerp(...)) forced white analytical
-                            // fallback (baseColorFactor=1, sun=60, no shadow) over textured
-                            // screenColor at silhouette, creating bright white outline.
-                            // Now lerp only, and confidence is 0 when reprojection fails,
-                            // so we fall back to IBL instead of white.
                             reflectionColor = lerp(rtrFallback, screenColor, confidence);
                         }
                     }
                 }
             } else if (wantRTR) {
-                // Roughness band (0.04, 0.40]: the lobe rays diverge per
-                // pixel, so they are traced at half resolution by the
-                // RtrHalfTrace compute pass (75% fewer rays, traversal out
-                // of the fragment quads). Bilinear-upsample the composed
-                // result; a = 0 (sky, miss, outside band) leaves
-                // reflectionColor at zero and confidence at zero, so the
-                // lerp below falls back to specularIBL.
                 float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
                 confidence     = halfRtr.a;
                 if (confidence > 0.0f) {
@@ -464,10 +362,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float zSlice = log(max(viewDepth, frame.nearZ) / frame.nearZ) / log(frame.farZ / frame.nearZ);
         zSlice -= 0.5f / 64.0f;
 
-        // Same frame counter every other stochastic path uses. Deriving it
-        // with a local `* 60.0f` re-introduced the decode drift this helper
-        // exists to avoid, and the wrap keeps noisePos small enough that the
-        // IGN hash below still resolves per-frame steps in float32.
         float ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
         float2 noisePos = input.pos.xy;
         noisePos.x += ignFrame * 5.588238f;

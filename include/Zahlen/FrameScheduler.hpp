@@ -13,40 +13,22 @@ namespace ZHLN {
 
 class Engine;
 
-/**
- * @brief The frame's phases, in execution order.
- *
- * Naming the phases makes the frame reviewable in one place instead of reading
- * Engine::Tick top to bottom, and lets a phase gain or lose steps without the
- * surrounding sequence being touched.
- */
 enum class FramePhase : uint8_t {
-    Input,        // Raw device state -> InputStateComponent.
-    UI,           // UI interaction plus the host editor callback.
-    HotReload,    // Main-thread dispatch of settled filesystem reload events.
-    PlayerIntent, // Input -> movement, using last frame's resolved camera.
-    Physics,      // Fixed-step simulation and transform write-back.
-    Gameplay,     // Native and/or scripted gameplay modules.
-    Simulation,   // The hazard-analysed update graph, then command playback.
-    Camera,       // Target cameras, camera matrices, LOD selection.
-    Visibility,   // The render graph: culling, decals, lighting.
-    Present,      // Frame submission and device-lost handling.
-    Fallback,     // Missing-module detection and the default preset.
-    History,      // Motion vectors and transform history.
+    Input,
+    UI,
+    HotReload,
+    PlayerIntent,
+    Physics,
+    Gameplay,
+    Simulation,
+    Camera,
+    Visibility,
+    Present,
+    Fallback,
+    History,
 };
 
-// Phase names come from ZHLN::Reflect::EnumToString(FramePhase) -- the codebase
-// convention (see src/vulkan/core/RenderCore.cpp:95, include/Zahlen/Error.hpp:39,
-// extras/Scripting/ScriptBinder.hpp). A hand-rolled switch here would be the
-// only one in the tree and would silently drift when a phase is added.
 
-/**
- * @brief Values steps need to exchange across phase boundaries.
- *
- * A `SystemGraph` cannot carry these: its `SystemFunc` signature is fixed at
- * `(Engine&, float)`, which is exactly why the gameplay status and the
- * device-lost result had to be threaded out of Engine::Tick by hand.
- */
 struct FrameContext {
     GameplayDriver driver     = GameplayDriver::Cpp;
     GameplayStatus status     = GameplayStatus::OK;
@@ -55,35 +37,18 @@ struct FrameContext {
 
 using FrameStepFn = void (*)(Engine&, float, FrameContext&);
 
-// One ordered unit of work. A compiled `SystemGraph` is simply a step whose
-// body executes that graph, so hazard analysis only ever orders systems that
-// genuinely may run concurrently -- never the phases around them.
 struct FrameStep {
     FramePhase  phase = FramePhase::Input;
     const char* name  = "UnnamedStep";
     FrameStepFn run   = nullptr;
 };
 
-/**
- * @brief Runs the frame as an explicit, ordered list of named steps.
- *
- * Steps execute strictly in registration order; there is no reordering and no
- * implicit parallelism at this level. Concurrency happens only inside a
- * SystemGraph step, bounded by that graph's hazard analysis.
- */
 class FrameScheduler {
   public:
     void Add(FramePhase phase, const char* name, FrameStepFn run) {
         _steps.push_back(FrameStep {.phase = phase, .name = name, .run = run});
     }
 
-    // Inserts a step directly after the step named @p afterName. Steps run in
-    // registration order (see Execute), so a layer added after the core
-    // schedule is built -- an optional extras module contributing a phase --
-    // needs a position, not just an append: the player-intent translation has
-    // to sit before Physics, not after History. Returns false and appends
-    // nothing when the anchor is missing; callers that cannot run out of
-    // position treat that as append-at-end themselves if they want to.
     auto InsertAfter(const char* afterName, FramePhase phase, const char* name, FrameStepFn run) -> bool {
         for (size_t i = 0; i < _steps.size(); ++i) {
             if (std::string_view(_steps[i].name) == afterName) {
@@ -94,9 +59,6 @@ class FrameScheduler {
         return false;
     }
 
-    // Inserts a step directly before the step named @p beforeName. Same
-    // rationale as InsertAfter; a contributed Input-phase step uses this to
-    // run at the very front of the frame, where no earlier anchor exists.
     auto InsertBefore(const char* beforeName, FramePhase phase, const char* name, FrameStepFn run) -> bool {
         for (size_t i = 0; i < _steps.size(); ++i) {
             if (std::string_view(_steps[i].name) == beforeName) {
@@ -132,4 +94,4 @@ class FrameScheduler {
     std::vector<FrameStep> _steps;
 };
 
-} // namespace ZHLN
+}

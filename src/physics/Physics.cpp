@@ -51,7 +51,6 @@ struct ShapeEntry {
     JPH::ShapeRefC shape;
 };
 
-// MEMORY UTILITIES
 namespace {
 template <typename T>
 [[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
@@ -77,9 +76,8 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
     }
     ptr = new_ptr;
 }
-} // namespace
+}
 
-// --- Jolt Boilerplate: Layers & Filters
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
     static constexpr size_t                             kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
@@ -138,11 +136,6 @@ class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
     }
 };
 
-// Out-of-line virtual definitions anchor each vtable in this translation unit
-// (suppresses -Wweak-vtables). The filter classes above have external linkage
-// and all-inline virtuals, so without an anchor the vtable is emitted weakly
-// in every TU; the contact listeners are declared in PhysicsContactEvents.hpp
-// and instantiated only here, so this is their single home.
 BPLayerInterfaceImpl::~BPLayerInterfaceImpl()                           = default;
 ObjectVsBroadPhaseLayerFilterImpl::~ObjectVsBroadPhaseLayerFilterImpl() = default;
 ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl()                 = default;
@@ -216,9 +209,8 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     ZHLN::TaskSystem::Counter mInFlight;
     AvailableJobs             mJobs;
 };
-} // namespace
+}
 
-// CONTEXT IMPLEMENTATION
 
 struct PhysicsContext::Impl {
     JPH::PhysicsSystem                      physicsSystem;
@@ -258,10 +250,6 @@ PhysicsContext::PhysicsContext(const PhysicsConfig& cfg): _impl(std::make_unique
 
 PhysicsContext::~PhysicsContext() {
     _impl->jobSystem.WaitIdle();
-    // CharacterVirtual instances retain listener/system pointers. Release them
-    // while the listeners, PhysicsSystem, and PhysicsWorld backing storage are
-    // still alive; allowing member destruction to release them after
-    // world.Shutdown() corrupts teardown state and faults on Apple ARM64.
     for (auto& character: _impl->characterMap) {
         if (character != nullptr) {
             character->SetListener(nullptr);
@@ -295,13 +283,9 @@ void PhysicsContext::Step(float deltaTime) {
     world.isStepping.store(true, std::memory_order::release);
 
     _impl->physicsSystem.Update(deltaTime, 2, _impl->tempAllocator.get(), &_impl->jobSystem);
-    // Jolt barriers should drain their jobs before returning, but keep an
-    // explicit scheduler-level fence so PhysicsContext teardown can never race
-    // a queued Job::Execute/Release on another fiber.
     _impl->jobSystem.WaitIdle();
 
     for (auto* character: _impl->activeCharacters) {
-        // Disable floor-sticking when character has upward velocity (jumping)
         JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings {
             .mStickToFloorStepDown = (character->GetLinearVelocity().GetY() <= 0.01f) ? JPH::Vec3(0.0f, -0.25f, 0.0f) : JPH::Vec3::sZero(),
             .mWalkStairsStepUp     = JPH::Vec3(0.0f, 0.40f, 0.0f),
@@ -352,7 +336,6 @@ auto PhysicsContext::GetOrCreateShape(Physics::ShapeType type, float p1, float p
         }
     }
 
-    // Lock section returns the created shape directly into a const variable
     return ZHLN::Lock(impl->world.sync.shadowLock, [&]() -> JPH::ShapeRefC {
         JPH::ShapeRefC newShape;
 
@@ -478,7 +461,6 @@ auto PhysicsContext::CreateRigidBody(
 
 namespace Physics {
 
-// ADDED: Missing GetBodyID implementation that operates on the core struct
 auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID {
     if (handle.index >= world.slotCapacity) {
         return {};
@@ -545,11 +527,9 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
 auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
     JPH::StaticCompoundShapeSettings compound;
 
-    // 1. Lower Lifter Sphere (Bottom touches Y = 0.0m, Center at Y = R_L)
     JPH::ShapeRefC lifterShape = new JPH::SphereShape(config.lifterRadius);
     compound.AddShape(JPH::Vec3(0.0f, config.GetLifterOffsetY(), 0.0f), JPH::Quat::sIdentity(), lifterShape);
 
-    // 2. Upper Bumper Oval / Spheroid Capsule (Centered at Y_B with exact equator cut)
     const float    cylinderHalfHeight = std::max(0.001f, config.bumperRadiusY - config.bumperRadiusXZ);
     JPH::ShapeRefC bumperShape        = (config.bumperRadiusY > config.bumperRadiusXZ) ?
                                             static_cast<JPH::ShapeRefC>(new JPH::CapsuleShape(cylinderHalfHeight, config.bumperRadiusXZ)) :
@@ -561,7 +541,7 @@ auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
     return res.HasError() ? nullptr : res.Get();
 }
 
-} // namespace Physics
+}
 
 auto PhysicsContext::CreateMeshBody(
     const VertexPosition* vertices,
@@ -585,9 +565,6 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Char
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
-    // The caller authors the hull. The neutral fallback is a plain capsule:
-    // the engine has no character archetype of its own, so an absent shape
-    // must not silently become one.
     JPH::ShapeRefC charShape = params.shape;
     if (charShape == nullptr) {
         charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
@@ -704,7 +681,6 @@ void PhysicsContext::SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg pos
 }
 
 void PhysicsContext::SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity) {
-    // FIXED: Passed _impl->world as first arg
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
         _impl->world.bodyInterface->SetLinearVelocity(id, velocity);
@@ -737,25 +713,15 @@ auto PhysicsContext::IsBodyDynamic(ZHLN::Entity handle) const -> bool {
         return false;
     }
 
-    // Virtual characters are not rigid bodies at all; only an Alive slot is a
-    // body, and queued-for-destruction ones are no longer pushable.
     if (world.LoadSlotState(handle.index) != Physics::SlotState::Alive) {
         return false;
     }
 
-    // Resolve the Jolt BodyID through the canonical helper: it validates the
-    // handle's generation (a recycled slot may match the index but hold a
-    // different body) and maps the dense slot to its BodyID. It returns an
-    // invalid ID for stale handles and for character slots.
     const JPH::BodyID bodyID = Physics::GetBodyID(world, handle);
     if (bodyID.IsInvalid()) {
         return false;
     }
 
-    // Ask Jolt for the authoritative motion type. This is correct whether the
-    // body is active or sleeping and does not depend on joltBodyPtrs, which is
-    // indexed by Jolt body index (not the dense index) and is only populated
-    // during the active-body sync pass.
     return world.bodyInterface->GetMotionType(bodyID) == JPH::EMotionType::Dynamic;
 }
 
@@ -943,7 +909,7 @@ void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Entity handle) {
     world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
 }
 
-} // namespace
+}
 
 void PhysicsContext::SetBodyOwner(Entity handle, Entity owner) {
     auto& world = _impl->world;
@@ -997,7 +963,6 @@ void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitu
 }
 
 void PhysicsContext::AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse) {
-    // FIXED: Passed _impl->world to free function
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
         _impl->world.bodyInterface->AddImpulse(id, impulse);
@@ -1045,7 +1010,6 @@ void PhysicsContext::AddRadialImpulse(JPH::RVec3Arg center, float radius, float 
 auto PhysicsContext::GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t> {
     const auto& world = _impl->world;
 
-    // Clamp the count to capacity in case the buffer overflowed
     size_t count = world.contactCount.load(std::memory_order::acquire);
     count        = std::min(count, world.contactCapacity);
 
@@ -1068,4 +1032,4 @@ auto PhysicsContext::GetInternalWorld() const noexcept -> const Physics::Physics
     return _impl->world;
 }
 
-} // namespace ZHLN
+}

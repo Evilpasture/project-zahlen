@@ -5,7 +5,7 @@
 #include "Zahlen/Log.hpp"
 #include <Jolt/Physics/Constraints/HingeConstraint.h>
 #include <Jolt/Physics/Constraints/SliderConstraint.h>
-#include <Zahlen/physics/Physics.hpp> // For GetBodyID
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 
 namespace ZHLN::Physics {
@@ -34,9 +34,6 @@ void PhysicsWorld::FlushCommands(
                 const JPH::BodyID bodyID = bodyIDs[dense];
 
                 if (bodyID.IsInvalid()) {
-                    // Virtual characters are physics slots too, but have no
-                    // JPH::BodyID. Release their strong reference and remove
-                    // the raw update-list entry before recycling the slot.
                     if (slot < characterMap.size() && characterMap[slot] != nullptr) {
                         auto* character = characterMap[slot].GetPtr();
                         character->SetListener(nullptr);
@@ -49,7 +46,6 @@ void PhysicsWorld::FlushCommands(
 
                 const uint32_t joltIdx = bodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
 
-                // Verify indices against array boundaries before writing
                 ZHLN::Assert(
                     joltIdx < idToHandleMap.size() && joltIdx < joltBodyPtrs.size(),
                     "PhysicsCommand: joltIdx ({}) exceeds active map sizes ({}, {}) during DestroyBody!", joltIdx, idToHandleMap.size(), joltBodyPtrs.size()
@@ -65,7 +61,6 @@ void PhysicsWorld::FlushCommands(
             }
 
             case CommandType::CreateConstraint: {
-                // FIXED: Pass `*this` as the world to the free function `GetBodyID`
                 JPH::BodyID id1 = GetBodyID(*this, cmd.createC.b1);
                 JPH::BodyID id2 = GetBodyID(*this, cmd.createC.b2);
 
@@ -139,4 +134,4 @@ void PhysicsWorld::FlushCommands(
     }
 }
 
-} // namespace ZHLN::Physics
+}

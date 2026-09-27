@@ -1,22 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Reflection/Structs.hpp
-//
-// Aggregate shape: fields, their names, offsets and types, and every walk over
-// them -- ForEachField/ForEachFieldWithName/ForEachFieldInfo, TieFields,
-// ZipFieldsWithNames, FieldCount/FieldNames/HasField, Get/SetFieldByName,
-// IndexOfField, MakeFromTuple, and MemberName/MemberType/MemberValue, the only
-// member handles that leave the reflection headers.
-//
-// No <ranges> and no <algorithm> here on purpose: the predicates that wanted
-// std::ranges::any_of are plain loops, which is what makes this header cheap
-// enough for the field-iteration paths that include it and nothing else --
-// RenderInternal.hpp, Vertex.hpp, extras/toml/TOML.hpp, the render passes.
-//
-// Field is the descriptor Dynamic.hpp's Define consumes. It lives here rather
-// than in Core.hpp because it is a field, and because its FieldName is a
-// ZHLN::StringLiteral -- an annotation-vocabulary type, not a P2996 one.
 
 #pragma once
 
@@ -32,10 +16,6 @@
 
 namespace ZHLN::Reflect {
 
-// A field descriptor: a type and the name it is reflected under. Dynamic.hpp's
-// Define<Name, Fields...> consumes these to name a generated aggregate's
-// members, and the name is a ZHLN::StringLiteral (Zahlen/Core/Description.hpp)
-// because it has to be a non-type template argument.
 template <typename T, ZHLN::StringLiteral FieldName>
 struct Field {
     using type                             = T;
@@ -84,7 +64,7 @@ consteval auto IndexOfField() -> std::size_t {
     return static_cast<std::size_t>(-1);
 }
 
-} // namespace TemplatedDetail
+}
 
 template <typename T, typename F>
 constexpr void ForEachField(T&& t, F&& f) {
@@ -165,8 +145,6 @@ consteval auto FieldNames() {
 
 template <typename T>
 consteval auto HasField(std::string_view name) -> bool {
-    // A plain loop rather than std::ranges::any_of: this header carries no
-    // <ranges> or <algorithm>, and the walk is over a define_static_array.
     for (auto member: TemplatedDetail::NonStaticDataMembers<T>()) {
         if (std::meta::identifier_of(member) == name) {
             return true;
@@ -186,7 +164,6 @@ consteval auto HasTag(std::string_view field_name) -> bool {
     using U = std::remove_cvref_t<T>;
     if constexpr (requires { typename U::ReflectMetadata; }) {
         using Meta [[maybe_unused]] = typename U::ReflectMetadata;
-        // Plain loop, not std::ranges::any_of: no <ranges> in this header.
         for (auto member: TemplatedDetail::NonStaticDataMembers<Meta>()) {
             if (std::meta::identifier_of(member) == field_name && std::meta::type_of(member) == ^^Tag) {
                 return true;
@@ -289,8 +266,6 @@ constexpr void ForEachFieldAccessor(F&& f) {
     };
 }
 
-// Spelling of a reflected data member (a handle as handed to
-// ForEachDataMember); empty when the compiler reports no identifier.
 template <std::meta::info MemberInfo>
 consteval auto MemberName() -> std::string_view {
     if constexpr (std::meta::has_identifier(MemberInfo)) {
@@ -299,42 +274,39 @@ consteval auto MemberName() -> std::string_view {
     return {};
 }
 
-// Declared type of a reflected data member.
 template <std::meta::info MemberInfo>
 using MemberType = typename[:std::meta::type_of(MemberInfo):];
 
-// Reference to a reflected data member of an object. MemberInfo must be one
-// of the handles ForEachDataMember passes to its callback.
 template <std::meta::info MemberInfo, typename T>
 constexpr decltype(auto) MemberValue(T&& object) {
     return (std::forward<T>(object).[:MemberInfo:]);
 }
 
-#else // No C++26 static reflection: this module's degraded stand-ins.
+#else
 
 template <typename T, typename F>
-constexpr void ForEachField(T&& /*unused*/, F&& /*unused*/) {
+constexpr void ForEachField(T&& , F&& ) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldWithName(T&& /*unused*/, F&& /*unused*/) {
+constexpr void ForEachFieldWithName(T&& , F&& ) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachDataMember(F&& /*unused*/) {
+constexpr void ForEachDataMember(F&& ) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldInfo(F&& /*unused*/) {
+constexpr void ForEachFieldInfo(F&& ) {
 }
 
 template <typename T>
-constexpr auto TieFields(T&& /*unused*/) {
+constexpr auto TieFields(T&& ) {
     return std::tuple {};
 }
 
 template <typename T>
-constexpr auto ZipFieldsWithNames(T&& /*unused*/) {
+constexpr auto ZipFieldsWithNames(T&& ) {
     return std::tuple {};
 }
 
@@ -344,14 +316,14 @@ constexpr std::size_t FieldCount() {
 }
 
 template <std::size_t N, typename T>
-constexpr decltype(auto) GetField(T&& /*unused*/) {
+constexpr decltype(auto) GetField(T&& ) {
     struct Dummy {};
     static Dummy d;
     return d;
 }
 
 template <typename T, typename F>
-constexpr bool VisitFieldByName(T&& /*unused*/, std::string_view /*unused*/, F&& /*unused*/) {
+constexpr bool VisitFieldByName(T&& , std::string_view , F&& ) {
     return false;
 }
 
@@ -361,16 +333,16 @@ consteval auto FieldNames() {
 }
 
 template <typename T>
-consteval bool HasField(std::string_view /*unused*/) {
+consteval bool HasField(std::string_view ) {
     return false;
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldIndexed(T&& /*unused*/, F&& /*unused*/) {
+constexpr void ForEachFieldIndexed(T&& , F&& ) {
 }
 
 template <typename Tag, typename T>
-consteval bool HasTag(std::string_view /*unused*/) {
+consteval bool HasTag(std::string_view ) {
     return false;
 }
 
@@ -386,14 +358,14 @@ template <auto MemberInfo>
 using MemberType = void;
 
 template <auto MemberInfo, typename T>
-constexpr decltype(auto) MemberValue(T&& /*object*/) {
+constexpr decltype(auto) MemberValue(T&& ) {
     struct Dummy {};
     static Dummy d;
     return d;
 }
 
 template <StringLiteral NameConst, typename T>
-constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
+constexpr decltype(auto) GetFieldByName(T&& ) {
     struct Dummy {};
     static Dummy d;
     return d;
@@ -405,17 +377,17 @@ consteval std::size_t IndexOfField() {
 }
 
 template <StringLiteral NameConst, typename T, typename ValueType>
-constexpr bool SetFieldByName(T& /*unused*/, ValueType&& /*unused*/) {
+constexpr bool SetFieldByName(T& , ValueType&& ) {
     return false;
 }
 
 template <typename T, typename Tuple>
-constexpr T MakeFromTuple(Tuple&& /*unused*/) {
+constexpr T MakeFromTuple(Tuple&& ) {
     return T {};
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldAdaptive(T&& /*unused*/, F&& /*unused*/) {
+constexpr void ForEachFieldAdaptive(T&& , F&& ) {
 }
 
 template <typename Tag, typename T>
@@ -424,13 +396,13 @@ consteval bool ValidateSerializability() {
 }
 
 template <typename Meta, typename T, typename F>
-constexpr void ForEachReflectedField(T&& /*unused*/, F&& /*unused*/) {
+constexpr void ForEachReflectedField(T&& , F&& ) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachFieldAccessor(F&& /*unused*/) {
+constexpr void ForEachFieldAccessor(F&& ) {
 }
 
 #endif
 
-} // namespace ZHLN::Reflect
+}

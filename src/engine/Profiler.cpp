@@ -40,7 +40,7 @@ static_assert(
 
 SkipList<std::string, ProfileDataInternal<100>, std::less<>> s_Metrics;
 
-} // namespace
+}
 
 void CPUProfiler::Record(std::string_view name, float timeMS) noexcept {
     std::string key(name);
@@ -95,4 +95,4 @@ ScopedTimer::~ScopedTimer() noexcept {
     CPUProfiler::Record(name, duration);
 }
 
-} // namespace ZHLN
+}

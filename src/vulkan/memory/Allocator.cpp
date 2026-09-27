@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/memory/Allocator.cpp
 
 #include "execution/RenderQueue.hpp"
 #include "Rendering.hpp"
@@ -9,17 +8,9 @@
 #include <sys/types.h>
 #include <vector>
 
-// Private Allocator Errors (Tier 1)
-// Declared at file scope in this translation unit: no header exposes them, so
-// external code only ever logs the type-erased ZHLN::Error message. File scope
-// (rather than an anonymous namespace) keeps their reflected category names
-// stable for both native reflection and the AST transpiler fallback.
 
 namespace ZHLN::Vk {
 
-// Private allocator/creation errors (Tier 1): declared at file scope in this
-// translation unit so no header exposes them; callers only log the
-// type-erased ZHLN::Error message.
 enum class BufferCreationError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
     OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
@@ -34,19 +25,16 @@ enum class ImageCreationError : uint8_t {
     VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure">{}),
 };
 
-// VMA allocator instance bring-up failure.
 enum class AllocatorError : uint8_t {
     InitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan memory allocator initialization failed">{}) = 1,
 };
 
-// Staging ring buffer / persistent transfer buffer bring-up failures.
 enum class StagingRingBufferError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
     StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed">{}),
 };
 
 
-// Allocator RAII
 
 Allocator::~Allocator() noexcept {
     if (_handle != nullptr) {
@@ -126,7 +114,6 @@ std::expected<void, ZHLN::ErrorCode> Allocator::Init(const Context& ctx) noexcep
     return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
-// Buffer RAII
 auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, 0);
 }
@@ -149,9 +136,6 @@ auto Buffer::Create(
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
 
-    // Acceleration-structure addresses must be aligned to 256 bytes. Promote
-    // the caller's optional alignment here so every AS buffer gets the same
-    // guarantee, even when a call site uses the four-argument overload.
     VkDeviceSize effectiveAlignment = minAlignment;
     if (Has(usage, BufferUsage::AccelerationStructureStorage | BufferUsage::AccelerationStructureBuildInput)) {
         effectiveAlignment = std::max(effectiveAlignment, static_cast<VkDeviceSize>(256));
@@ -180,13 +164,10 @@ auto Buffer::Create(
         .minAlignment   = effectiveAlignment
     };
 
-    // Automatically request persistent mapping for host-visible memory types
     if (memUsage == MemoryUsage::CPUOnly || memUsage == MemoryUsage::CPUToGPU || memUsage == MemoryUsage::GPUToCPU) {
         alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
 
-    // VMA 3.1+: honor additional alignment requirements of the allocation
-    // (VmaAllocationCreateInfo::minAlignment only exists from VMA 3.1.0).
 #if defined(VMA_VERSION_MAJOR) && defined(VMA_VERSION_MINOR) && (VMA_VERSION_MAJOR > 3 || (VMA_VERSION_MAJOR == 3 && VMA_VERSION_MINOR >= 1))
     alloc_info.minAlignment = effectiveAlignment;
 #endif
@@ -204,7 +185,6 @@ auto Buffer::Create(
                 return std::unexpected(BufferCreationError::InvalidCaptureAddress);
 
             default:
-                // Native driver/subsystem failure: preserve raw code in a dedicated failure state
                 return std::unexpected(BufferCreationError::VulkanSubsystemFailure);
         }
     }
@@ -237,7 +217,6 @@ auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedReg
 }
 
 auto Buffer::Map() noexcept -> MappedRegion {
-    // If the buffer is already persistently mapped, bypass expensive vmaMapMemory system calls
     if (_info.pMappedData != nullptr) {
         return {nullptr, nullptr, _info.pMappedData};
     }
@@ -246,7 +225,6 @@ auto Buffer::Map() noexcept -> MappedRegion {
     return {_handle.Allocator(), _handle.Allocation(), ptr};
 }
 
-// UploadToBuffer Implementation
 
 auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
     auto staging_res = Buffer::Create(allocator, size, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
@@ -262,12 +240,10 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
         }
     }
 
-    // Cleaned up to utilize the updated CopyBuffer helper
     CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
 }
 
-// Image RAII
 
 auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
     VkImage                       img        = VK_NULL_HANDLE;
@@ -401,7 +377,6 @@ auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noe
     return Image::Create(allocator, _info, memUsage);
 }
 
-// StagingRingBuffer Implementation
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:
     _allocator(std::exchange(other._allocator, nullptr)), _device(std::exchange(other._device, VK_NULL_HANDLE)),
@@ -451,11 +426,11 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     if (res != VK_SUCCESS) {
         return std::unexpected(StagingRingBufferError::OutOfHostMemory);
     }
-    _timelineSemaphore = Semaphore(_device, raw_sem); // Adopt into RAII wrapper
+    _timelineSemaphore = Semaphore(_device, raw_sem);
 
     auto staging_res = Buffer::Create(_allocator, _capacity, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
     if (!staging_res.has_value()) {
-        _timelineSemaphore = {}; // Triggers automatic destruction logic
+        _timelineSemaphore = {};
         return std::unexpected(StagingRingBufferError::StagingBufferCreationFailed);
     }
     _stagingBuffer = std::move(*staging_res);
@@ -467,13 +442,13 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
 
 void StagingRingBuffer::Cleanup() noexcept {
     if (_device != VK_NULL_HANDLE) {
-        _mappedRegion  = {}; // Clean up mapping wrapper
-        _stagingBuffer = {}; // Clean up buffer handle
+        _mappedRegion  = {};
+        _stagingBuffer = {};
         for (auto& rp: _retiredPools) {
             vkDestroyCommandPool(_device, rp.pool, nullptr);
         }
         _retiredPools.clear();
-        _timelineSemaphore = {}; // Trigger automatic RAII cleanup
+        _timelineSemaphore = {};
     }
 }
 
@@ -485,7 +460,6 @@ void StagingRingBuffer::Recycle() noexcept {
     uint64_t completed_value = 0;
     vkGetSemaphoreCounterValue(_device, _timelineSemaphore.Get(), &completed_value);
 
-    // Guard against unsubmitted allocations (timelineValue == 0)
     while (!_activeAllocations.empty() && _activeAllocations.front().timelineValue > 0 && _activeAllocations.front().timelineValue <= completed_value) {
         _tail = (_activeAllocations.front().offset + _activeAllocations.front().size) % _capacity;
         _activeAllocations.erase(_activeAllocations.begin());
@@ -529,7 +503,7 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
             }
         } else {
             if (wrap) {
-                has_space = false; // Cannot wrap if active region already wraps
+                has_space = false;
             } else {
                 has_space = (aligned_head + size < _tail);
             }
@@ -540,12 +514,12 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
         }
 
         if (_activeAllocations.empty()) {
-            return {}; // Out of memory boundaries
+            return {};
         }
 
         uint64_t wait_val = _activeAllocations.front().timelineValue;
         if (wait_val == 0) {
-            break; // Avoid waiting on unsubmitted allocations
+            break;
         }
 
         VkSemaphore         sem_handle = _timelineSemaphore.Get();
@@ -595,7 +569,6 @@ void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation al
     }
 }
 
-// DeletionQueue Implementation
 
 DeletionQueue::~DeletionQueue() {
     for (auto& queue: _queues) {
@@ -618,7 +591,6 @@ void DeletionQueue::EnqueueImage(VmaAllocator allocator, VkImage image, VmaAlloc
 
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
     _currentFrameIndex = frameIndex % _queues.size();
-    // Safe to reclaim memory now! The fence for this frame slot has finished [c].
     CleanupQueue(_queues[_currentFrameIndex]);
 }
 
@@ -633,4 +605,4 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
     queue.clear();
 }
 
-} // namespace ZHLN::Vk
+}

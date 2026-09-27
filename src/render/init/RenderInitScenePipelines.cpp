@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/init/RenderInitScenePipelines.cpp
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include <ShaderBindings.hpp>
@@ -16,7 +15,6 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
 
 
-    // 1. Allocate global default particle buffer to prevent null vkGetBufferDeviceAddress crashes
     size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
     auto   pb_res             = Vk::Buffer::Create(
         allocator.Get(), particleBufferSize,
@@ -28,16 +26,12 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     }
     particleBuffer = std::move(*pb_res);
 
-    // 2. Build GPU Compute Simulation Pipeline (particle_update.hlsl)
-    //    VK_EXT_descriptor_heap: `scene.frame` reads via the PUSH_ADDRESS
-    //    mapping; per-dispatch data travels through vkCmdPushDataEXT.
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
     if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get()); !built) {
         return std::unexpected(built.error());
     }
 
-    // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)
     particleRenderLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(
@@ -49,7 +43,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT}) // <-- FIXED: Changed from R16G16B16_SFLOAT
+                .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
                 .DepthWrite(false)
@@ -65,20 +59,14 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
 
 
-    // 1. Compute Simulation Pipeline (mesh_particle_update.hlsl)
-    //    VK_EXT_descriptor_heap: heap mappings + vkCmdPushDataEXT replace the
-    //    descriptor set + push constant range this pipeline used to declare.
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
     if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // 2. All 3D mesh particle graphics pipelines are descriptor-heap pipelines
-    //    sharing the empty layout + the scene registry mappings.
     meshParticleRenderLayout = emptyPipelineLayout;
 
-    // 3. G-Buffer Deferred Graphics Pipeline (mesh_particle_render.hlsl)
 
     return LoadAndCreateShaders(
                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleRenderVS>(),
@@ -89,17 +77,16 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .ColorFormats(ActiveGBuffer::array) // Writes to SceneColor, Velocity, NormRough
+                .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
-                .DepthWrite(true) // Solid 3D geometry writes depth
+                .DepthWrite(true)
                 .CullBack()
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // 4. Directional Shadow Cascade Pipeline (mesh_particle_shadow.hlsl)
 
             return LoadAndCreateShaders(
                        MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleShadowVS>(),
@@ -112,7 +99,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Drawn inside the multiview cascade pass.
+                        .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                         .CullNone()
                         .Cache(pipelineCache.Get())
                         .Build(ctx.Device())
@@ -166,9 +153,6 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     linePipelineLayout = emptyPipelineLayout;
 
-    // The debug line pipeline rasterises through PSForward, so it needs the
-    // Forward geometry variant (the G-buffer one emits motion vectors and a
-    // normal frame that PSForward does not read).
 
 
     return LoadAndCreateShaders(
@@ -199,23 +183,14 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
     return shadowSamplerBuilder.Build(ctx.Device())
         .transform_error([](auto err) -> ErrorCode { return err; })
 
-        // 1. Bind Sampler
         .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
             shadowSampler     = std::forward<decltype(sampler)>(sampler);
             shadowSamplerInfo = shadowSamplerBuilder.Info();
             return {};
         })
 
-        // 2. Cascade shadow map pair, per-cascade views, the punctual atlas and
-        //    its two views. TargetManager owns the shadow geometry, so the
-        //    resolution, cascade count and atlas layering are its constants and
-        //    not this function's concern.
         .and_then([&]() -> std::expected<void, ErrorCode> { return targets.InitShadows(); })
 
-        // 3. Allocate Double-Buffered Frame Uniform Buffers
-        //    VK_EXT_descriptor_heap: their device addresses feed the scene
-        //    registry's PUSH_ADDRESS mappings, so they need
-        //    Vk::BufferUsage::ShaderDeviceAddress.
         .and_then([&]() -> auto {
             return CreateDoubleBuffered(
                        allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
@@ -224,7 +199,6 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 4. Allocate Double-Buffered Light Storage Buffers (same SDA requirement)
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
             return CreateDoubleBuffered(
@@ -234,7 +208,6 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 5. Allocate Double-Buffered Indirect Argument Buffers
         .and_then([&](auto&& lsb) -> auto {
             frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreateDoubleBuffered(
@@ -243,7 +216,6 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 6. Complete pipeline assignment
         .transform([&](auto&& sib) -> auto { frames.shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
 }
 
@@ -254,10 +226,6 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 
 
 
-    // Reflects decal.slang set 0 ({texDepth, pointSampler}) and set 1 (the scene
-    // parameter block subset). VK_EXT_descriptor_heap: the reflection feeds the
-    // mapping tables (decalHeapMappings + decalSceneHeapMappings) that remap
-    // both sets onto the heaps at pipeline creation; no descriptor sets exist.
     const Vk::ReflectedStageInput reflectInputs[2] = {
         {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
         {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -268,7 +236,6 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     BuildDecalHeapMappings();
     decalPipelineLayout = emptyPipelineLayout;
 
-    // Merge decal set 0 + scene set 1 into one mapping chain per stage.
     std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
     mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
     mergedEntries.insert(mergedEntries.end(), decalSceneHeapMappings.entries.begin(), decalSceneHeapMappings.entries.end());
@@ -284,11 +251,11 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::DecalPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-            return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
+            return Vk::PipelineBuilder<2, true> {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&mergedInfo, &mergedInfo)
-                .ColorFormats(decalFormats) // Explicit 2-format array
+                .ColorFormats(decalFormats)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
                 .DepthWrite(false)
@@ -303,7 +270,6 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 
 
-    // We declare the shared shaders in a stack variable so all lambdas can reference it.
     Vk::ShaderStages shaders;
 
 
@@ -326,8 +292,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(false)
                 .CullNone()
-                // CSG Write: stamp reference 1 into the stencil wherever the
-                // volume passes, and colour nothing while doing it.
                 .ColorWriteEnable(false)
                 .StencilWriteMask(1)
                 .Cache(pipelineCache.Get())
@@ -346,8 +310,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                // CSG Difference: the target draws only where the cutters did
-                // not stamp reference 1, so their volume is subtracted from it.
                 .StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
@@ -365,8 +327,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                // CSG Intersection: the target draws only where the cutters did
-                // stamp reference 1, so only the overlap survives.
                 .StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
@@ -387,9 +347,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCode> {
-    // Optional: hang_gpu.slang writes through a null page to force TDR.
-    // Pipeline creation must not take down engine init; ProvokeDeviceLost
-    // then no-ops.
     auto built = Vk::PipelineLayoutBuilder(ctx.Device())
                      .Build()
                      .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
@@ -413,9 +370,6 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // VK_EXT_descriptor_heap: the HiZ map does not exist yet at pipeline-build
-    // time (it is created on the first RecreateTargets) and the pass writes one
-    // block per mip as it records them, so the binding table needs no count.
     if (auto built = Vk::BuildHeapPassBindings(
             heapManager, hizDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
         );
@@ -427,8 +381,6 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
 }
 
 auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
-    // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
-    // the heap; the per-draw push block travels via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
@@ -439,8 +391,6 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                // Multiview cascades: matches the single layered shadow render
-                // pass (viewMask 0x0F); ViewIndex drives the light matrix.
                 .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                 .CullNone()
                 .Cache(pipelineCache.Get())
@@ -449,12 +399,6 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&, device]() -> std::expected<void, ErrorCode> {
-            // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
-            // design: a failure here only means the cascades keep using the
-            // indirect vertex draws, so it never fails pipeline compilation.
-            // The twin renders inside the multiview cascade pass and its mesh
-            // stage reads SV_ViewID, which requires multiviewMeshShader --
-            // skip creation entirely when that feature is unavailable.
             const bool multiviewMesh = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
                 return f.multiviewMeshShader == VK_TRUE;
             });
@@ -462,8 +406,6 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
                 return {};
             }
 
-            // Shadow variant: its varying set must match ShadowPS exactly, so the
-            // three modules are named together in one call.
             auto shaders = Vk::ShaderStages::CreateMesh<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS>(device);
             if (!shaders) {
                 ZHLN::Log("[RenderResources] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
@@ -476,7 +418,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
                                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                                 .DepthOnly()
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                                .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Multiview cascades (must match the render pass).
+                                .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                                 .CullNone()
                                 .Cache(pipelineCache.Get())
                                 .Build(device);
@@ -490,8 +432,6 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
 }
 
 auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
-    // VK_EXT_descriptor_heap variant of the shadow path (same mappings, the
-    // per-draw light index travels through push data).
     punctualShadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
@@ -566,9 +506,6 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // Queue families for CONCURRENT sharing (graphics+compute+transfer)
-            // — reused for all cluster-related buffers to avoid ownership
-            // transfer hazards between async compute writes and graphics reads.
             const auto&    physInfo     = ctx.PhysicalInfo();
             const uint32_t candFamilies[3] = {physInfo.graphics_family, physInfo.compute_family, physInfo.transfer_family};
             uint32_t       uniqFamilies[3];
@@ -615,8 +552,6 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             constexpr Vk::BufferUsage kGlobalCounterUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
                                                                Vk::BufferUsage::ShaderDeviceAddress;
 
-            // Reuse the CONCURRENT sharing computed above for all cluster buffers
-            // (graphics fragment read + compute volumetric read).
 
             auto createClusterDoubleBuffered = [&](size_t size, Vk::BufferUsage usage) -> std::expected<DoubleBuffered<Vk::Buffer>, ErrorCode> {
                 auto first = Vk::Buffer::Create(
@@ -695,12 +630,6 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 })
                 .and_then([&](auto&& tsb) {
                     frames.tlasScratchBuffer = std::forward<decltype(tsb)>(tsb);
-                    // Host-visible instance storage (CPU_TO_GPU, coherent):
-                    // BuildTLAS memcpys the scratch straight into the mapped
-                    // buffer, dropping the staging buffer, the per-frame
-                    // transfer copy, and its barrier. Same pattern as the
-                    // instance-data buffers: CPU_TO_GPU + device address +
-                    // double-buffered.
                     return CreateDoubleBuffered(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
                         Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::AccelerationStructureBuildInput,
@@ -734,4 +663,4 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         });
 }
 
-} // namespace ZHLN
+}

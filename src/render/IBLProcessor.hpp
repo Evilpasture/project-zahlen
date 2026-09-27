@@ -25,10 +25,6 @@ enum class EnvironmentBakeError : uint8_t {
 
 class IBLProcessor {
   public:
-    // Already-decoded RGBA32F. A null pointer (or a zero extent) bakes the
-    // procedural sky. The equirect is destroyed after the immediate submit;
-    // the skybox samples the prefiltered cube's mip 0. Value-initialization
-    // zeroes every field.
     struct RadianceSource {
         const float* rgba;
         uint32_t     width;
@@ -47,9 +43,6 @@ class IBLProcessor {
         if (hasRadiance && (radiance.width > kMaxRadianceExtent || radiance.height > kMaxRadianceExtent)) {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
-        // HDR values do not fit in the procedural UNORM cube (the sun disk
-        // already clamped). 16F keeps the range; the procedural path stays
-        // UNORM so existing captures do not shift from an unclamped disk.
         const VkFormat cubeFormat = hasRadiance ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
         const int environmentMode = hasRadiance ? (radiance.renderSkybox != 0 ? 1 : 2) : 0;
         const uint32_t hasRadianceWord = hasRadiance ? 1u : 0u;
@@ -67,10 +60,6 @@ class IBLProcessor {
             return shader;
         };
 
-        // Every bake stage is a generated module: the bytes the descriptor checks
-        // ran against are the bytes that get loaded, and each module states its own
-        // entry point. Specular and SH share iblBakeHeapBindings (radiance +
-        // storage image). BRDF stays on the procedural bake table.
         const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>();
         const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
         const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
@@ -189,13 +178,6 @@ class IBLProcessor {
                     .sunDir       = sunDir,
                 };
 
-                // One dispatched command buffer, one block per dispatch: the
-                // LUT bakes share a block (the shader bound to outAddr does not
-                // sample the texture it is bound to), every specular mip gets its
-                // own because all of them are recorded before the submission
-                // retires. BeginImmediate rewinds the bake partition, and
-                // ExecuteImmediate waits on the fence, so no earlier bake can
-                // still be reading what this one overwrites.
                 impl.heapManager.BeginImmediate();
 
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -217,9 +199,6 @@ class IBLProcessor {
                         Vk::Slot<"radianceMap">(radianceWrite)
                     );
                 }
-                // SH writes coefficients through outAddr and does not declare
-                // outTexture. The set still names it because SpecularMain does;
-                // the extra descriptor is unused by this dispatch.
                 const HeapBlockBase shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
                     impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[0]}),
                     Vk::Slot<"radianceMap">(radianceWrite)
@@ -242,10 +221,6 @@ class IBLProcessor {
                         .imageExtent       = {uploadWidth, uploadHeight, 1},
                     };
                     CopyBufferToImage<1>(cmd, staging->Handle(), radianceImage->Handle(), {region});
-                    // TransitionLayout's SHADER_READ destination stage is the
-                    // fragment stage only. This bake samples from compute, so
-                    // the copy has to be visible there or the prefilter reads
-                    // the image before the upload lands.
                     ImageBarrier(
                         cmd, ZHLN_ImageBarrierDesc {
                                  .image      = radianceImage->Handle(),
@@ -264,7 +239,6 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
-                    // The pushed word carries the block's base slot.
                     pipes.brdf.DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
                     pipes.sh.DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(impl.ctx, cmd, shBlock, 64, 1, 1, shPush);
@@ -349,4 +323,4 @@ class IBLProcessor {
     static_assert(sizeof(IBLBakePush) == 96);
 };
 
-} // namespace ZHLN::Vk
+}

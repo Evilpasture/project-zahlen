@@ -1,16 +1,15 @@
-// resources/shaders/mesh_particle_render.hlsl
 
 import common;
 import pbr_helpers;
 import uniforms;
 
 struct Particle3D {
-    float4 position; // xyz = pos, w = scale
-    float4 velocity; // xyz = vel, w = unused
-    float4 rotation; // xyzw = quaternion
-    float4 rotVel;   // xyz = angular velocity, w = unused
-    float4 color;    // rgba
-    float4 params;   // x = age, y = life
+    float4 position;
+    float4 velocity;
+    float4 rotation;
+    float4 rotVel;
+    float4 color;
+    float4 params;
 };
 
 struct MeshParticleRenderPushConstants {
@@ -19,10 +18,10 @@ struct MeshParticleRenderPushConstants {
     uint64_t attrAddress;
     uint64_t iboAddress;
 
-    float4 baseColorFactor; // Offset 32 (16-byte aligned)
-    float4 emissiveFactor;  // Offset 48 (16-byte aligned)
+    float4 baseColorFactor;
+    float4 emissiveFactor;
 
-    uint indexCount; // Offset 64
+    uint indexCount;
     uint albedoIdx;
     uint normalIdx;
     uint pbrIdx;
@@ -32,13 +31,12 @@ struct MeshParticleRenderPushConstants {
     float alphaCutoff;
     uint alphaMode;
 
-    uint _padding; // Offset 100
+    uint _padding;
 };
 
 [vk::push_constant]
 MeshParticleRenderPushConstants mp_pc;
 
-// Bindless registry now comes from the `scene` parameter block (common.slang).
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -61,7 +59,7 @@ struct PSOutput {
     float4 color : SV_Target0;
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
-    float4 emissive : SV_Target3; // See basic.slang: additive, not reflectance.
+    float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
 };
 
@@ -84,7 +82,6 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     Particle3D* particles = (Particle3D*) mp_pc.particleBufferAddr;
     Particle3D p          = particles[instanceId];
 
-    // Cull dead particles cleanly (0-area degenerate clip position)
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
         output.pos             = float4(0.0f, 0.0f, 0.0f, 0.0f);
         output.currClip        = float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -109,7 +106,6 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
         actualVertexId = indices[vertexId];
     }
 
-    // Mesh vertices are packed float3 values (12-byte stride), not a padded float3 array.
     float* positionValues = (float*) mp_pc.posAddress;
     uint positionOffset   = actualVertexId * 3u;
     float3 localPos       = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
@@ -126,10 +122,6 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));
 
 #ifdef SHADOW_PASS
-    // Depth-only cascade variant: rasterize at the light-space position of the
-    // view being rendered. The camera-space output.pos above is meaningless
-    // for the shadow map, and the multiview cascade pass (viewMask 0x0F)
-    // implicitly writes each view into its own array layer.
     output.pos = output.shadowPos;
 #endif
 

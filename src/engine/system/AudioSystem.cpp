@@ -18,7 +18,6 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
     auto& reg   = ctx.registry;
     auto& audio = *ctx.audio;
 
-    // 1. UPDATE LISTENER (Ears)
     bool listenerFound = false;
     for (Entity e: reg.GetEntitiesWith<Components::AudioListenerComponent>()) {
         auto* listener = reg.Get<Components::AudioListenerComponent>(e);
@@ -51,7 +50,6 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
         audio.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
     }
 
-    // 2. RECONCILE PERSISTENT AUDIO SOURCES
     auto srcEntities = reg.GetEntitiesWith<Components::AudioSourceComponent>();
     auto sources     = reg.GetRawArray<Components::AudioSourceComponent>();
 
@@ -84,7 +82,6 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
         }
     }
 
-    // 3. RECONCILE LOOP SYNTHESIZERS
     auto synthEntities = reg.GetEntitiesWith<Components::LoopSynthComponent>();
     auto synths        = reg.GetRawArray<Components::LoopSynthComponent>();
 
@@ -92,7 +89,7 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
         Entity                          e     = synthEntities[i];
         Components::LoopSynthComponent& synth = synths[i];
 
-        if (!audio.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) { // Re-using validation underlying check is fine
+        if (!audio.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) {
             synth.synthHandle = audio.CreateLoopSynth(e, synth.waveType1, synth.waveType2, synth.filterType);
         }
 
@@ -104,9 +101,8 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
         }
     }
 
-    // 4. FIRE AND FORGET DISPATCH & ORPHAN FADEOUT
     audio.FlushEvents();
     audio.ReconcileVoices(reg.AliveQuery(), dt);
 }
 
-} // namespace ZHLN
+}

@@ -23,7 +23,6 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const EC
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
             if (light.type == LightType::Sun) {
-                // Prioritize explicit direction vector if set by script
                 if (light.direction.LengthSq() > 1e-4f) {
                     sunDirection = light.direction;
                 } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
@@ -41,7 +40,6 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const EC
         }
     }
 
-    // Fallback to legacy tag search if no explicit Sun type was registered
     if (!sunFound) {
         auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
         if (!sunEntities.empty()) {
@@ -61,15 +59,6 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
     auto& reg = ctx.registry;
     auto& rc  = *ctx.render;
 
-    // 1. DYNAMIC SHADOW ALLOCATION FOR PUNCTUAL LIGHTS
-    //
-    // Allocation follows optical prominence, not gameplay identity: the
-    // reference point is the camera (the only eye this engine rasterizes for),
-    // and each punctual light scores by its intensity over distance-squared --
-    // the same falloff the shader applies, so the lights that contribute most
-    // to what is on screen are the ones that earn shadow layers. A scene with
-    // no player entity (fly-through, RTS, architectural viewer, N players)
-    // allocates exactly the same way.
     struct LightImportance {
         Entity entity;
         float  score;
@@ -80,9 +69,8 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](auto& light) {
-            light.shadowLayer = -1; // Default to no shadow
+            light.shadowLayer = -1;
 
-            // Punctual shadows are only allocated to local point/spot lights
             if (light.type == LightType::Point || light.type == LightType::Spot) {
                 JPH::Vec3 lightPos    = JPH::Vec3::sZero();
                 bool      hasLightPos = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
@@ -95,14 +83,12 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
                 if (hasLightPos) {
                     float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
-                    // Optical importance: light intensity weighted by distance attenuation
                     lightPriorities.push_back({.entity = e, .score = light.intensity / distSq});
                 }
             }
         });
     }
 
-    // Sort by optical priority (highest screen contribution first)
     std::ranges::sort(lightPriorities, [](const LightImportance& a, const LightImportance& b) { return a.score > b.score; });
 
     auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
@@ -117,7 +103,6 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
         });
     }
 
-    // 2. COMPILE GPU LIGHTS
     ZHLN::Array<Light> sceneLights;
     JPH::Mat44         viewMatrix    = ctx.camera->GetViewMatrix();
     auto               lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
@@ -152,7 +137,6 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
             if (hasTransform) {
                 std::memcpy(packed.position, &pos, sizeof(float) * 3);
 
-                // Transform position to view-space for cluster culling
                 JPH::Vec3 posView      = viewMatrix * pos;
                 packed.positionView[0] = posView.GetX();
                 packed.positionView[1] = posView.GetY();
@@ -182,4 +166,4 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
     rc.SetLights(sceneLights.data(), sceneLights.size());
 }
 
-} // namespace ZHLN
+}

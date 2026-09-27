@@ -21,18 +21,10 @@ extern void ASSERTION_FAILED_AT_COMPILE_TIME();
 
 class Engine;
 
-// Installs the crash handlers and binds them to `state`. Idempotent per state.
-//
-// `state` must outlive every signal the process can receive: its address is
-// copied into the handler slots, so declare it with static storage duration.
 void SetupSignalHandler(CrashState& state);
 
-// If a worker thread parked a crash in `state`, dump it and abort.
-// Called from Engine::ProcessEvents; a no-op when nothing is pending.
 void CheckForCrashes(CrashState& state, Engine* engine);
 
-// GetCurrentFiberID() lives in Zahlen/Threading/Thread.hpp with the rest of the
-// fiber API; include that header instead of declaring it here.
 auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
 
@@ -55,10 +47,6 @@ struct LogContext {
 void              InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message);
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message);
 
-/**
- * @brief Modern C++23 Engine Logger with Fiber awareness and compile-time channel dispatch.
- * Restored to standard dynamic formatting for stable general-purpose runtime use.
- */
 template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
     if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
@@ -68,10 +56,6 @@ void Log(LogContext ctx, Args&&... args) {
     InternalWriteLog(static_cast<uint8_t>(Channel), ctx.loc.file_name(), ctx.loc.line(), formatted);
 }
 
-/*
- * @brief ONLY USE FOR EXTREMELY EXCEPTIONAL CASES.
- * Change return type to std::expected<void, ErrorCode> and return an error code.
- */
 template <typename... Args>
 [[noreturn]] void Panic(LogContext ctx, Args&&... args) {
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
@@ -85,9 +69,6 @@ void PanicIf(bool condition, LogContext ctx, Args&&... args) {
     }
 }
 
-/*
- * @brief Runtime assertion.
- */
 template <typename... Args>
 inline void Assert(bool condition, LogContext ctx, Args&&... args) {
     if consteval {
@@ -128,7 +109,6 @@ struct DumpOptions {
     bool   show_interpret = true;
 };
 
-// ANSI Color Helpers
 namespace Color {
 inline constexpr char Reset[]  = "\033[0m";
 inline constexpr char Gray[]   = "\033[90m";
@@ -136,7 +116,7 @@ inline constexpr char Cyan[]   = "\033[36m";
 inline constexpr char Yellow[] = "\033[33m";
 inline constexpr char Green[]  = "\033[32m";
 inline constexpr char Red[]    = "\033[31m";
-} // namespace Color
+}
 
 void LogManual(std::string_view file, int line, std::string_view message, const char* color = "");
 
@@ -194,14 +174,6 @@ void SmartDumpInternal(const T& var, std::string_view name, LogContext ctx) {
     }
 }
 
-/**
- * @brief Dumps raw memory contents of a variable with automatic or custom label.
- * Uses C++26 reflection to infer the type name when label is omitted.
- *
- * Usage:
- *   ZHLN::Dump(myStruct);
- *   ZHLN::Dump(myStruct, "Custom Label");
- */
 template <typename T>
 void Dump(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
     std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
@@ -209,14 +181,6 @@ void Dump(const T& var, std::string_view label = {}, std::source_location loc = 
     SmartDumpInternal(var, name, ctx);
 }
 
-/**
- * @brief Reflects and prints structured fields of an object.
- * Uses C++26 reflection to infer the type name when label is omitted.
- *
- * Usage:
- *   ZHLN::Trace(myObject);
- *   ZHLN::Trace(myObject, "Custom Label");
- */
 template <typename T>
 void Trace(const T& var, std::string_view label = {}, std::source_location loc = std::source_location::current()) {
     std::string_view name = label.empty() ? Reflect::TypeName<T>() : label;
@@ -227,4 +191,4 @@ void Trace(const T& var, std::string_view label = {}, std::source_location loc =
 auto JoltTraceBridge(const char* inFMT, ...) noexcept -> void;
 auto JoltAssertBridge(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) noexcept -> bool;
 
-} // namespace ZHLN
+}

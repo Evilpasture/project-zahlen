@@ -12,7 +12,6 @@ namespace ZHLN::Physics {
 
 namespace {
 
-// --- Internal Memory Utilities
 template <typename T>
 [[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
     return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
@@ -36,9 +35,8 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
     }
     ptr = new_ptr;
 }
-} // namespace
+}
 
-// --- Implementation
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
     ZHLN::Assert(inMaxBodies > 0 && inMaxBodies < 10000000, "PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
@@ -52,7 +50,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     capacity     = inMaxBodies;
     slotCapacity = inMaxBodies;
 
-    // Aligned allocations for hot SIMD paths
     positions         = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
     prevPositions     = AllocateAligned<JPH::Real>(capacity * 4, sizeof(JPH::Real) * 4);
     rotations         = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
@@ -60,7 +57,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     linearVelocities  = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
     angularVelocities = AllocateAligned<float>(capacity * 4, sizeof(float) * 4);
 
-    // Standard types are resized automatically
     bodyIDs.resize(capacity);
     materialIDs.resize(capacity);
     userData.resize(capacity);
@@ -79,8 +75,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     idToHandleMap.resize(capacity + 1);
     joltBodyPtrs.resize(capacity + 1);
 
-    // Explicitly zero-initialize JPH::Arrays of POD types because Jolt's Array::resize leaves them
-    // uninitialized!
     std::memset(idToHandleMap.data(), 0, idToHandleMap.size() * sizeof(decltype(idToHandleMap)::value_type));
     std::memset(static_cast<void*>(joltBodyPtrs.data()), 0, joltBodyPtrs.size() * sizeof(decltype(joltBodyPtrs)::value_type));
 
@@ -102,12 +96,10 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     contactCapacity = 4096;
     contactBuffer.resize(contactCapacity);
 
-    // Initialize Material Registry
     materialCapacity = 16;
     materialCount    = 0;
     materials.resize(materialCapacity);
 
-    // Constraints
     constraintCapacity = inMaxBodies;
 
     constraints.resize(constraintCapacity, nullptr);
@@ -126,7 +118,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
 }
 
 void PhysicsWorld::Shutdown() {
-    // Reclaim hot SoA raw memory blocks
     DeallocateAligned(std::exchange(positions, nullptr), sizeof(JPH::Real) * 4);
     DeallocateAligned(std::exchange(prevPositions, nullptr), sizeof(JPH::Real) * 4);
     DeallocateAligned(std::exchange(rotations, nullptr), sizeof(float) * 4);
@@ -134,7 +125,6 @@ void PhysicsWorld::Shutdown() {
     DeallocateAligned(std::exchange(linearVelocities, nullptr), sizeof(float) * 4);
     DeallocateAligned(std::exchange(angularVelocities, nullptr), sizeof(float) * 4);
 
-    // Clearing JPH::Arrays deallocates all system heap blocks automatically
     bodyIDs.clear();
     materialIDs.clear();
     userData.clear();
@@ -168,7 +158,6 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     capacity            = newCapacity;
     slotCapacity        = newCapacity;
 
-    // Reallocate aligned SoA arrays
     ReallocateAligned(positions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
     ReallocateAligned(prevPositions, oldCap * 4, newCapacity * 4, sizeof(JPH::Real) * 4);
     ReallocateAligned(rotations, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
@@ -176,7 +165,6 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     ReallocateAligned(linearVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
     ReallocateAligned(angularVelocities, oldCap * 4, newCapacity * 4, sizeof(float) * 4);
 
-    // Using standard .resize() handles allocations and preserves stability
     bodyIDs.resize(newCapacity);
     materialIDs.resize(newCapacity);
     userData.resize(newCapacity);
@@ -189,11 +177,9 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     generations.resize(newCapacity);
     slotStates.resize(newCapacity);
 
-    // FIX: Explicitly scale active tracking maps to prevent out-of-bounds corruption
     idToHandleMap.resize(newCapacity + 1);
     joltBodyPtrs.resize(newCapacity + 1);
 
-    // Explicitly zero-initialize the newly added elements to prevent garbage pointer reads
     size_t addedCount = newCapacity - oldCap;
     std::memset(idToHandleMap.data() + (oldCap + 1), 0, addedCount * sizeof(decltype(idToHandleMap)::value_type));
     std::memset(static_cast<void*>(joltBodyPtrs.data() + (oldCap + 1)), 0, addedCount * sizeof(decltype(joltBodyPtrs)::value_type));
@@ -278,7 +264,6 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
 }
 
 auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
-    // If we are out of slots, double the capacity
     if (freeConstraintCount == 0) {
         ResizeConstraintBuffers(constraintCapacity * 2);
     }
@@ -289,11 +274,9 @@ auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
 }
 
 void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
-    // Increment generation so old handles become invalid
     constraintGenerations[slot].fetch_add(1, std::memory_order::relaxed);
     constraintStates[slot] = SlotState::Empty;
 
-    // Return slot to free list
     freeConstraintSlots[freeConstraintCount++] = slot;
 }
 
@@ -301,12 +284,10 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
     size_t currentCount = count.load(std::memory_order::acquire);
     size_t slotCap      = slotCapacity;
 
-    // 1. Calculate Sizes
     size_t posSize = currentCount * sizeof(JPH::Real) * 4;
     size_t rotSize = currentCount * sizeof(float) * 4;
-    size_t velSize = currentCount * sizeof(float) * 4; // linear + angular
+    size_t velSize = currentCount * sizeof(float) * 4;
 
-    // Mappings: gen (u32), s2d (u32), d2s (u32), states (u8), owners (Entity)
     size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(ZHLN::Entity));
 
     size_t totalSize = sizeof(WorldStateHeader) + posSize + rotSize + (velSize * 2) + mappingSize;
@@ -315,7 +296,6 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
     auto*                 ptr = buffer.data();
 
     ZHLN::Lock(sync.shadowLock, [&] -> void {
-        // 2. Write Header
         WorldStateHeader header;
         header.bodyCount    = static_cast<uint32_t>(currentCount);
         header.slotCapacity = static_cast<uint32_t>(slotCap);
@@ -323,7 +303,6 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
         std::memcpy(ptr, &header, sizeof(WorldStateHeader));
         ptr += sizeof(WorldStateHeader);
 
-        // 3. Write SoA Hot Buffers (Positions, Rotations, Velocities)
         std::memcpy(ptr, positions, posSize);
         ptr += posSize;
         std::memcpy(ptr, rotations, rotSize);
@@ -333,7 +312,6 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
         std::memcpy(ptr, angularVelocities, velSize);
         ptr += velSize;
 
-        // 4. Write Mapping Tables (Atomics must be loaded)
         for (size_t i = 0; i < slotCap; ++i) {
             uint32_t g = generations[i].load(std::memory_order::relaxed);
             std::memcpy(ptr, &g, sizeof(uint32_t));
@@ -350,8 +328,6 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
             *ptr   = s;
             ptr += 1;
         }
-        // Owner associations are lifecycle state: retain them across a physics
-        // snapshot so the reconciler still knows what an ECS destroy owns.
         std::memcpy(ptr, bodyOwners.data(), slotCap * sizeof(ZHLN::Entity));
     });
     return buffer;
@@ -367,13 +343,12 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
     }
     if (header->slotCapacity != slotCapacity) {
         return false;
-    } // Safety: must match current allocation
+    }
 
     const uint8_t* ptr        = data + sizeof(WorldStateHeader);
     size_t         savedCount = header->bodyCount;
 
     ZHLN::Lock(sync.shadowLock, [&] -> void {
-        // 1. Restore SoA Buffers
         size_t posSize = savedCount * sizeof(JPH::Real) * 4;
         size_t rotSize = savedCount * sizeof(float) * 4;
         size_t velSize = savedCount * sizeof(float) * 4;
@@ -387,7 +362,6 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         std::memcpy(angularVelocities, ptr, velSize);
         ptr += velSize;
 
-        // 2. Restore Mapping Tables
         for (size_t i = 0; i < slotCapacity; ++i) {
             uint32_t g = 0;
             std::memcpy(&g, ptr, sizeof(uint32_t));
@@ -406,10 +380,8 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         std::memcpy(bodyOwners.data(), ptr, slotCapacity * sizeof(ZHLN::Entity));
         ptr += (slotCapacity * sizeof(ZHLN::Entity));
 
-        // 3. Reset Free List Logic
         size_t newFreeCount = 0;
         for (uint32_t i = 0; i < slotCapacity; ++i) {
-            // Rebuilding the free list from the raw snapshot bytes, so compare storage-side.
             if (slotStates[i].load(std::memory_order::relaxed) == static_cast<uint8_t>(SlotState::Empty)) {
                 freeSlots[newFreeCount++] = i;
             }
@@ -419,15 +391,12 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         time = header->worldTime;
     });
 
-    // 4. SYNC TO JOLT: Push SoA data back to the actual Jolt bodies
-    // This part happens outside the shadow lock but while isStepping is ideally false
     for (size_t i = 0; i < savedCount; i++) {
         JPH::BodyID bid = bodyIDs[i];
         if (bid.IsInvalid()) {
             continue;
         }
 
-        // Extract from SoA
         JPH::RVec3 p(positions[i * 4 + 0], positions[i * 4 + 1], positions[i * 4 + 2]);
         JPH::Quat  q(rotations[i * 4 + 0], rotations[i * 4 + 1], rotations[i * 4 + 2], rotations[i * 4 + 3]);
         JPH::Vec3  lv(linearVelocities[i * 4 + 0], linearVelocities[i * 4 + 1], linearVelocities[i * 4 + 2]);
@@ -441,4 +410,4 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
     return true;
 }
 
-} // namespace ZHLN::Physics
+}

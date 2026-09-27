@@ -47,7 +47,7 @@ target_link_libraries(zshader PRIVATE
     Vulkan-Headers       # <vulkan/vulkan_core.h>: the enumerators Reflect.cpp names
     zahlen_warnings      # the same warning set as every other target in the project
     ${ZHLN_SLANG_TARGET}
-    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp> # libslang: both reflection passes compile in-process (catalog + gpu-types)
+    $<$<BOOL:${MINGW}>:stdc++exp> # libslang: both reflection passes compile in-process (catalog + gpu-types); MinGW's libstdc++ needs the library named, other environments resolve it -- off MinGW the genex is empty, so it needs no if() gate
 )
 
 # Slang's own headers do not survive this project's warning set (old-style
@@ -63,8 +63,7 @@ target_link_libraries(zshader PRIVATE
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
 )
-set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}
-    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>>")
+set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
     add_dependencies(zshader slang-glslang)
@@ -77,17 +76,34 @@ endif()
 # Zahlen/Core/Ranges for the ranges the tool uses where the engine does.
 target_include_directories(zshader PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
-# Vk::Result's build-tree definition (see cmake/VkResultMirror.cmake): Emit.cpp
-# reads the RHI umbrella, which reaches RenderCore.hpp, so the generated dir
-# must resolve here too. Stated directly -- the tool needs one generated header,
-# not the RHI library, so it does not link zahlen_vulkan for it. Set at the top
-# level before cmake/ShaderCompilation.cmake adds this directory.
-
 # The engine publishes these on its own target (CMakeLists.txt:984) and the tool
 # cannot inherit them, so it states them: every engine header this tool includes
 # is written for a build without exceptions or RTTI.
 target_compile_options(zshader PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+)
+
+# The tool is the build's critical path: the catalog and gpu-types commands
+# cannot run until its six translation units are built, and every downstream
+# consumer of the generated headers queues behind them. What the six actually
+# share is ZShader.hpp everywhere, slang.h in three of them, and vulkan_core.h
+# (Reflect.cpp reads the enumerators); those parse once into the PCH.
+#
+# Deliberately NOT here: the RHI umbrella. Emit.cpp's mentions of
+# Rendering.hpp and pipeline/ShaderProgram.hpp are TEXT -- lines the emitter
+# writes into the generated ShaderBindings.hpp/ShaderBytecode.cpp, sitting in
+# raw-string templates at Emit.cpp:129 and :210 -- not headers it consumes
+# (grep matches them anyway, which is how a PCH once got built around them).
+# zshader has no src/vulkan or VMA include path, and forcing the umbrella in
+# drags RenderingPCH.h's volk-then-vk_mem_alloc chain into a target that links
+# neither -- which is precisely the pair of failures this block once produced.
+# vulkan_core.h IS safe here: with no Rendering.hpp in the PCH there is no
+# volk in it either, so real prototypes first is the only order present --
+# exactly what Reflect.cpp compiles today.
+target_precompile_headers(zshader PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
+    "<slang.h>"
+    "<vulkan/vulkan_core.h>"
 )
 
 # The reflection flags themselves -- -freflection, -fannotation-attributes and

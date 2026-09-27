@@ -1,32 +1,16 @@
-// resources/shaders/rt_shadow.slang
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Dedicated ray-traced sun shadow mask.
-//
-// The lighting pass used to trace its shadow ray inline, one ray per fragment, writing the
-// resulting 1-bit visibility straight into the shading term. A binary value cannot be filtered
-// where it is produced (the only smoothing was TAA, which also resolves geometry edges and
-// motion), and cost is paid per shaded fragment rather than once per pixel. So this pass
-// evaluates visibility into an R8 target at 1-2 SPP with blue-noise/Vogel-disk jitter, and
-// shadow_denoise_atrous.slang smooths it before lighting reads a single load instead of a ray.
-//
-// Writes 1.0 for fully lit and 0.0 for fully shadowed, so lighting can multiply it straight
-// into the sun term.
 
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-// Only the knobs the host actually varies per quality tier. Everything else
-// (invViewProj, lightDir, sunSize, screenResolution, camPos) already lives in
-// FrameUniforms, so duplicating it here would just create a second source of
-// truth for the same values.
 struct RTShadowPushConstants {
-    uint samples;        // SPP for this frame (RayTracingConfig::shadowSamples)
-    uint enableAlphaTest; // non-zero -> evaluate cutout masks on candidates
-    float normalBias;    // world units of N offset to avoid self-shadowing
-    float maxDistance;   // ray TMax; longer rays cost traversal, not quality
+    uint samples;
+    uint enableAlphaTest;
+    float normalBias;
+    float maxDistance;
 };
 
 [vk::push_constant]
@@ -41,32 +25,11 @@ SamplerState pointSampler;
 RaytracingAccelerationStructure tlas;
 StructuredBuffer<InstanceData> g_instances;
 
-// Cutout alpha lookup. This is the engine's bindless array: the host must map
-// it onto the same reserved slot range WriteTextureSlotToHeap writes, so
-// inst.albedoIndex resolves to the same textures the raster path sees.
 Texture2D globalTextures[];
 
-// Blue noise tile for the sun-disk jitter (NEAREST + REPEAT sampler).
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
-/**
- * Visibility of one ray, honouring cutout alpha when enabled.
- *
- * Opaque-only tracing turns every alpha-tested card -- foliage, hair, chain link -- into a solid
- * rectangle of shadow. Dropping RAY_FLAG_FORCE_OPAQUE makes traversal hand back
- * CANDIDATE_NON_OPAQUE_TRIANGLE hits so the mask can be evaluated and the transparent parts
- * rejected. Two details differ from the opaque path:
- *
- *  - No RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH: that auto-commits the first candidate and
- *    never returns control, so there is no opportunity to evaluate a mask.
- *  - The commit call is Slang's CommitNonOpaqueTriangleHit(), not HLSL's ConfirmIntersection()
- *    -- Slang maps its name onto OpRayQueryConfirmIntersectionKHR for SPIR-V and the HLSL
- *    spelling is not a member of RayQuery<T> here.
- *
- * Geometry only reaches this path if its BLAS was built without VK_GEOMETRY_OPAQUE_BIT_KHR
- * (RayTracingConfig::alphaTestingInBVH).
- */
 float TraceVisibility(float3 origin, float3 direction, float tMax, bool alphaTest) {
     RayDesc ray;
     ray.Origin    = origin;
@@ -92,17 +55,11 @@ float TraceVisibility(float3 origin, float3 direction, float tMax, bool alphaTes
         uint instanceID  = q.CandidateInstanceID();
         InstanceData inst = g_instances[instanceID];
 
-        // Geometry flagged non-opaque in the BVH but not actually masked
-        // (blend modes, decals) still arrives as a candidate; it occludes
-        // fully and needs no texture fetch.
         if (inst.alphaMode != 1u) {
             q.CommitNonOpaqueTriangleHit();
             continue;
         }
 
-        // Rebuild the hit UV from the mesh's own vertex stream. Barycentric
-        // interpolation happens in object space, so the instance matrix never
-        // applies and no transform is needed.
         uint primIndex = q.CandidatePrimitiveIndex();
         float2 bary    = q.CandidateTriangleBarycentrics();
         uint i0        = inst.fetchIndex(primIndex * 3u + 0u);
@@ -131,8 +88,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float depth = texDepth.Load(int3(tid.xy, 0)).r;
     if (depth >= 1.0f) {
-        // Sky: nothing to shadow, and tracing from a reconstructed position at
-        // the far plane would only generate garbage rays.
         outShadow[tid.xy] = 1.0f;
         return;
     }
@@ -144,8 +99,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
     float3 L            = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
 
-    // Back-facing surfaces get full visibility: the cascade path already
-    // handles their NdotL <= 0 case and tracing into them only produces acne.
     if (dot(N, L) <= 0.0f) {
         outShadow[tid.xy] = 1.0f;
         return;
@@ -164,9 +117,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float visibility = 0.0f;
     for (uint i = 0u; i < spp; ++i) {
         float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, tid.xy, frameIdx, i);
-        // Vogel disk: uniform in area over the sun's angular radius, so even a
-        // 1 SPP estimate is unbiased across the disk rather than sampling one
-        // fixed direction per dither angle.
         float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
         float3 dir = SafeNormalize(L + right * disk.x + bitangent * disk.y, L);

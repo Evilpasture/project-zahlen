@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/SystemWiring.cpp
 #include "SystemWiring.hpp"
 
 #include "LODSystem.hpp"
@@ -49,14 +48,10 @@ void Sys_VisualInterpolation(SystemContext& ctx) {
 
 void Sys_Animation(SystemContext& ctx) {
     static AnimationSystem sys;
-    // The post-processor (extras/Animation's two-bone IK, when installed)
-    // runs inside the skinning pass -- see AnimationSystem::UpdateAnimations.
     sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt, ctx.bonePosePostProcessor);
 }
 
 void Sys_Articulation(SystemContext& ctx) {
-    // Must run on the World's instance, not a node-local one: its tracking
-    // ledger is the shared state DespawnEntity's Release() drains.
     ctx.articulation->Update(ctx, ctx.dt);
 }
 
@@ -83,37 +78,21 @@ void Sys_Particle(SystemContext& ctx) {
     sys.Update(ctx, ctx.dt);
 }
 
-// FRAME PHASE STEPS
-//
-// Each function is one ordered unit of work in the frame. The two SystemGraphs
-// are steps like any other, so hazard analysis only ever orders systems *inside*
-// a graph -- never the phases around them, which run in fixed registration
-// order. Adding a system means adding a step here, not editing Engine::Tick.
 
 namespace Steps {
 
-// The Input phase step (raw device state -> per-entity InputComponent) and
-// the PlayerIntent step (camera-relative intent -> MovementComponent) moved
-// to extras/CharacterController with the components they translate; that
-// module re-inserts both through the FrameSchedulerExtension seam at their
-// original positions.
 
-void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+void HostUICallback(Engine& engine, float , FrameContext& ) {
     if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
         (*cb)(engine);
     }
 }
 
-void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    // All background discovery has already settled into the service queue.
-    // This is the sole callback dispatch point, before gameplay and rendering.
+void HotReload(Engine& engine, float , FrameContext& ) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    // The accumulator is injected from the Engine instance, not held here or
-    // in PhysicsSystem: it persists only for this engine's lifetime, so a
-    // destroyed engine or scene reset never hands its leftover time forward.
+void Physics(Engine& engine, float dt, FrameContext& ) {
     PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
 }
 
@@ -144,33 +123,25 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
+void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
     SystemContext sysCtx = engine.MakeSystemContext(dt);
     engine.GetUpdateGraph().Execute(sysCtx);
 }
 
-void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+void CommandPlayback(Engine& engine, float , FrameContext& ) {
     engine.GetMainECB().Playback();
 }
 
-// Project camera matrices from the current rig pose immediately before
-// visibility/render work.
-//
-// The third-person target camera (spring-arm orbit around a tracked entity)
-// moved to extras/Camera: it contributes its own step through the
-// FrameSchedulerExtension seam, inserted before this step so its rig pose is
-// what the matrices below project. A core-only host has no rig step and the
-// camera simply projects its authored pose.
-void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
+void Camera(Engine& engine, float dt, FrameContext& ) {
     static CameraSystem camSys;
     camSys.Update(engine, dt, engine.GetCurrentAlpha());
 }
 
-void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+void LOD(Engine& engine, float , FrameContext& ) {
     LODSystem::Update(engine);
 }
 
-void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
+void RenderGraph(Engine& engine, float dt, FrameContext& ) {
     SystemContext sysCtx = engine.MakeSystemContext(dt);
     engine.GetRenderGraph().Execute(sysCtx);
 }
@@ -179,10 +150,6 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
         if (render_res.error().Is(FrameResult::DeviceLost)) {
-            // HandleDeviceLost tears the RenderContext down before rebuilding
-            // it. If the rebuild fails the engine has no context at all, and
-            // the next Present would dereference null; report it as a fatal
-            // frame status and close the window so the host loop exits.
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                 ctx.status = GameplayStatus::Error;
@@ -193,36 +160,26 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-// The "DefaultPreset" fallback step left with the fallback scene
-// (extras/FallbackScene): that module re-inserts it after "GameplayModule"
-// through the FrameSchedulerExtension seam, gated on
-// Engine::FallbackSceneEnabled() exactly as before.
 
-void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
+void TransformHistory(Engine& engine, float , FrameContext& ) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
     static TransformSystem transformSystem;
     transformSystem.UpdateTransformHistory(engine.GetRegistry());
 }
 
-} // namespace Steps
+}
 
-} // namespace
+}
 
 void BuildFrameScheduler(Engine& engine) {
     using Phase     = FramePhase;
     auto& scheduler = engine.GetFrameScheduler();
 
     scheduler.Clear();
-    // The Input and PlayerIntent phase steps moved to extras/CharacterController
-    // with the components they translate; that module re-inserts them through
-    // the FrameSchedulerExtension seam (before HostUICallback and after
-    // ScriptAndShaderReload, their original positions).
     scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
     scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
-    // The Fallback "DefaultPreset" step is contributed by extras/FallbackScene
-    // (after "GameplayModule") when that domain is installed.
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
@@ -231,10 +188,6 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
     scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
 
-    // Optional layers contribute their phase steps on every (re)build, so a
-    // scene reset never strands a host that installed an extras module.
-    // InsertAfter positioning is the extension's own business; the core steps
-    // above are the anchors.
     engine.ApplyFrameSchedulerExtensions(scheduler);
 }
 
@@ -242,29 +195,11 @@ void BuildSystemGraphs(Engine& engine) {
     auto& updateGraph = engine.GetUpdateGraph();
     auto& renderGraph = engine.GetRenderGraph();
 
-    // Rebuild, never append. InitializeDefaultScene is called again whenever a
-    // scene is reset on a live engine (the GPU test pool does exactly that),
-    // and without this the graphs accumulate a second, third, ... copy of every
-    // system. Duplicates are not merely slow: Compile() only orders nodes that
-    // conflict, so a system with a read-only or empty access pattern --
-    // TextureSystem, CullingSystem, DecalSystem -- has no edge to its own
-    // duplicate and the copies are dispatched to run *concurrently* over the
-    // same engine state. That is a data race on whatever they fill in, and it
-    // shows up much later as a corrupted allocator heap.
-    // BuildFrameScheduler has always cleared for the same reason.
     updateGraph.Clear();
     renderGraph.Clear();
 
     using namespace ZHLN::ECS;
 
-    // Character locomotion (MovementComponent) used to be anchored here as an
-    // external write for VisualInterpolationSystem's yaw read; both moved to
-    // extras/CharacterController, which contributes its own external-writes
-    // anchor and systems through the engine's SystemGraphsExtension seam.
-    // Pose interpolation reads PhysicsWorld SoA under one lock; there is no
-    // PhysicsStateComponent to declare. Authored scene data with no per-frame
-    // writer (HierarchyComponent, SkeletalMeshComponent, PhysicsComponent, ...)
-    // is deliberately not declared.
 
     updateGraph.AddSystem({
         .update_func    = [](SystemContext& ctx) -> void { TextureSystem::Update(ctx, ctx.dt); },
@@ -283,9 +218,6 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func = Sys_Animation,
         .name        = "AnimationSystem",
-        // MovementComponent left this pattern when character locomotion moved
-        // to extras/CharacterController; AnimationSystem never read it in its
-        // body (the entry was an ordering anchor only).
         .access_pattern = {Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(), Write<Components::MorphTargetComponent>()},
         .enabled        = true,
     });
@@ -311,10 +243,6 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    // NOTE: the former PostProcessSystem bridge (ECS → SetGISettings) was
-    // removed: RenderSystem::RenderMain now performs the single
-    // ECS → GraphicsSettings → RenderContext::ApplySettings sync each frame
-    // (see system/GraphicsSettingsSync.hpp).
 
     updateGraph.AddSystem({
         .update_func    = Sys_Audio,
@@ -323,10 +251,6 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    // InteractionSystem (trigger/pickup/container/usable) moved to
-    // extras/Interaction. It re-registers itself through the engine's
-    // SystemGraphsExtension seam (see Interaction::Install), which replays on
-    // every graph rebuild, so it survives scene resets just like this wiring.
 
     updateGraph.AddSystem({
         .update_func    = Sys_Particle,
@@ -335,24 +259,8 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    // Terrain moved to extras/Terrain: its update-graph node is contributed
-    // through the SystemGraphsExtension seam and appended here as well,
-    // preserving its end-of-graph position.
 
-    // Compilation is deferred until after the render graph's core systems and
-    // the optional-layer extensions below are registered, so contributed nodes
-    // take part in hazard analysis and AddSystemBefore anchoring for BOTH
-    // graphs. Compile() only builds edges from earlier nodes to later ones --
-    // an extension added after Compile() could never anchor before a core
-    // system, which is exactly what e.g. an animation modifier needs.
 
-    // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
-    // before this graph runs; CullingSystem reads CameraComponent. Same anchor
-    // rationale as updateGraph above.
-    //   CameraComponent      <- CameraSystem::Update (Camera phase).
-    // TransformComponent / WorldTransformComponent are written by updateGraph,
-    // not by an imperative phase, so they are cross-graph ordering rather than an
-    // undeclared external write -- left to the phase order on purpose.
     renderGraph.DeclareExternalWrites(
         "ExternalPreRenderWrites", {
                                        Write<Components::CameraComponent>(),
@@ -386,34 +294,17 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled = true,
     });
 
-    // Optional layers contribute graph nodes on every (re)build, before either
-    // graph is compiled. See the note where updateGraph.Compile() was deferred.
     engine.ApplySystemGraphsExtensions(updateGraph, renderGraph);
 
     updateGraph.Compile();
     renderGraph.Compile();
 }
 
-// The boot layout every host starts from: registered components, the default
-// camera and global-settings singletons, the UI settings, then compiled
-// graphs and schedule. This is engine infrastructure -- it used to live on
-// DefaultPreset next to the fallback scene content, and moved here when that
-// content left core for extras/FallbackScene.
 auto InitializeDefaultScene(Engine& engine) -> bool {
     auto& reg = engine.GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
-    // InputComponent left the default camera when character locomotion moved
-    // to extras/CharacterController: core's free-cam reads the raw
-    // InputStateComponent singleton, and per-entity intent belongs to the
-    // controller, which adds InputComponent to the entities it drives.
-    //
-    // The third-person target camera left with it: extras/Camera re-seeds the
-    // boot camera's rig component in its frame step, which runs every frame
-    // after this scene is built and again after each scene reset recreates
-    // the camera. Core itself projects no rig; a host without the extras
-    // gets a static authored camera.
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
         Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {}
@@ -433,4 +324,4 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     return true;
 }
 
-} // namespace ZHLN
+}

@@ -11,10 +11,8 @@
 namespace ZHLN {
 bool LoadRenderDocLibrary() noexcept {
 #if defined(_WIN32)
-    // Try the standard system search path first
     HMODULE mod = LoadLibraryA("renderdoc.dll");
     if (!mod) {
-        // Fallback to the default installation directory
         mod = LoadLibraryA("C:\\Program Files\\RenderDoc\\renderdoc.dll");
     }
     if (mod) {
@@ -22,10 +20,8 @@ bool LoadRenderDocLibrary() noexcept {
         return true;
     }
 #elif defined(__linux__)
-    // Try standard search path
     void* mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_GLOBAL);
     if (mod == nullptr) {
-        // Fallback to common library paths
         mod = dlopen("/usr/lib/librenderdoc.so", RTLD_NOW | RTLD_GLOBAL);
     }
     if (mod == nullptr) {
@@ -42,4 +38,4 @@ bool LoadRenderDocLibrary() noexcept {
     );
     return false;
 }
-} // namespace ZHLN
+}

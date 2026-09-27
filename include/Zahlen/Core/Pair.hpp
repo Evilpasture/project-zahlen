@@ -12,4 +12,4 @@ struct Pair {
     constexpr bool operator==(const Pair&) const  = default;
     auto           operator<=>(const Pair&) const = default;
 };
-} // namespace ZHLN
+}

@@ -14,7 +14,7 @@
 // moment they share one.
 //
 // This is stb_image_WRITE. The decode half, STB_IMAGE_IMPLEMENTATION, already
-// lives in extern/stbi_impl.c inside zahlen_engine and must not be defined in a
+// lives in src/engine/stbi_impl.c inside zahlen_engine and must not be defined in a
 // test TU -- see the note in tests/CMakeLists.txt.
 
 #define ZHLN_TEST_IMAGE_WRITE_IMPL

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/ShaderReloadRegistry.cpp
 
 #include "ShaderReloadRegistry.hpp"
 
@@ -39,8 +38,6 @@ void ShaderReloadRegistry::Register(std::string_view name, const std::vector<con
 }
 
 void ShaderReloadRegistry::Dispatch(const std::string& changedPath, const std::function<void()>& onFirstMatch) {
-    // Snapshot the length: a rebuild below may register a new entry, which was
-    // built from the old file contents and must not run for this same event.
     const size_t count = _entries.size();
     bool         matched = false;
 
@@ -56,9 +53,6 @@ void ShaderReloadRegistry::Dispatch(const std::string& changedPath, const std::f
             matched = true;
         }
 
-        // Copy rather than call through the reference: a rebuild may
-        // re-register this very name, which replaces the entry in place and
-        // moves the closure out from under us mid-call.
         const std::function<void()> callback = entry.callback;
         if (callback) {
             callback();
@@ -66,4 +60,4 @@ void ShaderReloadRegistry::Dispatch(const std::string& changedPath, const std::f
     }
 }
 
-} // namespace ZHLN
+}

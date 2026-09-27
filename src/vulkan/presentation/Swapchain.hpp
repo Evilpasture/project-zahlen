@@ -4,7 +4,6 @@
 #pragma once
 
 namespace ZHLN::Vk {
-// Swapchain RAII
 
 struct SwapchainSupport {
     ZHLN_SwapchainSupport raw;
@@ -45,4 +44,4 @@ class Swapchain {
     VkDevice       _device = VK_NULL_HANDLE;
     ZHLN_Swapchain _raw    = {};
 };
-} // namespace ZHLN::Vk
+}

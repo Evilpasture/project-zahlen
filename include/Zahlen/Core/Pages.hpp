@@ -7,12 +7,11 @@
 
 namespace ZHLN {
 
-// Virtual Memory & OS Page Primitives
 
 enum class PageProtection : std::uint8_t {
-    NoAccess,  // PROT_NONE / PAGE_NOACCESS
-    ReadWrite, // PROT_READ | PROT_WRITE / PAGE_READWRITE
-    Guard,     // PROT_NONE on POSIX / PAGE_READWRITE | PAGE_GUARD on Windows
+    NoAccess,
+    ReadWrite,
+    Guard,
 };
 
 [[nodiscard]] inline auto GetPageSize() noexcept -> size_t {
@@ -87,39 +86,24 @@ inline void FreePages(void* address, [[maybe_unused]] size_t bytes) noexcept {
     }
 
 #if defined(_WIN32)
-    // Note: 'bytes' must be 0 when using MEM_RELEASE on Windows.
-    // Address must be the base address from VirtualAlloc.
     VirtualFree(address, 0, MEM_RELEASE);
 #else
     munmap(address, AlignUpToPage(bytes));
 #endif
 }
 
-// Guarded Regions
 
-/**
- * @brief A page-aligned allocation walled in by one inaccessible page on each
- * side, so that stepping off either end faults instead of silently corrupting
- * whatever is mapped next to it.
- */
 struct GuardedRegion {
-    void*  base  = nullptr; // Base of the whole mapping; hand this to FreeGuardedRegion().
-    size_t size  = 0;       // Size of the whole mapping, guard pages included.
-    void*  begin = nullptr; // First usable byte, just above the low guard page.
-    void*  end   = nullptr; // One past the last usable byte; stacks grow down from here.
+    void*  base  = nullptr;
+    size_t size  = 0;
+    void*  begin = nullptr;
+    void*  end   = nullptr;
 
     [[nodiscard]] constexpr auto valid() const noexcept -> bool {
         return base != nullptr;
     }
 };
 
-/**
- * @brief Reserves `bytes` of read/write memory with a guard page on both ends.
- *
- * The usable payload is rounded up to a whole page, so `end - begin` may be
- * larger than requested. Returns an invalid region (`valid() == false`) if the
- * mapping or either guard page could not be set up.
- */
 [[nodiscard]] inline auto AllocateGuardedRegion(size_t bytes) noexcept -> GuardedRegion {
     if (bytes == 0) {
         return {};
@@ -127,7 +111,7 @@ struct GuardedRegion {
 
     const size_t page   = GetPageSize();
     const size_t usable = AlignUpToPage(bytes);
-    const size_t total  = usable + (page * 2); // Payload + 2 guard pages
+    const size_t total  = usable + (page * 2);
 
     void* const base = AllocatePages(total, PageProtection::ReadWrite);
     if (base == nullptr) {
@@ -145,11 +129,8 @@ struct GuardedRegion {
     return {.base = base, .size = total, .begin = low + page, .end = high};
 }
 
-/**
- * @brief Releases a region previously handed out by AllocateGuardedRegion().
- */
 inline void FreeGuardedRegion(GuardedRegion region) noexcept {
     FreePages(region.base, region.size);
 }
 
-} // namespace ZHLN
+}

@@ -1,16 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Reflection/Dynamic.hpp
-//
-// Reflection that produces code instead of reading it: TypeDescriptor,
-// AggregateBuilder and Define, all built on std::meta::define_aggregate.
-// Nothing here exists at runtime -- the work happens entirely in a constant
-// expression -- and this is the only module in the directory whose bodies want
-// <vector> (member specs) and <array> (the fixed-array binding).
-//
-// AnonymousNode and FixedArrayBinding are the declaration helpers the builder
-// needs: a nested object's type has to be named before it is defined.
 
 #pragma once
 
@@ -37,7 +27,7 @@ struct FixedArrayBinding {
     using type = std::array<T, N>;
 };
 
-} // namespace TemplatedDetail
+}
 
 class TypeDescriptor {
   public:
@@ -138,7 +128,7 @@ template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type;
 
-    friend constexpr auto GetSchemaName(type* /*unused*/) -> std::string_view {
+    friend constexpr auto GetSchemaName(type* ) -> std::string_view {
         return Name;
     }
 
@@ -158,16 +148,16 @@ struct Define {
     }
 };
 
-#else // No C++26 static reflection: this module's degraded stand-ins.
+#else
 
 template <StringLiteral Name, typename... Fields>
 struct Define {
     struct type {};
-    friend constexpr std::string_view GetSchemaName(type* /*unused*/) {
+    friend constexpr std::string_view GetSchemaName(type* ) {
         return Name;
     }
 };
 
 #endif
 
-} // namespace ZHLN::Reflect
+}

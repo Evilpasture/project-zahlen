@@ -1,15 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/gui/FontLoader.cpp
-//
-// Implementation of the baked-font seam (include/Zahlen/gui/FontLoader.hpp):
-// the loader hook, the default bake slot, the cooked-font decoder and the one
-// embedded fallback bake. The embedded payload is the cooked container the
-// checked-in Font8x8 bitmap data bakes into -- see tools/gen_default_font.py,
-// which regenerates resources/fonts/DefaultFont.zfont. It is embedded exactly
-// the way src/render/Resources.cpp embeds cooked SPIR-V, so a zero-asset build
-// decodes real baked-atlas bytes at boot instead of scraping the OS for a TTF.
 
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
@@ -28,9 +19,6 @@ struct FontLoaderState {
 };
 
 auto GetState() noexcept -> FontLoaderState& {
-    // Construct-on-first-use: the seam must work from static initialisation
-    // order any way it is reached, and every caller is single-threaded boot,
-    // device-loss recovery or a test.
     static FontLoaderState state;
     return state;
 }
@@ -41,11 +29,6 @@ auto GetState() noexcept -> FontLoaderState& {
 #pragma clang diagnostic ignored "-Wc23-extensions"
 #endif
 
-// The zero-asset standalone bake: cooked Font8x8 metrics, generated offline
-// (tools/gen_default_font.py). Never parsed, never rasterised at runtime --
-// DecodeCookedFont consumes it exactly as it consumes a pak payload. The path
-// arrives as a source-file definition (see src/gui/CMakeLists.txt), the same
-// way Resources.cpp receives its SHADER_*_PATH embeds.
 constexpr uint8_t kEmbeddedDefaultFontRaw[] = {
 #embed ZHLN_DEFAULT_FONT_ZFONT_PATH
 };
@@ -63,9 +46,8 @@ void DecodeEmbeddedDefaultInto(BakedFontAsset& out) {
     }
 }
 
-} // namespace
+}
 
-// --- Loader Hook -------------------------------------------------------------
 
 void InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept {
     auto& state   = GetState();
@@ -90,7 +72,6 @@ auto LoadBakedFont(BakedFontAsset& out) -> bool {
     return (state.loader != nullptr) && state.loader(state.loaderUser, out);
 }
 
-// --- Default Bake Slot -------------------------------------------------------
 
 auto GetDefaultBakedFont() -> const BakedFontAsset& {
     auto& state = GetState();
@@ -107,7 +88,6 @@ void SetDefaultBakedFont(BakedFontAsset font) noexcept {
     state.defaultBakeSet = true;
 }
 
-// --- Cooked Font ('FNT0') Decoding -------------------------------------------
 
 auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode> {
     if (blob.size() < sizeof(CookedFontHeader)) {
@@ -127,8 +107,6 @@ auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFon
         return std::unexpected(FontAssetError::BadDimensions);
     }
 
-    // The coverage is one byte per texel and nothing else; a header that claims
-    // a different payload size describes a file this reader does not know.
     const uint64_t texelCount = static_cast<uint64_t>(header.atlasWidth) * static_cast<uint64_t>(header.atlasHeight);
     if (header.pixelDataSize != texelCount) {
         return std::unexpected(FontAssetError::BadDimensions);
@@ -151,8 +129,6 @@ auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFon
 
     asset.glyphs.resize(header.glyphCount);
     if (header.glyphCount > 0) {
-        // CookedFontGlyph is the file-layout twin of GlyphMetric (seven
-        // floats, no padding either way), so the records copy straight over.
         static_assert(sizeof(CookedFontGlyph) == sizeof(GlyphMetric));
         std::memcpy(asset.glyphs.data(), blob.data() + sizeof(CookedFontHeader), static_cast<size_t>(glyphBytes));
     }
@@ -163,4 +139,4 @@ auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFon
     return asset;
 }
 
-} // namespace ZHLN::GUI
+}

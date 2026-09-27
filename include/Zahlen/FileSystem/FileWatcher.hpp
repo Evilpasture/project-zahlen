@@ -1,10 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/FileSystem/FileWatcher.hpp
-//
-// Low-level file watching — polling observer with main-thread dispatch.
-// Part of zahlen_filesystem.
 
 #pragma once
 
@@ -74,4 +70,4 @@ class ZHLN_API FileSystemWatcher {
     std::unique_ptr<Impl> _impl;
 };
 
-} // namespace ZHLN::FS
+}

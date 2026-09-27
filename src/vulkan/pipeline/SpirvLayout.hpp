@@ -1,42 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/SpirvLayout.hpp
-//
-// What a module's bytes say its types are: the size a struct occupies, the members of a
-// push-constant block, and the frame-address/heap-index words of the descriptor heap's
-// push data. Everything here is a constant expression.
-//
-// The ABI constants themselves live in PushDataLayout.hpp, the half every translation
-// unit can afford; this is a reader, included only by the checks that read a module
-// (src/render/GpuAbi.hpp) and the offline tools that replay them. It exists so the
-// verification half needs no runtime pass over bytecode: `#embed` puts a module's bytes in
-// a translation unit and these are the same numbers SPIRV-Reflect answers at pipeline
-// creation, read by a reader that never runs.
-//
-// Two sizes, and the difference is deliberate:
-//
-//   * `StructSize` is what a host ABI means by a struct's size -- the end of the last
-//     member rounded up to its alignment, and so the only number a C++ `sizeof` can be
-//     held to;
-//   * `StructExtent` is how far the members reach, unpadded (28 where the size of
-//     `{ float; float3 }` is 32). It is what SPIRV-Reflect reports as padded_size and as a
-//     member's size, and so what tools/zshader writes into the catalog as `PushSize`.
-//
-// The layout rules are SPIR-V's, not Slang's: offsets from OpMemberDecorate Offset,
-// strides from ArrayStride/MatrixStride, a PhysicalStorageBuffer pointer 8 bytes, and
-// std140/std430 visible only as the `Name_std140`-style OpName suffix Slang emits. A
-// lookup matches the plain name first, then the suffixed copies.
-//
-// Deliberately narrow, like SpirvBindings.hpp: instruction headers, type opcodes,
-// decorations and names -- no function body, no control flow, no descriptor kind. Anything
-// it cannot read comes back as `Complete() == false`, which a caller must treat as "this
-// proves nothing" rather than "this declares nothing". Standalone on purpose (no Vulkan
-// type, no render header, no allocation) so a host tool can run it over real modules.
 
 #pragma once
 
-#include "PushDataLayout.hpp" // the ABI constants this reader is held against
+#include "PushDataLayout.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -46,17 +14,12 @@
 
 namespace ZHLN::Vk {
 
-// One member of a struct as the module declares it: the name the shader knows
-// it by -- a byte range, because a consteval function cannot build a
-// string_view out of the `uint8_t[]` an #embed produces (see SpirvBindings.hpp)
-// -- where it sits and how big it is.
 struct SpirvLayoutField {
     uint32_t nameOffset = 0;
     uint32_t nameLength = 0;
     uint32_t offset     = 0;
     uint32_t size       = 0;
 
-    // True when this member's name is `name`, byte for byte.
     [[nodiscard]] constexpr auto IsNamed(std::span<const uint8_t> module, std::string_view name) const noexcept -> bool {
         if (name.size() != nameLength || static_cast<size_t>(nameOffset) + nameLength > module.size()) {
             return false;
@@ -70,14 +33,10 @@ struct SpirvLayoutField {
     }
 };
 
-// What a module's push-constant block declares: how far its members reach (`extent`, the
-// catalog's PushSize) and the members themselves, in declaration order. Bounded at twice
-// the widest block the engine ships (skinning.slang's 12 members); a wider block comes
-// back `complete == false` rather than quietly truncated.
 struct SpirvPushBlock {
     static constexpr uint32_t kCapacity = 32;
 
-    uint32_t                                nameOffset = 0; // the variable's OpName
+    uint32_t                                nameOffset = 0;
     uint32_t                                nameLength = 0;
     uint32_t                                extent     = 0;
     uint32_t                                count      = 0;
@@ -89,28 +48,18 @@ struct SpirvPushBlock {
     }
 };
 
-// What a lookup found under a name, and how sure it is.
 struct SpirvTypeLookup {
-    uint32_t size      = 0; // the struct's size, as a host ABI means it
-    uint32_t extent    = 0; // how far its members reach, unpadded
+    uint32_t size      = 0;
+    uint32_t extent    = 0;
     bool     found     = false;
-    // Two declarations the same plain name answers to, with different layouts: a reader
-    // that guessed between them would guess about the one thing this header exists to be
-    // sure of.
     bool     ambiguous = false;
 };
 
-// The reader
 
-// The types, decorations and names of one module, read once: construction is the walk and
-// every query after it is a lookup in the tables the walk filled, so a caller with many
-// questions (the ABI check asks about every type in a list) pays for one pass.
 class SpirvTypes {
   public:
-    // Word 0 of an instruction is [wordCount:16][opcode:16], little-endian on
-    // every target the engine builds for.
     static constexpr uint32_t kSpirvMagic                    = 0x07230203;
-    static constexpr size_t   kSpirvHeaderWords              = 5; // magic, version, generator, bound, schema
+    static constexpr size_t   kSpirvHeaderWords              = 5;
     static constexpr uint16_t kSpirvOpName                   = 5;
     static constexpr uint16_t kSpirvOpMemberName             = 6;
     static constexpr uint16_t kSpirvOpTypeInt                = 21;
@@ -130,12 +79,8 @@ class SpirvTypes {
     static constexpr uint16_t kSpirvDecorationArrayStride    = 6;
     static constexpr uint16_t kSpirvDecorationMatrixStride   = 7;
     static constexpr uint16_t kSpirvDecorationOffset         = 35;
-    // StorageClass PushConstant: the one variable a module's push block is.
     static constexpr uint32_t kSpirvStoragePushConstant      = 9;
 
-    // Sized from the widest module the engine ships, with room to spare: it
-    // declares 81 types, 227 struct members and 78 names. A module with more
-    // than these reports through Complete() rather than truncating.
     static constexpr uint32_t kTypeCapacity        = 256;
     static constexpr uint32_t kMemberCapacity      = 512;
     static constexpr uint32_t kNameCapacity        = 192;
@@ -147,10 +92,6 @@ class SpirvTypes {
 
     constexpr SpirvTypes() noexcept = default;
 
-    // Walks `module` once: every OpName/OpMemberName, every type declaration, member
-    // offsets and strides, the integer constants an array length can be, and the
-    // module-scope variables. It stops at the first OpFunction, because SPIR-V's logical
-    // layout puts every declaration above the function section.
     [[nodiscard]] static constexpr auto Parse(std::span<const uint8_t> module) noexcept -> SpirvTypes;
 
     [[nodiscard]] constexpr auto Complete() const noexcept -> bool {
@@ -160,37 +101,20 @@ class SpirvTypes {
         return _bytes;
     }
 
-    // The struct the module declares under `name`, matching a type's OpName exactly, as its
-    // last dotted component, or as its prefix before a `_std140`/`_std430`/`_scalar`
-    // suffix -- the spellings Slang emits for one type.
     [[nodiscard]] constexpr auto LookupStruct(std::string_view name) const noexcept -> SpirvTypeLookup;
 
-    // The size a host `sizeof` has to equal for the struct `name`, or 0 when the module
-    // declares no such struct (LookupStruct::found tells the two apart).
     [[nodiscard]] constexpr auto StructSize(std::string_view name) const noexcept -> uint32_t {
         return LookupStruct(name).size;
     }
 
-    // The module's push-constant block, when it declares one.
     [[nodiscard]] constexpr auto PushBlock() const noexcept -> SpirvPushBlock;
 
-    // The push-data layout the struct `typeName` declares, read with the heap writer's
-    // rules: every 8-byte member on an 8-byte boundary, in declaration order, is a frame
-    // address, and the first 4-byte word after them is the descriptor index. Nothing when
-    // the module declares no such struct or its addresses do not follow each other.
     [[nodiscard]] constexpr auto HeapPushData(std::string_view typeName) const noexcept -> std::optional<HeapPushDataLayout>;
 
   private:
     enum class Kind : uint8_t { Scalar, Vector, Matrix, Array, RuntimeArray, Struct, Pointer, Opaque };
-    // What a decoration says. A member decoration is about one member of one
-    // struct; the rest are about a type.
     enum class Decoration : uint8_t { ArrayStride, MatrixStride, MemberOffset, MemberMatrixStride };
 
-    // One declared type. `first`/`count` index the member table for a struct,
-    // `first` is the element/pointee/column type for the others, `count` is a
-    // component/column count or the id of an array's length constant, and
-    // `extra` is a scalar's bit width or a pointer's storage class -- whichever
-    // reading the kind calls for.
     struct Type {
         uint32_t id         = 0;
         uint32_t first      = 0;
@@ -256,16 +180,6 @@ class SpirvTypes {
     uint32_t                                      _variableCount    = 0;
     bool                                          _truncated        = false;
 
-    // --- tables
-    // The index of the type `id` names, or an empty optional when the module
-    // declares no such type. Deliberately an index and not a pointer: a pointer
-    // *into this table* can only say "absent" by comparing itself to nullptr, and
-    // that comparison is exactly what GCC refuses to fold when a sanitizer build
-    // constant-evaluates it (GCC bug 71962, -fsanitize=null: "(&kTypes._types[1])
-    // == 0 is not a constant expression" -- see cmake/Sanitizers.cmake). An index
-    // answers "absent" as a bool, so the reader stays evaluable in every build --
-    // including the sanitizer CI build, which is where the GpuAbi walk has to
-    // hold the ABI to the module. Index access into the table is unaffected.
     [[nodiscard]] constexpr auto TypeIndexAt(uint32_t id) const noexcept -> std::optional<uint32_t> {
         for (uint32_t i = 0; i < _typeCount; ++i) {
             if (_types[i].id == id) {
@@ -319,17 +233,8 @@ class SpirvTypes {
         return std::nullopt;
     }
 
-    // --- sizes
-    // The alignment of a type, by the rules the runtime reader used: an array,
-    // a matrix and a three-or-four-component vector are 16, a two-component
-    // vector 8, a struct the widest of its members, a scalar its own width, and
-    // a device address 8.
     [[nodiscard]] constexpr auto AlignOf(uint32_t id) const noexcept -> uint32_t;
-    // How far a type's members reach, unpadded -- what SPIRV-Reflect reports as
-    // a block member's size and a block's padded_size.
     [[nodiscard]] constexpr auto ExtentOf(uint32_t id) const noexcept -> uint32_t;
-    // The size a host ABI means by the type: the extent, rounded up to the
-    // type's alignment for a struct.
     [[nodiscard]] constexpr auto SizeOf(uint32_t id) const noexcept -> uint32_t {
         const std::optional<uint32_t> typeIndex = TypeIndexAt(id);
         if (!typeIndex || _types[*typeIndex].kind != Kind::Struct) {
@@ -337,15 +242,10 @@ class SpirvTypes {
         }
         return Vk::AlignUp(ExtentOf(id), AlignOf(id));
     }
-    // True when `type`'s OpName is one `name` answers to.
     [[nodiscard]] constexpr auto NameMatches(const Type& type, std::string_view name) const noexcept -> bool;
-    // The index of the first struct the module declares under `name` (the
-    // declaration order the walk read them in), or an empty optional. An index
-    // for the same reason TypeIndexAt returns one.
     [[nodiscard]] constexpr auto FirstStructIndex(std::string_view name) const noexcept -> std::optional<uint32_t>;
 };
 
-// The walk
 
 [[nodiscard]] constexpr auto SpirvTypes::Parse(std::span<const uint8_t> module) noexcept -> SpirvTypes {
     SpirvTypes out {};
@@ -357,20 +257,13 @@ class SpirvTypes {
     }
     const size_t words = module.size() / 4;
 
-    // Word `index` of the instruction stream, assembled a byte at a time: a
-    // consteval function cannot view the bytes as words, because that would be
-    // a cast, and a cast is not a constant expression.
     const auto wordAt = [&](size_t index) noexcept -> uint32_t {
         return static_cast<uint32_t>(module[index * 4]) | (static_cast<uint32_t>(module[index * 4 + 1]) << 8) |
                (static_cast<uint32_t>(module[index * 4 + 2]) << 16) | (static_cast<uint32_t>(module[index * 4 + 3]) << 24);
     };
-    // The word count in an instruction's first word: how the walk skips it.
     const auto countAt = [&](size_t word) noexcept -> uint32_t {
         return static_cast<uint32_t>(module[word * 4 + 2]) | (static_cast<uint32_t>(module[word * 4 + 3]) << 8);
     };
-    // The NUL-terminated string an instruction carries from word `first`, as a
-    // byte range. False when it reaches the instruction's end without a
-    // terminator, which is not a module this can read.
     const auto stringAt = [&](size_t first, uint32_t count, uint32_t* offset, uint32_t* length) noexcept -> bool {
         const uint32_t start = static_cast<uint32_t>(first * 4);
         const uint32_t span  = count * 4;
@@ -412,8 +305,6 @@ class SpirvTypes {
                 }
                 break;
             case kSpirvOpMemberName:
-                // A member's name belongs to the member, and the struct it
-                // belongs to is read when the member table is folded below.
                 if (count >= 4) {
                     if (out._memberNameCount == kMemberNameCapacity || !stringAt(word + 3, count - 3, &offset, &length)) {
                         out._truncated = true;
@@ -507,9 +398,6 @@ class SpirvTypes {
                 }
                 break;
             case kSpirvOpVariable:
-                // Above the first function, so module scope by construction: a
-                // variable declared in a body is local, and the walk never sees
-                // one.
                 if (count >= 4) {
                     if (out._variableCount == kVariableCapacity) {
                         out._truncated = true;
@@ -536,8 +424,6 @@ class SpirvTypes {
                 }
                 break;
             case kSpirvOpMemberDecorate:
-                // Operands: the struct, the member's index, the decoration, its
-                // value.
                 if (count >= 5) {
                     const uint32_t decoration = wordAt(word + 3);
                     if (decoration == kSpirvDecorationOffset || decoration == kSpirvDecorationMatrixStride) {
@@ -555,9 +441,6 @@ class SpirvTypes {
                 }
                 break;
             case kSpirvOpFunction:
-                // Module scope ends here: everything above the function section
-                // has been read, and nothing below it is a declaration this
-                // reader answers for.
                 word = words;
                 continue;
             default:
@@ -566,7 +449,6 @@ class SpirvTypes {
         word += count;
     }
 
-    // --- fold the names and the decorations into the tables
     for (uint32_t i = 0; i < out._typeCount; ++i) {
         uint32_t offset = 0;
         uint32_t length = 0;
@@ -590,9 +472,6 @@ class SpirvTypes {
                 member.nameOffset = offset;
                 member.nameLength = length;
             }
-            // A matrix member can carry its stride where it is used instead of
-            // on the type (OpMemberDecorate MatrixStride): folded onto the
-            // member's type, which is how the size below reads a stride.
             const auto stride = out.DecorationFor(structId, index, Decoration::MemberMatrixStride);
             const std::optional<uint32_t> memberIndex = out.TypeIndexAt(member.typeId);
             if (stride.has_value() && memberIndex.has_value() && out._types[*memberIndex].kind == Kind::Matrix) {
@@ -613,9 +492,6 @@ class SpirvTypes {
             out._truncated = true;
             return out;
         }
-        // The type decoration wins over a member's: it is what the type is
-        // declared as everywhere it is used, and the runtime reader read it that
-        // way too.
         bool known = false;
         for (uint32_t s = 0; s < out._strideCount; ++s) {
             if (out._strides[s].typeId == entry.target) {
@@ -637,7 +513,7 @@ class SpirvTypes {
     const Type* type = &_types[*typeIndex];
     switch (type->kind) {
         case Kind::Scalar:
-            return type->extra / 8; // a width is at least 8 bits, so this is at least 1
+            return type->extra / 8;
         case Kind::Vector:
             if (type->count >= 3) {
                 return 16;
@@ -688,7 +564,7 @@ class SpirvTypes {
             return stride.has_value() ? *stride * count : ExtentOf(type->first) * count;
         }
         case Kind::Pointer:
-            return 8; // a VkDeviceAddress
+            return 8;
         case Kind::Struct: {
             uint32_t end = 0;
             for (uint32_t index = 0; index < type->count; ++index) {
@@ -720,17 +596,12 @@ class SpirvTypes {
         }
         return true;
     };
-    // The exact name wins outright.
     if (size == name.size()) {
         return is(start, name);
     }
-    // Slang's layout-specialized copy: `FrameUniforms_std140` for
-    // `FrameUniforms`. The character after the prefix has to be the separator,
-    // or `Culling` would answer for `CullingConstants`.
     if (is(start, name) && _bytes[start + name.size()] == static_cast<uint8_t>('_')) {
         return true;
     }
-    // A type a namespace qualified: `something.Type` answers for `Type`.
     for (uint32_t i = 0; i < size; ++i) {
         if (_bytes[start + i] == static_cast<uint8_t>('.') && size - (i + 1) == name.size() && is(start + i + 1, name)) {
             return true;
@@ -761,8 +632,6 @@ class SpirvTypes {
             found.size   = size;
             found.extent = ExtentOf(type.id);
         } else if (size != found.size) {
-            // Two declarations the same plain name answers to: two layouts, and
-            // no honest way to pick between them from here.
             found.ambiguous = true;
         }
     }
@@ -819,7 +688,7 @@ class SpirvTypes {
             continue;
         }
         if (addressCount == HeapPushDataLayout::kMaxAddresses) {
-            return std::nullopt; // An address run longer than the container.
+            return std::nullopt;
         }
         if (addressCount > 0 && member.offset < layout.frameAddressOffsets[addressCount - 1] + sizeof(uint64_t)) {
             return std::nullopt;
@@ -831,10 +700,6 @@ class SpirvTypes {
     }
     layout.addressCount = addressCount;
 
-    // The descriptor index is the first 4-byte word after the address run.
-    // What occupies the blob in front of the addresses is the schema's
-    // arrangement -- the reader takes the prefix as given, because telling a
-    // pass payload from any other word is not this module's question.
     const uint32_t after = layout.frameAddressOffsets[addressCount - 1] + sizeof(uint64_t);
     uint32_t       index = 0xFFFFFFFFu;
     for (uint32_t i = 0; i < type->count; ++i) {
@@ -852,4 +717,4 @@ class SpirvTypes {
     return layout;
 }
 
-} // namespace ZHLN::Vk
+}

@@ -5,7 +5,6 @@
 
 namespace ZHLN::Vk {
 
-// Semaphore Helpers
 
 class alignas(64) SemaphorePool {
   public:
@@ -34,4 +33,4 @@ class alignas(64) SemaphorePool {
     [[maybe_unused]] uint32_t  _padding    = 0;
     std::array<VkSemaphore, 6> _semaphores = {};
 };
-} // namespace ZHLN::Vk
+}

@@ -11,7 +11,7 @@
 
 namespace ZHLN::Vk {
 
-class Context; // Forward declaration
+class Context;
 
 [[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept;
 
@@ -57,20 +57,13 @@ enum class BarrierAccess : VkAccessFlags2 {
     DepthRead     = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
     DepthWrite    = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 
-    // Ray tracing (VK_KHR_acceleration_structure). Without these the RT barriers
-    // in RenderFrame.cpp could not be expressed through the enums at all.
     AccelerationStructureRead  = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
     AccelerationStructureWrite = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR
 };
 
-// Enable bitwise OR operations on the scoped enums
 [[nodiscard]] constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage;
 [[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
 
-/**
- * @brief One vkCmdPipelineBarrier2. Empty spans are omitted from the dependency.
- * Buffer / image / global-memory helpers below all route through this.
- */
 inline void PipelineBarrier(
     VkCommandBuffer cmd,
     std::span<const VkBufferMemoryBarrier2> buffers = {},
@@ -110,20 +103,8 @@ inline void PipelineBarrier(
     };
 }
 
-/**
- * @brief Unified memory barrier dispatcher.
- * Exposed early to resolve cyclic header dependencies between Queue and Core headers.
- */
 inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept;
 
-/**
- * @brief Global memory barrier expressed with the scoped enums.
- *
- * Mirrors the BufferBarrier overload below: callers name stages and accesses
- * instead of raw VK_* flags, and the casts to the C descriptor's fields happen
- * in one place. Combine flags with operator|, e.g.
- * BarrierStage::Copy | BarrierStage::AccelerationStructureBuild.
- */
 inline void MemoryBarrier(
     VkCommandBuffer cmd,
     BarrierStage    srcStage,
@@ -139,7 +120,6 @@ struct CommandBuffer {
     VkCommandBuffer            handle     = VK_NULL_HANDLE;
     static constexpr QueueType queue_type = QType;
 
-    // Implicit conversion to raw handle for driver API calls
                        operator VkCommandBuffer() const noexcept;
     [[nodiscard]] bool Valid() const noexcept;
 };
@@ -181,19 +161,12 @@ inline void BufferBarrier(
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue;
 
-/**
- * @brief Resolves the appropriate raw VkQueue from the context based on QueueType.
- */
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t;
 
-/**
- * @brief Submits a strongly-typed command buffer to its corresponding queue
- *        and blocks the CPU until execution completes.
- */
 template <QueueType QType>
 [[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept;
 
-} // namespace ZHLN::Vk
+}
 
 #include "RenderQueue.inl"

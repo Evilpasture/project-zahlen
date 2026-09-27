@@ -12,18 +12,11 @@
 
 namespace ZHLN {
 
-/**
- * @brief A fixed-capacity, null-terminated string that never allocates.
- * @tparam Capacity The maximum number of characters including the null terminator.
- */
 template <size_t Capacity>
 class FixedString {
     static_assert(Capacity > 0, "Capacity must be at least 1 for null terminator");
 
   public:
-    // Longest text this string can hold: capacity() includes the terminator.
-    // Code that has to truncate before writing (GUI::TextEdit) asks for this
-    // rather than deriving the off-by-one itself.
     static constexpr size_t kMaxTextLength = Capacity - 1;
 
     constexpr FixedString() noexcept = default;
@@ -111,17 +104,15 @@ class FixedString {
     size_t                     _len = 0;
 };
 
-// Helper for type deduction: ZHLN::FixedString str{"Hello"};
 template <size_t N>
 FixedString(const char (&)[N]) -> FixedString<N>;
 
-// Common aliases
 using String32  = FixedString<32>;
 using String64  = FixedString<64>;
 using String128 = FixedString<128>;
 using String256 = FixedString<256>;
 
-} // namespace ZHLN
+}
 
 namespace std {
 template <size_t N>
@@ -130,4 +121,4 @@ struct formatter<ZHLN::FixedString<N>, char>: formatter<string_view, char> {
         return formatter<string_view, char>::format(string_view(str), ctx);
     }
 };
-} // namespace std
+}

@@ -1,18 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/GenerationalPool.hpp
-//
-// A fixed-capacity pool of heap objects addressed by a packed
-// (generation, index) handle. Destroying an entry bumps its generation, so a
-// handle held past the object's lifetime fails the generation check and
-// resolves to nothing instead of onto the slot's new occupant -- the same
-// stale-handle discipline DestinationRegistry enforces for windows.
-//
-// Lifted out of RenderInternal.hpp because GeometryManager owns the buffer
-// handle table and cannot include the renderer's private header: DI means the
-// manager does not know the context exists, and that only works if the
-// containers it is built from are reachable on their own.
 
 #pragma once
 #include <Zahlen/Core/Array.hpp>
@@ -25,16 +13,15 @@
 
 namespace ZHLN {
 
-// GenerationalPool Template
 
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
   public:
     enum class Error : uint8_t {
-        InvalidHandle = 1, // The handle was 0/Null
-        StaleHandle,       // Generational mismatch (the resource was already destroyed)
-        OutOfBoundsIndex,  // Index exceeds pool capacity
-        NullResource       // Internal error: slot points to null pointer
+        InvalidHandle = 1,
+        StaleHandle,
+        OutOfBoundsIndex,
+        NullResource
     };
 
     GenerationalPool() {
@@ -42,11 +29,10 @@ class GenerationalPool {
         for (size_t i = 0; i < MaxObjects; ++i) {
             _freeIndices.push_back(MaxObjects - 1 - i);
         }
-        _generations.fill(1); // Generations start at 1
+        _generations.fill(1);
     }
 
     ~GenerationalPool() {
-        // Automatically sweeps and safely destroys all remaining active allocations on shutdown
         for (size_t i = 0; i < MaxObjects; ++i) {
             if (_pointers[i] != nullptr) {
                 _pool.Destroy(_pointers[i]);
@@ -54,7 +40,6 @@ class GenerationalPool {
         }
     }
 
-    // Non-copyable, non-movable matching engine context lifetime
     GenerationalPool(const GenerationalPool&)                    = delete;
     auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
 
@@ -84,12 +69,12 @@ class GenerationalPool {
         auto gen       = static_cast<uint32_t>(rawHandle >> 32);
 
         if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
-            return; // Safely ignore stale or invalid handles
+            return;
         }
 
         _pool.Destroy(_pointers[index]);
         _pointers[index] = nullptr;
-        _generations[index]++; // Increment generation to invalidate stale handles
+        _generations[index]++;
         _freeIndices.push_back(index);
     }
 
@@ -122,4 +107,4 @@ class GenerationalPool {
     ZHLN::Array<uint32_t>            _freeIndices;
 };
 
-} // namespace ZHLN
+}

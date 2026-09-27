@@ -47,7 +47,7 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
         }
     }
 }
-} // namespace Tests
+}
 
 void ArticulationSystem::ReleaseTracked(ECS::Registry& registry, PhysicsContext& physics, size_t index) noexcept {
     TrackedRagdoll& tracked = _tracked[index];
@@ -73,9 +73,6 @@ void ArticulationSystem::Track(Entity owner, const Components::RagdollComponent&
                 tracked.isAddedToPhysics = component.isAddedToPhysics;
                 return;
             }
-            // A replacement component can arrive without an ECS lifecycle
-            // callback. The old reference remains tracked until Reconcile
-            // removes its Jolt registration on the next update.
             return;
         }
     }
@@ -107,9 +104,6 @@ void ArticulationSystem::Release(Engine& engine, Entity owner) noexcept {
         }
     }
 
-    // A component can be explicitly despawned before its first system update.
-    // It cannot have been activated by ArticulationSystem yet, but handle a
-    // manually activated component defensively without relying on component lifecycle callbacks.
     if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(owner);
         component != nullptr && component->ragdollInstance != nullptr && component->isAddedToPhysics) {
         engine.GetPhysicsContext().RemoveRagdoll(*component->ragdollInstance.GetPtr());
@@ -118,9 +112,6 @@ void ArticulationSystem::Release(Engine& engine, Entity owner) noexcept {
 }
 
 void ArticulationSystem::Shutdown(Engine& engine) noexcept {
-    // A component could have been replaced between frames. First discard stale
-    // ledger entries, then capture every current component before releasing
-    // registrations while the PhysicsContext is still available.
     Reconcile(engine.GetRegistry(), engine.GetPhysicsContext());
     const auto owners = engine.GetRegistry().GetEntitiesWith<Components::RagdollComponent>();
     for (const Entity owner: owners) {
@@ -151,8 +142,6 @@ bool ArticulationSystem::AttachRagdoll(
     Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
     uint32_t jointOffset
 ) {
-    // Nothing to attach is not an error to repair: the caller authored no
-    // physical parts, so there is no ragdoll to own.
     if (authoredParts.empty()) {
         return false;
     }
@@ -164,8 +153,6 @@ bool ArticulationSystem::AttachRagdoll(
     }
     joltSkel->CalculateParentJointIndices();
 
-    // Direct translation of the authored spec: one Jolt part per authored
-    // part, in the same order. No string inspection, no archetype.
     const std::vector<Physics::RagdollPartParams> parts(authoredParts.begin(), authoredParts.end());
 
     auto ragdollInstance = pc.CreateSkeletalRagdoll(joltSkel, parts);
@@ -262,8 +249,6 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
         if (phys != nullptr && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
-            // The physics owner may have been queued for destruction. Its
-            // identity root is the safe pose until synchronization catches up.
             capsuleWorldPos = JPH::RVec3::sZero();
         }
 
@@ -286,8 +271,6 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             }
         }
 
-        // Optional pose providers publish model-space motor targets through a
-        // generic core component. Articulation does not depend on any provider.
         if (const auto* poseOverride = reg.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
             const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
             std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
@@ -376,4 +359,4 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
     }
 }
 
-} // namespace ZHLN
+}

@@ -1,4 +1,3 @@
-// src/render/RenderDrawCommands.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,17 +24,12 @@ struct ResolvedMeshMaterial {
     VkDeviceAddress posAddr         = 0;
     VkDeviceAddress attrAddr        = 0;
 
-    // VK_EXT_mesh_shader streams (0 / 0 when the mesh has no meshlets, which
-    // makes both the task shader and the CPU-side path fall back to vertices).
     VkDeviceAddress meshletAddr       = 0;
     VkDeviceAddress meshletVertexAddr = 0;
     VkDeviceAddress meshletTriAddr    = 0;
     uint32_t        meshletCount      = 0;
 };
 
-// Meshlet streams describe the ORIGINAL vertex pool. A GPU-skinned draw
-// renders from a separate, post-skinning vertex buffer, so its meshlet vertex
-// indices would no longer line up: those draws keep the vertex pipeline.
 [[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferHandle::Invalid && mesh.meshletVertexBuffer != BufferHandle::Invalid &&
            mesh.meshletTriBuffer != BufferHandle::Invalid && skinnedVertexBuffer == BufferHandle::Invalid;
@@ -48,8 +42,6 @@ struct BindlessIndices {
     uint32_t emissive;
 };
 
-// 0xFFFF is not a bindless slot (the region is 32768). The shader treats it
-// as "no texture" so a missing film or volume map stays a constant.
 constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 
 [[nodiscard]] uint32_t FilmTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
@@ -75,23 +67,17 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
     };
 }
 
-// Inputs for one GPU instance record. `resolved` may be null: the line queue
-// owns its vertex buffers itself and has no mesh material, so it contributes no
-// skin / IBO / meshlet addresses.
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
     JPH::Mat44 world     = JPH::Mat44::sIdentity();
     JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
 
-    // The line queue points at its own position/attribute pair; mesh draws take
-    // theirs from the resolved mesh.
     uint64_t posAddress  = 0;
     uint64_t attrAddress = 0;
 
     BindlessIndices indices {};
 
-    // Mirrors `Material::alphaMode`: 0 opaque, 1 masked, 2 blend.
     uint32_t alphaMode   = 0;
     bool     isViewmodel = false;
     bool     isSkinned   = false;
@@ -112,12 +98,6 @@ struct InstanceDataDesc {
     std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
 
-    // Packed into InstanceData::flags bits 24..31 (8-bit unorm). When non-zero
-    // the shader reads iridescence from emissiveFactor.w, film thickness max
-    // from alphaCutoff, IOR from metallicFactor, volume thickness from
-    // baseColor.a, and normal scale from emissive.x. Texture indices and the
-    // film minimum ride in the two padding words. Those slots keep their
-    // ordinary meaning otherwise. The GPU struct itself does not grow.
     float transmissionFactor = 0.0f;
     float iridescenceFactor  = 0.0f;
     float filmThicknessNm    = 0.0f;
@@ -128,8 +108,6 @@ struct InstanceDataDesc {
     uint32_t filmThicknessTex = kNoFilmTexture;
     uint32_t iridescenceTex   = kNoFilmTexture;
     uint32_t volumeThicknessTex = kNoFilmTexture;
-    // Packed into the padding words only when transmission is zero. Factor 0
-    // leaves those words alone. emissive.w then holds the coat roughness factor.
     float    clearcoatFactor          = 0.0f;
     float    clearcoatRoughnessFactor = 0.0f;
     float    clearcoatNormalScale     = 1.0f;
@@ -138,16 +116,6 @@ struct InstanceDataDesc {
     uint32_t clearcoatNormalTex       = kNoFilmTexture;
 };
 
-/**
- * @brief Pack an `InstanceDataDesc` into the GPU instance record.
- *
- * The bit-packing (the two texture-index pairs, the viewmodel/skinned/alpha-mode
- * flag word), the skin/IBO/meshlet address derivation and the two padding fields
- * lived in three copies; this is the single place that knows them. The counts and
- * the position/attribute addresses stay explicit because the call sites
- * legitimately disagree: the line queue has no indices at all, and the CSG path
- * draws `finalPosMesh` rather than `posMesh`.
- */
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
     const ResolvedMeshMaterial* res = desc.resolved;
 
@@ -163,9 +131,6 @@ struct InstanceDataDesc {
     uint32_t             paddingCenter = 0;
     uint32_t             paddingMeshlet = 0;
     if (transmission8 != 0) {
-        // A transmission draw never reaches the G-buffer, so these slots are
-        // free. emissive.x is the normal-map scale, not an emissive color;
-        // the transmission shader does not add emissive.
         emissive[0] = desc.normalScale;
         emissive[3] = desc.iridescenceFactor;
         alphaCutoff = desc.filmThicknessNm;
@@ -208,8 +173,6 @@ struct InstanceDataDesc {
         .morphWeights     = desc.morphWeights,
         .baseColorFactor  = baseColor,
         .emissiveFactor   = emissive,
-        // VK_EXT_mesh_shader streams (all zero => vertex pipeline). Debug lines
-        // are not meshletized: LINE_LIST topology has no mesh pipeline variant.
         .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
@@ -269,12 +232,9 @@ struct InstanceDataDesc {
     return res;
 }
 
-} // namespace
+}
 
-// RenderContext::Impl Internal Member Functions
 
-// The draw-queue sort moved to DrawQueueManager::Sort (DrawQueueManager.cpp),
-// which owns the queue and the scratch it sorts with.
 
 void RenderContext::Impl::FlushLineQueue() {
     activeLineVertexCount = 0;
@@ -329,8 +289,6 @@ void RenderContext::Impl::FlushLineQueue() {
     auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map();
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);
 
-    // Debug lines run on their own position/attribute pair, carry no indices and
-    // are not meshletized (resolved == nullptr zeroes skin/IBO/meshlet).
     dst[lineInstanceIdx] = BuildGPUInstanceData(
         InstanceDataDesc {
             .posAddress  = posAddr,
@@ -345,7 +303,6 @@ void RenderContext::Impl::FlushLineQueue() {
     queues.Lines().clear();
 }
 
-// RenderContext Public Member Functions
 
 void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;
@@ -378,7 +335,6 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .resolved  = &*resolved,
                  .world     = params.transform,
                  .prevWorld = params.prevTransform,
-                 // posAddress points at scratchMesh for basic.slang.
                  .posAddress       = resolved->posAddr,
                  .attrAddress      = resolved->attrAddr,
                  .indices          = tex,
@@ -451,8 +407,6 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         return {
             .instanceData =
-                // CSG cutters are stencil-only draws; they still carry the
-                // meshlet streams so they can take the mesh path too.
             BuildGPUInstanceData(
                 InstanceDataDesc {
                     .resolved        = &*resolved,
@@ -534,4 +488,4 @@ void RenderContext::DrawDecal(const DecalParams& params) noexcept {
     );
 }
 
-} // namespace ZHLN
+}

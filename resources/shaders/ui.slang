@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Standalone UI shader. Does not import `common`: a 2D overlay must not
-// bind GlobalSceneRegistry (IBL, shadows, volumetric, instance buffers).
 import instance_data;
 import vertex_format;
 
@@ -18,10 +16,9 @@ struct UIObjectConstants {
 [vk::push_constant]
 UIObjectConstants uiObj;
 
-// Sampler + bindless texture array. Member order is the binding table.
 struct UIRegistry {
-    SamplerState sampler;  // 0
-    Texture2D textures[];  // 1
+    SamplerState sampler;
+    Texture2D textures[];
 };
 
 ParameterBlock<UIRegistry> ui;

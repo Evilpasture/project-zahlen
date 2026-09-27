@@ -1,4 +1,3 @@
-// resources/shaders/volumetric_integration.slang
 
 import uniforms;
 import volumetric_grid;

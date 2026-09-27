@@ -11,11 +11,6 @@
 
 namespace ZHLN {
 
-/**
- * @brief Thread-safe, growable circular queue (FIFO) designed for -fno-exceptions.
- * Uses ZHLN::Mutex for low-overhead, fast internal synchronization.
- * Enforces power-of-two capacities to use fast bitwise masking.
- */
 template <typename T, size_t InitialCapacity = 16>
 class Queue {
     static_assert((InitialCapacity & (InitialCapacity - 1)) == 0, "InitialCapacity must be a power of two!");
@@ -29,7 +24,6 @@ class Queue {
         ClearAndFree();
     }
 
-    // Copy Constructor (Thread-Safe)
     Queue(const Queue& other): _tail(other._size), _capacity(other._capacity), _size(other._size) {
         MutexGuard otherGuard(const_cast<Queue&>(other)._mutex);
 
@@ -44,7 +38,6 @@ class Queue {
         }
     }
 
-    // Copy Assignment (Deadlock-Free & Thread-Safe)
     Queue& operator=(const Queue& other) {
         if (this != &other) {
             Queue* first  = this;
@@ -77,7 +70,6 @@ class Queue {
         return *this;
     }
 
-    // Move Constructor (Thread-Safe)
     Queue(Queue&& other) noexcept: _data(other._data), _head(other._head), _tail(other._tail), _capacity(other._capacity), _size(other._size) {
         MutexGuard otherGuard(other._mutex);
 
@@ -88,7 +80,6 @@ class Queue {
         other._size     = 0;
     }
 
-    // Move Assignment (Deadlock-Free & Thread-Safe)
     Queue& operator=(Queue&& other) noexcept {
         if (this != &other) {
             Queue* first  = this;
@@ -137,11 +128,6 @@ class Queue {
         emplace(static_cast<T&&>(value));
     }
 
-    /**
-     * @brief Atomically extracts the front item from the queue.
-     * @param outValue Receives the moved front item on success.
-     * @return true if an item was successfully popped, false if empty.
-     */
     bool try_pop(T& outValue) noexcept {
         MutexGuard guard(_mutex);
         if (_size == 0) {
@@ -224,7 +210,6 @@ class Queue {
 
         constexpr bool use_move = std::is_nothrow_move_constructible_v<T> || !std::is_copy_constructible_v<T>;
 
-        // OPTIMIZED SINGLE-PASS RELOCATION LOOP
         for (size_t i = 0; i < _size; ++i) {
             size_t srcIdx = (oldHead + i) & (oldCapacity - 1);
             if constexpr (use_move) {
@@ -232,7 +217,6 @@ class Queue {
             } else {
                 ::new (static_cast<void*>(&newData[i])) T(oldData[srcIdx]);
             }
-            // Destroy the old item immediately while its cache line is scorching hot!
             oldData[srcIdx].~T();
         }
 
@@ -240,7 +224,6 @@ class Queue {
             ::operator delete[](oldData, std::align_val_t {alignof(T)});
         }
 
-        // Atomic assignment of states
         _data     = newData;
         _head     = 0;
         _tail     = _size;
@@ -255,4 +238,4 @@ class Queue {
     mutable Mutex _mutex {};
 };
 
-} // namespace ZHLN
+}

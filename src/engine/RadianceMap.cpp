@@ -79,8 +79,6 @@ auto ParseU32(std::string_view text, uint32_t& out) noexcept -> bool {
     return ec == std::errc {} && ptr != text.data();
 }
 
-// "-Y <h> +X <w>", either axis first, either sign. +Y is bottom-up, -X is
-// right-to-left; the caller flips so the buffer is top-down, +X to the right.
 auto ParseResolution(std::string_view line, uint32_t& width, uint32_t& height, bool& flipX, bool& flipY) -> bool {
     width = height = 0;
     flipX = flipY = false;
@@ -145,8 +143,6 @@ auto ReadFlatPixels(Cursor& cur, float* dst, uint32_t count, float exposure) -> 
     return true;
 }
 
-// New-style RLE: four independently encoded channels. A count above 128 is a
-// run of (count - 128) copies of the next byte; otherwise it is a dump.
 auto ReadRleChannel(Cursor& cur, uint8_t* dst, uint32_t width, int channel) -> bool {
     uint32_t written = 0;
     while (written < width) {
@@ -356,7 +352,7 @@ auto ReadAssetBytes(AssetManager& assets, std::string_view path) -> std::expecte
     return bytes;
 }
 
-} // namespace
+}
 
 auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
     if (bytes.size() >= sizeof(uint32_t)) {
@@ -409,4 +405,4 @@ auto LoadRadianceMap(AssetManager& assets, std::string_view path) -> std::expect
     return raw;
 }
 
-} // namespace ZHLN
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/DrawQueueManager.cpp
 
 #include "DrawQueueManager.hpp"
 
@@ -23,9 +22,6 @@ void DrawQueueManager::Sort() {
 
     RadixSort64(_sortItems.data(), _sortTemp.data(), drawCount);
 
-    // Gather sorted commands into scratch once, then swap ownership with the
-    // queue. The previous assignment copied every DrawCommand a second time and
-    // replaced the whole backing allocation.
     for (uint32_t i = 0; i < drawCount; ++i) {
         _sorted[i] = _queues.drawQueue[_sortItems[i].payload];
     }
@@ -33,4 +29,4 @@ void DrawQueueManager::Sort() {
     _queues.drawQueue.swap(_sorted);
 }
 
-} // namespace ZHLN
+}

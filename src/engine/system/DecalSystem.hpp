@@ -9,11 +9,7 @@ namespace ZHLN {
 
 class DecalSystem {
   public:
-    /**
-     * @brief Iterates all entities with DecalComponent + TransformComponent
-     *        and submits them to the renderer via Renderer::DrawDecal.
-     */
     static void Update(SystemContext& ctx);
 };
 
-} // namespace ZHLN
+}

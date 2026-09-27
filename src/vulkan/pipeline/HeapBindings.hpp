@@ -1,32 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/HeapBindings.hpp
-//
-// VK_EXT_descriptor_heap binding support for the reflected (SPIRV-Reflect/Slang) passes.
-// One HeapPassBindings covers one reflected descriptor set:
-//
-//  * Sampler bindings get ONE static sampler-heap slot and a CONSTANT_OFFSET mapping,
-//    written once at init (InitHeapPassSamplers).
-//  * Everything else gets ONE contiguous resource-heap block per write, holding the
-//    set's resource bindings in ordinal order, plus a PUSH_INDEX mapping. That mapping
-//    is deliberately slot-independent: ordinal i is addressed at `i * resource stride`
-//    and the block's base slot arrives through push data, so no absolute heap slot is
-//    baked into a pipeline and the mapping table stays correct wherever the allocator
-//    places the block. The write returns that base and the caller pushes it before
-//    dispatch.
-//
-// Blocks are transient: each write bumps the partition of the frame (or immediate
-// sequence) being recorded, rewound at the top of the next one. So a dispatch never
-// needs a slot reserved in advance, and these immediate host writes cannot disturb
-// descriptors another in-flight frame is still reading -- that frame owns its own
-// partition. A pass dispatching N times allocates N blocks; one needing a block twice
-// dispatches twice with the same returned base.
-//
-// Descriptors are written by name: each argument is `Vk::Slot<"binding">(value)`, so
-// argument order is not part of the contract and a binding a configuration does not
-// declare (Slang drops unreferenced parameters) is skipped instead of shifting every
-// descriptor after it.
 
 #pragma once
 
@@ -34,7 +8,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "ShaderProgram.hpp" // NamesAreDeclared and friends
+#include "ShaderProgram.hpp"
 
 #include <Zahlen/Log.hpp>
 
@@ -43,9 +17,6 @@
 
 namespace ZHLN::Vk {
 
-// FNV-1a over a binding name: a fast reject for FindResourceOrdinal, never the
-// authority -- the lookup confirms with the full name, so a collision cannot bind the
-// wrong descriptor.
 [[nodiscard]] constexpr auto NameHash(std::string_view name) noexcept -> uint32_t {
     uint32_t hash = 2166136261u;
     for (const char c: name) {
@@ -58,14 +29,9 @@ struct HeapPassBindings {
     std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
     VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
 
-    // The sampler bindings' static sampler-heap slots in reflected order, with the names
-    // they were reflected under: InitHeapPassSamplers resolves Vk::SamplerSlot<"name">
-    // against these, so a dropped sampler cannot shift the create infos after it.
     std::vector<uint32_t>    samplerSlots;
     std::vector<std::string> samplerNames;
 
-    // Position in `samplerSlots` of the sampler reflected as `name`, or nullopt when this
-    // module does not declare it.
     [[nodiscard]] auto FindSamplerPosition(std::string_view name) const noexcept -> std::optional<uint32_t> {
         const uint32_t hash  = NameHash(name);
         const auto     count = static_cast<uint32_t>(samplerNames.size());
@@ -77,27 +43,17 @@ struct HeapPassBindings {
         return std::nullopt;
     }
 
-    // One non-sampler binding: the name SPIRV-Reflect reported and its position in this
-    // set's resource-heap block. That position IS its resource ordinal -- the space
-    // WriteHeapParameters resolves names into and the PUSH_INDEX mapping's
-    // `ordinal * stride` arithmetic is built on.
     struct ResourceBinding {
-        std::string      name; // owned: the reflection module is gone by the time writes happen
+        std::string      name;
         uint32_t         nameHash       = 0;
         VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
     };
     std::vector<ResourceBinding> resources;
 
-    // The resource ordinal of the binding this set reflects as `name`. `nullopt` means the
-    // module does not declare it, which is ordinary: Slang drops unreferenced parameters
-    // (lighting.slang's blueNoiseTex and tlas exist only under `#ifndef DISABLE_RTR`), so
-    // one call site names a superset of what any single module declares.
     [[nodiscard]] auto FindResourceOrdinal(std::string_view name) const noexcept -> std::optional<uint32_t> {
         const uint32_t hash  = NameHash(name);
         const auto     count = static_cast<uint32_t>(resources.size());
         for (uint32_t ordinal = 0; ordinal < count; ++ordinal) {
-            // Hash first, name as the tie-break: a collision costs a compare, never a
-            // wrong binding.
             if (resources[ordinal].nameHash == hash && resources[ordinal].name == name) {
                 return ordinal;
             }
@@ -108,13 +64,8 @@ struct HeapPassBindings {
     uint32_t setIndex        = 0;
     uint32_t indexPushOffset = 0;
 
-    // Which transient partition this pass's blocks come from; set once, when the mapping
-    // table is built. See HeapLifecycle.
     HeapLifecycle lifecycle = HeapLifecycle::Frame;
 
-    // Number of non-sampler bindings, i.e. the width of one block. The mapping table bakes
-    // only a binding's ordinal within the block; which block a dispatch reads is the
-    // pushed index word's business.
     uint32_t resourceBindingCount = 0;
 
     void Finalize() noexcept {
@@ -135,10 +86,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return t == VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 
-// Bakes the mapping table for one reflected descriptor set. No resource slots are
-// reserved here -- blocks are allocated per write from `lifecycle`'s partition -- but the
-// heap is still needed for the static sampler slots. Fails when the caller supplies no
-// reflected index offset: offset 0 is the pass's own push block.
 [[nodiscard]] inline auto BuildHeapPassBindings(
     HeapManager&        heap,
     const ReflectedSet& set,
@@ -209,23 +156,16 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
                     entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
                     break;
                 case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-                    // Slang decorates neither StructuredBuffer nor RWStructuredBuffer with
-                    // NonWritable/NonReadable, so a READ_ONLY mask never matches
-                    // (VUID-...-flags-11312) and RW vs RO is indistinguishable from the
-                    // reflected type: accept every storage-buffer variable.
                     entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
                     break;
                 case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
                     entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
                     break;
                 default:
-                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT; // Unknown: accept everything
+                    entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
                     break;
             }
 
-            // Slot-independent mapping: the binding lives at its own ordinal inside
-            // whichever block the index word selects, so the pipeline never learns where the
-            // allocator placed the block.
             entry.source                               = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
             entry.sourceData.pushIndex.heapOffset      = ordinal * stride;
             entry.sourceData.pushIndex.pushOffset      = indexPushOffset;
@@ -233,16 +173,12 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
             entry.sourceData.pushIndex.heapArrayStride = 0;
 
             if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-                // The sampler half of a combined image sampler resolves from a dedicated
-                // sampler-heap slot, constant across blocks.
                 auto smp = heap.AllocateStaticSampler();
                 if (!smp) [[unlikely]] {
                     return std::unexpected(smp.error());
                 }
                 entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp->index));
             }
-            // Names travel with the ordinal they were assigned: this is the table
-            // WriteHeapParameters resolves Vk::Slot names against.
             out.resources.push_back(
                 {.name = b.name, .nameHash = NameHash(b.name), .descriptorType = b.descriptorType}
             );
@@ -255,16 +191,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return {};
 }
 
-// Writes the static sampler descriptors of a pass: one `Vk::SamplerSlot<"name">` per
-// SAMPLER binding, matched by name against what SPIRV-Reflect reported. A sampler the
-// module does not declare is skipped; every slot it does declare must be named, because
-// an unwritten sampler slot is a descriptor the shader samples with.
-//
-// `Declared` is the set of programs the pass runs (<ShaderBindings.hpp>), so the names are
-// checked against their bindings at compile time from the modules' own bytes. The runtime
-// assertions cover what a name cannot: a sampler a configuration dropped, and one this call
-// forgot. A binding the cook strips is named through `Vk::UnreadSampler`, which the check
-// reads as deliberate rather than as a misspelling.
 template <typename Declared, typename... Samplers>
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
     static_assert(
@@ -286,7 +212,7 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
         using SamplerT      = std::remove_cvref_t<decltype(sampler)>;
         const auto position = b.FindSamplerPosition(SamplerT::name);
         if (!position) {
-            return; // Not a sampler of this module: see the dead-strip note above.
+            return;
         }
         ZHLN::Assert(
             !initialized[*position], "descriptor-heap sampler init: sampler '{}' of set {} is initialized twice", SamplerT::name, b.setIndex
@@ -303,8 +229,6 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
     );
 }
 
-// Pushes the per-frame addresses at their independently reflected offsets; individual
-// writes stay correct if Slang inserts padding under a future target layout.
 inline void PushHeapFrameAddresses(
     VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
 ) noexcept {
@@ -320,16 +244,10 @@ inline void PushHeapFrameAddresses(
     PushHeapFrameAddresses(cmd, layout.UsedFrameAddresses(), addresses);
 }
 
-// Pushes the descriptor-index word that PUSH_INDEX mappings read.
 inline void PushHeapIndex(VkCommandBuffer cmd, uint32_t offset, uint32_t index) noexcept {
     PushData(cmd, offset, index);
 }
 
-// `PushData` with the contract in it: the caller names the module(s) whose bytes
-// read the struct, so a push site cannot hand a module a struct it does not
-// declare, or nothing at all. Lives with its siblings (and after core/RenderCore.hpp
-// in the umbrella's topological order), because the call to `PushData` is only
-// visible here.
 template <ShaderProgram... Modules, typename T>
 void PushHeapData(VkCommandBuffer cmd, const T& value) noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
@@ -340,16 +258,12 @@ void PushHeapData(VkCommandBuffer cmd, const T& value) noexcept {
     PushData(cmd, 0, value);
 }
 
-// Acceleration-structure heap write payload: decouples the write helper from the
-// ray-tracing context, the engine resolves the address.
 struct AsAddressWrite {
     VkDeviceAddress address = 0;
 };
 
 namespace TemplatedDetail {
 
-// Resolves a heap image descriptor's create info from a TypedImage when the caller
-// attached none: a 2D, single-mip, single-layer view.
 template <typename T>
 const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateInfo& scratch) noexcept {
     if constexpr (IsTypedImage<T>::value) {
@@ -362,14 +276,11 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
         if (img.viewInfo != nullptr) {
             return img.viewInfo;
         }
-        return nullptr; // No image handle to synthesize from.
+        return nullptr;
     }
     return nullptr;
 }
 
-// The kinds of descriptor a parameter-block field can supply: "this field cannot supply
-// this binding's descriptor type" is how a drifted block shows up. `Unknown` is a field
-// type the writer cannot turn into any descriptor.
 enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
 
 template <typename T>
@@ -388,11 +299,6 @@ template <typename T>
     }
 }
 
-// The other half of the same question, for the side the module states: the shape of value
-// a declared binding takes, read off the descriptor type <ShaderBindings.hpp> recorded
-// from the module's bytes. `WriteHeapBinding` answers it at run time and quietly writes
-// nothing on a mismatch; the compile-time check in WriteHeapParameters makes the same
-// mismatch a build error at the call site.
 template <VkDescriptorType Type>
 [[nodiscard]] consteval auto WriteSourceOfDeclaration() noexcept -> WriteSource {
     switch (Type) {
@@ -415,11 +321,6 @@ template <VkDescriptorType Type>
     }
 }
 
-// A write's payload held against the declaration it names: `WriteSourceOf` the value's
-// shape against `WriteSourceOfDeclaration` the binding's. A buffer where the module reads
-// an image is two same-sized values to the driver, so nothing before the validation layer
-// objects and the shader reads whatever the bits happen to mean -- this makes it a compile
-// error at the call site instead.
 struct WriteShapeMatchesDeclaration {
     template <typename DeclaredSlot, typename WriteSlot>
     [[nodiscard]] static consteval auto Holds() noexcept -> bool {
@@ -427,11 +328,6 @@ struct WriteShapeMatchesDeclaration {
     }
 };
 
-// Writes one heap descriptor for one reflected binding from one argument, into the slot
-// the write resolved for it. Returns false when the value cannot supply `descriptorType`
-// at all (a caller bug, not a runtime condition); a recognized value whose resource is
-// empty (null image or buffer, zero AS address) still returns true, because writing
-// nothing there is deliberate at some call sites.
 template <typename Arg>
 [[nodiscard]] auto WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
@@ -446,12 +342,11 @@ template <typename Arg>
             VkImageViewCreateInfo        scratch {};
             const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
             if (info == nullptr || info->image == VK_NULL_HANDLE) {
-                return true; // Untranslatable arg (raw handle without view info): nothing to write.
+                return true;
             }
             const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             if constexpr (IsTypedImage<T>::value) {
-                // Typed images carry their compile-time layout contract.
                 constexpr VkImageLayout typedLayout = (T::layout == VK_IMAGE_LAYOUT_UNDEFINED) ? layout : T::layout;
                 if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                     heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
@@ -494,7 +389,7 @@ template <typename Arg>
                 buffer = arg;
             }
             if (buffer == VK_NULL_HANDLE || size == 0) {
-                return true; // Empty buffer: nothing to write.
+                return true;
             }
             const VkDeviceAddress address = ctx.BufferAddress(buffer);
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
@@ -510,36 +405,16 @@ template <typename Arg>
         if constexpr (source != WriteSource::AccelerationStructure) {
             return false;
         } else {
-            // Callers pass AsAddressWrite with the device address of the current TLAS.
             heap.WriteAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
             return true;
         }
     }
 
-    // A reflected descriptor type this writer does not serve. Samplers never get here: the
-    // walkers skip them and InitHeapPassSamplers owns their slots.
     return false;
 }
 
-} // namespace TemplatedDetail
+}
 
-// Writes one named descriptor per argument into a fresh transient block and returns that
-// block's base, which is what the dispatch pushes into the mapping's index word.
-//
-// Every argument is `Vk::Slot<"name">(value)` matched against the names SPIRV-Reflect
-// reported for set `b.setIndex`. Sampler bindings take no argument (their slots are
-// static), and a name the module does not declare is skipped -- Slang drops unreferenced
-// parameters, so one call site serves the RT and NoRT tables without an absent binding
-// moving its neighbours. The block comes from `b.lifecycle`'s partition and is
-// `b.resourceBindingCount` slots wide; every binding must be named, because nothing else
-// fills a transient block and an unnamed slot holds a previous frame's descriptor.
-//
-// Telling a dropped name from a typo is the compile-time half below: `Declared` is the set
-// of programs the pass runs, whose bindings come from the modules' own bytes, so a name no
-// module declares is a typo the compiler reports and a declared binding this call does not
-// spell is a descriptor nothing writes. A binding the cook strips is named through
-// `Vk::Unread`, so it is neither. The runtime assertions then cover the descriptor *kind*
-// of a value and the module that was actually reflected.
 template <typename Declared, typename... Slots>
 [[nodiscard]] auto
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
@@ -558,8 +433,6 @@ template <typename Declared, typename... Slots>
         "binding is an image, an image where it is an acceleration structure"
     );
 
-    // One flag per resource ordinal: the closing assertion needs to know every binding was
-    // named exactly once, not merely how many arguments arrived.
     constexpr uint32_t kMaxTrackedBindings = 128;
     std::array<bool, kMaxTrackedBindings> named {};
     ZHLN::Assert(b.resources.size() <= kMaxTrackedBindings);
@@ -569,9 +442,6 @@ template <typename Declared, typename... Slots>
         block.has_value(), "descriptor-heap write: the {} transient partition has no room for a {} slot block (set {}); raise its capacity",
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
-    // Release builds: Assert's [[assume(false)]] makes the failure path unreachable, but the
-    // value still has to name something valid, so it names this partition's base. A
-    // wrong-but-in-bounds block is a visible wrong image; a stale one is a fault.
     const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
                                        _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) :
                                        _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
@@ -582,7 +452,7 @@ template <typename Declared, typename... Slots>
 
         const auto ordinal = b.FindResourceOrdinal(SlotT::name);
         if (!ordinal) {
-            return; // Not a binding of this module: see the Slang dead-strip note above.
+            return;
         }
         ZHLN::Assert(
             !named[*ordinal], "descriptor-heap write: binding '{}' of set {} is named twice; the second argument overwrites the first", SlotT::name, b.setIndex
@@ -612,4 +482,4 @@ template <typename Declared, typename... Slots>
     return HeapBlockBase {blockBase};
 }
 
-} // namespace ZHLN::Vk
+}
