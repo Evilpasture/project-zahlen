@@ -15,9 +15,7 @@
 
 namespace ZHLN {
 
-namespace {
-template <typename Source>
-std::pair<JPH::Vec3, float> ComputeSunDirectionAndIntensity(const Source& reg) noexcept {
+std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
     JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
     float     sunIntensity = 180.0f;
     bool      sunFound     = false;
@@ -55,16 +53,6 @@ std::pair<JPH::Vec3, float> ComputeSunDirectionAndIntensity(const Source& reg) n
     }
 
     return {sunDirection.Normalized(), sunIntensity};
-}
-
-} // namespace
-
-std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
-    return ComputeSunDirectionAndIntensity(reg);
-}
-
-std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery query) noexcept {
-    return ComputeSunDirectionAndIntensity(query);
 }
 
 void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,

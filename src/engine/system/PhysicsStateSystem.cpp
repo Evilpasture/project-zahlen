@@ -13,7 +13,7 @@
 
 namespace ZHLN::Tests {
 static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
-                                          PhysicsContext& physics, float alpha) noexcept {
+                                          const PhysicsContext& physics, float alpha) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;

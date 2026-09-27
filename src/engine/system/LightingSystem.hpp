@@ -24,7 +24,6 @@ class LightingSystem {
                                   const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
                        ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera);
 
-    static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept;
-    static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery query) noexcept;
+    static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery reg) noexcept;
 };
 } // namespace ZHLN

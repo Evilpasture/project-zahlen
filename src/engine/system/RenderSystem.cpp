@@ -332,7 +332,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         }
     }
 
-    auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
+    auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(LightingSystem::SunQuery {reg});
     if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasAuthoredSun(reg)) {
         if (const auto* env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env != nullptr && !env->source.empty()) {
             sunIntensity = 0.0f;
