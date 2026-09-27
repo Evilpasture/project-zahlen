@@ -2,58 +2,53 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TransformSystem.hpp"
-#include "Zahlen/Engine.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Config.hpp>
-#include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
-
 namespace {
 
-JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept {
-    const auto* trans       = reg.Get<Components::TransformComponent>(e);
+using TransformQuery = ECS::Query<const Components::HierarchyComponent, const Components::TransformComponent,
+                                  Components::WorldTransformComponent&>;
+
+JPH::Mat44 GetLogicalWorldTransform(TransformQuery query, Entity e) noexcept {
+    const auto* trans       = query.Get<Components::TransformComponent>(e);
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetLocalMatrix() : JPH::Mat44::sIdentity();
 
-    const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
-    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && reg.IsAlive(hierarchy->parent)) {
+    const auto* hierarchy = query.Get<Components::HierarchyComponent>(e);
+    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && query.IsAlive(hierarchy->parent)) {
         static thread_local int recursionDepth = 0;
         if (recursionDepth > 16) {
             return localMatrix;
         }
-        recursionDepth++;
-        JPH::Mat44 parentLogical = GetLogicalWorldTransform(reg, hierarchy->parent);
-        recursionDepth--;
+        ++recursionDepth;
+        JPH::Mat44 parentLogical = GetLogicalWorldTransform(query, hierarchy->parent);
+        --recursionDepth;
         return parentLogical * localMatrix;
     }
     return localMatrix;
 }
 
-}
-
-JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept {
-    const auto* trans       = reg.Get<Components::TransformComponent>(e);
+JPH::Mat44 GetWorldTransform(TransformQuery query, Entity e) noexcept {
+    const auto* trans       = query.Get<Components::TransformComponent>(e);
     JPH::Mat44  localMatrix = (trans != nullptr) ? trans->GetLocalMatrix() : JPH::Mat44::sIdentity();
 
-    const auto* hierarchy = reg.Get<Components::HierarchyComponent>(e);
-    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && reg.IsAlive(hierarchy->parent)) {
-        JPH::Mat44 parentLogical = GetLogicalWorldTransform(reg, hierarchy->parent);
-        return parentLogical * localMatrix;
+    const auto* hierarchy = query.Get<Components::HierarchyComponent>(e);
+    if ((hierarchy != nullptr) && hierarchy->parent != Entity::Null() && query.IsAlive(hierarchy->parent)) {
+        return GetLogicalWorldTransform(query, hierarchy->parent) * localMatrix;
     }
-
     return localMatrix;
 }
 
-void TransformSystem::ResolveTransforms(ECS::Registry& reg) const noexcept {
-    auto entities = reg.GetEntitiesWith<Components::TransformComponent>();
+} // namespace
 
-    for (Entity e: entities) {
-        JPH::Mat44 computedWorld = GetWorldTransform(reg, e);
-        auto*      worldComp     = reg.Get<Components::WorldTransformComponent>(e);
+void TransformSystem::Update(TransformQuery query, ECS::Registry& registry) noexcept {
+    for (Entity e: query.Entities<Components::TransformComponent>()) {
+        JPH::Mat44 computedWorld = GetWorldTransform(query, e);
+        auto*      worldComp     = query.Get<Components::WorldTransformComponent>(e);
 
         if (worldComp == nullptr) {
-            worldComp           = &reg.Add<Components::WorldTransformComponent>(e);
+            worldComp           = &registry.Add<Components::WorldTransformComponent>(e);
             worldComp->previous = computedWorld;
         }
         worldComp->world = computedWorld;
@@ -69,4 +64,4 @@ void TransformSystem::UpdateTransformHistory(ECS::Registry& reg) noexcept {
     }
 }
 
-}
+} // namespace ZHLN

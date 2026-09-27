@@ -4,7 +4,6 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 // clang-format off
@@ -14,54 +13,60 @@
 
 namespace ZHLN {
 
-ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
-    auto& reg   = ctx.registry;
-    auto& audio = *ctx.audio;
+ZHLN_API void AudioSystem(
+    ECS::Query<const Components::AudioListenerComponent, const Components::WorldTransformComponent,
+               const Components::TransformComponent, Components::AudioSourceComponent&, Components::LoopSynthComponent&> query,
+    ECS::OptionRes<AudioContext> audio, ECS::OptionRes<Camera> camera, FrameDt dt
+) {
+    if (!audio) {
+        return; // ECS-only/headless graphs need no audio device.
+    }
+    auto& device = *audio;
 
     bool listenerFound = false;
-    for (Entity e: reg.GetEntitiesWith<Components::AudioListenerComponent>()) {
-        auto* listener = reg.Get<Components::AudioListenerComponent>(e);
+    for (Entity e: query.Entities<Components::AudioListenerComponent>()) {
+        auto* listener = query.Get<Components::AudioListenerComponent>(e);
         if ((listener != nullptr) && listener->isPrimary) {
             JPH::Vec3 pos = JPH::Vec3::sZero();
             JPH::Vec3 dir = JPH::Vec3::sAxisZ();
             JPH::Vec3 up  = JPH::Vec3::sAxisY();
 
-            if (auto* wt = reg.Get<Components::WorldTransformComponent>(e)) {
+            if (auto* wt = query.Get<Components::WorldTransformComponent>(e)) {
                 pos = wt->world.GetTranslation();
                 dir = -wt->world.GetColumn3(2).Normalized();
                 up  = wt->world.GetColumn3(1).Normalized();
-            } else if (auto* t = reg.Get<Components::TransformComponent>(e)) {
+            } else if (auto* t = query.Get<Components::TransformComponent>(e)) {
                 pos = t->position;
                 dir = t->rotation * JPH::Vec3::sAxisZ();
                 up  = t->rotation * JPH::Vec3::sAxisY();
             }
 
-            audio.UpdateListener(pos, dir, up);
+            device.UpdateListener(pos, dir, up);
             listenerFound = true;
             break;
         }
     }
 
-    if (!listenerFound) {
-        const auto& cam      = *ctx.camera;
+    if (!listenerFound && camera) {
+        const auto& cam      = *camera;
         float       yawRad   = JPH::DegreesToRadians(cam.yaw);
         float       pitchRad = JPH::DegreesToRadians(cam.pitch);
         JPH::Vec3   dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-        audio.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
+        device.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
     }
 
-    auto srcEntities = reg.GetEntitiesWith<Components::AudioSourceComponent>();
-    auto sources     = reg.GetRawArray<Components::AudioSourceComponent>();
+    auto srcEntities = query.Entities<Components::AudioSourceComponent>();
+    auto sources     = query.Raw<Components::AudioSourceComponent>();
 
     for (size_t i = 0; i < srcEntities.size(); ++i) {
         Entity                            e   = srcEntities[i];
         Components::AudioSourceComponent& src = sources[i];
 
-        if (!audio.IsVoiceValid(src.voiceHandle)) {
+        if (!device.IsVoiceValid(src.voiceHandle)) {
             if (src.playOnStart && !src.filepath.empty()) {
-                src.voiceHandle = audio.CreateVoice(e, src.filepath.c_str(), src.isSpatialized, src.isLooping, src.volume);
+                src.voiceHandle = device.CreateVoice(e, src.filepath.c_str(), src.isSpatialized, src.isLooping, src.volume);
                 if (src.voiceHandle != AudioHandle::Invalid) {
-                    audio.PlayVoice(src.voiceHandle);
+                    device.PlayVoice(src.voiceHandle);
                 }
             }
         }
@@ -69,40 +74,40 @@ ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
         if (src.voiceHandle != AudioHandle::Invalid) {
             if (src.isSpatialized) {
                 JPH::Vec3 pos = JPH::Vec3::sZero();
-                if (auto* wt = reg.Get<Components::WorldTransformComponent>(e)) {
+                if (auto* wt = query.Get<Components::WorldTransformComponent>(e)) {
                     pos = wt->world.GetTranslation();
-                } else if (auto* t = reg.Get<Components::TransformComponent>(e)) {
+                } else if (auto* t = query.Get<Components::TransformComponent>(e)) {
                     pos = t->position;
                 }
-                audio.SetVoicePosition(src.voiceHandle, pos);
+                device.SetVoicePosition(src.voiceHandle, pos);
             }
-            audio.SetVoiceVolume(src.voiceHandle, src.volume);
-            audio.SetVoicePitch(src.voiceHandle, src.pitch);
-            audio.SetVoiceLooping(src.voiceHandle, src.isLooping);
+            device.SetVoiceVolume(src.voiceHandle, src.volume);
+            device.SetVoicePitch(src.voiceHandle, src.pitch);
+            device.SetVoiceLooping(src.voiceHandle, src.isLooping);
         }
     }
 
-    auto synthEntities = reg.GetEntitiesWith<Components::LoopSynthComponent>();
-    auto synths        = reg.GetRawArray<Components::LoopSynthComponent>();
+    auto synthEntities = query.Entities<Components::LoopSynthComponent>();
+    auto synths        = query.Raw<Components::LoopSynthComponent>();
 
     for (size_t i = 0; i < synthEntities.size(); ++i) {
         Entity                          e     = synthEntities[i];
         Components::LoopSynthComponent& synth = synths[i];
 
-        if (!audio.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) {
-            synth.synthHandle = audio.CreateLoopSynth(e, synth.waveType1, synth.waveType2, synth.filterType);
+        if (!device.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) {
+            synth.synthHandle = device.CreateLoopSynth(e, synth.waveType1, synth.waveType2, synth.filterType);
         }
 
         if (synth.synthHandle != SynthHandle::Invalid) {
-            audio.SetLoopSynthParams(synth.synthHandle, synth.charge, synth.baseFreq, synth.filterFreq, synth.volume);
+            device.SetLoopSynthParams(synth.synthHandle, synth.charge, synth.baseFreq, synth.filterFreq, synth.volume);
             if (synth.isStopping) {
-                audio.StopLoopSynth(synth.synthHandle, synth.fadeOut);
+                device.StopLoopSynth(synth.synthHandle, synth.fadeOut);
             }
         }
     }
 
-    audio.FlushEvents();
-    audio.ReconcileVoices(reg.AliveQuery(), dt);
+    device.FlushEvents();
+    device.ReconcileVoices(query.AliveQuery(), dt);
 }
 
 }

@@ -1613,6 +1613,12 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     outMap.poseValid   = true;
 }
 
+// Structural additions (pose overrides and attachment world transforms) need
+// Registry&: the inspector marks this evaluator as a wildcard component writer.
+// Keep the existing SystemContext entry point below for custom schedules.
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::ResMut<PhysicsContext> physicsRes,
+                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept;
+
 void ProceduralAnimation::Register(Engine& engine) {
     auto& registry = engine.GetRegistry();
     registry.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
@@ -1624,34 +1630,8 @@ void ProceduralAnimation::Register(Engine& engine) {
     registry.RegisterComponent<Animation::ItemHandlingComponent>("ItemHandlingComponent");
     registry.RegisterComponent<RigBoneMap>("RigBoneMap");
 
-    using namespace ECS;
     auto&      graph    = engine.GetUpdateGraph();
-    const bool inserted = graph.AddSystemBefore(
-        {
-            .update_func = [](SystemContext& ctx) { ProceduralAnimation::Update(ctx, ctx.dt); },
-            .name        = "ProceduralAnimationSystem",
-            .access_pattern =
-                {
-                    Read<Components::PhysicsComponent>(),
-                    Write<Components::TransformComponent>(),
-                    Write<Components::WorldTransformComponent>(),
-                    Read<Components::HierarchyComponent>(),
-                    Read<Components::MeshComponent>(),
-                    Read<ProceduralLookAtComponent>(),
-                    Write<FirstPersonVisibilityComponent>(),
-                    Read<ProceduralAnimationConfigComponent>(),
-                    Read<Components::SkeletalMeshComponent>(),
-                    Write<ProceduralLocomotionComponent>(),
-                    Write<ProceduralLocomotionTracksComponent>(),
-                    Write<Animation::ItemHandlingComponent>(),
-                    Write<HairStrandsComponent>(),
-                    Write<RigBoneMap>(),
-                    Write<Components::KinematicPoseOverrideComponent>(),
-                },
-            .enabled = true,
-        },
-        "ArticulationSystem"
-    );
+    const bool inserted = graph.AddSystemBefore<&ProceduralAnimationSystem>("ArticulationSystem");
     if (inserted) {
         graph.Compile();
         ZHLN::Log("[ProceduralAnimation] Registered optional subsystem before ArticulationSystem.");
@@ -1864,11 +1844,17 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 }
 
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
+    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::ResMut<PhysicsContext> {ctx.physics},
+                              ECS::ResMut<RenderContext> {ctx.render}, ECS::ResMut<Camera> {ctx.camera});
+}
+
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::ResMut<PhysicsContext> physicsRes,
+                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
-    auto& registry = ctx.registry;
-    auto& physics  = *ctx.physics;
-    auto& renderer = *ctx.render;
+    const float dt = frameDt.value;
+    auto& physics  = *physicsRes;
+    auto& renderer = *renderRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
@@ -2369,7 +2355,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
                     );
                 }
 
-                Camera& camera            = *ctx.camera;
+                Camera& camera            = *cameraRes;
                 camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
                 const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                 JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();

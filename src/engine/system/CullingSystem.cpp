@@ -15,15 +15,15 @@
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
-void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& visible, const Camera& cam, const CullingStats& stats) noexcept {
+void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<Entity>& visible, const Camera& cam, const CullingStats& stats) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
     }
     testsRun = true;
 
-    auto entities = reg.GetEntitiesWith<Components::MeshComponent>();
-    auto meshes   = reg.GetRawArray<Components::MeshComponent>();
+    auto entities = query.Entities<Components::MeshComponent>();
+    auto meshes   = query.Raw<Components::MeshComponent>();
 
     size_t expectedVisible = 0;
     for (size_t i = 0; i < entities.size(); ++i) {
@@ -31,7 +31,7 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
             continue;
         }
 
-        const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(entities[i]);
+        const auto* worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
         JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
         JPH::Vec3   pos        = worldMat * meshes[i].localCenter;
 
@@ -47,7 +47,7 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
     }
 
     for (Entity e: visible) {
-        if (!reg.IsAlive(e)) {
+        if (!query.IsAlive(e)) {
             ZHLN::Log("[Test Fail] Culling: Visible list contains dead entity {}", e.index);
         }
     }
@@ -128,38 +128,46 @@ void CullingSystem::Update(SystemContext& ctx, JPH::Array<Entity>& outVisible, J
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
-    auto&             reg = ctx.registry;
-    auto&             rc  = *ctx.render;
+    UpdateCore<UsePhysicsTransforms>(CullingQuery(ctx.registry), *ctx.render, cam, ctx.camera != nullptr && &cam == ctx.camera,
+                                     outVisible, outVisibleShadow);
+}
 
-    auto entities       = reg.GetEntitiesWith<Components::MeshComponent>();
-    auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
+void CullingSystem::GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
+                                ECS::ResMut<Camera> camera, VisibleEntities visible, VisibleShadowEntities shadow) {
+    culling->UpdateCore<false>(query, *render, *camera, true, visible.values, shadow.values);
+}
+
+template <bool UsePhysicsTransforms>
+void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Camera& cam, bool engineCam,
+                               JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+    ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
+
+    auto entities       = query.Entities<Components::MeshComponent>();
+    auto cameraEntities = query.Entities<Components::CameraComponent>();
 
     Components::CameraComponent* cComp = nullptr;
     if (!cameraEntities.empty()) {
-        cComp = reg.Get<Components::CameraComponent>(cameraEntities[0]);
+        cComp = query.Get<Components::CameraComponent>(cameraEntities[0]);
     }
 
     bool     isFullBright     = false;
     float    shadowWidth      = 80.0f;
     uint32_t shadowResolution = 2048;
 
-    auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
+    auto settingsEntities = query.Entities<Components::GlobalSettingsTagComponent>();
     if (!settingsEntities.empty()) {
-        if (auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
+        if (auto* pp = query.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
             isFullBright = (pp->fullBright != 0);
         }
     }
 
-    auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
+    auto shadowEntities = query.Entities<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
-        if (auto* shadowSettings = reg.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
+        if (auto* shadowSettings = query.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
             shadowWidth      = shadowSettings->shadowWidth;
             shadowResolution = shadowSettings->shadowResolution;
         }
     }
-
-    const bool engineCam = (ctx.camera != nullptr) && (&cam == ctx.camera);
 
     if (m_stats.FreezeFrustum && engineCam) {
         if (!m_wasFrozen) {
@@ -199,7 +207,9 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
     }
 
     if (!isFullBright) {
-        auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
+        auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(
+            query.Select<const Components::LightComponent, const Components::WorldTransformComponent,
+                         const Components::TransformComponent, const Components::SunTagComponent>());
 
         JPH::Vec3 shadowCenter = cam.position;
         float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);
@@ -217,7 +227,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
         cam.shadowFrustum.Update(shadowProjView);
     }
 
-    auto meshes = reg.GetRawArray<Components::MeshComponent>();
+    auto meshes = query.Raw<Components::MeshComponent>();
 
     m_stats.TotalTriangles    = 0;
     m_stats.RenderedTriangles = 0;
@@ -267,7 +277,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
                 meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
             }
 
-            const auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+            const auto* worldTrans = query.Get<Components::WorldTransformComponent>(e);
             JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
 
             batchEntities[n] = e;
@@ -315,7 +325,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(reg, outVisible, cam, m_stats);
+        ZHLN::Tests::VerifyCullingResults(query, outVisible, cam, m_stats);
     }
 }
 

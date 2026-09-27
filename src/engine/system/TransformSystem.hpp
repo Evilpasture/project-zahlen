@@ -3,37 +3,22 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
 #include <Zahlen/Common.h>
-#include <Zahlen/Entity.hpp>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 
-namespace ECS {
-class Registry;
-}
-namespace Physics {
-struct PhysicsWorld;
-}
-
 class ZHLN_API TransformSystem {
   public:
-    TransformSystem()                             = default;
-    TransformSystem(TransformSystem&&)            = delete;
-    TransformSystem& operator=(TransformSystem&&) = delete;
-    ~TransformSystem()                            = default;
+    // A raw Registry& is explicit: a missing WorldTransformComponent must be
+    // inserted, so the graph serialises this structural writer.
+    static void Update(ECS::Query<const Components::HierarchyComponent, const Components::TransformComponent,
+                                  Components::WorldTransformComponent&> query,
+                       ECS::Registry& registry) noexcept;
 
-    TransformSystem(const TransformSystem&)            = delete;
-    TransformSystem& operator=(const TransformSystem&) = delete;
-
-    [[nodiscard]] JPH::Mat44 GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept;
-
-    void ResolveTransforms(ECS::Registry& reg) const noexcept;
-
-    void UpdateTransformHistory(ECS::Registry& reg) noexcept;
+    // The post-present history step lives in FrameScheduler, not SystemGraph.
+    static void UpdateTransformHistory(ECS::Registry& registry) noexcept;
 };
 
-}
+} // namespace ZHLN

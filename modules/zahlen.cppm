@@ -274,6 +274,7 @@ using ZHLN::Reflect::GetField;
 using ZHLN::Reflect::GetFieldByName;
 using ZHLN::Reflect::SetFieldByName;
 using ZHLN::Reflect::StringToEnum;
+using ZHLN::Reflect::SystemInspector;
 using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
 }
@@ -372,15 +373,24 @@ using ZHLN::BufferSync;
 using ZHLN::BufferView;
 using ZHLN::Components;
 using ZHLN::Entity;
+using ZHLN::FrameAlpha;
+using ZHLN::FrameDt;
+using ZHLN::FrameIndex;
 using ZHLN::RagdollState;
+using ZHLN::VisibleEntities;
+using ZHLN::VisibleShadowEntities;
 
 namespace ECS {
 using ZHLN::ECS::Access;
 using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::EntityCommandBuffer;
+using ZHLN::ECS::OptionRes;
+using ZHLN::ECS::Query;
 using ZHLN::ECS::Read;
 using ZHLN::ECS::Registry;
+using ZHLN::ECS::Res;
+using ZHLN::ECS::ResMut;
 using ZHLN::ECS::SparseSet;
 using ZHLN::ECS::SystemGraph;
 using ZHLN::ECS::SystemInfo;

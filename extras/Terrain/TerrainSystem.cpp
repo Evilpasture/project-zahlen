@@ -99,20 +99,20 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
     });
 }
 
-void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
+void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&> query,
+                           ECS::ResMut<RenderContext> render) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
-    auto& reg = ctx.registry;
-    auto& rc  = *ctx.render;
+    auto& rc  = *render;
 
-    auto entities = reg.GetEntitiesWith<TerrainComponent>();
-    auto terrains = reg.GetRawArray<TerrainComponent>();
+    auto entities = query.Entities<TerrainComponent>();
+    auto terrains = query.Raw<TerrainComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
         auto&  terrain  = terrains[i];
-        auto*  meshComp = reg.Get<Components::MeshComponent>(e);
+        auto*  meshComp = query.Get<Components::MeshComponent>(e);
 
         if (meshComp == nullptr) {
             continue;
@@ -206,20 +206,8 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
 
 namespace {
 
-void Sys_Terrain(SystemContext& ctx) {
-    static TerrainSystem sys;
-    sys.Update(ctx, ctx.dt);
-}
-
-void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
-    // Appended at the end of the update graph, matching its position in the
-    // core wiring before terrain left the engine core.
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {ECS::Write<TerrainComponent>(), ECS::Write<Components::MeshComponent>()},
-        .enabled        = true,
-    });
+void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
+    updateGraph.AddSystem<&TerrainSystem::Update>();
 }
 
 } // namespace

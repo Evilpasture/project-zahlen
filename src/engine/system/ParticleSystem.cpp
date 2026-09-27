@@ -6,22 +6,21 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 
-void ParticleSystem::Update(SystemContext& ctx, float ) {
+void ParticleSystem::Update(ECS::Query<const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent> query,
+                            ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
     using namespace ZHLN::Ranges;
-    auto&       reg = ctx.registry;
-    auto&       rc  = *ctx.render;
-    const auto& cam = *ctx.camera;
+    auto& rc = *render;
+    const auto& cam = *camera;
 
     auto& active2D = rc.GetTracked2DEmitters();
     auto& active3D = rc.GetTracked3DEmitters();
 
     active2D | EraseIf([&](const auto& pair) {
-        if (!reg.IsAlive(Entity::Unpack(pair.first))) {
+        if (!query.IsAlive(Entity::Unpack(pair.first))) {
             rc.DestroyBuffer(pair.second);
             return true;
         }
@@ -29,15 +28,15 @@ void ParticleSystem::Update(SystemContext& ctx, float ) {
     });
 
     active3D | EraseIf([&](const auto& pair) {
-        if (!reg.IsAlive(Entity::Unpack(pair.first))) {
+        if (!query.IsAlive(Entity::Unpack(pair.first))) {
             rc.DestroyBuffer(pair.second);
             return true;
         }
         return false;
     });
 
-    auto entities = reg.GetEntitiesWith<Components::ParticleEmitterComponent>();
-    auto emitters = reg.GetRawArray<Components::ParticleEmitterComponent>();
+    auto entities = query.Entities<Components::ParticleEmitterComponent>();
+    auto emitters = query.Raw<Components::ParticleEmitterComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         auto& emitter = emitters[i];
@@ -60,8 +59,8 @@ void ParticleSystem::Update(SystemContext& ctx, float ) {
         rc.SubmitParticleEmitter(buffer, emitter.maxParticles, params);
     }
 
-    auto mesh_entities = reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>();
-    auto mesh_emitters = reg.GetRawArray<Components::MeshParticleEmitterComponent>();
+    auto mesh_entities = query.Entities<Components::MeshParticleEmitterComponent>();
+    auto mesh_emitters = query.Raw<Components::MeshParticleEmitterComponent>();
 
     for (size_t i = 0; i < mesh_entities.size(); ++i) {
         auto& emitter = mesh_emitters[i];

@@ -5,33 +5,123 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Core/Reflection/System.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/ecs/SystemAccess.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 #include <cstdint>
 #include <string_view>
 #include <vector>
 
-namespace ZHLN {
-struct SystemContext;
-}
-
 namespace ZHLN::ECS {
 
-enum class Access : uint8_t { Read, Write };
+// Parameters are deliberately matched by *exact* type. In particular a plain
+// float cannot accidentally select dt instead of alpha, and a Res/Query
+// reference cannot bind to a short-lived resolved value.
+template <typename Param>
+struct ParameterResolver {
+    static_assert(!std::is_same_v<Param, Param>, "Unrecognized system parameter type (use Query, Res, OptionRes or a tagged frame value)");
+};
 
-struct ComponentAccess {
-    uint32_t familyId;
-    Access   mode;
+template <typename... Comps>
+struct ParameterResolver<Query<Comps...>> {
+    static auto Resolve(SystemContext& ctx) noexcept -> Query<Comps...> { return Query<Comps...>(ctx.registry); }
+};
+
+template <>
+struct ParameterResolver<Registry&> {
+    static auto Resolve(SystemContext& ctx) noexcept -> Registry& { return ctx.registry; }
+};
+
+template <>
+struct ParameterResolver<const Registry&> {
+    static auto Resolve(SystemContext& ctx) noexcept -> const Registry& { return ctx.registry; }
+};
+
+template <>
+struct ParameterResolver<FrameDt> {
+    static auto Resolve(SystemContext& ctx) noexcept -> FrameDt { return {ctx.dt}; }
+};
+
+template <>
+struct ParameterResolver<FrameAlpha> {
+    static auto Resolve(SystemContext& ctx) noexcept -> FrameAlpha { return {ctx.alpha}; }
+};
+
+template <>
+struct ParameterResolver<FrameIndex> {
+    static auto Resolve(SystemContext& ctx) noexcept -> FrameIndex { return {ctx.frame}; }
+};
+
+namespace TemplatedDetail {
+
+template <typename T>
+struct ResourceSlot {
+    static auto Get(SystemContext& ctx) noexcept -> T* {
+        if constexpr (std::is_same_v<T, RenderContext>) {
+            return ctx.render;
+        } else if constexpr (std::is_same_v<T, PhysicsContext>) {
+            return ctx.physics;
+        } else if constexpr (std::is_same_v<T, AudioContext>) {
+            return ctx.audio;
+        } else if constexpr (std::is_same_v<T, Camera>) {
+            return ctx.camera;
+        } else if constexpr (std::is_same_v<T, CullingSystem>) {
+            return ctx.culling;
+        } else if constexpr (std::is_same_v<T, ArticulationSystem>) {
+            return ctx.articulation;
+        } else {
+            static_assert(!std::is_same_v<T, T>, "Resource is not a service provided by SystemContext");
+        }
+    }
+};
+
+} // namespace TemplatedDetail
+
+template <typename T>
+struct ParameterResolver<Res<T>> {
+    static auto Resolve(SystemContext& ctx) -> Res<T> {
+        const T* ptr = TemplatedDetail::ResourceSlot<T>::Get(ctx);
+        ZHLN::Assert(ptr != nullptr, "System requires a service which is absent from SystemContext");
+        return {ptr};
+    }
 };
 
 template <typename T>
-constexpr auto Read() noexcept -> ComponentAccess {
-    return {ComponentFamily::GetTypeID<T>(), Access::Read};
-}
+struct ParameterResolver<ResMut<T>> {
+    static auto Resolve(SystemContext& ctx) -> ResMut<T> {
+        T* ptr = TemplatedDetail::ResourceSlot<T>::Get(ctx);
+        ZHLN::Assert(ptr != nullptr, "System requires a service which is absent from SystemContext");
+        return {ptr};
+    }
+};
 
 template <typename T>
-constexpr auto Write() noexcept -> ComponentAccess {
-    return {ComponentFamily::GetTypeID<T>(), Access::Write};
-}
+struct ParameterResolver<OptionRes<T>> {
+    static auto Resolve(SystemContext& ctx) noexcept -> OptionRes<T> { return {TemplatedDetail::ResourceSlot<T>::Get(ctx)}; }
+};
+
+template <>
+struct ParameterResolver<BonePosePostProcessor> {
+    static auto Resolve(SystemContext& ctx) noexcept -> BonePosePostProcessor { return ctx.bonePosePostProcessor; }
+};
+
+template <>
+struct ParameterResolver<VisibleEntities> {
+    static auto Resolve(SystemContext& ctx) -> VisibleEntities {
+        ZHLN::Assert(ctx.visibleEntities != nullptr, "System requires the visible-entities output list");
+        return {*ctx.visibleEntities};
+    }
+};
+
+template <>
+struct ParameterResolver<VisibleShadowEntities> {
+    static auto Resolve(SystemContext& ctx) -> VisibleShadowEntities {
+        ZHLN::Assert(ctx.visibleShadowEntities != nullptr, "System requires the shadow-visible output list");
+        return {*ctx.visibleShadowEntities};
+    }
+};
 
 using SystemFunc = void (*)(ZHLN::SystemContext&);
 
@@ -52,8 +142,16 @@ class ZHLN_API SystemGraph {
     SystemGraph(SystemGraph&&) noexcept                    = default;
     auto operator=(SystemGraph&&) noexcept -> SystemGraph& = default;
 
+    // The legacy API remains for extension authors who cannot yet express
+    // their component accesses in their signature.
     void AddSystem(SystemInfo info);
     auto AddSystemBefore(SystemInfo info, std::string_view beforeSystem) -> bool;
+
+    template <auto SystemFn>
+    void AddSystem() { AddSystem(MakeSystemInfo<SystemFn>()); }
+
+    template <auto SystemFn>
+    auto AddSystemBefore(std::string_view beforeSystem) -> bool { return AddSystemBefore(MakeSystemInfo<SystemFn>(), beforeSystem); }
 
     void DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses);
 
@@ -69,6 +167,16 @@ class ZHLN_API SystemGraph {
     [[nodiscard]] static auto HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept -> bool;
 
   private:
+    template <auto SystemFn>
+    static auto MakeSystemInfo() -> SystemInfo {
+        using Inspector = ZHLN::Reflect::SystemInspector<SystemFn>;
+        SystemInfo info;
+        info.name        = Inspector::NameCString();
+        info.update_func = &Inspector::template Invoke<ParameterResolver, ZHLN::SystemContext>;
+        Inspector::PopulateAccessPattern(info.access_pattern);
+        return info;
+    }
+
     struct Node {
         SystemInfo            info;
         std::vector<uint32_t> dependents;
@@ -85,4 +193,4 @@ class ZHLN_API SystemGraph {
     std::vector<uint32_t> _entryNodes;
 };
 
-}
+} // namespace ZHLN::ECS

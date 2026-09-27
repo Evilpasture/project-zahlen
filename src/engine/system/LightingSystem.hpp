@@ -3,17 +3,28 @@
 
 #pragma once
 
-#include <Zahlen/SystemContext.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Math/Vec3.h>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 #include <utility>
+
 namespace ZHLN {
+class RenderContext;
+struct Camera;
 
 class LightingSystem {
   public:
-    void Update(SystemContext& ctx, float dt);
+    using SunQuery = ECS::Query<const Components::LightComponent, const Components::WorldTransformComponent,
+                                const Components::TransformComponent, const Components::SunTagComponent>;
+
+    static void Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
+                                  const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
+                       ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera);
+
     static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept;
+    static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery query) noexcept;
 };
-}
+} // namespace ZHLN

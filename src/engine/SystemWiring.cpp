@@ -42,43 +42,6 @@
 namespace ZHLN {
 namespace {
 
-void Sys_VisualInterpolation(SystemContext& ctx) {
-    VisualInterpolationSystem::Update(ctx);
-}
-
-void Sys_Animation(SystemContext& ctx) {
-    static AnimationSystem sys;
-    sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt, ctx.bonePosePostProcessor);
-}
-
-void Sys_Articulation(SystemContext& ctx) {
-    ctx.articulation->Update(ctx, ctx.dt);
-}
-
-void Sys_Transform(SystemContext& ctx) {
-    static TransformSystem sys;
-    sys.ResolveTransforms(ctx.registry);
-}
-
-void Sys_Audio(SystemContext& ctx) {
-    AudioSystem(ctx, ctx.dt);
-}
-
-void Sys_Culling(SystemContext& ctx) {
-    ctx.culling->Update<false>(ctx, *ctx.visibleEntities, *ctx.visibleShadowEntities);
-}
-
-void Sys_Lighting(SystemContext& ctx) {
-    static LightingSystem sys;
-    sys.Update(ctx, ctx.dt);
-}
-
-void Sys_Particle(SystemContext& ctx) {
-    static ParticleSystem sys;
-    sys.Update(ctx, ctx.dt);
-}
-
-
 namespace Steps {
 
 
@@ -163,8 +126,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
 
 void TransformHistory(Engine& engine, float , FrameContext& ) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
-    static TransformSystem transformSystem;
-    transformSystem.UpdateTransformHistory(engine.GetRegistry());
+    TransformSystem::UpdateTransformHistory(engine.GetRegistry());
 }
 
 }
@@ -198,101 +160,20 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.Clear();
     renderGraph.Clear();
 
-    using namespace ZHLN::ECS;
+    // Every graph node derives its name, thunk and component hazards from its
+    // callable's signature. The camera is modified in the earlier frame phase.
+    updateGraph.AddSystem<&TextureSystem::Update>();
+    updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
+    updateGraph.AddSystem<&AnimationSystem::Update>();
+    updateGraph.AddSystem<&ArticulationSystem::Update>();
+    updateGraph.AddSystem<&TransformSystem::Update>();
+    updateGraph.AddSystem<&AudioSystem>();
+    updateGraph.AddSystem<&ParticleSystem::Update>();
 
-
-    updateGraph.AddSystem({
-        .update_func    = [](SystemContext& ctx) -> void { TextureSystem::Update(ctx, ctx.dt); },
-        .name           = "TextureSystem",
-        .access_pattern = {},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_VisualInterpolation,
-        .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::TransformComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func = Sys_Animation,
-        .name        = "AnimationSystem",
-        .access_pattern = {Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(), Write<Components::MorphTargetComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func = Sys_Articulation,
-        .name        = "ArticulationSystem",
-        .access_pattern =
-            {
-                Read<Components::PhysicsComponent>(),
-                Read<Components::MeshComponent>(),
-                Read<Components::KinematicPoseOverrideComponent>(),
-                Write<Components::RagdollComponent>(),
-                Write<Components::TransformComponent>(),
-            },
-        .enabled = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Transform,
-        .name           = "TransformSystem",
-        .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
-        .enabled        = true,
-    });
-
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Audio,
-        .name           = "AudioSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::AudioSourceComponent>()},
-        .enabled        = true,
-    });
-
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Particle,
-        .name           = "ParticleSystem",
-        .access_pattern = {Write<Components::ParticleEmitterComponent>()},
-        .enabled        = true,
-    });
-
-
-
-    renderGraph.DeclareExternalWrites(
-        "ExternalPreRenderWrites", {
-                                       Write<Components::CameraComponent>(),
-                                   }
-    );
-
-    renderGraph.AddSystem({
-        .update_func    = Sys_Culling,
-        .name           = "CullingSystem",
-        .access_pattern = {Read<Components::MeshComponent>(), Read<Components::WorldTransformComponent>(), Read<Components::CameraComponent>()},
-        .enabled        = true,
-    });
-
-    renderGraph.AddSystem({
-        .update_func    = [](SystemContext& ctx) -> void { DecalSystem::Update(ctx); },
-        .name           = "DecalSystem",
-        .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
-        .enabled        = true,
-    });
-
-    renderGraph.AddSystem({
-        .update_func = Sys_Lighting,
-        .name        = "LightingSystem",
-        .access_pattern =
-            {
-                Read<Components::LightComponent>(),
-                Read<Components::TransformComponent>(),
-                Read<Components::NameComponent>(),
-                Write<Components::MeshComponent>(),
-            },
-        .enabled = true,
-    });
+    renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
+    renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
+    renderGraph.AddSystem<&DecalSystem::Update>();
+    renderGraph.AddSystem<&LightingSystem::Update>();
 
     engine.ApplySystemGraphsExtensions(updateGraph, renderGraph);
 

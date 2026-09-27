@@ -4,11 +4,13 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 
-class Engine;
-struct SystemContext;
+class RenderContext;
+struct Camera;
 
 class ZHLN_API ParticleSystem {
   public:
@@ -20,7 +22,8 @@ class ZHLN_API ParticleSystem {
     ParticleSystem(ParticleSystem&&)                 = default;
     ParticleSystem& operator=(ParticleSystem&&)      = default;
 
-    void Update(SystemContext& ctx, float dt);
+    static void Update(ECS::Query<const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent> emitters,
+                       ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera);
 };
 
 }

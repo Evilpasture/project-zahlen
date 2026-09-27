@@ -14,6 +14,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -24,7 +25,7 @@ namespace ZHLN {
 
 class Engine;
 class PhysicsContext;
-struct SystemContext;
+class RenderContext;
 struct Skeleton;
 
 namespace ECS {
@@ -52,7 +53,12 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    void Update(SystemContext& ctx, float dt);
+    static void Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
+                                  const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
+                                  Components::TransformComponent&, const Components::RagdollHitReactionCommand,
+                                  const Components::RagdollImpulseCommand> query,
+                       ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
+                       ECS::ResMut<PhysicsContext> physics, ECS::ResMut<RenderContext> render, FrameDt frameDt);
 
     void Release(Engine& engine, Entity owner) noexcept;
     void Shutdown(Engine& engine) noexcept;

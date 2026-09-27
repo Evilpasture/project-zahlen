@@ -14,7 +14,6 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -175,61 +174,66 @@ bool ArticulationSystem::AttachRagdoll(
     return true;
 }
 
-void ArticulationSystem::Update(SystemContext& ctx, float dt) {
-    Reconcile(ctx.registry, *ctx.physics);
+void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
+                                            const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
+                                            Components::TransformComponent&, const Components::RagdollHitReactionCommand,
+                                            const Components::RagdollImpulseCommand> query,
+                                 ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
+                                 ECS::ResMut<PhysicsContext> physics, ECS::ResMut<RenderContext> render, FrameDt frameDt) {
+    auto& sys = *articulation;
+    auto& pc  = *physics;
+    auto& rc  = *render;
+    const float dt = frameDt.value;
+    sys.Reconcile(registry, pc);
 
-    auto& reg = ctx.registry;
-    auto& pc  = *ctx.physics;
-    auto& rc  = *ctx.render;
-
-    auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
-    auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();
+    auto entities = query.Entities<Components::RagdollComponent>();
+    auto ragdolls = query.Raw<Components::RagdollComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity                        e       = entities[i];
         Components::RagdollComponent& ragComp = ragdolls[i];
-        auto*                         phys    = reg.Get<Components::PhysicsComponent>(e);
+        auto*                         phys    = query.Get<Components::PhysicsComponent>(e);
 
         if (ragComp.ragdollInstance == nullptr) {
             continue;
         }
-        Track(e, ragComp);
+        sys.Track(e, ragComp);
 
         uint32_t offset = ragComp.jointOffset;
         uint32_t count  = ragComp.jointCount;
 
-        if (auto* hitCmd = reg.Get<Components::RagdollHitReactionCommand>(e)) {
+        if (auto* hitCmd = query.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
-                _jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
-                _jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
-                _jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
+                sys._jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
+                sys._jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
+                sys._jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
 
                 ragComp.state = RagdollState::PartialBlend;
             }
-            reg.Remove<Components::RagdollHitReactionCommand>(e);
+            registry.Remove<Components::RagdollHitReactionCommand>(e);
         }
 
-        if (auto* impulseCmd = reg.Get<Components::RagdollImpulseCommand>(e)) {
+        if (auto* impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
             pc.AddRagdollImpulse(*ragComp.ragdollInstance.GetPtr(), impulseCmd->jointIndex, impulseCmd->impulse);
-            reg.Remove<Components::RagdollImpulseCommand>(e);
+            registry.Remove<Components::RagdollImpulseCommand>(e);
         }
 
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
             uint32_t globalIdx = offset + j;
-            float    decay     = _jointStates.jointBlendDecay[globalIdx];
+            float    decay     = sys._jointStates.jointBlendDecay[globalIdx];
 
             if (decay > 0.0f) {
-                _jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, _jointStates.jointBlendWeights[globalIdx] - decay * dt);
-                _jointStates.jointStiffness[globalIdx]    = std::min(1.0f, _jointStates.jointStiffness[globalIdx] + dt * 1.5f);
+                sys._jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, sys._jointStates.jointBlendWeights[globalIdx] - decay * dt);
+                sys._jointStates.jointStiffness[globalIdx]    = std::min(1.0f, sys._jointStates.jointStiffness[globalIdx] + dt * 1.5f);
 
-                if (_jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
-                    _jointStates.jointBlendDecay[globalIdx] = 0.0f;
+                if (sys._jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
+                    sys._jointStates.jointBlendDecay[globalIdx] = 0.0f;
                 }
             }
 
-            if (_jointStates.jointBlendWeights[globalIdx] > 0.001f) {
+            if (sys._jointStates.jointBlendWeights[globalIdx] > 0.001f) {
                 hasActiveBlend = true;
             }
         }
@@ -258,7 +262,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
 
         JPH::Array<JPH::Mat44> localJoints(count, JPH::Mat44::sIdentity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = _jointStates.inverseBindMatrices[offset + j].Inversed();
+            localJoints[j] = sys._jointStates.inverseBindMatrices[offset + j].Inversed();
         }
 
         JPH::Array<JPH::Mat44> modelJoints(count, JPH::Mat44::sIdentity());
@@ -271,7 +275,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             }
         }
 
-        if (const auto* poseOverride = reg.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
+        if (const auto* poseOverride = query.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
             const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
             std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
         }
@@ -292,7 +296,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             }
             ragComp.prevState = ragComp.state;
         }
-        Track(e, ragComp);
+        sys.Track(e, ragComp);
 
         if (ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
             pc.DriveRagdollPose(*ragdoll, animPose);
@@ -306,11 +310,11 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
                 continue;
             }
 
-            auto allSkinnedEntities = reg.GetEntitiesWith<Components::SkeletalMeshComponent>();
+            auto allSkinnedEntities = query.Entities<Components::SkeletalMeshComponent>();
             for (Entity childEnt: allSkinnedEntities) {
-                auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
+                auto* skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
                 if (skelMesh != nullptr && skelMesh->jointOffset == offset) {
-                    if (auto* trans = reg.Get<Components::TransformComponent>(childEnt)) {
+                    if (auto* trans = query.Get<Components::TransformComponent>(childEnt)) {
                         trans->position = JPH::Vec3(actualRootOffset);
                         trans->rotation = JPH::Quat::sIdentity();
                     }
@@ -321,11 +325,11 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             JPH::Mat44             invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
 
             for (uint32_t j = 0; j < count; ++j) {
-                JPH::Mat44 ibm       = _jointStates.inverseBindMatrices[offset + j];
+                JPH::Mat44 ibm       = sys._jointStates.inverseBindMatrices[offset + j];
                 JPH::Mat44 physModel = invRoot * physicalWorldJoints[j];
                 JPH::Mat44 animModel = modelJoints[j];
 
-                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : _jointStates.jointBlendWeights[offset + j];
+                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : sys._jointStates.jointBlendWeights[offset + j];
 
                 if (blendWeight <= 0.001f) {
                     finalSkinningMatrices[j] = animModel * ibm;
@@ -355,7 +359,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyArticulationStateConsistency(reg);
+        ZHLN::Tests::VerifyArticulationStateConsistency(registry);
     }
 }
 

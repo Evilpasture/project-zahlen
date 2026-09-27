@@ -98,7 +98,7 @@ void   Update(Engine& engine, float dt);
 | :--- | :--- | :--- |
 | **Hot-Reloading** | Reloading `.so`/`.dll` modules invalidates class vtables and member offsets, crashing active class instances. | Components reside in C++ host memory. Hot-reloaded code modules simply re-attach to existing Component arrays seamlessly. |
 | **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
-| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` inspects Component Read/Write access patterns (`Read<T>()`, `Write<T>()`) to execute systems in parallel on fibers safely. |
+| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` derives component Read/Write hazards from each system's `Query<const T, U&>` signature (or explicit `Registry&` for structural writers) and orders fiber tasks accordingly. |
 | **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
 
 
@@ -421,7 +421,36 @@ Each frame executes in a strict, deterministic sequence:
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
    * `RenderSystem`: Records multi-pass Vulkan commands and presents to the swapchain.
 
-### 3.1 Graphics Settings Flow
+### 3.1 Signature-driven ECS systems
+
+Register a free function, static member, or stateless callable with one line:
+
+```cpp
+void MoveUp(ECS::Query<Components::TransformComponent&> transforms, FrameDt dt) {
+    transforms.ForEach([&](Entity, Components::TransformComponent& transform) {
+        transform.position += JPH::Vec3(0.0f, dt.value, 0.0f);
+    });
+}
+
+updateGraph.AddSystem<&MoveUp>();
+// updateGraph.AddSystemBefore<&MoveUp>("TransformSystem"); // ordered insertion
+```
+
+`SystemGraph` reflects the callable's name and parameter types, resolves each
+parameter from `SystemContext`, builds a direct invocation thunk, and infers
+component dependencies from the query: `const T`/`const T&` reads, `T`/`T&`
+writes. `Query::ForEach` iterates the intersection; `Get`, `Entities`, `Raw`,
+`Patch`, and `GetSingleton` support optional lookups/independent passes but
+only for declared families. Queries can be projected to a read-only subset.
+Declare `Registry&` explicitly when making structural ECS changes or calling
+an existing callback that may do so; it conservatively conflicts with all
+component accesses. `Res<T>` and `ResMut<T>` inject required services,
+`OptionRes<T>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
+`FrameIndex` avoid guessing between otherwise identical scalar types. The
+legacy `AddSystem(SystemInfo)` API remains available to external callers.
+System signature reflection syntax is isolated in `Core/Reflection/System.hpp`.
+
+### 3.2 Graphics Settings Flow
 
 Graphics configuration flows in **one direction** through a single canonical model
 (`include/Zahlen/GraphicsSettings.hpp`):

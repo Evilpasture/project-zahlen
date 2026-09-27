@@ -4,11 +4,10 @@
 #include "TextureSystem.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SystemContext.hpp>
 
 namespace ZHLN {
 
-void TextureSystem::Update(SystemContext& , float ) {
+void TextureSystem::Update() {
 }
 
 uint32_t TextureSystem::ResolveIndex(Engine& engine, TextureHandle handle) noexcept {

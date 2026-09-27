@@ -6,11 +6,13 @@
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/Common.h>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
 
 class Engine;
-struct SystemContext;
+class RenderContext;
 
 namespace ECS {
 class SystemGraph;
@@ -31,7 +33,8 @@ class TerrainSystem {
     TerrainSystem(TerrainSystem&&)                 = default;
     TerrainSystem& operator=(TerrainSystem&&)      = default;
 
-    void Update(SystemContext& ctx, float dt);
+    static void Update(ECS::Query<const TerrainComponent, Components::MeshComponent&> query,
+                       ECS::ResMut<RenderContext> render);
 
     static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
     static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;

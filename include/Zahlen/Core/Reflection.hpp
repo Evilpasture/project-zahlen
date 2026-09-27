@@ -11,4 +11,5 @@
 #include <Zahlen/Core/Reflection/Dynamic.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <Zahlen/Core/Reflection/System.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
