@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Reflection/Core.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <source_location>
@@ -81,14 +82,43 @@ struct CallableInspector {
 
     static constexpr auto fnEntity = FunctionEntity();
 
+    static consteval auto ParameterCount() -> std::size_t { return std::meta::parameters_of(fnEntity).size(); }
+
+    template <std::size_t I>
+    static consteval auto ParameterTypeInfo() -> std::meta::info {
+        return std::meta::type_of(std::meta::parameters_of(fnEntity)[I]);
+    }
+
+    template <std::size_t I>
+    using ParameterType = typename[:ParameterTypeInfo<I>():];
+
+    template <typename F, std::size_t... Is>
+    static void ForEachWithIndices(F&& f, std::index_sequence<Is...>) {
+        (f.template operator()<ParameterType<Is>>(), ...);
+    }
+
+    template <template <typename> class Resolver, typename Context, std::size_t... Is>
+    static void InvokeWithIndices(Context& ctx, std::index_sequence<Is...>) {
+        auto callable = Fn;
+        std::invoke(callable, Resolver<ParameterType<Is>>::Resolve(ctx)...);
+    }
+
+    static consteval auto HasUnnamedOwner() -> bool {
+        if constexpr (std::is_class_v<Callable>) {
+            return !std::meta::has_identifier(std::meta::parent_of(fnEntity));
+        }
+        return false;
+    }
+
+    static consteval auto UnnamedOwnerLocation() -> std::source_location {
+        return std::meta::source_location_of(std::meta::parent_of(fnEntity));
+    }
+
   public:
     template <typename F>
     static void ForEachParameter(F&& f) {
-        constexpr auto params = std::define_static_array(std::meta::parameters_of(fnEntity));
-        [:Expand(params):] >> [&]<auto param>() {
-            using Param = typename[:std::meta::type_of(param):];
-            f.template operator()<Param>();
-        };
+        // Only the type aliases above touch reflections; f runs with C++ types.
+        ForEachWithIndices(std::forward<F>(f), std::make_index_sequence<ParameterCount()>{});
     }
 
     static consteval auto Name() -> std::string_view {
@@ -109,16 +139,13 @@ struct CallableInspector {
     static auto NameCString() -> const char* {
         static const std::string name = [] {
             std::string result {Name()}; // identifier_of returns a view, not necessarily a C string
-            if constexpr (std::is_class_v<Callable>) {
-                constexpr auto parent = std::meta::parent_of(fnEntity);
-                if constexpr (!std::meta::has_identifier(parent)) {
-                    // Closure spellings need not be unique; distinguish them
-                    // by the location of the callable's definition.
-                    constexpr auto loc = std::meta::source_location_of(parent);
-                    result += "@";
-                    result += loc.file_name();
-                    result += ":" + std::to_string(loc.line()) + ":" + std::to_string(loc.column());
-                }
+            if constexpr (HasUnnamedOwner()) {
+                // Reflection values stay in consteval helpers; the runtime
+                // string builder receives only an ordinary source_location.
+                constexpr auto loc = UnnamedOwnerLocation();
+                result += "@";
+                result += loc.file_name();
+                result += ":" + std::to_string(loc.line()) + ":" + std::to_string(loc.column());
             }
             return result;
         }();
@@ -127,11 +154,10 @@ struct CallableInspector {
 
     template <template <typename> class Resolver, typename Context>
     static void Invoke(Context& ctx) {
-        constexpr auto params = std::define_static_array(std::meta::parameters_of(fnEntity));
-        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            auto callable = Fn;
-            std::invoke(callable, Resolver<typename[:std::meta::type_of(params[Is]):]>::Resolve(ctx)...);
-        }(std::make_index_sequence<params.size()>{});
+        // A reflection (std::meta::info) is consteval-only in Clang/P2996.
+        // Resolve every parameter type above, during template instantiation;
+        // the runtime thunk must only mention ordinary C++ types and values.
+        InvokeWithIndices<Resolver>(ctx, std::make_index_sequence<ParameterCount()>{});
     }
 
 #else
