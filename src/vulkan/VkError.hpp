@@ -77,7 +77,7 @@ class Error {
   private:
     struct CategoryRide {
         static inline bool registered = []() -> bool {
-            TemplatedDetail::RegisterCategory(kCategoryHash, &kCategory);
+            ::ZHLN::TemplatedDetail::RegisterCategory(kCategoryHash, &kCategory);
             return true;
         }();
     };
