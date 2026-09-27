@@ -3,9 +3,11 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <expected>
+#include <format>
 #include <string>
 #include <type_traits>
 
@@ -27,6 +29,10 @@ enum class HandleError : uint8_t {
     GenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled handle failed generation check. Expected generation {}, got {}"> {}) = 1,
     SlotOutOfBounds ZHLN_ANNOTATION(ZHLN::Description<"Slot index {} exceeds maximum capacity of {}"> {}),
     EntityNull ZHLN_ANNOTATION(ZHLN::Description<"Entity handle is null or uninitialized."> {})
+};
+
+enum class BareError : uint8_t {
+    Unnamed = 1
 };
 
 // ============================================================================
@@ -169,6 +175,93 @@ struct ErrorTestSuite {
 
             ZHLN::ErrorCode none;
             if (none) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 7. Unknown Categories Degrade to "None" ---
+        // A two-word code whose category was never registered is still a live
+        // error (it is truthy and carries its words), but every text path
+        // answers "None": this is the deliberate shape of an unnamed failure,
+        // not a crash and not an empty string.
+        std::expected<void, ZHLN::ErrorCode> unknown_category_resolves_to_none() {
+            const ZHLN::ErrorCode foreign {0x5EED1E55u, 7u};
+
+            ZHLN::Error err = foreign;
+            if (!err) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (err.Is<CodecError>()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (err.Category() != "None" || err.Message() != "None" || err.Name() != "None") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+
+            const ZHLN::ErrorCode back = err;
+            if (!(back == foreign)) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 8. Manual Category Registration Is Idempotent and First-Wins ---
+        // RegisterErrorCategory is the foreign-code twin of the enum
+        // constructor's auto-registration: calling it again under a hash that
+        // is already present changes nothing, and the first category to claim
+        // a hash owns its text for the life of the process.
+        std::expected<void, ZHLN::ErrorCode> register_error_category_is_first_wins() {
+            static constexpr ZHLN::ErrorCategory first {
+                .name      = "TestForeign",
+                .to_string = [](uint32_t v) noexcept -> std::string_view { return "foreign failure"; },
+                .to_name   = [](uint32_t v) noexcept -> std::string_view { return "ForeignFailure"; }
+            };
+            static constexpr ZHLN::ErrorCategory second {
+                .name      = "TestForeignImpostor",
+                .to_string = [](uint32_t v) noexcept -> std::string_view { return "impostor"; },
+                .to_name   = [](uint32_t v) noexcept -> std::string_view { return "Impostor"; }
+            };
+            const uint32_t hash = Hash32("tests::Foreign");
+
+            ZHLN::RegisterErrorCategory(hash, &first);
+            ZHLN::RegisterErrorCategory(hash, &second);
+            ZHLN::RegisterErrorCategory(hash, &first);
+
+            ZHLN::Error err = ZHLN::ErrorCode {hash, 3u};
+            if (err.Category() != "TestForeign") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (err.Message() != "foreign failure" || err.Name() != "ForeignFailure") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 9. Unannotated Enumerators Fall Back to Their Name ---
+        std::expected<void, ZHLN::ErrorCode> message_falls_back_to_enumerator_name() {
+            ZHLN::Error err {BareError::Unnamed};
+
+            if (err.Name() != "Unnamed" || err.Message() != "Unnamed") {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            return {};
+        }
+
+        // --- 10. Formatting an Error Prints Its Message ---
+        // ZHLN::Log and ZHLN::Panic format through std::format, so the
+        // formatter on the error types is the one text path a log line takes.
+        std::expected<void, ZHLN::ErrorCode> error_formats_as_its_message() {
+            ZHLN::ErrorCode code {CodecError::CorruptedStream};
+            ZHLN::Error     err = code;
+
+            if (std::format("{}", code) != err.Message()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (std::format("{}", err) != err.Message()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (std::format("{}", err) != "The input bitstream is corrupted or incomplete.") {
                 return std::unexpected(CodecError::CorruptedStream);
             }
             return {};
