@@ -45,6 +45,12 @@ class VolumetricFogSystem {
     // Uploads the tiling 3D noise the media injection pass samples.
     [[nodiscard]] auto InitializeNoise(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
 
+    // Writes the pass-local sampler descriptors for the three volumetric
+    // passes that declare one: the temporal resolve's linear tap, the noise
+    // sampler the media injection tiles with, and the shadow sampler the light
+    // injection compares the cascade map against.
+    void InitSamplers(RenderContext::Impl& impl) noexcept;
+
     // --- what the passes need ----------------------------------------------
 
     [[nodiscard]] auto Clear() noexcept -> Vk::FixedDoubleBufferedComputePass<VolumetricClearLayout>&;

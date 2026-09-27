@@ -220,9 +220,10 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    // The image-space effects below are PostProcessFeature's; it owns both the
-    // pipelines and the heap bindings their samplers are written into.
+    // The passes below own their own pipelines and heap bindings, so they
+    // write the sampler descriptors those bindings declare.
     postProcess.InitSamplers(*this);
+    fog.InitSamplers(*this);
 }
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {
