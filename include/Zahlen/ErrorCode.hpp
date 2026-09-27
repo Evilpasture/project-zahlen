@@ -105,26 +105,6 @@ struct CategoryRegistration {
     }();
 };
 
-// Manual category registration, the twin of CategoryRegistration above: for
-// codes that enter the channel without riding the enum constructor -- the
-// Vulkan layer's Vk::Error carries a foreign enum and holds its category as
-// data, so there is no E to instantiate the template with. Insert-only; a
-// hash already present is a no-op, so the first registration wins and the
-// rest dedup against it.
-inline void RegisterCategory(const uint32_t hash, const ErrorCategory* category) noexcept {
-    auto& head = GetRegistryHead();
-    for (auto* curr = head.load(std::memory_order::acquire); curr != nullptr; curr = curr->next) {
-        if (curr->hash == hash) {
-            return;
-        }
-    }
-    auto* node     = new RegistryNode {hash, category, head.load(std::memory_order::relaxed)};
-    auto  expected = node->next;
-    while (!head.compare_exchange_weak(expected, node, std::memory_order::release, std::memory_order::relaxed)) {
-        node->next = expected;
-    }
-}
-
 inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
     RegistryNode* curr = GetRegistryHead().load(std::memory_order::acquire);
     while (curr != nullptr) {
@@ -137,6 +117,27 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
 }
 
 } // namespace TemplatedDetail
+
+// The public registration seam: the foreign-code twin of the enum
+// constructor's auto-registration. It exists for boundary carriers outside
+// this header that hold a category as data -- there is no E for the template
+// to instantiate, and no carrier should have to reach into the detail
+// namespace to ride the registry (a subsystem private to core is free to
+// change; this signature is not). Insert-only and idempotent: a hash already
+// present is a no-op, so calling it once per conversion is harmless.
+inline void RegisterErrorCategory(const uint32_t hash, const ErrorCategory* category) noexcept {
+    auto& head = TemplatedDetail::GetRegistryHead();
+    for (auto* curr = head.load(std::memory_order::acquire); curr != nullptr; curr = curr->next) {
+        if (curr->hash == hash) {
+            return;
+        }
+    }
+    auto* node     = new TemplatedDetail::RegistryNode {hash, category, head.load(std::memory_order::relaxed)};
+    auto  expected = node->next;
+    while (!head.compare_exchange_weak(expected, node, std::memory_order::release, std::memory_order::relaxed)) {
+        node->next = expected;
+    }
+}
 
 // Non-constexpr undefined symbol hook: calling this during constant evaluation forces an immediate compile error
 extern void ERROR_CODE_CANNOT_BE_ZERO();

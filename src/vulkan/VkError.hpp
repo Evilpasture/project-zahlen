@@ -17,6 +17,7 @@
 
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <cstdint>
 #include <string_view>
@@ -31,10 +32,14 @@ namespace ZHLN::Vk {
 extern void VK_ERROR_CANNOT_BE_SUCCESS();
 
 inline constexpr uint32_t kCategoryHash = Hash32("ZHLN::Vk::Error");
+// The category speaks the raw C enumerator -- the same string ReportVkError
+// already prints (Reflect::EnumToString over the real VkResult; no mirror
+// enum, no annotations, no codegen): a promoted Error names
+// VK_ERROR_DEVICE_LOST as itself.
 inline constexpr ErrorCategory kCategory = {
     .name      = "Vk",
-    .to_string = [](uint32_t) noexcept -> std::string_view { return "Vulkan error"; },
-    .to_name   = [](uint32_t) noexcept -> std::string_view { return "Vulkan error"; },
+    .to_string = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
+    .to_name   = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
 };
 
 class Error {
@@ -64,8 +69,11 @@ class Error {
 
     // Into the error channel, implicit, exactly as expensive as ErrorCode's
     // enum path: a hash and a widening. The category rides along once, on the
-    // first conversion, so a later Error promotion prints "Vk" instead of
-    // "None" -- without that touch the registry is addressable only by enums.
+    // first conversion, so a later Error promotion names the driver's own
+    // enumerator instead of "None". The ride goes through
+    // ZHLN::RegisterErrorCategory -- the channel's public registration seam,
+    // the same touch the enum constructor makes -- never into core's detail
+    // namespace, which is free to change.
     [[nodiscard]] constexpr operator ErrorCode() const noexcept {
         if consteval {
         } else {
@@ -77,7 +85,7 @@ class Error {
   private:
     struct CategoryRide {
         static inline bool registered = []() -> bool {
-            ::ZHLN::TemplatedDetail::RegisterCategory(kCategoryHash, &kCategory);
+            ZHLN::RegisterErrorCategory(kCategoryHash, &kCategory);
             return true;
         }();
     };
