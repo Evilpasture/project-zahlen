@@ -200,10 +200,6 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
 
     Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointInfo));
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers<Shaders::Gtao>(heapManager, gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(heapManager, bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomDown>(heapManager, bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomUp>(heapManager, bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
         heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"shadowSampler">(shadowInfo),
@@ -217,9 +213,6 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
-    Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-        heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
-    );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
@@ -227,10 +220,9 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::VolumetricTemporal>(heapManager, volumetricTemporalPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
-    const VkSamplerCreateInfo repeatInfo = Vk::SamplerBuilder {}.Linear().Repeat().LodRange(0.0F, 0.0F).Info();
-    Vk::InitHeapPassSamplers<Shaders::VolumetricFogInject>(heapManager, volumetricFogInjectPass.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatInfo));
-    Vk::InitHeapPassSamplers<Shaders::VolumetricLightInject>(heapManager, volumetricLightInjectPass.heapBindings, Vk::SamplerSlot<"shadowSampler">(shadowInfo));
+    // The image-space effects below are PostProcessFeature's; it owns both the
+    // pipelines and the heap bindings their samplers are written into.
+    postProcess.InitSamplers(*this);
 }
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {

@@ -11,80 +11,6 @@
 
 namespace ZHLN {
 
-namespace {
-
-JPH::Mat44 ComputeCascadeLightSpaceMatrix(
-    const Camera&     cam,
-    const JPH::Mat44& lightView,
-    const JPH::Vec3&  sunDir,
-    float             nearDist,
-    float             farDist,
-    float             aspect,
-    float             tanHalfFov,
-    uint32_t          shadowResolution
-) noexcept {
-    float hNear = 2.0f * tanHalfFov * nearDist;
-    float wNear = hNear * aspect;
-    float hFar  = 2.0f * tanHalfFov * farDist;
-    float wFar  = hFar * aspect;
-
-    std::array<JPH::Vec3, 8> corners = {
-        {{-wNear * 0.5f, hNear * 0.5f, -nearDist},
-         {wNear * 0.5f, hNear * 0.5f, -nearDist},
-         {wNear * 0.5f, -hNear * 0.5f, -nearDist},
-         {-wNear * 0.5f, -hNear * 0.5f, -nearDist},
-         {-wFar * 0.5f, hFar * 0.5f, -farDist},
-         {wFar * 0.5f, hFar * 0.5f, -farDist},
-         {wFar * 0.5f, -hFar * 0.5f, -farDist},
-         {-wFar * 0.5f, -hFar * 0.5f, -farDist}}
-    };
-
-    JPH::Mat44 invCamView = cam.GetViewMatrix().Inversed();
-    for (auto& corner: corners) {
-        corner = invCamView * corner;
-    }
-
-    JPH::Vec3 nearCenter = JPH::Vec3::sZero();
-    JPH::Vec3 farCenter  = JPH::Vec3::sZero();
-    for (int i = 0; i < 4; ++i) {
-        nearCenter += corners[static_cast<size_t>(i)];
-        farCenter  += corners[4 + static_cast<size_t>(i)];
-    }
-    JPH::Vec3 center = (nearCenter + farCenter) * 0.125f;
-
-    float radius = 0.0f;
-    for (const auto& corner: corners) {
-        radius = std::max(radius, (corner - center).Length());
-    }
-    radius = std::ceil(radius * 16.0f) / 16.0f;
-    const float invTexels = 2.0f / static_cast<float>(shadowResolution);
-    radius                = std::ceil(radius / invTexels) * invTexels;
-
-    JPH::Vec3 centerLight   = lightView * center;
-    float     texelsPerUnit = static_cast<float>(shadowResolution) / (radius * 2.0f);
-
-    centerLight.SetX(std::floor(centerLight.GetX() * texelsPerUnit) / texelsPerUnit);
-    centerLight.SetY(std::floor(centerLight.GetY() * texelsPerUnit) / texelsPerUnit);
-
-    center = lightView.Inversed() * centerLight;
-
-    float offset  = Shadows::BaseOffset;
-    float farClip = Shadows::BaseDepth;
-
-    if (farDist > 550.0f) {
-        offset  = Shadows::FarOffset;
-        farClip = Shadows::FarDepth;
-    }
-
-    JPH::Vec3  cascadeLightPos  = center + sunDir * offset;
-    JPH::Mat44 cascadeLightView = Math::CreateLookAt(cascadeLightPos, center, JPH::Vec3::sAxisY());
-    JPH::Mat44 cascadeLightProj = Math::CreateOrtho(-radius, radius, -radius, radius, Shadows::NearClip, farClip);
-
-    return cascadeLightProj * cascadeLightView;
-}
-
-}
-
 void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept {
     _impl->current_view_proj    = viewProj;
     _impl->unjittered_view_proj = unjitteredViewProj;
@@ -161,7 +87,9 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         float farDist  = cascadeSplits[i];
 
         gpuUniforms.lightSpaceMatrices[i] =
-            ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution);
+            ShadowRenderer::ComputeCascadeLightSpaceMatrix(
+                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution
+            );
     }
 
     gpuUniforms.nearZ = cam.nearZ;

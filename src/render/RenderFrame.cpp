@@ -443,6 +443,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     }
 
     _impl->frames.FlipAll();
+    _impl->shadows.Flip();
 
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());

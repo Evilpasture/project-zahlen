@@ -133,12 +133,33 @@ using TransferDstWrite = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_P
 template <typename Image>
 using ShaderReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
-template <ResourceName Name, typename UsagesList, typename RecordFn_T>
-struct GraphPass {
+// ---------------------------------------------------------------------------
+// Direct pass protocol
+// ---------------------------------------------------------------------------
+// A pass is a self-describing struct, not a closure handed to a factory. The
+// graph engine never asks a pass for a record function: it calls the pass.
+//
+// Two things are therefore required of a pass type, and the concept below is
+// exactly that contract:
+//
+//   * `name`  -- a compile-time `ResourceName`, what the profiler and the
+//                diagnostic checkpoints resolve their stage enums against;
+//   * `Usages` -- a `TypeList` of the resource usages that drive hazard
+//                 analysis and barrier generation.
+//
+// `RenderPass<Name, Usages...>` is the base that supplies both. Inheriting it
+// is a static, zero-cost declaration: no members, no vtable, and the pass type
+// stays trivially copyable so the graph can hold it by value.
+template <typename T>
+concept FrameGraphPass = requires {
+    { T::name.string_view() } -> std::convertible_to<std::string_view>;
+    typename T::Usages;
+};
+
+template <ResourceName Name, typename... UsagesList>
+struct RenderPass {
     static constexpr auto name = Name;
-    using Usages               = UsagesList;
-    using RecordFn             = RecordFn_T;
-    RecordFn record;
+    using Usages               = TypeList<UsagesList...>;
 };
 
 namespace TemplatedDetail {
@@ -207,9 +228,13 @@ struct ParallelPass {
     }
 
   private:
+    // A fork body is a pass recorded out of line, on a secondary command
+    // buffer, so it is replayed as a plain functor call -- exactly the shape
+    // `IsForkablePass` admits into a group. There is no record member to
+    // name: the pass *is* the callable.
     template <typename SubPass>
     static void RecordBody(void* user, VkCommandBuffer cmd) noexcept {
-        static_cast<const SubPass*>(user)->record(cmd);
+        (*static_cast<const SubPass*>(user))(cmd);
     }
 };
 
@@ -219,8 +244,6 @@ constexpr auto Fork(SubPasses&&... passes) {
 }
 
 namespace TemplatedDetail {
-
-struct BypassGraphicsCheckToken {};
 
 template <typename U>
 struct IsColorAttachment: std::false_type {};
@@ -345,6 +368,12 @@ template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
 
+// Whether a pass may be replayed as a raw fork body on a secondary command
+// buffer. A compute or transfer pass always can. A raster pass can only if it
+// manages its own render pass -- that is, if it is callable with a bare
+// `VkCommandBuffer`. A raster pass that takes `RasterPassContext&` is asking
+// the executor to open the render pass for it, and that wrapper has to run on
+// the command buffer it is handed, so such a pass runs alone.
 template <typename P>
 struct IsForkablePass {
     using Usages      = typename P::Usages;
@@ -352,7 +381,7 @@ struct IsForkablePass {
     using DepthWrites = Filter<Usages, IsDepthAttachment>;
 
     static constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
-    static constexpr bool value       = !is_graphics || std::is_invocable_v<typename P::RecordFn, VkCommandBuffer>;
+    static constexpr bool value       = !is_graphics || std::is_invocable_v<P, VkCommandBuffer>;
 };
 
 template <typename... S>
@@ -457,36 +486,14 @@ struct PassPack {
     constexpr auto BuildGraph() &&;
 };
 
+// A pass pack is the only composition primitive the graph still offers: a
+// tuple of pass structs in declaration order, concatenated with `+` and
+// compiled with `BuildGraph()`. Each pass is written as a struct that inherits
+// `RenderPass<...>` and implements `operator()`, so there is nothing here that
+// wraps a closure -- the pack stores the passes themselves.
 template <typename... Passes>
 constexpr auto MakePassPack(Passes&&... passes) {
     return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
-}
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto MakePass(RecordFn&& record) {
-    constexpr bool has_graphics = (TemplatedDetail::IsColorAttachment<Usages>::value || ...) || (TemplatedDetail::IsDepthAttachment<Usages>::value || ...);
-
-    if constexpr (has_graphics) {
-        static_assert(
-            !std::is_invocable_v<RecordFn, VkCommandBuffer>, "\n\n================================================================================\n"
-                                                             "  [COMPILER ERROR] Render pass safety violation detected!\n"
-                                                             "================================================================================\n\n"
-                                                             "  Direct use of MakePass with ColorWrite or DepthWrite is not allowed.\n"
-                                                             "  Recording draw calls outside of an active Vulkan RenderPass causes undefined "
-                                                             "behaviour.\n\n"
-                                                             "  Resolution:\n"
-                                                             "    - Write your lambdas to accept 'auto& ctx' instead of raw VkCommandBuffer.\n"
-                                                             "    - The graph executor will automatically open and close the RenderPass for you.\n\n"
-                                                             "================================================================================\n"
-        );
-    }
-
-    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
-}
-
-template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, TemplatedDetail::BypassGraphicsCheckToken  = {}) {
-    return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
 }
 
 struct GraphResource {
@@ -513,6 +520,39 @@ class ResourceBinder {
     std::array<GraphResource, ResourceList::size> _resources {};
 };
 
+// The part of a rendered pass's context that does not depend on which
+// attachments the graph collected for it.
+//
+// The concrete `RasterPassContext` is templated on the resource list, the pass's
+// color and depth writes, and the pass index -- none of which a pass type can
+// name, because they are only known once the whole graph is compiled. A pass
+// that wants the automatic render-pass wrapper therefore declares
+// `operator()(Vk::RasterPassContextBase&)` and gets the derived context passed
+// to it by reference. That is what lets the body live in a translation unit
+// instead of being a template instantiated (and re-instantiated) at every graph
+// composition.
+class RasterPassContextBase {
+  public:
+    explicit RasterPassContextBase(VkCommandBuffer cmd) noexcept: m_cmd(cmd) {
+    }
+    ~RasterPassContextBase() = default;
+
+    RasterPassContextBase(const RasterPassContextBase&)                = delete;
+    auto operator=(const RasterPassContextBase&) -> RasterPassContextBase& = delete;
+    RasterPassContextBase(RasterPassContextBase&&) noexcept            = delete;
+    auto operator=(RasterPassContextBase&&) noexcept -> RasterPassContextBase& = delete;
+
+    [[nodiscard]] auto Cmd() const noexcept -> VkCommandBuffer;
+    [[nodiscard]] auto Extent() const noexcept -> VkExtent2D;
+
+  protected:
+    void SetExtent(VkExtent2D extent) noexcept;
+
+  private:
+    VkCommandBuffer m_cmd;
+    VkExtent2D      m_extent {};
+};
+
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 class RasterPassContext;
 
@@ -521,6 +561,11 @@ class CompileTimeFrameGraph {
   public:
     using Resources = typename TemplatedDetail::CollectAllResources<Passes...>::type;
     using Binder    = ResourceBinder<Resources>;
+
+    static_assert(
+        (FrameGraphPass<Passes> && ...),
+        "every graph pass must satisfy Vk::FrameGraphPass: inherit Vk::RenderPass<\"Name\", Usages...> so the graph can name it and analyse its hazards"
+    );
 
     static constexpr size_t NumPasses    = sizeof...(Passes);
     static constexpr size_t NumResources = Resources::size;
@@ -615,18 +660,13 @@ struct ClearColorOf {
 };
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-class RasterPassContext {
+class RasterPassContext: public RasterPassContextBase {
   public:
     RasterPassContext(VkCommandBuffer cmd, const std::array<GraphResource, ResourceList::size>& bindings) noexcept;
 
     ~RasterPassContext() noexcept;
 
-    [[nodiscard]] VkCommandBuffer Cmd() const noexcept;
-    [[nodiscard]] VkExtent2D      Extent() const noexcept;
-
   private:
-    VkCommandBuffer                                             m_cmd;
-    VkExtent2D                                                  m_extent {};
     std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> m_colors {};
 
     template <typename... Imgs, typename... DImgs>

@@ -82,13 +82,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            return CompileShadowPipeline(
-                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
+            return shadows.CompileCascadePipelines(
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
             );
         })
         .and_then([&]() {
-            return CompilePunctualShadowPipeline(
-                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+            return shadows.CompilePunctualPipeline(
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(),
+                Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
             );
         })
         .and_then([&]() { return InitCSGPipelines(); });
