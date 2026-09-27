@@ -7,6 +7,7 @@
 #include "NativeScriptModule.hpp"
 #include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
+#include "AudioSystem.hpp"
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
@@ -18,7 +19,6 @@
 #include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/Audio/AudioSystem.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>

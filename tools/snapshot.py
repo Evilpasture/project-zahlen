@@ -38,7 +38,7 @@ PRESETS = {
         "include/Zahlen/Audio.hpp",
         "src/audio",
         "modules/zahlen-audio.cppm",
-        "include/Zahlen/Audio/AudioSystem.hpp",
+        "src/engine/system/AudioSystem.hpp",
         "src/engine/system/AudioSystem.cpp",
     ],
     "core": [

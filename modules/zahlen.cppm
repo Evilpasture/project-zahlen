@@ -116,8 +116,10 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
+// Preserve the existing umbrella-module export without exposing this engine
+// graph entry through the audio library's public headers.
+#include <AudioSystem.hpp>
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/Audio/AudioSystem.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>

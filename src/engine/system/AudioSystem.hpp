@@ -3,8 +3,8 @@
 
 #pragma once
 
-// The graph entry point depends on component and generated GPU layouts. Keep
-// that dependency out of Audio.hpp, which is also used by the audio-only target.
+// Engine-only graph entry point; the audio library exposes AudioContext, not
+// engine component queries. Keep Components.hpp out of its public API.
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
