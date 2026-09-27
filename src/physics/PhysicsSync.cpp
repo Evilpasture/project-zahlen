@@ -17,7 +17,7 @@
 
 namespace ZHLN::Physics {
 
-namespace { // --- INTERNAL OPTIMIZED IMPLEMENTATION ---
+namespace {
 
 struct alignas(32) PosStride {
     JPH::Real x, y, z, w;
@@ -70,11 +70,9 @@ using AuxPointerType = JPH::Float4*;
 template <JPH::EBodyType TType>
 [[gnu::always_inline, gnu::nonnull(2)]]
 inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b, const WorldDataCreateInfo world) noexcept {
-    // 1. Snapshot previous state (Center of Mass & Rotation)
     world.shadow_ppos[D] = world.shadow_pos[D];
     world.shadow_prot[D] = world.shadow_rot[D];
 
-    // 2. Write Current COM Position
     auto* const targetPos   = &world.shadow_pos[D];
     const auto& translation = b->GetCenterOfMassPosition();
 
@@ -85,11 +83,9 @@ inline void ProcessItem(const uint32_t D, const JPH::Body* const ZHLN_RESTRICT b
         JPH::Vec4(JPH::Vec3(translation), 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(targetPos));
     }
 
-    // 3. Write Current Rotation
     const auto& rotation = b->GetRotation();
     rotation.GetXYZW().StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
 
-    // 4. Write Velocities (Rigid Body Only)
     if constexpr (TType == JPH::EBodyType::RigidBody) {
         JPH::Vec4(b->GetLinearVelocity(), 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_lvel[D]));
 
@@ -150,7 +146,6 @@ inline void ExecuteSyncPass(
         const uint32_t raw_jolt_id = active_ids[i].GetIndexAndSequenceNumber();
         const uint32_t j_idx       = raw_jolt_id & JPH::BodyID::cMaxBodyIndex;
 
-        // 1. Panic immediately if Jolt returns an out-of-bounds index (indicates memory corruption)
         ZHLN::Assert(
             j_idx < map.slot_capacity + 1, "PhysicsSync: Out of bounds j_idx ({}) detected! Slot capacity is {}. Active ID: {:#x}", j_idx, map.slot_capacity,
             raw_jolt_id
@@ -163,7 +158,6 @@ inline void ExecuteSyncPass(
             map.body_ptrs[j_idx] = b;
         }
 
-        // 2. Panic if Jolt claims a body is active but we fail to resolve its pointer
         ZHLN::Assert(b != nullptr, "PhysicsSync: Failed to resolve Jolt Body for active ID: {:#x}", raw_jolt_id);
 
         const uint64_t handle = b->GetUserData();
@@ -173,14 +167,10 @@ inline void ExecuteSyncPass(
         const uint32_t safe_slot   = (slot < map.slot_capacity) ? slot : 0;
         const uint32_t current_gen = map.generations[safe_slot].load(std::memory_order::relaxed);
 
-        // 3. Panic if we find a garbage non-zero slot index exceeding capacity (indicates corrupted
-        // UserData)
         ZHLN::Assert(
             slot < map.slot_capacity, "PhysicsSync: Decoded slot index ({}) exceeds slot capacity ({}). Handle: {:#x}", slot, map.slot_capacity, handle
         );
 
-        // (Unmanaged bodies like Ragdoll joints have handle == 0 and are safely skipped
-        // branchlessly)
         const uint32_t bad      = static_cast<uint32_t>(slot >= map.slot_capacity) | (current_gen ^ gen);
         const uint32_t d_idx    = map.slot_to_dense[safe_slot];
         const auto     is_valid = static_cast<uint32_t>(bad == 0);
@@ -206,7 +196,6 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
     for (auto* character: characters) {
         const ZHLN::Entity h = ZHLN::Entity::Unpack(character->GetUserData());
 
-        // In-loop validation (similar to rigid body pass)
         const uint32_t slot = h.index;
         if (slot >= map.slot_capacity) [[unlikely]] {
             continue;
@@ -214,11 +203,9 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 
         const uint32_t D = map.slot_to_dense[slot];
 
-        // 1. Snapshot previous state
         world.shadow_ppos[D] = world.shadow_pos[D];
         world.shadow_prot[D] = world.shadow_rot[D];
 
-        // 2. Optimized Position Store
         const JPH::RVec3 pos       = character->GetPosition();
         auto* const      targetPos = &world.shadow_pos[D];
         if constexpr (IS_DOUBLE) {
@@ -228,16 +215,14 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
             JPH::Vec4(JPH::Vec3(pos), 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(targetPos));
         }
 
-        // 3. Optimized Rotation & Velocity Store
         character->GetRotation().GetXYZW().StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_rot[D]));
 
         JPH::Vec4(character->GetLinearVelocity(), 0.0f).StoreFloat4(reinterpret_cast<AuxPointerType>(&world.shadow_lvel[D]));
     }
 }
 
-} // namespace
+}
 
-// PUBLIC API
 
 [[
 #if defined(__clang__)
@@ -253,7 +238,6 @@ void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const inSystem, const J
         return;
     }
 
-    // Retrieve aligned raw pointers from the managed JPH::Arrays
     const WorldDataCreateInfo worldInfo = {
         .shadow_pos  = std::assume_aligned<32>(reinterpret_cast<PosStride*>(positions)),
         .shadow_ppos = std::assume_aligned<32>(reinterpret_cast<PosStride*>(prevPositions)),
@@ -277,4 +261,4 @@ void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const inSystem, const J
     }
 }
 
-} // namespace ZHLN::Physics
+}

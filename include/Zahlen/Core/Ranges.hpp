@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: include/Zahlen/Core/Ranges.hpp
 #pragma once
 
 #include <array>
@@ -15,7 +14,6 @@ namespace ZHLN::Ranges {
 
 namespace TemplatedDetail {
 
-// Helper to deduce the weakest iterator_category among a set of categories
 template <typename... Categories>
 struct MinCategory;
 
@@ -30,7 +28,6 @@ struct MinCategory<Cat1, Cat2, Rest...> {
     using type  = typename MinCategory<lower, Rest...>::type;
 };
 
-// Maps raw iterator categories to standard tags
 template <typename Category>
 using NormalizeCategory = std::conditional_t<
     std::is_base_of_v<std::random_access_iterator_tag, Category>,
@@ -40,9 +37,8 @@ using NormalizeCategory = std::conditional_t<
         std::bidirectional_iterator_tag,
         std::conditional_t<std::is_base_of_v<std::forward_iterator_tag, Category>, std::forward_iterator_tag, std::input_iterator_tag>>>;
 
-} // namespace TemplatedDetail
+}
 
-// Core Zip View
 
 template <typename... Iterators>
 class ZipIterator {
@@ -83,7 +79,7 @@ class ZipIterator {
 
   private:
     template <size_t... Is>
-    [[nodiscard]] constexpr bool any_equal(const ZipIterator& other, std::index_sequence<Is...> /*unused*/) const {
+    [[nodiscard]] constexpr bool any_equal(const ZipIterator& other, std::index_sequence<Is...> ) const {
         return ((std::get<Is>(_iters) == std::get<Is>(other._iters)) || ...);
     }
 
@@ -120,7 +116,6 @@ class ZipRange {
     std::tuple<Ranges...> _ranges;
 };
 
-// Transform View
 
 template <typename Iterator, typename Func>
 class TransformIterator {
@@ -159,7 +154,7 @@ class TransformIterator {
 
   private:
     Iterator     _it;
-    mutable Func _func; // FIXED: mutable allows stateful / non-const operator() lambdas
+    mutable Func _func;
 };
 
 template <typename Range, typename Func>
@@ -183,7 +178,6 @@ class TransformRange {
     Func  _func;
 };
 
-// Filter View
 
 template <typename Iterator, typename Pred>
 class FilterIterator {
@@ -195,7 +189,6 @@ class FilterIterator {
     using reference       = typename std::iterator_traits<Iterator>::reference;
     using pointer         = typename std::iterator_traits<Iterator>::pointer;
     using difference_type = typename std::iterator_traits<Iterator>::difference_type;
-    // Filtering inherently requires forward scanning, capping category at forward_iterator_tag
     using iterator_category =
         std::conditional_t<std::is_base_of_v<std::forward_iterator_tag, base_category>, std::forward_iterator_tag, std::input_iterator_tag>;
 
@@ -261,7 +254,6 @@ class FilterRange {
     Pred  _pred;
 };
 
-// Stride View
 
 template <typename Iterator>
 class StrideIterator {
@@ -328,7 +320,6 @@ class StrideRange {
     size_t _stride;
 };
 
-// Take View (Limits to first N elements)
 
 template <typename Iterator>
 class TakeIterator {
@@ -394,7 +385,6 @@ class TakeRange {
     size_t _count;
 };
 
-// Drop View (Skips first N elements - Advanced at zero runtime cost)
 
 template <typename Range>
 class DropRange {
@@ -423,7 +413,6 @@ class DropRange {
     size_t _count;
 };
 
-// EraseIf Action (Terminal mutation)
 
 template <typename Container, typename Pred>
 constexpr auto EraseIf(Container& c, Pred pred) {
@@ -437,7 +426,6 @@ constexpr auto EraseIf(Container& c, Pred pred) {
     return c;
 }
 
-// FindIf Action (Linear Search)
 
 template <typename Container, typename Pred>
 constexpr auto FindIf(Container& c, Pred pred) {
@@ -453,7 +441,6 @@ constexpr auto FindIf(Container& c, Pred pred) {
     return last;
 }
 
-// Functional Adapters for Pipe `|` Syntax
 
 template <typename Func>
 struct TransformAdapter {
@@ -501,7 +488,6 @@ template <typename Pred>
 struct EraseIfAdapter {
     Pred pred;
 
-    // FIXED: Now delegates directly to ZHLN::Ranges::EraseIf(c, pred)
     template <typename Container>
     constexpr auto operator()(Container& c) const {
         return ZHLN::Ranges::EraseIf(c, pred);
@@ -572,20 +558,17 @@ struct FindOrInsertAdapter {
     }
 };
 
-// Global Pipeline Operator
 template <typename Range, typename Adapter>
 constexpr auto operator|(Range&& r, Adapter&& a) {
     return std::forward<Adapter>(a)(std::forward<Range>(r));
 }
 
-// Global Factory Functions (Supports both Direct and Pipeline syntax)
 
 template <typename... Ranges>
 [[nodiscard]] constexpr auto Zip(Ranges&&... ranges) {
     return ZipRange<Ranges...>(std::forward<Ranges>(ranges)...);
 }
 
-// 1. Transform Overloads
 template <typename Range, typename Func>
 [[nodiscard]] constexpr auto Transform(Range&& range, Func func) {
     return TransformRange<Range, Func>(std::forward<Range>(range), func);
@@ -595,7 +578,6 @@ template <typename Func>
     return TransformAdapter<Func> {func};
 }
 
-// 2. Filter Overloads
 template <typename Range, typename Pred>
 [[nodiscard]] constexpr auto Filter(Range&& range, Pred pred) {
     return FilterRange<Range, Pred>(std::forward<Range>(range), pred);
@@ -605,7 +587,6 @@ template <typename Pred>
     return FilterAdapter<Pred> {pred};
 }
 
-// 3. Stride Overloads
 template <typename Range>
 [[nodiscard]] constexpr auto Stride(Range&& range, size_t stride) {
     return StrideRange<Range>(std::forward<Range>(range), stride);
@@ -614,7 +595,6 @@ template <typename Range>
     return StrideAdapter {stride};
 }
 
-// 4. Take Overloads
 template <typename Range>
 [[nodiscard]] constexpr auto Take(Range&& range, size_t count) {
     return TakeRange<Range>(std::forward<Range>(range), count);
@@ -623,7 +603,6 @@ template <typename Range>
     return TakeAdapter {count};
 }
 
-// 5. Drop Overloads
 template <typename Range>
 [[nodiscard]] constexpr auto Drop(Range&& range, size_t count) {
     return DropRange<Range>(std::forward<Range>(range), count);
@@ -632,19 +611,16 @@ template <typename Range>
     return DropAdapter {count};
 }
 
-// 6. EraseIf Overloads
 template <typename Pred>
 [[nodiscard]] constexpr auto EraseIf(Pred pred) {
     return EraseIfAdapter<Pred> {pred};
 }
 
-// 7. FindIf Overloads
 template <typename Pred>
 [[nodiscard]] constexpr auto FindIf(Pred pred) {
     return FindIfAdapter<Pred> {pred};
 }
 
-// 8. FindOrInsert Overloads
 template <typename Key, typename Factory, typename KeySelector = DefaultKeySelector>
 [[nodiscard]] constexpr auto FindOrInsert(Key&& key, Factory&& factory, KeySelector&& key_selector = {}) {
     return FindOrInsertAdapter<std::decay_t<Key>, std::decay_t<Factory>, std::decay_t<KeySelector>> {
@@ -652,7 +628,6 @@ template <typename Key, typename Factory, typename KeySelector = DefaultKeySelec
     };
 }
 
-// FindOr / FindValue Adapters (Associative & Pair Range Lookup)
 
 template <typename TargetType, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
 struct FindOrAdapter {
@@ -664,14 +639,12 @@ struct FindOrAdapter {
     constexpr auto operator()(const Container& c) const {
         using ValueType = std::conditional_t<std::is_void_v<TargetType>, std::decay_t<Fallback>, TargetType>;
 
-        // 1. Specialized for ZHLN::HashMap (returns Value* / const Value*)
         if constexpr (requires { c.Find(key); }) {
             if (const auto* val = c.Find(key)) {
                 return static_cast<ValueType>(*val);
             }
             return static_cast<ValueType>(fallback);
         }
-        // 2. Specialized for std::map / std::unordered_map (has .find())
         else if constexpr (requires { c.find(key); }) {
             auto it = c.find(key);
             if (it != c.end()) {
@@ -683,7 +656,6 @@ struct FindOrAdapter {
             }
             return static_cast<ValueType>(fallback);
         }
-        // 3. Fallback for linear pair ranges / ZHLN::Array<Pair>
         else {
             auto it = ZHLN::Ranges::FindIf(c, [this](const auto& element) {
                 if constexpr (std::is_invocable_v<KeySelector, decltype(element)>) {
@@ -752,7 +724,6 @@ struct FindValueAdapter {
     }
 };
 
-// --- Factory Functions
 
 template <typename TargetType = void, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
 [[nodiscard]] constexpr auto FindOr(Key&& key, Fallback&& fallback, KeySelector&& key_selector = {}) {
@@ -766,4 +737,4 @@ template <typename Key, typename KeySelector = DefaultKeySelector>
     return FindValueAdapter<std::decay_t<Key>, std::decay_t<KeySelector>> {std::forward<Key>(key), std::forward<KeySelector>(key_selector)};
 }
 
-} // namespace ZHLN::Ranges
+}

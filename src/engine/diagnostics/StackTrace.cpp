@@ -1,39 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/diagnostics/StackTrace.cpp
-//
-// Platform backtracing and symbol demangling, and nothing else. Split out of
-// AssertHandler.cpp because it is the one part of the diagnostics layer with
-// per-platform state that has to be initialised exactly once, and because both
-// the crash path and the ordinary panic path want frames.
-//
-// Two entry points, deliberately:
-//
-//   CaptureStackTrace     frames into a caller-provided buffer. The crash path
-//                         uses this so the frames live on its own stack.
-//   GetPoorMansStacktrace the public API from Zahlen/Log.hpp, unchanged in
-//                         signature; now a thin wrapper over the above.
-//
-// What this fixes on Windows: the old GetPoorMansStacktrace called
-// SymInitialize(GetCurrentProcess(), nullptr, true) on every single invocation
-// and never called SymCleanup. DbgHelp keeps one symbol table per process, so
-// each call tore down and rebuilt the table underneath whatever was walking it,
-// and the symbol handles from the previous walk were never released. A crash
-// dump that prints a trace per subsystem therefore reinitialized DbgHelp once
-// per subsystem. Initialisation now happens once, from
-// InitializeSymbolResolver(), which SetupSignalHandler calls while the process
-// is still healthy. SymFromAddr's return value is also checked now -- it was
-// ignored before, so a failed lookup printed whatever was left in the buffer
-// from the previous frame and read like a real symbol name.
 
 #include "diagnostics/DiagnosticsInternal.hpp"
-#include <Zahlen/Core/Platform.hpp> // windows.h on Windows
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib> // std::free
+#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <string>
@@ -44,32 +19,21 @@
 #include <execinfo.h>
 #else
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h> // i'm tired of missing macros
+#include <windows.h>
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 #endif
 
 namespace ZHLN::Diagnostics {
 
-// The hard ceiling on frames per trace. Sized as an array rather than a vector
-// because this runs from a signal handler; 128 pointers is 1 KB of stack, which
-// is what the trace this replaced already reserved. Named from GetPoorMansStacktrace
-// below, so it sits outside the unnamed namespace.
 constexpr int kMaxFrames = 128;
 
 namespace {
 
-// A demangled C++ name can run long, but a fixed buffer keeps demangling off the
-// heap. __cxa_demangle only allocates when the buffer it is handed is too small,
-// and the caller frees that case below.
 constexpr size_t kDemangleCapacity = 1024;
 
-// Longest mangled name worth attempting. Anything longer is left mangled rather
-// than truncated, since a half-demangled name is worse than an honest one.
 constexpr size_t kMaxMangledLength = 512;
 
-// Appends to a caller's buffer without ever writing past it, and without
-// involving the heap. Returns how many bytes were placed.
 class BufferAppender {
   public:
     explicit BufferAppender(std::span<char> out) noexcept: _out(out) {
@@ -100,8 +64,6 @@ class BufferAppender {
     void AppendHex(uint64_t value) noexcept {
         static constexpr char kDigits[] = "0123456789abcdef";
 
-        // Digits come out least-significant first, so build them into a scratch
-        // buffer and copy across in reverse. 16 nibbles covers a uint64_t.
         char   nibbles[16] {};
         size_t count = 0;
         do {
@@ -126,23 +88,16 @@ class BufferAppender {
     size_t          _len = 0;
 };
 
-} // namespace
+}
 
 void InitializeSymbolResolver() noexcept {
 #if defined(__APPLE__) || defined(__linux__)
-    // backtrace()/backtrace_symbols() need no setup.
 #else
-    // DbgHelp is per-process, not per-call. exchange() rather than a plain bool
-    // because SetupSignalHandler can be reached from more than one entry point
-    // (app/main.cpp, app/UIEditor.cpp) and only the first one should initialise.
     static std::atomic<bool> s_initialized {false};
     if (s_initialized.exchange(true, std::memory_order::acq_rel)) {
         return;
     }
 
-    // UNDNAME turns the decorated names DbgHelp returns into readable C++;
-    // DEFERRED_LOADS keeps symbol loading off the initialisation path, which
-    // matters because this can be called while the process is already unstable.
     SymSetOptions(SymGetOptions() | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
     SymInitialize(GetCurrentProcess(), nullptr, true);
 #endif
@@ -165,11 +120,6 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
         return 0;
     }
 
-    // backtrace_symbols allocates one array for the whole trace and the caller
-    // frees it. It is the one allocation left on this path: removing it means
-    // resolving symbols with dladdr and linking libdl, which is a separate
-    // change from splitting this file. Everything after this point is
-    // buffer-only.
     char** symbols = backtrace_symbols(frames, count);
     if (symbols == nullptr) {
         return 0;
@@ -178,18 +128,12 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
     for (int i = 0; i < count; ++i) {
         const std::string_view line = (symbols[i] != nullptr) ? std::string_view(symbols[i]) : std::string_view();
 
-        // A GNU symbol line reads "<prefix> _Z<...> + <offset>"; demangle the
-        // mangled name in place and reassemble around it.
         const size_t nameStart = line.find("_Z");
         const size_t nameEnd   = (nameStart == std::string_view::npos) ? std::string_view::npos : line.find(" + ", nameStart);
 
         if (nameStart != std::string_view::npos && nameEnd != std::string_view::npos) {
             const std::string_view mangled = line.substr(nameStart, nameEnd - nameStart);
 
-            // __cxa_demangle reads a C string, and `mangled` is a window into the
-            // middle of `line`, so its data() is not NUL-terminated. Copy it out
-            // first -- pointing demangle at the slice would let it run past the
-            // end of the symbol and into the offset text.
             char   mangledBuf[kMaxMangledLength] {};
             char   demangled[kDemangleCapacity] {};
             size_t demangledLen = sizeof(demangled);
@@ -206,8 +150,6 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
                 sink.Append(std::string_view(result));
                 sink.Append(line.substr(nameEnd));
                 sink.Append("\n");
-                // __cxa_demangle reallocates when the buffer it was handed is
-                // too small, and hands back a pointer that is then ours to free.
                 if (result != demangled) {
                     std::free(result);
                 }
@@ -239,10 +181,6 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
 
         const auto address = reinterpret_cast<DWORD64>(frames[i]);
 
-        // SymFromAddr writes into symbol->Name only on success. Checking the
-        // return is what stops a failed lookup from printing the previous
-        // frame's name, which is indistinguishable from a real symbol in the
-        // log and sends whoever reads it to the wrong function.
         if (SymFromAddr(process, address, nullptr, symbol) != FALSE) {
             sink.Append(std::string_view(symbol->Name, strnlen(symbol->Name, MAX_SYM_NAME)));
         } else {
@@ -257,14 +195,11 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
     return sink.size();
 }
 
-} // namespace ZHLN::Diagnostics
+}
 
 namespace ZHLN {
 
 auto GetPoorMansStacktrace() -> std::string {
-    // Generous because this is the ordinary panic path with a healthy stack.
-    // The crash path calls Diagnostics::CaptureStackTrace directly with a much
-    // smaller budget rather than going through here.
     constexpr size_t kCapacity = 16384;
 
     char   buf[kCapacity] {};
@@ -276,4 +211,4 @@ auto GetPoorMansStacktrace() -> std::string {
     return std::string(buf, len);
 }
 
-} // namespace ZHLN
+}

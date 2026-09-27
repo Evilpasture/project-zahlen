@@ -51,10 +51,6 @@ class ZHLN_API AnimationSystem {
     using NodeWorldTransformMap = JPH::UnorderedMap<const cgltf_node*, JPH::Mat44, PointerHash, std::equal_to<>>;
     using SampledTransformMap   = JPH::UnorderedMap<const cgltf_node*, SampledTransform, PointerHash, std::equal_to<>>;
 
-    // `postProcessor` is the engine-level animation-modifier hook (see
-    // BonePosePostProcessor): called per animated root between pose
-    // evaluation and joint upload, so modifiers like two-bone IK adjust the
-    // bone hierarchy in its exact former slot. Null passes the pose through.
     void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt, BonePosePostProcessor postProcessor = nullptr);
 
   private:
@@ -72,4 +68,4 @@ class ZHLN_API AnimationSystem {
     ) const noexcept;
 };
 
-} // namespace ZHLN
+}

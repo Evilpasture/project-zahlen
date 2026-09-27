@@ -27,4 +27,4 @@ class Clock {
     std::chrono::high_resolution_clock::time_point _last;
 };
 
-} // namespace ZHLN
+}

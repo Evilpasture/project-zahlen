@@ -6,7 +6,7 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <condition_variable>
 #include <mutex>
-#include <queue> // Replaced vector with queue
+#include <queue>
 #include <thread>
 #include <vector>
 
@@ -17,7 +17,6 @@
 
 namespace ZHLN::TaskSystem {
 
-// --- Thread-Safe Queue (Fixed: Now strictly FIFO)
 struct WorkQueue {
     std::mutex              mtx;
     std::condition_variable cv;
@@ -41,8 +40,8 @@ struct WorkQueue {
         if (quit && fibers.empty()) {
             return nullptr;
         }
-        Fiber* f = fibers.front(); // Pull from the front
-        fibers.pop();              // Remove from the front
+        Fiber* f = fibers.front();
+        fibers.pop();
         return f;
     }
 
@@ -51,8 +50,8 @@ struct WorkQueue {
         if (fibers.empty()) {
             return nullptr;
         }
-        Fiber* f = fibers.front(); // Pull from the front
-        fibers.pop();              // Remove from the front
+        Fiber* f = fibers.front();
+        fibers.pop();
         return f;
     }
 
@@ -70,10 +69,8 @@ struct WorkQueue {
     }
 };
 
-// --- Thread-Local Cache Optimization
 namespace {
 
-// Compiler-safe single-element thread-local cache (maximum 1 fiber per thread)
 thread_local Fiber* t_localFiber = nullptr;
 
 inline auto PushLocalFiber(Fiber* f) noexcept -> bool {
@@ -81,7 +78,7 @@ inline auto PushLocalFiber(Fiber* f) noexcept -> bool {
         t_localFiber = f;
         return true;
     }
-    return false; // Cache full, fallback to global s_freeQueue
+    return false;
 }
 
 inline auto PopLocalFiber() noexcept -> Fiber* {
@@ -90,10 +87,9 @@ inline auto PopLocalFiber() noexcept -> Fiber* {
         t_localFiber = nullptr;
         return f;
     }
-    return nullptr; // Cache empty, fallback to global s_freeQueue
+    return nullptr;
 }
 
-// --- Internal State
 struct FiberData {
     Task     task;
     Counter* counter;
@@ -119,40 +115,23 @@ void SetCurrentThreadHighPriority() noexcept {
 #endif
 }
 
-// --- The Infinite Loop every Fiber runs
 void FiberMain(void* arg) {
     auto* data = static_cast<FiberData*>(arg);
     while (true) {
-        // 1. Run the assigned task
         if (data->task.func != nullptr) {
             data->task.func(data->task.arg);
         }
 
-        // 2. Decrement counter if provided
         if (data->counter != nullptr) {
             data->counter->value.fetch_sub(1, std::memory_order::release);
         }
 
-        // 3. Mark the task complete. The RESUMER recycles this fiber into
-        //    the free pool after Resume() returns -- never publish yourself
-        //    here: between the push and the Yield the fiber is still running,
-        //    and another thread that pops and resumes it becomes a second
-        //    owner (both threads end up inside the same fiber; one of them
-        //    returns from a Resume it never owned, and the fiber is dropped
-        //    from every queue -- the pool silently drains until the root
-        //    Dispatch starves).
         Fiber::GetCurrent()->taskDone.store(true, std::memory_order::release);
 
-        // 4. Yield back to the OS worker thread so it can grab the next Ready Fiber
         Fiber::Yield();
     }
 }
 
-// Hand a fiber that just finished its task back to the pool. Called by the
-// resumer immediately after Resume() returns: at that instant the fiber is
-// provably suspended and this thread is its only owner. Blocked yields
-// (mutex/condvar/counter waits) leave taskDone clear and are skipped --
-// those fibers re-enter the ready queue through WakeUp instead.
 inline void RecycleFiber(Fiber* f) noexcept {
     if (f == nullptr || !f->taskDone.exchange(false, std::memory_order::acquire)) {
         return;
@@ -162,19 +141,12 @@ inline void RecycleFiber(Fiber* f) noexcept {
     }
 }
 
-// --- The Infinite Loop every OS Thread runs
 void WorkerMain(uint32_t index) {
     SetCurrentThreadHighPriority();
     Fiber::InitMainThread();
     t_workerIndex = index;
 
     while (true) {
-        // A fiber recycled into this thread's local cache is invisible to
-        // every other thread. Hand it back to the global free pool BEFORE
-        // sleeping: otherwise a root Dispatch can starve forever in
-        // s_freeQueue.PopOrWait() while every free fiber sits parked in a
-        // sleeping worker's cache (observed: whole pool idle at the post-task
-        // Yield, both global queues empty, main hung dispatching entry nodes).
         if (Fiber* cached = PopLocalFiber()) {
             s_freeQueue.Push(cached);
         }
@@ -187,7 +159,7 @@ void WorkerMain(uint32_t index) {
     }
 }
 
-} // namespace
+}
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     if (!s_threads.empty() || !s_fiberPool.empty()) {
@@ -204,7 +176,7 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
             numThreads = 4;
         }
         if (numThreads > 1) {
-            numThreads -= 1; // Leave 1 core for the main loop
+            numThreads -= 1;
         }
     }
 
@@ -267,10 +239,6 @@ void Dispatch(std::span<const Task> tasks, Counter* counter) {
     const bool nestedDispatch = currentFiber != nullptr && !currentFiber->isMain;
 
     for (const auto& task: tasks) {
-        // Parent task fibers must not block waiting for child fibers, but root
-        // dispatch preserves asynchronous queue semantics. Running root jobs
-        // inline can re-enter external job systems (notably Jolt) while they are
-        // still constructing dependency graphs and invalidate queued jobs.
         Fiber* f = PopLocalFiber();
         if (f == nullptr) {
             f = nestedDispatch ? s_freeQueue.TryPop() : s_freeQueue.PopOrWait();
@@ -324,8 +292,6 @@ void Wait(Counter* counter) {
                 spinCount++;
             }
         } else {
-            // Workers push themselves to the back of the line SILENTLY
-            // to prevent condition variable thrashing and lost wakeups
             s_readyQueue.PushSilent(self);
             Fiber::Yield();
         }
@@ -336,4 +302,4 @@ void WakeUp(ZHLN::Fiber* fiber) {
     s_readyQueue.Push(fiber);
 }
 
-} // namespace ZHLN::TaskSystem
+}

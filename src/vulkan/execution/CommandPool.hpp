@@ -9,7 +9,6 @@
 
 namespace ZHLN::Vk {
 
-// Command-pool validity and command-buffer allocation failures.
 enum class CommandPoolError : uint8_t {
     PoolNotReady ZHLN_ANNOTATION(ZHLN::Description<"Command pool device handle is not initialized">{}) = 1,
     CommandBufferAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Command buffer allocation failed (out of memory)">{}),
@@ -47,7 +46,6 @@ class CommandPool {
     [[nodiscard]] auto AllocateSecondary(uint32_t count) noexcept -> std::expected<void, ErrorCode>;
     void               Reset() noexcept;
 
-    // This is where the compiler-enforced safety is introduced!
     [[nodiscard]] constexpr auto operator[](const uint32_t idx) const noexcept -> Vk::CommandBuffer<QType> {
         return Vk::CommandBuffer<QType> {_raw.buffers[idx]};
     }
@@ -99,6 +97,6 @@ class CommandPools {
   private:
     std::array<CommandPool<QType>, N> _pools = {};
 };
-} // namespace ZHLN::Vk
+}
 
 #include "CommandPool.inl"

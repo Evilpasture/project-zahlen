@@ -29,12 +29,8 @@ struct Skeleton;
 
 namespace ECS {
 class Registry;
-} // namespace ECS
+}
 
-// Cache-aligned SoA buffer for maximum evaluation throughput. One per
-// ArticulationSystem (see below), not process-global: a destroyed world must
-// take its joint state with it, and two coexisting worlds must not overwrite
-// each other's matrices.
 struct alignas(64) JointStateBuffer {
     std::array<float, 8192>      jointBlendWeights;
     std::array<float, 8192>      jointStiffness;
@@ -56,40 +52,16 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    // Runs inside the update graph, so it consumes a SystemContext rather
-    // than an Engine.
     void Update(SystemContext& ctx, float dt);
 
-    // Releases a ragdoll's Jolt registration while its ECS component is still
-    // addressable. DespawnEntity uses this before Registry::Destroy.
     void Release(Engine& engine, Entity owner) noexcept;
-    // Drains retained registrations before the PhysicsContext is destroyed.
     void Shutdown(Engine& engine) noexcept;
 
-    // Attaches a skeletal ragdoll to `rootEntity` as its
-    // Components::RagdollComponent.
-    //
-    // Pure runtime execution: the caller resolves the rig (which skeleton of
-    // which prefab, at which joint offset) and authors the physical parts --
-    // shapes, masses, joint limits and motors. That authoring is data, not
-    // simulation, and it happens outside this class (a cooked asset, a scene
-    // document, or a procedural generator in a gameplay layer). This method
-    // performs no name matching and holds no character archetype; it only
-    // translates the authored spec into a Jolt ragdoll and writes the
-    // skeleton's inverse bind matrices into _jointStates, the class that owns
-    // the buffer.
-    //
-    // Returns false when `authoredParts` is empty, leaving the entity
-    // untouched.
     [[nodiscard]] bool AttachRagdoll(
         Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
         uint32_t jointOffset
     );
 
-    // Hands out `count` consecutive joint slots in _jointStates. The counter
-    // is an instance member (it used to be JointAllocator's static, one
-    // monotonic process-wide value with no lifecycle): each world starts at
-    // zero, and destroying a world reclaims its whole allocation range.
     uint32_t AllocateJoints(uint32_t count) noexcept;
 
   private:
@@ -99,9 +71,6 @@ class ZHLN_API ArticulationSystem {
         bool                   isAddedToPhysics = false;
     };
 
-    // Writes a skeleton's inverse bind matrices into this world's joint state
-    // at `jointOffset`. Private because the buffer is the system's own: it
-    // binds on attachment (AttachRagdoll) and nothing else writes there.
     void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
 
     void Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept;
@@ -113,4 +82,4 @@ class ZHLN_API ArticulationSystem {
     ZHLN::Atomic<uint32_t>      _nextJointOffset {0};
 };
 
-} // namespace ZHLN
+}

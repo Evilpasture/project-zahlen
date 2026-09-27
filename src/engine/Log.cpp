@@ -1,24 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/Log.cpp
-//
-// Log levels, file routing and console printing -- the half of the old
-// AssertHandler.cpp that has nothing to do with crashing. Everything here runs
-// on the normal path, so unlike the diagnostics/ units it is allowed to
-// allocate: std::println and std::format are the right tools when the process
-// is healthy.
-//
-// The one exception is Diagnostics::WriteToChannel, which lives here because it
-// writes to the same sinks but is defined for the crash path: raw descriptor
-// writes, no formatting, no allocation. It sits beside GetCustomLogFile because
-// that is the log sink it needs, and the diagnostics units call it rather than
-// each growing their own writer.
 
 #include "diagnostics/DiagnosticsInternal.hpp"
-#include <Zahlen/Core/Platform.hpp> // windows.h on Windows, unistd.h on Unix
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Threading/Thread.hpp> // GetCurrentFiberID()
+#include <Zahlen/Threading/Thread.hpp>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -33,7 +20,7 @@ namespace {
 
 std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
 
-} // namespace
+}
 
 void SetLogLevel(LogLevel level) noexcept {
     s_LogLevel.store(level, std::memory_order::release);
@@ -58,7 +45,6 @@ auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
 }
 
 void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message) {
-    // Guard against Quiet mode
     if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
         return;
     }
@@ -91,9 +77,7 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
     std::println(outStream, "[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
 }
 
-// Note: Emergency panic / crash dumps are kept unfiltered to preserve crash visibility.
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
-    // Force enable output for catastrophic crashes
     s_LogLevel.store(LogLevel::Verbose, std::memory_order::release);
     InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), file, line, message);
     std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
@@ -115,7 +99,7 @@ void LogManual(std::string_view file, int line, std::string_view message, const 
     }
 }
 
-} // namespace ZHLN
+}
 
 namespace ZHLN::Diagnostics {
 
@@ -141,4 +125,4 @@ void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
     }
 }
 
-} // namespace ZHLN::Diagnostics
+}

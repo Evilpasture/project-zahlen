@@ -19,87 +19,51 @@
 
 namespace ZHLN::Math {
 
-/**
- * @brief View Matrix (LookAt). Right-Handed.
- */
 inline auto CreateLookAt(JPH::Vec3Arg eye, JPH::Vec3Arg target, JPH::Vec3Arg up) {
     return JPH::Mat44::sLookAt(eye, target, up);
 }
 
-/**
- * @brief Perspective Projection Matrix.
- * Enforces Right-Handed coordinates.
- * Maps natively to Vulkan's Y-Down Clip Space.
- * Maps Z to [0, 1] for modern graphics APIs.
- */
 inline auto CreatePerspective(float fovRadians, float aspect, float nearZ, float farZ) {
     float f = 1.0f / JPH::Tan(fovRadians * 0.5f);
     return JPH::Mat44(
-        JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -f, 0.0f, 0.0f), // FLIPPED TO NATIVE Y-DOWN
+        JPH::Vec4(f / aspect, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -f, 0.0f, 0.0f),
         JPH::Vec4(0.0f, 0.0f, farZ / (nearZ - farZ), -1.0f), JPH::Vec4(0.0f, 0.0f, (nearZ * farZ) / (nearZ - farZ), 0.0f)
     );
 }
 
-/**
- * @brief Orthographic Projection Matrix.
- * Enforces Right-Handed coordinates.
- * Maps natively to Vulkan's Y-Down Clip Space.
- * Maps Z to [0, 1] for modern graphics APIs.
- */
 inline auto CreateOrtho(float left, float right, float bottom, float top, float nearZ, float farZ) {
     float r_l = right - left;
     float t_b = top - bottom;
     float f_n = farZ - nearZ;
 
     return JPH::Mat44(
-        JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f), // FLIPPED TO NATIVE Y-DOWN
+        JPH::Vec4(2.0f / r_l, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, -2.0f / t_b, 0.0f, 0.0f),
         JPH::Vec4(0.0f, 0.0f, -1.0f / f_n, 0.0f), JPH::Vec4(-(right + left) / r_l, (top + bottom) / t_b, -nearZ / f_n, 1.0f)
     );
 }
 
-/**
- * @brief TRS Assembler (Translation * Rotation * Scale).
- */
 inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation, JPH::Vec3Arg scale) {
     JPH::Mat44 m = JPH::Mat44::sRotationTranslation(rotation, translation);
     return m.PreScaled(scale);
 }
 
-/**
- * @brief Rotation + Translation only.
- */
 inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation) {
     return JPH::Mat44::sRotationTranslation(rotation, translation);
 }
 
-/**
- * @brief Translation / Rotation / Scale decomposition of an affine transform.
- */
 struct TransformTRS {
     JPH::Vec3 translation {0.0f, 0.0f, 0.0f};
     JPH::Quat rotation = JPH::Quat::sIdentity();
     JPH::Vec3 scale {1.0f, 1.0f, 1.0f};
 };
 
-// Smallest column length still treated as a usable basis axis by `Decompose`.
 inline constexpr float kDecomposeEpsilon = 1e-5f;
 
-/**
- * @brief Decompose a (possibly mirroring) affine transform into its TRS parts.
- *
- * Scale comes from the length of the three basis columns. A negative 3x3
- * determinant means the matrix mirrors, which is reported as a negative X scale
- * so a caller rebuilding the matrix from the result keeps the handedness.
- * Degenerate (zero-length) columns fall back to the matching unit axis, which
- * keeps the returned rotation a valid quaternion instead of a bag of NaNs.
- */
 [[nodiscard]] inline auto Decompose(const JPH::Mat44& m) noexcept -> TransformTRS {
     TransformTRS trs;
 
     trs.translation = m.GetTranslation();
 
-    // GetColumn3 truncates the homogeneous W, which is exactly the basis vector
-    // whose length defines that axis' scale.
     const JPH::Vec3 col0 = m.GetColumn3(0);
     const JPH::Vec3 col1 = m.GetColumn3(1);
     const JPH::Vec3 col2 = m.GetColumn3(2);
@@ -113,8 +77,6 @@ inline constexpr float kDecomposeEpsilon = 1e-5f;
     }
     trs.scale = JPH::Vec3(sx, sy, sz);
 
-    // Normalise the basis back into a pure rotation. Divide by the (possibly
-    // negative) mirrored length so mirroring is preserved in the rotation.
     const JPH::Vec3 axis0 = (std::abs(sx) > kDecomposeEpsilon) ? (col0 / sx) : JPH::Vec3::sAxisX();
     const JPH::Vec3 axis1 = (std::abs(sy) > kDecomposeEpsilon) ? (col1 / sy) : JPH::Vec3::sAxisY();
     const JPH::Vec3 axis2 = (std::abs(sz) > kDecomposeEpsilon) ? (col2 / sz) : JPH::Vec3::sAxisZ();
@@ -125,39 +87,23 @@ inline constexpr float kDecomposeEpsilon = 1e-5f;
     return trs;
 }
 
-/**
- * @brief Converts Euler angles (in Radians) to a Quaternion.
- */
 inline auto EulerToQuat(JPH::Vec3Arg radians) {
     return JPH::Quat::sEulerAngles(radians);
 }
 
-/**
- * @brief Converts a Quaternion to Euler angles (in Radians).
- */
 inline auto QuatToEuler(JPH::QuatArg quat) {
     return quat.GetEulerAngles();
 }
 
-/**
- * @brief Convenience: Euler Degrees to Quaternion.
- */
 inline auto EulerDegreesToQuat(JPH::Vec3Arg degrees) {
     JPH::Vec3 radians = degrees * (JPH::JPH_PI / 180.0f);
     return JPH::Quat::sEulerAngles(radians);
 }
 
-/**
- * @brief Convenience: Quaternion to Euler Degrees.
- */
 inline auto QuatToEulerDegrees(JPH::QuatArg quat) {
     return quat.GetEulerAngles() * (180.0f / JPH::JPH_PI);
 }
 
-/**
- * @brief Generates a world-space AABB from a View-Projection matrix.
- * Used to query Jolt's Broadphase.
- */
 inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
     JPH::Mat44 invVP = viewProj.Inversed();
     JPH::AABox bounds;
@@ -174,7 +120,6 @@ inline auto CalculateFrustumAABB(const JPH::Mat44& viewProj) -> JPH::AABox {
             }
         }
     }
-    // Stability: Inflate the box so we don't query every single frame
     bounds.ExpandBy(JPH::Vec3::sReplicate(2.0f));
     return bounds;
 }
@@ -183,14 +128,11 @@ inline auto CreateOrthoMatrix(float width, float height) -> JPH::Mat44 {
     float r = width;
     float b = height;
 
-    // Scale and translation parameters simplified; no negative scaling or inverted translations
-    // needed
     return {
         JPH::Vec4(2.0f / r, 0.0f, 0.0f, 0.0f), JPH::Vec4(0.0f, 2.0f / b, 0.0f, 0.0f), JPH::Vec4(0.0f, 0.0f, 1.0f, 0.0f), JPH::Vec4(-1.0f, -1.0f, 0.0f, 1.0f)
     };
 }
 
-// Bit layout is owned by resources/shaders/vertex_format.slang (Unpack1010102).
 constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed1010102 {
     uint32_t xs = static_cast<uint32_t>((x * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
     uint32_t ys = static_cast<uint32_t>((y * 0.5f + 0.5f) * 1023.0f) & 0x3FF;
@@ -199,8 +141,6 @@ constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed10
     return {(ws << 30) | (zs << 20) | (ys << 10) | xs};
 }
 
-// Normalized-float color packer. The byte layout itself is owned by the
-// freestanding scalar implementation in <Zahlen/Core/Math.hpp>.
 constexpr auto PackColor(float r, float g, float b, float a = 1.0f) -> PackedRGBA8 {
     const auto toByte = [](float channel) constexpr {
         return static_cast<uint8_t>(Clamp(channel, 0.0f, 1.0f) * 255.0f);
@@ -209,7 +149,6 @@ constexpr auto PackColor(float r, float g, float b, float a = 1.0f) -> PackedRGB
 }
 
 inline auto FloatToHalf(float f) -> uint16_t {
-    // Use memcpy to avoid strict aliasing issues
     uint32_t i = 0;
     std::memcpy(&i, &f, 4);
 
@@ -217,40 +156,29 @@ inline auto FloatToHalf(float f) -> uint16_t {
     int32_t  e = ((i >> 23) & 0xFF) - 127;
     uint32_t m = i & 0x007FFFFF;
 
-    // Handle Zero or extremely small denormals
     if (e <= -15) {
         return static_cast<uint16_t>(s);
     }
 
-    // Handle Exponent overflow (for values > 65504)
     if (e > 15) {
         return static_cast<uint16_t>(s | 0x7C00);
     }
 
-    // Re-bias exponent and pack
     return static_cast<uint16_t>(s | ((e + 15) << 10) | (m >> 13));
 }
 
-// Packs 4 floats into 4 halves
 inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
 #if defined(__F16C__) || defined(__AVX2__)
-    // x86_64 with F16C support
     __m128 f_vec = _mm_loadu_ps(src);
-    // 0 = Round to nearest even
     __m128i h_vec = _mm_cvtps_ph(f_vec, 0);
-    // Store the lower 64 bits (4 halves)
     _mm_storel_epi64(reinterpret_cast<__m128i*>(dst), h_vec);
 
 #elif defined(__aarch64__)
-    // ARM64 NEON
     float32x4_t f_vec = vld1q_f32(src);
     float16x4_t h_vec = vcvt_f16_f32(f_vec);
-    // Same bit pattern, different vector type: the reinterpret intrinsic is what
-    // the C-style cast compiled to, said in the NEON vocabulary.
     vst1_u16(dst, vreinterpret_u16_f16(h_vec));
 
 #else
-    // Fallback: Use your scalar version (ideally fixed)
     for (int i = 0; i < 4; ++i) {
         dst[i] = FloatToHalf(src[i]);
     }
@@ -269,14 +197,11 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {Floor(p.x), Floor(p.y), Floor(p.z)};
 }
 
-// Positive remainder of each axis against @p period (HLSL `fmod` wrap).
 [[nodiscard]] inline auto Wrap(JPH::Float3 p, JPH::Float3 period) noexcept -> JPH::Float3 {
     auto wrap1 = [](float v, float cell) noexcept -> float { return std::fmod(std::fmod(v, cell) + cell, cell); };
     return {wrap1(p.x, period.x), wrap1(p.y, period.y), wrap1(p.z, period.z)};
 }
 
-// Hash used by the HLSL tileable value-noise: wrap the integer lattice so
-// adjacent tile edges share a cell, then `frac(p * 0.1031)`.
 [[nodiscard]] inline auto TileableHash3(JPH::Float3 p, JPH::Float3 period) noexcept -> float {
     const JPH::Float3 wrapped = Wrap(p, period);
     p                         = Fract({wrapped.x * 0.1031f, wrapped.y * 0.1031f, wrapped.z * 0.1031f});
@@ -308,9 +233,6 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return Lerp(Lerp(r00, r10, u.y), Lerp(r01, r11, u.y), u.z);
 }
 
-// Seamless 3D FBM. @p firstOctavePeriod is the tile size of octave 0; each
-// later octave halves it (so a 64-cell volume uses 64 / 32 / 16). Amplitudes
-// are summed without normalizing, matching the original procedural FBM.
 [[nodiscard]] inline auto TileableFbm3(JPH::Float3 p, float firstOctavePeriod, uint32_t octaves = 3) noexcept -> float {
     float value  = 0.0f;
     float amp    = 0.5f;
@@ -324,4 +246,4 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return value;
 }
 
-} // namespace ZHLN::Math
+}

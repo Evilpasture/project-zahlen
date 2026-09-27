@@ -1,13 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/VkError.hpp
-//
-// A VkResult that has been decided is a failure. Construction refuses
-// VK_SUCCESS -- the channel's zero rule, enforced one layer earlier than
-// ErrorCode's -- so everything that reaches the conversion below is a real
-// error and crosses as its own category, verbatim: no mirror enum, no
-// annotations, no codegen.
 
 #pragma once
 
@@ -25,17 +18,9 @@
 
 namespace ZHLN::Vk {
 
-// Non-constexpr undefined symbol hook, the twin of ERROR_CODE_CANNOT_BE_ZERO:
-// calling it during constant evaluation is itself the compile-time diagnostic,
-// and the runtime arm below breaks instead, so the function never needs a
-// definition.
 extern void VK_ERROR_CANNOT_BE_SUCCESS();
 
 inline constexpr uint32_t kCategoryHash = Hash32("ZHLN::Vk::Error");
-// The category speaks the raw C enumerator -- the same string ReportVkError
-// already prints (Reflect::EnumToString over the real VkResult; no mirror
-// enum, no annotations, no codegen): a promoted Error names
-// VK_ERROR_DEVICE_LOST as itself.
 inline constexpr ErrorCategory kCategory = {
     .name      = "Vk",
     .to_string = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
@@ -58,7 +43,6 @@ class Error {
         return _code;
     }
 
-    // Same reading as ErrorCode's: true where there *is* an error.
     constexpr explicit operator bool() const noexcept {
         return _code != VK_SUCCESS;
     }
@@ -67,13 +51,6 @@ class Error {
         return _code == code;
     }
 
-    // Into the error channel, implicit, exactly as expensive as ErrorCode's
-    // enum path: a hash and a widening. The category rides along once, on the
-    // first conversion, so a later Error promotion names the driver's own
-    // enumerator instead of "None". The ride goes through
-    // ZHLN::RegisterErrorCategory -- the channel's public registration seam,
-    // the same touch the enum constructor makes -- never into core's detail
-    // namespace, which is free to change.
     [[nodiscard]] constexpr operator ErrorCode() const noexcept {
         if consteval {
         } else {
@@ -93,4 +70,4 @@ class Error {
     VkResult _code;
 };
 
-} // namespace ZHLN::Vk
+}

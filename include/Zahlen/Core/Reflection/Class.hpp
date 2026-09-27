@@ -1,15 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Reflection/Class.hpp
-//
-// Class-shaped reflection: bases (BaseClasses, HasBases, HasVirtualBases,
-// ForEachBase), member functions (MemberFunctionCount, MemberFunctionNames,
-// ForEachMemberFunction, ForEachMethodPointer, CollectMethodResults and the
-// MethodCollector it drives) and nested types (ForEachNestedType).
-//
-// Scripting's binder is the main consumer: it walks a bound type's nested
-// types, its member functions and its bases to build its tables.
 
 #pragma once
 
@@ -74,7 +65,7 @@ struct MethodCollector {
     static constexpr auto method_handles = get_methods();
 };
 
-} // namespace TemplatedDetail
+}
 
 template <typename T, typename F>
 constexpr void ForEachMemberFunction(F&& f) {
@@ -93,7 +84,6 @@ consteval auto BaseClasses() {
 template <typename T>
 consteval auto HasVirtualBases() -> bool {
     using U [[maybe_unused]] = std::remove_cvref_t<T>;
-    // Plain loop, not std::ranges::any_of: no <ranges> in this header.
     for (auto base: TemplatedDetail::BasesOf<U>()) {
         if (std::meta::is_virtual(base)) {
             return true;
@@ -169,10 +159,10 @@ constexpr auto CollectMethodResults(const T& inst) {
     }(std::make_index_sequence<Collector::count> {});
 }
 
-#else // No C++26 static reflection: this module's degraded stand-ins.
+#else
 
 template <typename T, typename F>
-constexpr void ForEachMemberFunction(F&& /*unused*/) {
+constexpr void ForEachMemberFunction(F&& ) {
 }
 
 template <typename T>
@@ -186,7 +176,7 @@ consteval bool HasVirtualBases() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachBase(F&& /*unused*/) {
+constexpr void ForEachBase(F&& ) {
 }
 
 template <typename T>
@@ -200,15 +190,15 @@ consteval auto MemberFunctionNames() {
 }
 
 template <typename T, typename F>
-constexpr void ForEachNestedType(F&& /*unused*/) {
+constexpr void ForEachNestedType(F&& ) {
 }
 
 template <typename T, typename F>
-constexpr void ForEachMethodPointer(F&& /*unused*/) {
+constexpr void ForEachMethodPointer(F&& ) {
 }
 
 template <typename T>
-constexpr auto CollectMethodResults(const T& /*inst*/) {
+constexpr auto CollectMethodResults(const T& ) {
     return std::tuple {};
 }
 
@@ -219,4 +209,4 @@ constexpr auto HasBases() -> bool {
     return !BaseClasses<T>().empty();
 }
 
-} // namespace ZHLN::Reflect
+}

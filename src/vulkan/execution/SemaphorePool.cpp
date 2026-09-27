@@ -6,7 +6,6 @@
 
 namespace ZHLN::Vk {
 
-// SemaphorePool Implementation
 
 SemaphorePool::~SemaphorePool() noexcept {
     Cleanup();
@@ -79,4 +78,4 @@ void SemaphorePool::Cleanup() noexcept {
     _count  = 0;
     _device = VK_NULL_HANDLE;
 }
-} // namespace ZHLN::Vk
+}

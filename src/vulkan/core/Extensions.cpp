@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/core/Extensions.cpp
 
 #include "Extensions.hpp"
 
@@ -10,13 +9,10 @@
 
 namespace ZHLN::Vk {
 
-// Private extension-builder error (Tier 1): declared at file scope in this
-// translation unit so no header exposes it.
 enum class ExtensionBuilderError : uint8_t {
     MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
 };
 
-// ExtensionResult Implementation
 
 ExtensionResult::ExtensionResult(std::vector<std::string>&& strings) noexcept: _strings(std::move(strings)) {
     RebuildPointers();
@@ -45,7 +41,6 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
-// ExtensionBuilder Implementation
 
 ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {
 }
@@ -55,8 +50,6 @@ auto ExtensionBuilder::ForDevice(VkPhysicalDevice physical) noexcept -> Extensio
 }
 
 auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
-    // EnumerateInstanceExtensions acquires the loader. An empty list makes
-    // every Require() report missing instead of touching a NULL dispatch pointer.
     return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateInstanceExtensions()));
 }
 
@@ -105,10 +98,6 @@ auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> nam
 
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::ErrorCode> {
     if (!_missingRequired.empty()) {
-        // Name the culprits: the fatal-error path prints only the error
-        // enumerator, which says nothing about which extension the driver
-        // lacks (and says even less on builds compiled with
-        // ZHLN_NO_ANNOTATION_EXTRACT, where the Description text is gone).
         for (const auto& name: _missingRequired) {
             ZHLN::Log("[Extensions] Required Vulkan extension not supported by this driver: {}", name);
         }
@@ -126,9 +115,4 @@ auto ExtensionBuilder::FindAvailable(std::string_view name) const noexcept -> co
     return it != _available.end() ? &(*it) : nullptr;
 }
 
-// The presentation bridge's consumer side. One arm per platform descriptor the
-// window subsystem can publish; the arm says which WSI that descriptor's surface
-// is created through, and nothing else. See
-// src/vulkan/presentation/Surface.cpp for the matching vkCreate*SurfaceKHR calls
-// -- the two have to agree, and they are the only two places that know.
-} // namespace ZHLN::Vk
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/PipelineCache.cpp
 // clang-format off
 #include "Rendering.hpp"
 // clang-format on
@@ -16,14 +15,8 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// A driver pipeline cache for this engine is a few megabytes. The ceiling
-// matters because the whole library builds with -fno-exceptions: a resize that
-// cannot be satisfied aborts rather than throwing. Bounding the size first is
-// what keeps a corrupt or hostile file from turning into a dead process.
 constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
 
-// Reads `path` into `out`. Returns false if the file is missing, empty,
-// oversized, or short-read; `out` is left cleared on failure.
 [[nodiscard]] auto ReadWholeFile(std::string_view path, std::vector<uint8_t>& out) -> bool {
     std::error_code             ec;
     const std::filesystem::path file(path);
@@ -47,23 +40,17 @@ constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
     return true;
 }
 
-// A cache blob is bound to the driver build and GPU that wrote it. Feeding a
-// foreign one to vkCreatePipelineCache is at best ignored and at worst
-// rejected, so compare the header against the live device first.
 [[nodiscard]] auto MatchesDevice(const VkPipelineCacheHeaderVersionOne& header, const VkPhysicalDeviceProperties& props) noexcept -> bool {
     return header.headerSize == sizeof(VkPipelineCacheHeaderVersionOne) && header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE
            && header.vendorID == props.vendorID && header.deviceID == props.deviceID
            && std::memcmp(header.pipelineCacheUUID, props.pipelineCacheUUID, VK_UUID_SIZE) == 0;
 }
 
-} // namespace
+}
 
 auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& props, const std::string_view path) noexcept -> PipelineCache {
     std::vector<uint8_t> data;
 
-    // An empty path means "no persistence configured": build the cache in
-    // memory and never touch the disk. ReadWholeFile would reject "" anyway,
-    // but the save side has to know not to try.
     if (!path.empty() && ReadWholeFile(path, data)) {
         VkPipelineCacheHeaderVersionOne header {};
         if (data.size() < sizeof(header)) {
@@ -111,7 +98,6 @@ void SavePipelineCache(const VkDevice device, const VkPipelineCache cache, const
         ZHLN::Log("[PipelineCache] vkGetPipelineCacheData failed; nothing written.");
         return;
     }
-    // The driver may report a smaller blob on the second call.
     data.resize(size);
 
     const std::filesystem::path target(path);
@@ -120,9 +106,6 @@ void SavePipelineCache(const VkDevice device, const VkPipelineCache cache, const
         std::filesystem::create_directories(parent, ec);
     }
 
-    // Write to a sibling temp file and rename over the target: a crash or power
-    // loss mid-write then leaves the previous good cache in place rather than a
-    // truncated one that fails header validation forever.
     const std::filesystem::path temp = std::filesystem::path(path).concat(".tmp");
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
@@ -142,4 +125,4 @@ void SavePipelineCache(const VkDevice device, const VkPipelineCache cache, const
     ZHLN::Log("[PipelineCache] Saved {} KB to '{}'.", data.size() / 1024, target.string());
 }
 
-} // namespace ZHLN::Vk
+}

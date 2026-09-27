@@ -37,16 +37,11 @@ enum class RenderPassType : uint8_t { Main, Shadow };
     return (passType == RenderPassType::Main) ? hasMain : hasShadow;
 }
 
-// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
-// carries a mesh pipeline, the instance carries meshlet streams and no
-// pipeline override (CSG stencil passes) is in play.
 [[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool meshShadingActive) noexcept {
     return meshShadingActive && pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() &&
            drawCmd.instanceData.meshletCount > 0;
 }
 
-// Number of task workgroups needed to screen every meshlet of an instance;
-// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
 [[nodiscard]] inline constexpr uint32_t TaskGroupCount(uint32_t meshletCount) noexcept {
     return (meshletCount + kMeshletsPerTaskGroup - 1) / kMeshletsPerTaskGroup;
 }
@@ -65,12 +60,6 @@ inline void SubmitDrawInstanced(
     const auto* nativeMat = drawCmd.material;
     auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
-    // --- VK_EXT_mesh_shader path
-    // The task shader reads the instance id out of push data (exactly like the
-    // vertex shader does), performs per-cluster frustum + normal-cone culling
-    // and amplifies into one mesh workgroup per surviving meshlet. There is no
-    // firstInstance to encode here, which is precisely why the mesh path runs
-    // through this per-draw submission rather than the indirect one.
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
             {.pipeline    = nativeMat->meshPipeline.Get(),
@@ -221,7 +210,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             .metallic           = 0.0f,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            ._padding           = 0 // Legacy padding slot; the shader selects the cascade from ViewIndex.
+            ._padding           = 0
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
 
@@ -255,7 +244,6 @@ struct GpuCullingPolicyPass1 {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
 
-        // Transition buffer access to CLEAR / TRANSFER_WRITE
         Vk::BufferBarrier(
             cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
             Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
@@ -268,7 +256,6 @@ struct GpuCullingPolicyPass1 {
             Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
         );
 
-        // 2. Dispatch Culling Pass 1 (Frustum + Last Frame Hi-Z)
         struct CullingConstants {
             JPH::Mat44           viewProj;
             std::array<float, 2> hizScreenSize;
@@ -299,7 +286,6 @@ struct GpuCullingPolicyPass1 {
         using enum Vk::BarrierAccess;
         Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
-        // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
             .Viewport(sceneVp)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -309,11 +295,6 @@ struct GpuCullingPolicyPass1 {
             .AddColor(coat_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorClearcoat)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Execute(cmd, [&]() {
-                // The culling dispatch above is a heap pass using push data at
-                // offsets 0/176, which invalidated the push-data state: re-bind
-                // the heaps (primary segments only — inherited secondaries keep
-                // theirs) and re-push the frame address block for the
-                // heap-based geometry draws.
                 recorder.EnsureHeapState(cmd);
 
                 for (const auto& group: groups) {
@@ -363,7 +344,6 @@ struct GpuCullingPolicyPass2 {
             Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
         );
 
-        // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
 
         const uint32_t                        hizMips2 = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
         const auto                            sceneVp2 = ctx.EffectiveViewport();
@@ -387,7 +367,6 @@ struct GpuCullingPolicyPass2 {
         using enum Vk::BarrierAccess;
         Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
-        // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
         Vk::DynamicPass(color_att.extent)
             .Viewport(sceneVp2)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -397,8 +376,6 @@ struct GpuCullingPolicyPass2 {
             .AddColor(coat_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .Execute(cmd, [&]() {
-                // Re-establish heap + push-data state after the culling dispatch
-                // (push data was updated for the dispatch).
                 recorder.EnsureHeapState(cmd);
 
                 for (const auto& group: groups) {
@@ -417,7 +394,6 @@ struct GpuCullingPolicyPass2 {
                         RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
-                // Particles and CSG are drawn ONLY in Pass 2 to avoid double rendering
                 DrawCSGMeshes(recorder, color_att.extent);
                 Draw3DParticles(recorder);
             });
@@ -427,7 +403,7 @@ struct GpuCullingPolicyPass2 {
 struct CpuCullingPolicyPass1 {
     static void Record(
         const FrameRecorder& recorder,
-        const ZHLN::Array<GroupRange>& /*groups*/,
+        const ZHLN::Array<GroupRange>& ,
         uint32_t                                                         drawCount,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
@@ -451,9 +427,6 @@ struct CpuCullingPolicyPass1 {
             .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
             .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
             .Execute(cmd, [&]() {
-                // Heap + push-data state for the parallel geometry secondaries.
-                // The secondaries inherit the heap binding and each pushes the
-                // per-frame device-address block once before its draws.
                 ctx.BindHeapsAndPushFrame(cmd);
                 const auto frameAddresses = ctx.FrameHeapAddresses();
                 const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
@@ -471,7 +444,7 @@ struct CpuCullingPolicyPass1 {
                         .viewport               = sceneVp,
                     },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
-                    [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
+                    [&](uint32_t ) -> VkCommandBuffer {
                         uint32_t wIdx = TaskSystem::GetWorkerIndex();
                         if (wIdx >= ctx.workerCmds.size()) {
                             wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
@@ -497,8 +470,8 @@ struct CpuCullingPolicyPass1 {
 struct CpuCullingPolicyPass2 {
     static void Record(
         const FrameRecorder& recorder,
-        const ZHLN::Array<GroupRange>& /*groups*/,
-        uint32_t /*drawCount*/,
+        const ZHLN::Array<GroupRange>& ,
+        uint32_t ,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         color_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         vel_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
@@ -506,7 +479,6 @@ struct CpuCullingPolicyPass2 {
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         coat_att,
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
     ) noexcept {
-        // CPU Culling does everything in Pass 1. Pass 2 just draws CSG and Particles on top.
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
         Vk::DynamicPass(color_att.extent)
@@ -529,7 +501,7 @@ template <typename CullingPolicy, typename... Args>
 void ExecutePass(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, Args&&... args) {
     CullingPolicy::Record(recorder, groups, drawCount, std::forward<Args>(args)...);
 }
-} // namespace
+}
 namespace Passes {
 
 void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
@@ -538,11 +510,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    // VK_EXT_descriptor_heap: the shadow pass runs entirely on heap pipelines.
-    // It records into either the primary (serial fallback) or a secondary
-    // command buffer (parallel recorder). In the secondary case the heaps are
-    // inherited from the primary and the frame addresses were re-pushed by
-    // the recorder, so only the primary path self-binds.
     recorder.EnsureHeapState(cmd);
 
     std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
@@ -554,10 +521,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, 8> passWriteOffsets {};
-    // Slot 0: the multiview cascade draw list. All four cascades render from
-    // ONE list now -- a mesh is listed once if ANY cascade intersects it, and
-    // each view (cascade) clips it in the vertex stage against its own
-    // light-space matrix. Slots 4..7 stay per-punctual-light.
     passWriteOffsets[0] = 0;
     for (uint32_t l = 0; l < RenderContext::Impl::MAX_PUNCTUAL_LIGHTS; ++l) {
         passWriteOffsets[4 + l] = (4 + l) * kGpuCullingMaxInstances;
@@ -587,9 +550,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         JPH::Vec3 meshPos     = drawCmd.instanceData.world.GetTranslation();
         float     radius      = drawCmd.instanceData.cullRadius;
 
-        // Cascade Culling: emit the mesh once if ANY cascade geometrically
-        // intersects it. The multiview pass re-tests per view in clip space,
-        // so this only decides which meshes enter the shared cascade list.
         bool inAnyCascade = false;
         for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
             if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
@@ -603,7 +563,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             passDrawCounts[0]++;
         }
 
-        // Punctual light logic
         for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
             const auto* light   = activeShadowLights[l];
             uint32_t    slotIdx = 4 + light->shadowLayer;
@@ -635,8 +594,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 
-        // SV_ViewID in the task/mesh stages needs multiviewMeshShader ENABLED; false
-        // keeps the cascades on the vertex pipeline.
         const bool multiviewMesh     = ctx.ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
             return f.multiviewMeshShader == VK_TRUE;
         });
@@ -644,11 +601,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
         uint32_t csmDrawCount = passDrawCounts[0];
 
-        // ONE layered render pass for all four cascades: Vulkan multiview
-        // (viewMask 0x0F) fans every draw out to the shadow map's four array
-        // layers and hands ViewIndex to the shaders, replacing four sequential
-        // Vk::DynamicPass instances (four render-target switches, four clears,
-        // four begin/end cycles) with a single one.
         Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> shadowMapArrayImage = {
             .handle = ctx.graphResources.shadowMap.image.Handle(),
             .view   = ctx.graphResources.shadowMap.view.Get(),
@@ -660,13 +612,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             .ViewMask(kCascadeViewMask)
             .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kShadowClearDepth)
             .Execute(cmd, [&]() {
-                // VK_EXT_mesh_shader: VkDrawMeshTasksIndirectCommandEXT has
-                // no firstInstance, so the instance id can no longer ride
-                // along in the indirect record. The cascade visibility list
-                // was just written to a host-visible buffer above, so the
-                // mesh path simply replays it as direct dispatches -- the
-                // per-cluster culling that matters now happens in the task
-                // shader against lightSpaceMatrices[ViewIndex].
                 const bool useMeshShadows = useMeshShadowPath && csmDrawCount > 0;
 
                 if (useMeshShadows) {
@@ -677,7 +622,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                         }
                         const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
-                            // Skinned / non-meshletized geometry: one vertex draw.
                             recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadowPipeline.Get(),
                                  .layout        = ctx.shadowPipelineLayout,
@@ -710,7 +654,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                          .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
                          .drawCount      = csmDrawCount},
-                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, // Cascade index comes from ViewIndex.
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                     );
                 }
@@ -774,8 +718,6 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 namespace {
 
-// Records what a scene pass saw and chose, at the moment it chose. See
-// Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
 void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
     stamp.draws         = drawCount;
     stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
@@ -785,7 +727,7 @@ void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderCont
     stamp.gpuCulling    = false;
 }
 
-} // namespace
+}
 
 void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
@@ -828,13 +770,6 @@ void MainPass1::Execute(
         }
     }
 
-    // VK_EXT_mesh_shader: the two-phase GPU culling path drives the geometry
-    // through vkCmdDrawIndirect, whose VkDrawIndirectCommand::firstInstance
-    // carries the instance id. The mesh equivalent
-    // (VkDrawMeshTasksIndirectCommandEXT) has no such field, so while mesh
-    // shading is active the passes take the per-draw recording policy and the
-    // culling work moves into the task shader (per-cluster frustum + normal
-    // cone) instead of the instance-level culling compute pass.
     const bool useGpuCulling  = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                 !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     ctx.scenePass1.gpuCulling = useGpuCulling;
@@ -877,8 +812,6 @@ void MainPass2::Execute(
         }
     }
 
-    // See MainPass1: mesh shading and the indirect culling path are mutually
-    // exclusive because the mesh indirect command has no firstInstance field.
     const bool useGpuCulling  = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                 !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     ctx.scenePass2.gpuCulling = useGpuCulling;
@@ -1029,20 +962,9 @@ void BlitPass::Execute(
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap<Shaders::Modules::BlitPS>(ctx.ctx, cmd, pc, blockBase);
 
-            // UI is not drawn here: a caller that wants an overlay calls
-            // RenderContext::RenderUI on the same attachment after the scene.
         });
     }
 
-    // The image is deliberately left in COLOR_ATTACHMENT_OPTIMAL -- the layout
-    // its own attachment usage declares, and the layout the frame's bookkeeping
-    // will report. Presentation is the presenter's job: it records the
-    // transition into PRESENT_SRC_KHR in the same command buffer, before
-    // ending and submitting it (RenderContext::Impl::PresentUsedWindows). A
-    // pass cannot make that transition: the target may be a render texture
-    // rather than the window's image, and a pass that transitions a layout the
-    // next pass then asserts is how a stale-layout validation error -- or a
-    // crash inside the validation layer reporting it -- gets its start.
 }
 
 void ViewmodelPass::Execute(
@@ -1092,5 +1014,5 @@ void ViewmodelPass::Execute(
         });
 }
 
-} // namespace Passes
-} // namespace ZHLN
+}
+}

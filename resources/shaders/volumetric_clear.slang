@@ -1,4 +1,3 @@
-// resources/shaders/volumetric_clear.slang
 
 import volumetric_grid;
 

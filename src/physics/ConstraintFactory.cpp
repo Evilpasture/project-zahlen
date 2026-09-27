@@ -96,7 +96,7 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
     return nullptr;
 }
 
-} // namespace Physics
+}
 
 Physics::ConstraintHandle
     PhysicsContext::CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params) {
@@ -130,4 +130,4 @@ void PhysicsContext::SetConstraintTarget(Physics::ConstraintHandle handle, float
     });
 }
 
-} // namespace ZHLN
+}

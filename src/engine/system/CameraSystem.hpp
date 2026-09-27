@@ -11,7 +11,7 @@ namespace ZHLN {
 class Engine;
 namespace ECS {
 class Registry;
-} // namespace ECS
+}
 
 struct Camera;
 struct Extent2D;
@@ -20,4 +20,4 @@ class CameraSystem {
     void Update(Engine& engine, float dt, float alpha);
     void Update(ECS::Registry& reg, Camera& cam, Extent2D res, float dt, float alpha);
 };
-} // namespace ZHLN
+}

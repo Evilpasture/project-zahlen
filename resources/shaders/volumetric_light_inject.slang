@@ -1,4 +1,3 @@
-// resources/shaders/volumetric_light_inject.hlsl
 
 import hash;
 import cluster_grid;
@@ -34,8 +33,6 @@ SamplerComparisonState shadowSampler;
 
 float PhaseHG(float cosTheta, float g) {
     float g2 = g * g;
-    // x^1.5 as x*sqrt(x): the general pow lowers to exp/log, and the
-    // denominator is strictly positive (>= (1-|g|)^2), so this is exact.
     float d = 1.0f + g2 - 2.0f * g * cosTheta;
     return (1.0f - g2) / (12.5663706f * d * sqrt(d));
 }
@@ -45,8 +42,6 @@ float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
 }
 
 float SampleShadowFast(float3 projCoords, float cascade, float angle) {
-    // Froxel scattering and temporal accumulation blur the result; use one
-    // comparison fetch instead of a 3x3 PCF kernel per voxel.
     const float texelSize    = 1.0f / float(frame.shadowResolution);
     const float bias         = 0.0012f * (cascade + 1.0f);
     const float compareDepth = projCoords.z - bias;
@@ -82,11 +77,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 accumulatedLight = float3(0.0f, 0.0f, 0.0f);
 
-    // --- 1. Ambient Sky Light
     float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f * lightPC.ambientIntensity;
     accumulatedLight += ambientSkyColor * scattering;
 
-    // --- 2. Sun / Directional Light
     float3 L_sun   = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
     float phaseSun = PhaseDualHG(dot(-V, L_sun), lightPC.phaseAnisotropy, -0.10f, 0.50f);
 
@@ -116,26 +109,20 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
-    // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment)
     uint clusterIdx = ClusterIndex(uint(uv.x * float(Cluster.Width)), uint(uv.y * float(Cluster.Height)), ViewDepthToClusterZWith(depthVS, frame.nearZ, frame.farZ));
     ClusterVolume cluster = clusterGrid[clusterIdx];
-    uint lightListCount   = min(cluster.count, 64u); // Defense-in-depth bounds clamp
+    uint lightListCount   = min(cluster.count, 64u);
 
     for (uint i = 0; i < lightListCount; ++i) {
         uint lIdx = clusterIndexList[cluster.offset + i];
         if (lIdx >= frame.lightCount)
-            continue; // Out-of-bounds index guard
+            continue;
 
         Light light = lights[lIdx];
 
         if (light.type == 0 || light.type == 4)
-            continue; // Skip Sun/Dir
+            continue;
 
-        // Reject on squared distance before the sqrt: outside the light's
-        // sphere the window term saturates to exactly zero, so length,
-        // normalize, phase, and the accumulate only run for lights that can
-        // affect this voxel. (The old atten > 0 check tested the same
-        // condition after paying for all of it.)
         float3 L_unnorm = light.position - worldPos;
         float range     = max(light.range, 0.001f);
         float distSq    = dot(L_unnorm, L_unnorm);

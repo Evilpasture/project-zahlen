@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/PipelineRegistry.cpp
 
 #include "PipelineRegistry.hpp"
 
@@ -61,8 +60,6 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
     return Vk::ShaderStages::Create(_ctx.Device(), desc.vertexShader, desc.fragShader)
         .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
         .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
-            // The stage descriptor came from a generated module, so the entry
-            // point is the module's own -- nothing here invents one.
             _diagnostics.RegisterShader(desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex");
             _diagnostics.RegisterShader(desc.fragShader, desc.fragShader.entry_point != nullptr ? desc.fragShader.entry_point : "fragment");
 
@@ -108,4 +105,4 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
         });
 }
 
-} // namespace ZHLN
+}

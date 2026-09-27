@@ -23,7 +23,6 @@
 
 namespace ZHLN {
 
-// Default Freestanding Sized Allocator
 
 template <typename T>
 struct DefaultAllocator {
@@ -31,7 +30,7 @@ struct DefaultAllocator {
 
     constexpr DefaultAllocator() noexcept = default;
     template <typename U>
-    constexpr DefaultAllocator(const DefaultAllocator<U>& /*unused*/) noexcept {
+    constexpr DefaultAllocator(const DefaultAllocator<U>& ) noexcept {
     }
 
     [[nodiscard]] constexpr auto allocate(size_t n) -> T* {
@@ -52,21 +51,12 @@ struct DefaultAllocator {
     }
 };
 
-// Allocator Features Detection
 
-// Concept verifying that the allocator supports an optimized reallocation protocol.
-//
-// Allocators satisfying this concept must adhere to the following contract:
-// - `.reallocate(ptr, old_cap, new_cap)` must semantically preserve the data of the first
-//   `std::min(old_cap, new_cap)` elements.
-// - It must automatically free/deallocate the old memory block at `ptr` if the block is
-//   relocated to a new virtual memory address (mirroring `std::realloc` semantics).
 template <typename Alloc, typename T>
 concept AllocatorHasReallocate = requires(Alloc& alloc, T* ptr, size_t old_cap, size_t new_cap) {
     { alloc.reallocate(ptr, old_cap, new_cap) } -> std::same_as<T*>;
 };
 
-// ZHLN::Array Container
 
 template <typename T, typename Allocator = DefaultAllocator<T>>
 class Array {
@@ -128,7 +118,6 @@ class Array {
         clear_and_free();
     }
 
-    // Copy semantics
     constexpr Array(const Array& other): _allocator(other._allocator) {
         if (other._size > 0) {
             allocate_storage(other._size);
@@ -151,7 +140,6 @@ class Array {
         return *this;
     }
 
-    // Move semantics
     constexpr Array(Array&& other) noexcept:
         _data(std::exchange(other._data, nullptr)), _size(std::exchange(other._size, 0)), _capacity(std::exchange(other._capacity, 0)),
         _allocator(std::move(other._allocator)) {
@@ -168,7 +156,6 @@ class Array {
         return *this;
     }
 
-    // Element Access
     [[nodiscard]] constexpr auto operator[](size_t index) noexcept -> reference {
         AssertBounds(index < _size);
         return _data[index];
@@ -206,7 +193,6 @@ class Array {
         return _data;
     }
 
-    // Iterators
     [[nodiscard]] constexpr auto begin() noexcept -> iterator {
         return _data;
     }
@@ -247,7 +233,6 @@ class Array {
         return const_reverse_iterator(begin());
     }
 
-    // Capacity
     [[nodiscard]] constexpr auto empty() const noexcept -> bool {
         return _size == 0;
     }
@@ -261,7 +246,6 @@ class Array {
         return std::numeric_limits<size_t>::max() / sizeof(T);
     }
 
-    // Ergonomic std::span implicit conversions
     [[nodiscard]] constexpr operator std::span<T>() noexcept {
         return {_data, _size};
     }
@@ -269,7 +253,6 @@ class Array {
         return {_data, _size};
     }
 
-    // Allocator Access
     [[nodiscard]] constexpr auto get_allocator() const noexcept -> allocator_type {
         return _allocator;
     }
@@ -290,7 +273,6 @@ class Array {
         }
     }
 
-    // Modifiers
     constexpr void clear() noexcept {
         destroy_range(_data, _data + _size);
         _size = 0;
@@ -313,11 +295,6 @@ class Array {
     }
 
     constexpr void push_back(T&& value) {
-        // NOTE: Aliasing checks are intentionally bypassed for rvalue move operations.
-        // If an element is moved from itself (e.g., `arr.push_back(std::move(arr[0]))`),
-        // any reallocation will cause a use-after-free of the source element since it
-        // gets relocated before the move constructor runs. This is considered undefined
-        // behavior at the caller level, matching std::vector's behavior.
         emplace_back(std::move(value));
     }
 
@@ -327,7 +304,6 @@ class Array {
         Traits::destroy(_allocator, _data + _size);
     }
 
-    // Mid-container insertion & construction
     template <typename... Args>
     constexpr auto emplace(const_iterator pos, Args&&... args) -> iterator {
         size_t index = pos - begin();
@@ -359,7 +335,6 @@ class Array {
         return emplace(pos, std::move(value));
     }
 
-    // Range-based insertion (Values)
     constexpr auto insert(const_iterator pos, size_t count, const T& value) -> iterator {
         size_t index = pos - begin();
         AssertBounds(index <= _size);
@@ -390,7 +365,6 @@ class Array {
         return begin() + index;
     }
 
-    // Range-based insertion (Iterators)
     template <typename InputIt>
         requires(std::input_iterator<InputIt>)
     constexpr auto insert(const_iterator pos, InputIt first, InputIt last) -> iterator {
@@ -429,7 +403,6 @@ class Array {
         return insert(pos, list.begin(), list.end());
     }
 
-    // Range-based erasure
     constexpr auto erase(const_iterator first, const_iterator last) noexcept -> iterator {
         size_t index = first - begin();
         size_t count = last - first;
@@ -529,7 +502,6 @@ class Array {
         lhs.swap(rhs);
     }
 
-    // Comparison Operators
     [[nodiscard]] constexpr auto operator==(const Array& other) const -> bool {
         if (_size != other._size) {
             return false;
@@ -555,7 +527,6 @@ class Array {
     [[gnu::always_inline]] static constexpr void AssertBounds(bool condition) noexcept {
         if (!condition) [[unlikely]] {
 #ifndef NDEBUG
-            // Bypassed during constant evaluation to maintain compatibility with constexpr
             if (!std::is_constant_evaluated()) {
                 std::fprintf(stderr, "[ZHLN::Array] Safety constraint violated!\n");
             }
@@ -627,7 +598,6 @@ class Array {
         _capacity = new_cap;
     }
 
-    // Unified allocation & relocation pipeline helper
     template <typename ConstructFn>
     constexpr void relocate_reallocate(size_t insert_index, size_t insert_count, ConstructFn&& construct_fn) {
         size_t new_cap = _capacity == 0 ? 8 : _capacity * 2;
@@ -646,7 +616,6 @@ class Array {
             _data     = new_data;
             _capacity = new_cap;
 
-            // Shift old elements to make room for insertion
             if (insert_index < _size) {
                 if constexpr (std::is_trivially_copyable_v<T>) {
                     std::memmove(_data + insert_index + insert_count, _data + insert_index, (_size - insert_index) * sizeof(T));
@@ -665,7 +634,6 @@ class Array {
         } else {
             new_data = Traits::allocate(_allocator, new_cap);
 
-            // 1. Relocate old elements preceding the insertion index
             if (_data != nullptr) {
                 if constexpr (std::is_trivially_copyable_v<T>) {
                     std::memcpy(new_data, _data, insert_index * sizeof(T));
@@ -677,10 +645,8 @@ class Array {
                 }
             }
 
-            // 2. Invoke context-specific element construction callback
             std::forward<ConstructFn>(construct_fn)(new_data + insert_index);
 
-            // 3. Relocate old elements following the insertion index
             if (_data != nullptr) {
                 if constexpr (std::is_trivially_copyable_v<T>) {
                     std::memcpy(new_data + insert_index + insert_count, _data + insert_index, (_size - insert_index) * sizeof(T));
@@ -768,4 +734,4 @@ class Array {
     }
 };
 
-} // namespace ZHLN
+}

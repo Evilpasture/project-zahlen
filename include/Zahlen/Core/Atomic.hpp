@@ -11,10 +11,6 @@ namespace ZHLN {
 template <typename T>
 concept AtomicScalar = std::is_scalar_v<T> && std::is_standard_layout_v<T>;
 
-/**
- * @brief Strictly Trivial (POD) Atomic Wrapper.
- * Uses C++20 std::atomic_ref to operate on raw memory safely.
- */
 template <AtomicScalar T>
 struct Atomic {
     using m_order = std::memory_order;
@@ -46,7 +42,6 @@ struct Atomic {
         return a_ref(value).compare_exchange_strong(expected, desired, success, failure);
     }
 
-    // --- Arithmetic Operators (Constrained to Integral / Pointers)
 
     [[gnu::always_inline]]
     auto fetch_add(T arg, m_order order = m_order::seq_cst) noexcept -> T
@@ -62,7 +57,6 @@ struct Atomic {
         return a_ref(value).fetch_sub(arg, order);
     }
 
-    // --- Bitwise Operators (Strictly Constrained to Integral Types)
 
     [[gnu::always_inline]]
     auto fetch_and(T arg, m_order order = m_order::seq_cst) noexcept -> T
@@ -111,4 +105,4 @@ struct Atomic {
 
 static_assert((std::is_trivially_default_constructible_v<Atomic<size_t>> && std::is_trivially_copyable_v<Atomic<size_t>>), "ZHLN::Atomic must be Trivial");
 
-} // namespace ZHLN
+}

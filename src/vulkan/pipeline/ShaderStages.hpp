@@ -14,9 +14,6 @@
 
 namespace ZHLN::Vk {
 
-// Raised by shader module loading/creation paths (ShaderStages, compute pass
-// builders, IBL baking). Shared across those translation units, so it lives
-// with the ShaderStages subsystem rather than in a global error header.
 enum class ShaderStageCreationError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader file open failed">{}) = 1,
     InvalidSpirvSize ZHLN_ANNOTATION(ZHLN::Description<"Invalid SPIR-V size">{}),
@@ -25,11 +22,7 @@ enum class ShaderStageCreationError : uint8_t {
     ShaderModuleCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader module creation failed">{}),
 };
 
-// ShaderStages RAII
 
-// Bytes that came off disk (the dev-mode reload path) or out of a created
-// stage: the caller owns them, so this is the only place an entry point can
-// still be named by hand beside the code.
 [[nodiscard]] constexpr auto CreateShaderDesc(const uint32_t* code, size_t size, const char* entry = nullptr) -> ZHLN_ShaderDesc {
     return ZHLN_ShaderDesc {.code = code, .size = size, .entry_point = entry};
 }
@@ -66,10 +59,6 @@ class ShaderStages {
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
-    // Stage creation from generated modules (<ShaderBindings.hpp>): each module
-    // states its own stage, path, bytes and entry point, so a vertex module
-    // cannot land in the fragment slot and no call site can pair a path with
-    // another module's bytes.
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto Create(VkDevice device) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
@@ -78,15 +67,10 @@ class ShaderStages {
         return Create(device, CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
     }
 
-    // VK_EXT_mesh_shader: builds a task + mesh + fragment stage set. `task`
-    // may be empty (mesh shaders can be dispatched without amplification);
-    // `mesh` is mandatory. The resulting ShaderStages carries no vertex
-    // module, which is exactly what the pipeline builder keys off of.
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
         -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
-    // The mesh-shader twin of Create(): task, mesh and fragment modules.
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(VkDevice device) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
@@ -111,7 +95,6 @@ class ShaderStages {
     [[nodiscard]] constexpr auto GetMeshSpv() const noexcept -> std::span<const uint32_t> {
         return _meshSpv;
     }
-    // True for a VK_EXT_mesh_shader pipeline (task+mesh instead of vertex).
     [[nodiscard]] constexpr auto IsMeshPipeline() const noexcept -> bool {
         return _raw.mesh.handle != VK_NULL_HANDLE;
     }
@@ -132,4 +115,4 @@ class ShaderStages {
 [[nodiscard]] constexpr auto AsSpirV(const void* data) -> const uint32_t* {
     return std::bit_cast<const uint32_t*>(data);
 }
-} // namespace ZHLN::Vk
+}

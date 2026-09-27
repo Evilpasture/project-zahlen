@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/filesystem/RuntimePaths.cpp
-// Moved from src/engine/RuntimePaths.cpp — low-level path queries belong to
-// zahlen_filesystem, not to engine.
 
 #include <Zahlen/FileSystem/Paths.hpp>
 
@@ -116,7 +113,7 @@ constexpr std::string_view kAppDirName = (isMac || isWindows) ? "Zahlen" : "zahl
     return exe;
 }
 
-} // namespace
+}
 
 auto IsDevTree() -> bool {
     const auto root = SourceRoot();
@@ -207,4 +204,4 @@ auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::p
     return probe_dir("build");
 }
 
-} // namespace ZHLN::FS::Paths
+}

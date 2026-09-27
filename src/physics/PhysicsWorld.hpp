@@ -43,19 +43,19 @@ enum class CommandType : uint8_t { DestroyBody, CreateConstraint, DestroyConstra
 struct Command {
     CommandType type;
     union {
-        ZHLN::Entity     handle;  // For DestroyBody
-        ConstraintHandle cHandle; // For DestroyConstraint
-        struct {                  // For CreateConstraint
+        ZHLN::Entity     handle;
+        ConstraintHandle cHandle;
+        struct {
             ConstraintType   cType;
             ZHLN::Entity     b1;
             ZHLN::Entity     b2;
             ConstraintParams params;
         } createC;
-        struct { // For SetConstraintTarget
+        struct {
             ConstraintHandle targetCHandle;
             float            targetValue;
         } setTarget;
-        struct { // For SetCollisionFilter
+        struct {
             ZHLN::Entity handle;
             uint32_t     category;
             uint32_t     mask;
@@ -66,11 +66,8 @@ struct Command {
 #pragma GCC diagnostic pop
 #endif
 
-static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>) ); // Must be trivial
+static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>) );
 
-// Lifecycle state of a physics slot (bodies and constraints share the
-// vocabulary). The value is stored as one byte per slot and is part of the
-// world snapshot stream, so the numbers are stable on purpose.
 enum class SlotState : uint8_t {
     Empty          = 0,
     Alive          = 1,
@@ -81,29 +78,25 @@ enum class SlotState : uint8_t {
 enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
-    // --- Block 1: Identity & Spatial (Offset 0-63)
-    ZHLN::Entity body1;      // 8
-    ZHLN::Entity body2;      // 8
-    JPH::Real    px, py, pz; // 12 or 24 (Double-ready)
-    float        nx, ny, nz; // 12
-    float        impulse;    // 4
-    ContactType  type;       // 4
-    uint32_t     flags;      // 4 (e.g., Sensor bits)
+    ZHLN::Entity body1;
+    ZHLN::Entity body2;
+    JPH::Real    px, py, pz;
+    float        nx, ny, nz;
+    float        impulse;
+    ContactType  type;
+    uint32_t     flags;
 
-    // --- Block 2: Advanced Dynamics & Metadata (Offset 64-127)
-    float    slidingSpeed;  // 4
-    float    rvx, rvy, rvz; // 12 (Relative Velocity at contact point)
-    uint32_t mat1, mat2;    // 8  (Material IDs for sound/FX)
-    uint32_t sub1, sub2;    // 8  (Sub-shape IDs for bone-specific hits)
+    float    slidingSpeed;
+    float    rvx, rvy, rvz;
+    uint32_t mat1, mat2;
+    uint32_t sub1, sub2;
 
-    // We LET the compiler do the padding.
 };
 
 static_assert(sizeof(ContactEvent) == 128, "ContactEvent must be exactly 128 bytes for L1/L2 cache isolation!");
 
 static_assert((std::is_trivially_default_constructible_v<ContactEvent> && std::is_trivially_copyable_v<ContactEvent>) );
 
-// Simple container for materials
 struct MaterialData {
     uint32_t id;
     float    friction;
@@ -115,7 +108,6 @@ static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::i
 struct PhysicsWorld {
     mutable BufferSync sync {};
 
-    // BUCKET 1: JOLT CORE (Cold)
     alignas(64) JPH::PhysicsSystem* system              = nullptr;
     JPH::BodyInterface*                 bodyInterface   = nullptr;
     JPH::JobSystem*                     jobSystem       = nullptr;
@@ -127,7 +119,6 @@ struct PhysicsWorld {
 
     uint32_t maxJoltBodies = 0;
 
-    // BUCKET 2: HOT SIMULATION STATE (DOD SoA arrays - Aligned Raw Pointers)
     alignas(64) double time = 0.0;
     ZHLN::Atomic<size_t> count {0};
     size_t               capacity     = 0;
@@ -141,12 +132,10 @@ struct PhysicsWorld {
     float*     linearVelocities  = nullptr;
     float*     angularVelocities = nullptr;
 
-    // Managed automatically by JPH::Array
     JPH::Array<JPH::BodyID> bodyIDs;
     JPH::Array<uint32_t>    materialIDs;
     JPH::Array<uint64_t>    userData;
 
-    // BUCKET 3: SYNCHRONIZATION
     alignas(64) ZHLN::Atomic<bool> isStepping {false};
 
     JPH::Array<Command> commandQueue;
@@ -154,36 +143,28 @@ struct PhysicsWorld {
     size_t              commandCount    = 0;
     size_t              commandCapacity = 0;
 
-    // BUCKET 4: MAPPINGS & FILTERS (Managed automatically by JPH::Array)
     alignas(64) JPH::Array<const void*> joltBodyPtrs;
 
     JPH::Array<ZHLN::Atomic<uint64_t>> idToHandleMap;
     JPH::Array<uint32_t>               slotToDense;
     JPH::Array<uint32_t>               denseToSlot;
     JPH::Array<uint32_t>               freeSlots;
-    // ECS ownership is separate from the physics handle stored in Jolt user data.
-    // It survives PhysicsComponent removal long enough for phase reconciliation.
     JPH::Array<ZHLN::Entity>            bodyOwners;
 
     JPH::Array<uint32_t> categories;
     JPH::Array<uint32_t> masks;
 
-    // Raw byte storage: the snapshot stream copies these bytes verbatim, so
-    // every typed read/write goes through LoadSlotState/StoreSlotState.
     JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
     JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
-    // BUCKET 5: CONTACTS & EVENTS
     alignas(64) JPH::Array<ContactEvent> contactBuffer;
     ZHLN::Atomic<size_t> contactCount {0};
     size_t               contactCapacity = 0;
 
-    // BUCKET 6: REGISTRIES
     alignas(64) JPH::Array<MaterialData> materials;
     size_t materialCount    = 0;
     size_t materialCapacity = 0;
 
-    // BUCKET 7: CONSTRAINTS
     alignas(64) JPH::Array<JPH::Constraint*> constraints;
     JPH::Array<ZHLN::Atomic<uint32_t>> constraintGenerations;
     JPH::Array<SlotState>              constraintStates;
@@ -192,24 +173,18 @@ struct PhysicsWorld {
     size_t                             constraintCapacity  = 0;
     size_t                             freeConstraintCount = 0;
 
-    // METHODS
 
-    // Explicit lifecycle methods (keeps struct Trivial)
     void Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc);
     void Shutdown();
 
-    // Data Management
     void ResizeBuffers(size_t newCapacity);
     auto AllocateHandle() -> ZHLN::Entity;
     void RemoveBodySlot(uint32_t slot);
     void ResizeConstraintBuffers(size_t newCapacity);
 
-    // Constraints
     auto AllocateConstraintHandle() -> ConstraintHandle;
     void RemoveConstraintSlot(uint32_t slot);
 
-    // Slot states are stored as bytes (snapshots memcpy the array), so the
-    // conversion and the memory ordering live here instead of at every call site.
     [[nodiscard]] auto LoadSlotState(uint32_t slot) const noexcept -> SlotState {
         return static_cast<SlotState>(slotStates[slot].load(std::memory_order::acquire));
     }
@@ -217,38 +192,25 @@ struct PhysicsWorld {
         slotStates[slot].store(static_cast<uint8_t>(state), std::memory_order::release);
     }
 
-    // Flush command buffer
     void FlushCommands(
         Command* capturedQueue, size_t capturedCount, JPH::Array<JPH::Ref<JPH::CharacterVirtual>>& characterMap,
         JPH::Array<JPH::CharacterVirtual*>& activeCharacters
     );
 
-    /**
-     * @brief Synchronizes all Jolt state to the SoA World.
-     * Handles Rigid Bodies, Characters, and executes optimized SIMD batch copies.
-     *
-     * @param inSystem The active Jolt PhysicsSystem.
-     * @param activeCharacters The array of active CharacterVirtuals.
-     */
     void Synchronize(const JPH::PhysicsSystem* inSystem, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
 
     auto SaveState() const -> JPH::Array<std::byte>;
     auto LoadState(const uint8_t* data, size_t size) -> bool;
 };
 
-// Guarantee predictable layout for raw memory mapping and SIMD logic
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 
-// --- Slot Predication Logic
 
 struct SlotPredicate {
-    bool isActive;       // Alive in Jolt right now and safe to query
-    bool isDestructible; // Can be queued for destruction
+    bool isActive;
+    bool isDestructible;
 };
 
-// Exhaustive on purpose: adding a SlotState stops compiling here until someone
-// decides whether it is live and destructible. The trailing return also covers
-// bytes that came out of a snapshot without a matching enumerator.
 [[nodiscard]] constexpr auto GetSlotPredicate(SlotState state) noexcept -> SlotPredicate {
     switch (state) {
         case SlotState::Alive:
@@ -261,7 +223,6 @@ struct SlotPredicate {
     return {.isActive = false, .isDestructible = false};
 }
 
-// --- Constraints
 auto CreateNativeConstraint(ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint*;
 
-} // namespace ZHLN::Physics
+}

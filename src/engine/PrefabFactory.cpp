@@ -1,13 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/PrefabFactory.cpp
-//
-// High-level PrefabFactory / EntitySpawner. Creates Jolt colliders, ECS entities,
-// GPU buffers from cached prefabs. This is the high-level spawning layer that
-// belongs to src/engine, not to filesystem/VFS.
-//
-// Renamed from PrefabFactory to PrefabFactory. Old namespace kept as alias.
 
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -66,7 +59,7 @@ auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& ow
     return &GUI::GetDefaultBakedFont();
 }
 
-} // namespace
+}
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     return CreateFontAtlasTexture(ctx, registry, nullptr, GUI::kDefaultFontAssetID);
@@ -204,7 +197,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     return texRes ? *texRes : 1;
 }
 
-auto LoadModelPrefab(RenderContext& /*ctx*/, AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {
+auto LoadModelPrefab(RenderContext& , AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {
     return assetMgr.GetCachedPrefab(HashAssetPath(path));
 }
 
@@ -415,7 +408,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
     return glowEnt;
 }
 
-} // namespace
+}
 
 auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
@@ -533,7 +526,7 @@ auto SpawnPrimitive(
     return e;
 }
 
-} // namespace
+}
 
 auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
@@ -742,4 +735,4 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
 
-} // namespace ZHLN::PrefabFactory
+}

@@ -28,8 +28,6 @@ target_link_libraries(zahlen_physics
         zahlen_threading
 )
 
-# PhysicsWorld and the command/synchronization internals are private to this
-# target; dependents receive the PhysicsContext façade only.
 target_include_directories(zahlen_physics
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
@@ -37,7 +35,6 @@ target_include_directories(zahlen_physics
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Pass Jolt specific configurations down
 target_compile_definitions(zahlen_physics PRIVATE
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
@@ -52,9 +49,4 @@ target_compile_definitions(zahlen_physics PUBLIC
 
 target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 
-# This target once stripped -freflection from its own COMPILE_OPTIONS here,
-# guarded to GCC; it was dead code twice over: the root's
-# zahlen_enable_reflection(zahlen_physics) runs after this directory is
-# configured (nothing had been added yet to strip), and Jolt's headers coexist
-# with the reflection flags on every toolchain the build supports.
 target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)

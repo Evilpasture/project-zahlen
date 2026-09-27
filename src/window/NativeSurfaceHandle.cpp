@@ -1,12 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/window/NativeSurfaceHandle.cpp
-//
-// The PIMPL lifetime, out of line: this is the translation unit that knows
-// NativeSurfaceHandle::Impl is a variant of OS descriptors, so it is also the
-// one that can destroy one. Nothing outside src/window/ and src/render/ needs
-// that, and nothing outside them includes the header that says so.
 
 #include "NativeSurfaceInternal.hpp"
 #include "PresentationTarget.hpp"
@@ -24,4 +18,4 @@ NativeSurfaceHandle::NativeSurfaceHandle(NativeSurfaceHandle&& other) noexcept =
 
 auto NativeSurfaceHandle::operator=(NativeSurfaceHandle&& other) noexcept -> NativeSurfaceHandle& = default;
 
-} // namespace ZHLN
+}

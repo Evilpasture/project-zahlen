@@ -15,17 +15,10 @@
 
 namespace ZHLN {
 
-/**
- * @brief Thread-safe, growable Fixed-Size Object Pool.
- * Combines free-list memory reuse with a lightweight spinlock to achieve
- * O(1) allocation/deallocation completely immune to the ABA problem. [6]
- */
 template <typename T, size_t BlockCount = 1024>
 class ObjectPool {
     static_assert(BlockCount > 0, "BlockCount must be greater than 0");
 
-    // Ensure the object size is at least as large as a pointer so we can
-    // safely overlay the free-list's Node pointers in unallocated slots. [6]
     static constexpr size_t ObjectSize = std::max(sizeof(T), sizeof(void*));
     static constexpr size_t Alignment  = std::max(alignof(T), alignof(void*));
 
@@ -66,8 +59,6 @@ class ObjectPool {
     ObjectPool() = default;
 
     ~ObjectPool() noexcept {
-        // Reclaims all raw memory chunks. Note that this allocator does not call
-        // destructors of active objects. Users must call Destroy() first. [6]
         Chunk* curr = _chunks;
         while (curr != nullptr) {
             Chunk* next = curr->next;
@@ -77,11 +68,9 @@ class ObjectPool {
         }
     }
 
-    // Non-copyable to prevent raw pointer aliasing
     ObjectPool(const ObjectPool&)                    = delete;
     auto operator=(const ObjectPool&) -> ObjectPool& = delete;
 
-    // Move semantics
     ObjectPool(ObjectPool&& other) noexcept: _freeList(std::exchange(other._freeList, nullptr)), _chunks(std::exchange(other._chunks, nullptr)) {
     }
 
@@ -94,20 +83,12 @@ class ObjectPool {
         return *this;
     }
 
-    /**
-     * @brief Allocation-free Object Factory.
-     * Allocates raw memory from the pool and constructs the object inline. [6]
-     */
     template <typename... Args>
     [[nodiscard]] T* Create(Args&&... args) {
         void* mem = Allocate();
         return ::new (mem) T(std::forward<Args>(args)...);
     }
 
-    /**
-     * @brief Type-safe object destructor.
-     * Invokes the object's destructor and returns its memory slot back to the pool. [6]
-     */
     void Destroy(T* ptr) noexcept {
         if (ptr == nullptr) {
             return;
@@ -116,9 +97,6 @@ class ObjectPool {
         Deallocate(ptr);
     }
 
-    /**
-     * @brief Allocates an uninitialized block of memory of size T.
-     */
     [[nodiscard]] void* Allocate() {
         _lock.lock();
         if (_freeList == nullptr) [[unlikely]] {
@@ -132,9 +110,6 @@ class ObjectPool {
         return std::bit_cast<void*>(node);
     }
 
-    /**
-     * @brief Returns an uninitialized memory block back to the pool's free list.
-     */
     void Deallocate(void* ptr) noexcept {
         if (ptr == nullptr) {
             return;
@@ -149,14 +124,12 @@ class ObjectPool {
 
   private:
     void AllocateChunk() {
-        // Allocate aligned memory for the Chunk structure
         void* mem   = ::operator new(sizeof(Chunk), std::align_val_t {alignof(Chunk)});
         auto* chunk = ::new (mem) Chunk();
 
         chunk->next = _chunks;
         _chunks     = chunk;
 
-        // Link all slots in the new chunk together and attach them to the free list [6]
         std::byte* start = chunk->storage.data();
         for (size_t i = 0; i < BlockCount; ++i) {
             auto* node = std::bit_cast<Node*>(start + (i * ObjectSize));
@@ -170,4 +143,4 @@ class ObjectPool {
     Chunk*   _chunks   = nullptr;
 };
 
-} // namespace ZHLN
+}

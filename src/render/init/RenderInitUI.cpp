@@ -9,4 +9,4 @@ auto RenderContext::Impl::SetupUI() -> std::expected<void, ErrorCode> {
     return uiRenderer.Init(*this);
 }
 
-} // namespace ZHLN
+}

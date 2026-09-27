@@ -134,15 +134,6 @@ class ZHLN_API Registry {
 
     auto Create() -> Entity;
 
-    /**
-     * @brief Creates an entity and attaches component instances in a single atomic lock.
-     *
-     * Usage:
-     *   Entity e = reg.Create(
-     *       Components::TransformComponent{.position = {0, 1, 0}},
-     *       Components::NameComponent{.name = "Player"}
-     *   );
-     */
     template <typename C1, typename... Cs>
     auto Create(C1&& c1, Cs&&... cs) -> Entity {
         return ZHLN::Lock(sync.shadowLock, [&] -> auto {
@@ -159,12 +150,6 @@ class ZHLN_API Registry {
         });
     }
 
-    /**
-     * @brief Creates an entity and default-constructs components by type in a single atomic lock.
-     *
-     * Usage:
-     *   Entity e = reg.Create<Components::TransformComponent, Components::MeshComponent>();
-     */
     template <typename T1, typename... Ts>
         requires(std::is_default_constructible_v<T1> && (std::is_default_constructible_v<Ts> && ...))
     auto Create() -> Entity {
@@ -185,8 +170,6 @@ class ZHLN_API Registry {
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
 
-    // Resource-context liveness query. Render/Audio/Physics take this instead
-    // of Registry so their public headers stay free of ECS.
     [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery {
         return {
             .userdata = this,
@@ -211,14 +194,9 @@ class ZHLN_API Registry {
 
     template <typename... Components>
     void RegisterComponents() {
-        // A C++17 fold expression that expands for every component in the list
         (RegisterComponent<Components>(BoxedName<Components>()), ...);
     }
 
-    /**
-     * @brief Automatically discovers and registers all nested component structures
-     * declared within a given container class using compile-time reflection.
-     */
     template <typename Container>
     void RegisterAllComponentsIn() {
         ZHLN::Reflect::ForEachNestedType<Container>([this]<typename Comp>() -> auto { this->RegisterComponent<Comp>(BoxedName<Comp>()); });
@@ -238,18 +216,6 @@ class ZHLN_API Registry {
         (Add<Ts>(entity), ...);
     }
 
-    // Attaches `component` to `entity`, replacing any instance already there,
-    // and returns a reference to the stored copy.
-    //
-    // Not synchronized, and it cannot take the lock itself: Create() calls this
-    // while it holds sync.shadowLock, Destroy/Clear take that lock, and a
-    // recursive lock is a panic here. Callers that mutate the registry from
-    // more than one thread -- a TaskSystem chunk, a system body running beside
-    // another graph node -- have to serialize first, or record the mutation in
-    // an EntityCommandBuffer and play it back single-threaded. A SparseSet is
-    // one object (count, dense array, sparse table, and the reallocation an
-    // insert can trigger), so two concurrent Adds of one component type corrupt
-    // it, and the returned reference is only as stable as that same guarantee.
     template <typename T>
     auto Add(Entity entity, T&& component) -> T& {
         using DecayedT = std::decay_t<T>;
@@ -265,11 +231,9 @@ class ZHLN_API Registry {
         }
 
         if constexpr (std::is_trivially_copyable_v<DecayedT>) {
-            // Fast Path: Direct bitwise memcpy
             _components[id]->Insert(entity, &component);
             return *static_cast<DecayedT*>(_components[id]->Get(entity));
         } else {
-            // Safe Path: Placement move-construction into SparseSet memory slot
             void* slot = _components[id]->InsertEmpty(entity);
             ::new (slot) DecayedT(std::forward<T>(component));
             return *static_cast<DecayedT*>(slot);
@@ -312,7 +276,7 @@ class ZHLN_API Registry {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
             ZHLN::Log("Unknown component: {}", BoxedName<T>());
-            return ZHLN::RestrictSpan<T>(nullptr, 0); // Safely return an empty span
+            return ZHLN::RestrictSpan<T>(nullptr, 0);
         }
         auto* set = _components[id];
         return ZHLN::RestrictSpan<T>(reinterpret_cast<T*>(set->GetDataArray()), set->Count());
@@ -328,9 +292,6 @@ class ZHLN_API Registry {
         return {_components[id]->GetDenseArray(), _components[id]->Count()};
     }
 
-    /**
-     * @brief The first entity carrying T, or Entity::Null() when none exists.
-     */
     template <typename T>
         requires CompleteType<T>
     [[nodiscard]] auto SingletonEntity() const noexcept -> Entity {
@@ -338,10 +299,6 @@ class ZHLN_API Registry {
         return entities.empty() ? Entity::Null() : entities[0];
     }
 
-    /**
-     * @brief Engine-wide singleton lookup: the component on the first entity
-     * carrying T, or nullptr when no such entity exists.
-     */
     template <typename T>
         requires CompleteType<T>
     [[nodiscard]] auto GetSingleton() const noexcept -> const T* {
@@ -356,13 +313,6 @@ class ZHLN_API Registry {
         return entities.empty() ? nullptr : Get<T>(entities[0]);
     }
 
-    /**
-     * @brief Like GetSingleton(), but creates the owning entity on first use.
-     *
-     * The returned reference is always valid: callers that treat a component as
-     * a process-wide singleton (input state, UI settings, the tagged settings
-     * entity) no longer have to hand-roll the "query, else create" dance.
-     */
     template <typename T, typename... Args>
         requires CompleteType<T> && std::is_constructible_v<T, Args...>
     auto GetOrEmplaceSingleton(Args&&... args) -> T& {
@@ -392,7 +342,6 @@ class ZHLN_API Registry {
         return nullptr;
     }
 
-    // Overload: Populates _typeInfo metadata alongside sparse set allocation
     template <typename T>
     void RegisterComponent(std::string_view name) {
         uint32_t id = ComponentFamily::GetTypeID<T>();
@@ -415,7 +364,6 @@ class ZHLN_API Registry {
         };
     }
 
-    // Inspector: Iterates and dumps active component state representations into out buffer
     void DebugDumpEntity(Entity entity, std::string& out) const {
         for (uint32_t id = 0; id < _compCapacity; ++id) {
             if (auto* raw = GetRawByFamily(entity, id)) {
@@ -438,7 +386,6 @@ class ZHLN_API Registry {
         return {_components[familyID]->GetDenseArray(), _components[familyID]->Count()};
     }
 
-    // Direct constant-time pointer fetch
     [[nodiscard]] auto GetRawByFamily(Entity entity, uint32_t familyID) const noexcept -> void* {
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return nullptr;
@@ -446,8 +393,6 @@ class ZHLN_API Registry {
         return _components[familyID]->Get(entity);
     }
 
-    // Patch combinator: collapses the repetitive null-check dance.
-    // Stop writing `if (auto* c = reg.Get<T>(e))` manually.
     template <typename T, typename Fn>
     auto Patch(Entity e, Fn&& fn) -> bool {
         if (auto* c = Get<T>(e)) {
@@ -518,4 +463,4 @@ class ZHLN_API Registry {
     void EnsureComponentCapacity(uint32_t id);
 };
 
-} // namespace ZHLN::ECS
+}

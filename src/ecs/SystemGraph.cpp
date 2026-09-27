@@ -49,8 +49,6 @@ void SystemGraph::DeclareExternalWrites(const char* label, std::vector<Component
     if (label == nullptr || accesses.empty()) {
         return;
     }
-    // update_func stays null: DispatchNode() already skips null functions and
-    // still propagates to dependents, so this node is a pure ordering anchor.
     _nodes.push_back(
         Node {
             .info                   = SystemInfo {.update_func = nullptr, .name = label, .access_pattern = std::move(accesses), .enabled = true},
@@ -102,7 +100,6 @@ void SystemGraph::Execute(ZHLN::SystemContext& systemCtx) {
     constexpr size_t kStackNodeLimit = 64;
     const size_t     nodeCount       = _nodes.size();
 
-    // Stack buffers for zero-allocation execution on graphs with up to 64 systems
     std::array<ZHLN::Atomic<uint32_t>, kStackNodeLimit> stackCounts {};
     std::array<NodePayload, kStackNodeLimit>            stackPayloads {};
 
@@ -195,7 +192,6 @@ void SystemGraph::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
         }
     }
 
-    // Decrement completion counter ONLY AFTER all child tasks have been safely dispatched
     ctx.completionCounter.value.fetch_sub(1, std::memory_order::release);
 }
 
@@ -230,4 +226,4 @@ void SystemGraph::Clear() noexcept {
     _entryNodes.clear();
 }
 
-} // namespace ZHLN::ECS
+}

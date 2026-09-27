@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Authoritative vertex attribute packing. The C++ cooker / importer write the
-// same bit layout (Math::PackNormal / PackUV / PackColor); shaders only unpack.
 module vertex_format;
 
 public struct PackedVertexAttributes {

@@ -7,13 +7,6 @@
 #include <print>
 namespace ZHLN::Vk {
 
-// Both of these go through the frame mapping too. A lost device is one thing,
-// and it has one name in this layer -- FrameResult::DeviceLost -- so the
-// callers that act on it (RenderDestinations::ReleaseTarget and
-// DestroyDestinations hand it to Instance::IncrementNumericalDeviceLoss) ask the same
-// question the frame loop asks, instead of comparing against a second
-// vocabulary for the same condition. Any other failure is the driver's own
-// code, which is more than "VulkanCallFailed" ever said.
 std::expected<void, ErrorCode> WaitIdle(VkDevice device) noexcept {
     const VkResult res = vkDeviceWaitIdle(device);
     if (res != VK_SUCCESS) {
@@ -47,11 +40,6 @@ std::expected<void, ErrorCode> QueueSubmit(
         .pSignalSemaphoreInfos    = signals.empty() ? nullptr : signals.data(),
     };
 
-    // The submit's own result, through the one frame mapping: a lost device has
-    // a name (FrameResult::DeviceLost -- the caller rebuilds), while
-    // VK_ERROR_OUT_OF_HOST_MEMORY or a driver's own code arrive as themselves.
-    // "The submission failed" is not something a caller can act on; those two
-    // are not the same news.
     const VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);
     if (res != VK_SUCCESS) [[unlikely]] {
         return std::unexpected(ToFrameError(res));
@@ -108,4 +96,4 @@ std::expected<void, ErrorCode>
     return {};
 }
 
-} // namespace ZHLN::Vk
+}

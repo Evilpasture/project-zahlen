@@ -1,6 +1,5 @@
 module;
 
-// 1. System / OS
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <emmintrin.h>
 #include <immintrin.h>
@@ -16,7 +15,6 @@ module;
 #include <unistd.h>
 #endif
 
-// 2. C/C++ Standard Library
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -66,7 +64,6 @@ module;
 #include <meta>
 #endif
 
-// 3. Jolt Physics
 // clang-format off
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Array.h>
@@ -119,7 +116,6 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
-// 4. Zahlen Engine Headers
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
@@ -222,10 +218,9 @@ using JPH::Sin;
 using JPH::Tan;
 using JPH::Vec3;
 using JPH::Vec4;
-} // namespace JPH
+}
 
 export namespace ZHLN {
-// Core
 using ZHLN::Array;
 using ZHLN::Assert;
 using ZHLN::Atomic;
@@ -281,9 +276,8 @@ using ZHLN::Reflect::SetFieldByName;
 using ZHLN::Reflect::StringToEnum;
 using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
-} // namespace Reflect
+}
 
-// Threading
 using ZHLN::Channel;
 using ZHLN::ConditionalVariable;
 using ZHLN::CPURelax;
@@ -306,9 +300,8 @@ using ZHLN::TaskSystem::Task;
 using ZHLN::TaskSystem::TaskFn;
 using ZHLN::TaskSystem::Wait;
 using ZHLN::TaskSystem::WakeUp;
-} // namespace TaskSystem
+}
 
-// Math & Types
 using ZHLN::AAMode;
 using ZHLN::AAState;
 using ZHLN::AssetID;
@@ -373,9 +366,8 @@ using ZHLN::Math::Sin;
 using ZHLN::Math::Smoothstep;
 using ZHLN::Math::Sqrt;
 using ZHLN::Math::Worley;
-} // namespace Math
+}
 
-// ECS
 using ZHLN::BufferSync;
 using ZHLN::BufferView;
 using ZHLN::Components;
@@ -393,9 +385,8 @@ using ZHLN::ECS::SparseSet;
 using ZHLN::ECS::SystemGraph;
 using ZHLN::ECS::SystemInfo;
 using ZHLN::ECS::Write;
-} // namespace ECS
+}
 
-// Physics
 using ZHLN::PhysicsContext;
 
 namespace Physics {
@@ -410,9 +401,8 @@ using ZHLN::Physics::RaycastPenetrationResult;
 using ZHLN::Physics::RaycastResult;
 using ZHLN::Physics::ShapeCastResult;
 using ZHLN::Physics::ShapeType;
-} // namespace Physics
+}
 
-// Render
 using ZHLN::BufferHandle;
 using ZHLN::DrawFlags;
 using ZHLN::DrawParams;
@@ -442,9 +432,8 @@ using ZHLN::GUI::LoadBakedFont;
 using ZHLN::GUI::SetDefaultBakedFont;
 using ZHLN::GUI::UninstallBakedFontLoader;
 using ZHLN::GUI::kDefaultFontAssetPath;
-} // namespace GUI
+}
 
-// Audio
 using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
 using ZHLN::AudioFilterType;
@@ -452,10 +441,8 @@ using ZHLN::AudioNoiseType;
 using ZHLN::AudioSystem;
 using ZHLN::AudioWaveformType;
 
-// Scripting
 using ZHLN::ScriptRunner;
 
-// Engine
 using ZHLN::Clock;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
@@ -493,5 +480,5 @@ using ZHLN::PrefabFactory::LoadModelPrefab;
 using ZHLN::PrefabFactory::LoadTexture;
 using ZHLN::PrefabFactory::RebuildVulkanResources;
 using ZHLN::PrefabFactory::SpawnParams;
-} // namespace PrefabFactory
-} // namespace ZHLN
+}
+}

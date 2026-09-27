@@ -63,7 +63,7 @@ static void VerifyRealVisualInterpolation(ECS::Registry& reg, PhysicsContext& ph
         }
     }
 }
-} // namespace ZHLN::Tests
+}
 
 namespace ZHLN {
 
@@ -110,11 +110,6 @@ void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
         const auto& snap = snapshots[j];
         trans->position  = snap.previousPosition + clampedAlpha * (snap.currentPosition - snap.previousPosition);
 
-        // Character yaw (MovementComponent orientation) used to be SLERP'd
-        // here from physics-tick state. That moved to extras/CharacterController
-        // with the component: its CharacterOrientationInterpolation node runs
-        // after this system and overwrites the rotation for characters. What
-        // stays here is the generic rigid-body rotation from the snapshot.
         trans->rotation = snap.previousRotation.SLERP(snap.currentRotation, clampedAlpha);
     }
 
@@ -123,4 +118,4 @@ void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
     }
 }
 
-} // namespace ZHLN
+}

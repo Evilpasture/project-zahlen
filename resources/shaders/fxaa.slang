@@ -1,4 +1,3 @@
-// resources/shaders/fxaa.slang
 
 struct VSOutput {
     float4 pos : SV_Position;
@@ -10,7 +9,6 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
-    // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
@@ -30,8 +28,6 @@ PushConstants pc;
 Texture2D<float4> texInput;
 SamplerState smp;
 
-// Convert RGB to Luma (Y) for edge detection, incorporating a soft perceptual
-// Reinhard tonemap curve locally so HDR sun glare doesn't smear the edge tracking.
 float GetLuma(float3 rgb) {
     float luma = dot(rgb, float3(0.299f, 0.587f, 0.114f));
     return luma / (1.0f + luma);
@@ -52,7 +48,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float lumaRange = lumaMax - lumaMin;
 
     if (lumaRange < max(pc.edgeThresholdMin, lumaMax * pc.edgeThreshold)) {
-        return float4(rgbM, 1.0f); // Bail out
+        return float4(rgbM, 1.0f);
     }
 
     float lumaNW = GetLuma(texInput.SampleLevel(smp, input.uv, 0.0f, int2(-1, -1)).rgb);
@@ -105,7 +101,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     bool reached1  = false;
     bool reached2  = false;
 
-    // Quality preset 12 - steps up to 8 texels
     [unroll]
     for (int i = 0; i < 8; ++i) {
         if (!reached1)

@@ -1,11 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Print.hpp
-//
-// Console/file-descriptor output: Detail::RawWrite, the only place a raw
-// descriptor is written to, plus the Print/Println overloads. The formatting
-// itself is Zahlen/Core/Format.hpp, which performs no I/O.
 
 #pragma once
 
@@ -23,7 +18,6 @@
 
 namespace ZHLN {
 
-// Signal-Safe Raw File-Descriptor Write
 
 namespace Detail {
 
@@ -38,9 +32,8 @@ inline void RawWrite(int fd, const char* buf, size_t len) noexcept {
 #endif
 }
 
-} // namespace Detail
+}
 
-// ZHLN::Print Overloads (Accepts FILE*, raw fd, or defaults to stdout)
 
 template <typename... Args>
 inline void Print(int fd, std::string_view fmt, Args&&... args) noexcept {
@@ -67,7 +60,6 @@ inline void Print(std::string_view fmt, Args&&... args) noexcept {
     Print(1, fmt, std::forward<Args>(args)...);
 }
 
-// ZHLN::Println Overloads (Accepts FILE*, raw fd, or defaults to stdout)
 
 template <typename... Args>
 inline void Println(int fd, std::string_view fmt, Args&&... args) noexcept {
@@ -99,4 +91,4 @@ inline void Println(FILE* stream) noexcept {
     Detail::RawWrite(fd, "\n", 1);
 }
 
-} // namespace ZHLN
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/presentation/Surface.cpp
 
 #include "Surface.hpp"
 #include <Zahlen/Log.hpp>
@@ -9,7 +8,6 @@
 
 namespace ZHLN::Vk {
 
-// Surface Implementation
 
 Surface::Surface(VkInstance instance, VkSurfaceKHR surface): _instance(instance), _handle(surface) {
 }
@@ -38,17 +36,10 @@ auto Surface::Get() const -> VkSurfaceKHR {
     return _handle;
 }
 
-} // namespace ZHLN::Vk
+}
 
 namespace {
 
-// --- Direct-to-display selection
-//
-// VK_KHR_display builds a surface from a physical device rather than from a
-// window: the display, one of its modes and one of its planes are enumerated and
-// picked here. First-of-each is the whole policy, which is what the TTY session
-// had before this moved out of the window subsystem; a caller that wants to
-// choose has the same three lists to choose from, in the same order.
 
 template <typename T, typename F>
 [[nodiscard]] auto FetchVulkanVector(F&& enumerator) -> std::vector<T> {
@@ -84,8 +75,6 @@ template <typename T, typename F>
     return modes[0];
 }
 
-// The plane already scanning out this display, or the first plane that lists it
-// as supported; UINT32_MAX when none does.
 [[nodiscard]] auto SelectPlane(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> uint32_t {
     auto planes = FetchVulkanVector<VkDisplayPlanePropertiesKHR>([physicalDevice](uint32_t* c, VkDisplayPlanePropertiesKHR* p) {
         vkGetPhysicalDeviceDisplayPlanePropertiesKHR(physicalDevice, c, p);
@@ -125,7 +114,7 @@ template <typename T, typename F>
     return opaque;
 }
 
-} // namespace
+}
 
 namespace ZHLN::Vk {
 
@@ -180,4 +169,4 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
     return Surface(instance, rawSurface);
 }
 
-} // namespace ZHLN::Vk
+}

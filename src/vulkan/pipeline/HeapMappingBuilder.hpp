@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/HeapMappingBuilder.hpp
 
 #pragma once
 
@@ -14,7 +13,6 @@
 
 namespace ZHLN::Vk {
 
-// Self-contained RAII bundle owning the entries and the valid Info struct for pipeline creation
 struct HeapMappingBundle {
     std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
     VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
@@ -28,7 +26,6 @@ class HeapMappingBuilder {
   public:
     explicit HeapMappingBuilder(const HeapManager& heap) noexcept : _heap(heap) {}
 
-    // 1. Static Sampler Slot Mapping
     auto Sampler(uint32_t set, uint32_t binding, SamplerHandle handle) && noexcept -> HeapMappingBuilder&& {
         AddConstantOffset(
             set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(_heap.SamplerOffset(handle.index)), 0
@@ -36,7 +33,6 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // 2. Static Sampled Image Slot Mapping
     auto SampledImage(uint32_t set, uint32_t binding, TextureHandle handle) && noexcept -> HeapMappingBuilder&& {
         AddConstantOffset(
             set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(_heap.ResourceOffset(handle.index)), 0
@@ -44,7 +40,6 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // 3. Bindless Texture Array Mapping (globalTextures[])
     auto BindlessTextureArray(uint32_t set, uint32_t binding, uint32_t baseSlot) && noexcept -> HeapMappingBuilder&& {
         AddConstantOffset(
             set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(_heap.ResourceOffset(baseSlot)),
@@ -53,19 +48,16 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // 4. Push-Address Buffer Mappings (Device Address in Push Data)
     auto UniformBufferAddress(uint32_t set, uint32_t binding, uint32_t pushDataOffset) && noexcept -> HeapMappingBuilder&& {
         AddPushAddress(set, binding, VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT, pushDataOffset);
         return std::move(*this);
     }
 
     auto StorageBufferAddress(uint32_t set, uint32_t binding, uint32_t pushDataOffset) && noexcept -> HeapMappingBuilder&& {
-        // SPIR-V storage buffers use ALL_EXT because Slang may omit RO/RW decorations
         AddPushAddress(set, binding, VK_SPIRV_RESOURCE_TYPE_ALL_EXT, pushDataOffset);
         return std::move(*this);
     }
 
-    // 5. Transient Push-Index Mappings (for in-frame compute & post-process passes)
     auto PushIndex(
         uint32_t                    set,
         uint32_t                    binding,
@@ -93,7 +85,6 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // --- Final Consumption
     [[nodiscard]] auto Build() && noexcept -> HeapMappingBundle {
         HeapMappingBundle bundle;
         bundle.entries = std::move(_entries);
@@ -135,4 +126,4 @@ class HeapMappingBuilder {
     std::vector<VkDescriptorSetAndBindingMappingEXT>    _entries;
 };
 
-} // namespace ZHLN::Vk
+}

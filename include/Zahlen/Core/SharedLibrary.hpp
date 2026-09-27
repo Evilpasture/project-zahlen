@@ -1,17 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/SharedLibrary.hpp
-//
-// Process-wide dynamic library loading. This is the public dlopen /
-// LoadLibrary façade: a move-only handle, a symbol lookup, and no logging.
-// Optional system libraries (libseat, libevdev, RenderDoc, …) resolve through
-// this so the engine can compile without them and fail only if a code path
-// actually needs the .so.
-//
-// Gameplay hot-reload still goes through engine-private Platform::LoadSharedLibrary
-// (RTLD_GLOBAL). This type defaults to a local bind so an optional plugin cannot
-// steal process-wide symbols.
 
 #pragma once
 
@@ -25,8 +14,8 @@
 namespace ZHLN {
 
 enum class SharedLibraryBind : uint8_t {
-    Local  = 0, // RTLD_LOCAL. Ignored on Windows (LoadLibrary is process-global).
-    Global = 1, // RTLD_GLOBAL.
+    Local  = 0,
+    Global = 1,
 };
 
 class SharedLibrary {
@@ -53,8 +42,6 @@ class SharedLibrary {
         Close();
     }
 
-    // Opens `path`. A handle already held is closed first. Returns false if
-    // the loader could not map the file; IsOpen() is then false.
     [[nodiscard]] auto Open(const char* path, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         Close();
         if (path == nullptr || path[0] == '\0') {
@@ -71,7 +58,6 @@ class SharedLibrary {
         return _handle != nullptr;
     }
 
-    // Tries each candidate in order and keeps the first that opens.
     [[nodiscard]] auto OpenAny(std::span<const char* const> candidates, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         for (const char* path: candidates) {
             if (Open(path, bind)) {
@@ -128,4 +114,4 @@ class SharedLibrary {
     void* _handle = nullptr;
 };
 
-} // namespace ZHLN
+}

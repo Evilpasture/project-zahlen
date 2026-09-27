@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Format.hpp
 #pragma once
 #include "Entity.hpp"
 // clang-format off
@@ -15,7 +14,6 @@
 
 namespace ZHLN::Reflect {
 
-// 1. Specialization for ZHLN::Entity
 template <>
 struct CustomFormatter<ZHLN::Entity> {
     static void format(const ZHLN::Entity& e, std::string& out) {
@@ -23,7 +21,6 @@ struct CustomFormatter<ZHLN::Entity> {
     }
 };
 
-// 2. Specialization for JPH::Vec3
 template <>
 struct CustomFormatter<JPH::Vec3> {
     static void format(const JPH::Vec3& v, std::string& out) {
@@ -31,7 +28,6 @@ struct CustomFormatter<JPH::Vec3> {
     }
 };
 
-// 3. Specialization for JPH::DVec3
 template <>
 struct CustomFormatter<JPH::DVec3> {
     static void format(const JPH::DVec3& v, std::string& out) {
@@ -39,7 +35,6 @@ struct CustomFormatter<JPH::DVec3> {
     }
 };
 
-// 4. Specialization for JPH::Quat
 template <>
 struct CustomFormatter<JPH::Quat> {
     static void format(const JPH::Quat& q, std::string& out) {
@@ -58,4 +53,4 @@ struct CustomFormatter<JPH::Ref<T>> {
     }
 };
 
-} // namespace ZHLN::Reflect
+}

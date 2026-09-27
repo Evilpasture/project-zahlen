@@ -33,9 +33,6 @@ template <typename LayoutT>
     bool                            additive = false
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-        // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
-        // PUSH_INDEX mapping table baked from the reflected set layout). Per-
-        // draw data travels through push data, so no push ranges are declared.
         return pass.BuildHeap(
             self->ctx.Device(), self->heapManager, shaders, colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
             additive, self->pipelineCache.Get()
@@ -54,8 +51,6 @@ template <typename LayoutT>
     bool                                  additive = false
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-        // VK_EXT_descriptor_heap: specialization never changes the descriptor
-        // interface, so one mapping table covers every variant.
         return pass.BuildHeapVariants(
             self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
             Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
@@ -104,4 +99,4 @@ template <typename BuildFn>
     return {};
 }
 
-} // namespace ZHLN
+}

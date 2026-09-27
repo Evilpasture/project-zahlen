@@ -11,7 +11,7 @@ void PhysicsDebugRenderer::DrawLine(JPH::RVec3Arg inFrom, JPH::RVec3Arg inTo, JP
     lines.push_back({.x = static_cast<float>(inTo.GetX()), .y = static_cast<float>(inTo.GetY()), .z = static_cast<float>(inTo.GetZ()), .color = color});
 }
 
-void PhysicsDebugRenderer::DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, JPH::RVec3Arg inV3, JPH::ColorArg inColor, ECastShadow /*inCastShadow*/) {
+void PhysicsDebugRenderer::DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, JPH::RVec3Arg inV3, JPH::ColorArg inColor, ECastShadow ) {
     uint32_t color = inColor.GetUInt32();
     triangles.push_back({.x = static_cast<float>(inV1.GetX()), .y = static_cast<float>(inV1.GetY()), .z = static_cast<float>(inV1.GetZ()), .color = color});
     triangles.push_back({.x = static_cast<float>(inV2.GetX()), .y = static_cast<float>(inV2.GetY()), .z = static_cast<float>(inV2.GetZ()), .color = color});
@@ -19,7 +19,6 @@ void PhysicsDebugRenderer::DrawTriangle(JPH::RVec3Arg inV1, JPH::RVec3Arg inV2, 
 }
 
 void PhysicsDebugRenderer::DrawText3D(JPH::RVec3Arg inPosition, const std::string_view& inString, JPH::ColorArg inColor, float inHeight) {
-    // Usually ignored or printed to stdout in simple engines.
 }
 
 void PhysicsDebugRenderer::Clear() {
@@ -27,4 +26,4 @@ void PhysicsDebugRenderer::Clear() {
     triangles.clear();
 }
 
-} // namespace ZHLN::Physics
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/execution/ParallelDraw.hpp
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -12,48 +11,27 @@ namespace ZHLN::Vk {
 struct SecondaryInheritance {
     std::span<const VkFormat> colorFormats;
     VkFormat                  depthFormat = VK_FORMAT_UNDEFINED;
-    // Must match the render pass the secondary is executed in:
-    // VUID-vkCmdExecuteCommands-pStencilAttachment-06775. Only set this when
-    // the pass actually binds a stencil attachment (the depth format alone is
-    // NOT enough — most depth passes have pStencilAttachment == NULL).
     VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
 
-    // VK_EXT_descriptor_heap: when non-null, the secondary inherits the
-    // primary's bound heaps so it can draw with heap-based pipelines.
     const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;
 
-    // Optional per-frame push-data fields (e.g. the scene registry's device
-    // addresses): pushed once into every secondary right after it begins.
-    // Offsets are reflected independently so Slang-inserted padding is kept.
     std::span<const uint32_t>        pushDataFrameOffsets;
     std::span<const VkDeviceAddress> pushDataFrameAddresses;
 
-    // Secondaries always vkCmdSetViewport/Scissor (they do not inherit those
-    // from the primary). Width or height <= 1 means the full `extent` passed
-    // to ParallelDrawDispatch — same convention as DynamicPass::Viewport.
     VkViewport viewport {};
 };
 
 namespace detail {
-// Archetype callback to test scheduler invocation without using lambdas in unevaluated contexts
 struct ParallelForCallback {
     void operator()([[maybe_unused]] uint32_t start, [[maybe_unused]] uint32_t end, [[maybe_unused]] uint32_t chunkIdx) const noexcept {
     }
 };
-} // namespace detail
+}
 
-/**
- * @brief Concept enforcing that the scheduler policy provides a valid ParallelFor loop
- * with the correct signature.
- */
 template <typename S>
 concept ParallelScheduler = requires(S&& s, uint32_t count, uint32_t chunkSize) { s.ParallelFor(count, chunkSize, detail::ParallelForCallback {}); };
 
-/**
- * @brief Fully decoupled, template-driven parallel command recorder.
- * Enforces the ParallelScheduler concept at compile-time for friendly error reporting.
- */
 template <ParallelScheduler SchedulerT, typename CmdProviderFn, typename RecordFn>
 inline void ParallelDrawDispatch(
     VkCommandBuffer             primaryCmd,
@@ -72,8 +50,6 @@ inline void ParallelDrawDispatch(
 
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
 
-    // VK_EXT_descriptor_heap: heap-binding inheritance for heap-based pipelines.
-    // Only chain it when the caller actually supplies heap bind descriptors.
     const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
         .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
         .pNext                 = nullptr,
@@ -107,9 +83,7 @@ inline void ParallelDrawDispatch(
         .pipelineStatistics   = 0
     };
 
-    // Parallel execution delegated to the compile-time injected scheduler policy
     std::forward<SchedulerT>(scheduler).ParallelFor(drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) noexcept {
-        // Fetch the task-local command buffer via the callback lambda
         VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
         const VkCommandBufferBeginInfo begin_info = {
@@ -121,18 +95,12 @@ inline void ParallelDrawDispatch(
 
         CommandBufferGuard recordGuard(sec_cmd, begin_info);
 
-        // VK_EXT_descriptor_heap: push data does not carry over from the
-        // primary, so re-push the per-frame block once per secondary.
         if (!inheritDesc.pushDataFrameAddresses.empty()) {
             PushHeapFrameAddresses(sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
         }
 
-        // Instantiated locally on the thread's stack.
-        // No thread_local, no global shared state.
         CommandEncoder encoder(sec_cmd);
 
-        // Secondaries own viewport/scissor; without this they rasterize the
-        // full framebuffer even when the scene is confined to a sub-rect.
         const bool useVp = inheritDesc.viewport.width > 1.0F && inheritDesc.viewport.height > 1.0F;
         const VkViewport viewport = useVp ? inheritDesc.viewport :
             VkViewport {
@@ -167,4 +135,4 @@ inline void ParallelDrawDispatch(
     Vk::ExecuteCommands(primaryCmd, secondaries);
 }
 
-} // namespace ZHLN::Vk
+}

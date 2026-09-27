@@ -1,18 +1,13 @@
-// resources/shaders/procedural_bake.slang
 
 [vk::constant_id(0)]
-const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
+const int BAKE_TYPE = 0;
 
-// The three pattern parameters are named after what they mean, not after their
-// position: the host struct (RenderContext::Impl::BakePush) spells them the same
-// way. The bake type is not a push word at all -- it is the BAKE_TYPE
-// specialization constant above.
 struct PushConstants {
     uint  width;
     uint  height;
-    float scale;      // pattern frequency
-    float randomness; // per-cell jitter / detail
-    float distortion; // wave-phase distortion
+    float scale;
+    float randomness;
+    float distortion;
 };
 
 [vk::push_constant]
@@ -20,9 +15,6 @@ PushConstants pc;
 
 RWTexture2D<float4> outTexture;
 
-// Patterns are compile-time types. CSMain intentionally retains BAKE_TYPE as the
-// host-visible specialization constant: changing it would break existing pipeline
-// specialization-map entries. Each selected path is monomorphized by Slang.
 public interface IBakePattern {
     static float3 generate(float2 uv);
 }
@@ -31,7 +23,6 @@ public float3 GenerateBake<T : IBakePattern>(float2 uv) {
     return T.generate(uv);
 }
 
-// --- NOISE MATH LIBRARIES
 float2 Hash22(float2 p) {
     float3 p3 = frac(float3(p.xyx) * float3(0.1031f, 0.1030f, 0.0973f));
     p3 += dot(p3, p3.yzx + 33.33f);
@@ -61,8 +52,7 @@ float3 EvaluateVoronoi(float2 uv) {
 }
 
 float EvaluatePerlin(float2 uv) {
-    // Standard Perlin/Simplex gradient noise math ...
-    return Hash22(floor(uv)).x; // Placeholder representation
+    return Hash22(floor(uv)).x;
 }
 
 public struct VoronoiPattern : IBakePattern {

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Material decoding + surface evaluation. Geometry stages only provide UVs,
-// tangent frames, and bindless indices; this module owns channel unpacking
-// and the metallic-roughness surface model.
 module material_model;
 
 import common;

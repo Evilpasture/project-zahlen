@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/memory/StagingContext.hpp
 
 #pragma once
 
@@ -16,7 +15,6 @@
 
 namespace ZHLN::Vk {
 
-// Staging buffer / host-mapped upload failures for the staging subsystem.
 enum class StagingError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Host memory allocation failed for staging buffer">{}) = 1,
     OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Device/Host-visible VRAM allocation failed for staging buffer">{}),
@@ -32,7 +30,6 @@ class StagingContext {
     StagingContext(Allocator& allocator, const Context& ctx);
     ~StagingContext();
 
-    // Disable copying to enforce strict ownership
     StagingContext(const StagingContext&)            = delete;
     StagingContext& operator=(const StagingContext&) = delete;
 
@@ -61,7 +58,7 @@ class StagingContext {
     VkCommandBuffer                  _cmd = VK_NULL_HANDLE;
     std::optional<CommandBufferGuard> _recording;
     std::vector<Buffer>              _stagingBuffers;
-    VkFence                          _fence = VK_NULL_HANDLE; // Owned internally
+    VkFence                          _fence = VK_NULL_HANDLE;
 };
 
-} // namespace ZHLN::Vk
+}

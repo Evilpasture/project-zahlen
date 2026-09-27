@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/gui/Text.cpp
 #include "Text.hpp"
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -22,12 +21,6 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
     bounds.minY = 1e9f;
     bounds.maxY = -1e9f;
 
-    // Line breaks are part of the measurement, not something the renderer gets
-    // to discover on its own: AppendTextVertices advances by TextLineHeight on
-    // '\n' and resets the pen to the line's left edge, so the bounds of a
-    // multi-line string are the union of its lines rather than the width of
-    // every glyph run together. Without this, a wrapped label measures as one
-    // line wide and one line tall while drawing as a paragraph.
     float currentX  = 0.0f;
     float lineTop   = 0.0f;
     bool  hasGlyphs = false;
@@ -80,7 +73,7 @@ uint32_t AppendTextVertices(
 
     float         currentX     = x;
     float         currentY     = y;
-    float         lineHeight   = TextLineHeight(font, scale); // Line height step for newlines
+    float         lineHeight   = TextLineHeight(font, scale);
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
     Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
     Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
@@ -104,8 +97,6 @@ uint32_t AppendTextVertices(
         float       v1 = g.y1 / font.atlasHeight;
 
         float x0 = currentX + g.xoff * scale;
-        // yoff is measured from the baseline; the bake's own baseline offset
-        // (top of line box to baseline) puts it back in top-left coordinates.
         float y0 = currentY + (g.yoff + font.baseline) * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
@@ -128,4 +119,4 @@ uint32_t AppendTextVertices(
     }
     return writtenCount;
 }
-} // namespace ZHLN::GUI
+}

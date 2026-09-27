@@ -1,14 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Format.hpp
-//
-// Formatting engine only: the signal-safe memory pool, the low-level number
-// and string conversions, BufferPrint (vsnprintf replacement), FormatTo and
-// the pool-backed Format()/FormatConst() helpers.
-//
-// This header deliberately performs no file-descriptor I/O. Translation units
-// that only build strings should include this instead of Print.hpp.
 
 #pragma once
 
@@ -27,7 +19,6 @@
 
 namespace ZHLN {
 
-// Lock-Free Statically Allocated Signal-Safe Memory Pool
 
 class SignalSafePool {
   public:
@@ -68,7 +59,6 @@ class SignalSafePool {
     inline static std::atomic<uint32_t> s_allocatedMask {0};
 };
 
-// Async-Signal Safe RAII Resource Holder
 
 class FormatResult {
   public:
@@ -128,7 +118,6 @@ class FormatResult {
     bool   _valid;
 };
 
-// Signal-Safe Low-Level Conversion Utilities
 
 namespace TemplatedDetail {
 
@@ -386,9 +375,8 @@ struct FormatOptions {
     size_t width     = 0;
 };
 
-} // namespace TemplatedDetail
+}
 
-// ZHLN::BufferPrint (vsnprintf / snprintf Async-Signal Safe Replacement)
 
 inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args) noexcept -> int {
     if ((buf == nullptr) || max_len == 0) {
@@ -536,7 +524,6 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcep
     return result;
 }
 
-// ZHLN::FormatTo (HYBRID: Type-Safe `{}` Formatting onto Stack Buffers)
 
 template <typename... Args>
 constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
@@ -694,7 +681,6 @@ constexpr auto FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&..
     return FormatTo(buf.data(), N, fmt, std::forward<Args>(args)...);
 }
 
-// ZHLN::Format (Pool-based std::format Async-Signal Safe Replacement)
 
 template <typename... Args>
 inline auto Format(std::string_view fmt, Args&&... args) noexcept -> FormatResult {
@@ -717,4 +703,4 @@ constexpr auto FormatConst(std::string_view fmt, Args&&... args) noexcept {
     return out;
 }
 
-} // namespace ZHLN
+}

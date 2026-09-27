@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Authoritative GPU instance / meshlet / vertex-attribute ABI. common.slang
-// imports this module and attaches methods; the host reflects the structs
-// without loading the bindless ParameterBlock.
 module instance_data;
 
 import vertex_format;
@@ -50,8 +47,6 @@ public struct InstanceData {
     public uint _paddingMeshlet;
 };
 
-// Raw word protocol (fetchMeshlet below reads words 0..15),
-// not the declared layout: no host struct is generated for it.
 [CxxSkip]
 public struct GPUMeshlet {
     public uint vertexOffset;
@@ -106,13 +101,6 @@ public extension VertexAttributes {
     }
 }
 
-// Behaviour-only accessors over the ABI above: no fields, padding, or
-// descriptor bindings. They live here rather than in common.slang so that
-// consumers of the raw ABI (ray-tracing helpers, standalone compute passes)
-// get them without pulling in common's global `scene` ParameterBlock and
-// push-constant declarations, which would change every binding table they
-// are imported into.
-// Column lengths of the world matrix. glTF thickness is in local metres.
 public float AverageWorldScale(float4x4 world) {
     float3x3 m = (float3x3) world;
     float sx = length(float3(m._m00, m._m10, m._m20));
@@ -164,11 +152,6 @@ public extension InstanceData {
             return ((this.flags >> 16) & 0xFFu) != 0;
         }
     }
-    // Bits 24..31: KHR_materials_transmission factor, 8-bit unorm. Zero for
-    // every ordinary draw. When non-zero the unused slots carry the film:
-    // emissive.w iridescence, emissive.x normal scale, alphaCutoff film max,
-    // metallicFactor IOR, baseColor.a volume thickness. The padding words
-    // carry texture indices (0xFFFF = none) and the film minimum in nm.
     public property float transmissionFactor {
         [ForceInline]
         get {
@@ -191,7 +174,6 @@ public extension InstanceData {
         [ForceInline]
         get { return float(this._paddingMeshlet >> 16); }
     }
-    // x transmission, y iridescence factor, z film max nm, w film min nm.
     [ForceInline]
     public float4 transmissionParams() {
         float t = this.transmissionFactor;
@@ -200,7 +182,6 @@ public extension InstanceData {
         }
         return float4(t, this.emissiveFactor.w, this.alphaCutoff, this.filmThicknessMinNm);
     }
-    // x volume thickness metres, y IOR, z model scale (geometry stage), w normal scale.
     [ForceInline]
     public float4 volumeParams() {
         if (this.transmissionFactor <= 0.0f) {
@@ -208,17 +189,11 @@ public extension InstanceData {
         }
         return float4(this.baseColorFactor.a, this.metallicFactor, 1.0f, this.emissiveFactor.x);
     }
-    // x film thickness, y iridescence factor, z volume thickness. 0xFFFF = none.
     [ForceInline]
     public uint4 transmissionTextures() {
         return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, 0u);
     }
 
-    // KHR_materials_clearcoat, packed only when transmission is zero (that
-    // path already owns the padding words). Factor byte 0 is no lacquer.
-    // _paddingCenter: low 16 coat tex, high 16 coat-roughness tex (0xFFFF = none).
-    // _paddingMeshlet: low 16 coat-normal tex, bits 16..23 factor unorm8,
-    // bits 24..31 normal scale in 1/64. emissive.w is the roughness factor.
     [ForceInline]
     public float clearcoatFactor() {
         if (this.transmissionFactor > 0.0f) {
@@ -262,8 +237,6 @@ public extension InstanceData {
     public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0)
             return float3(0.0f);
-        // Positions are a tightly packed host float3 stream (12-byte stride).
-        // A float3* may be given a 16-byte array stride by SPIR-V layout rules.
         float* values    = (float*) this.posAddress;
         uint valueOffset = vertexId * 3u;
         return float3(values[valueOffset], values[valueOffset + 1u], values[valueOffset + 2u]);
@@ -275,11 +248,6 @@ public extension InstanceData {
         return attributes[vertexId];
     }
 
-    // --- VK_EXT_mesh_shader accessors
-    // Every meshlet stream is read through raw word loads for the same reason
-    // fetchPosition/fetchSkin are: a typed pointer may be assigned a padded
-    // array stride by SPIR-V layout rules, while the host writes tightly
-    // packed data. 16 words == sizeof(GPUMeshlet).
     [ForceInline]
     public bool hasMeshlets() {
         return this.meshletAddress != 0 && this.meshletVertexAddress != 0 && this.meshletTriAddress != 0 && this.meshletCount > 0;
@@ -303,16 +271,12 @@ public extension InstanceData {
         return m;
     }
 
-    // Global vertex index of local vertex `local` inside a meshlet.
     [ForceInline]
     public uint fetchMeshletVertex(uint vertexOffset, uint local) {
         uint* indices = (uint*) this.meshletVertexAddress;
         return indices[vertexOffset + local];
     }
 
-    // One micro-triangle (three meshlet-local 8-bit indices). The cooker pads
-    // every meshlet's triangle run to a 4-byte boundary, but a single triangle
-    // may still straddle a word, hence the per-byte extraction.
     [ForceInline]
     public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
         uint* words   = (uint*) this.meshletTriAddress;
@@ -326,9 +290,6 @@ public extension InstanceData {
 
     [ForceInline]
     public SkinVertex fetchSkin(uint vertexId) {
-        // The host packs each influence record as three uints (12 bytes). Do
-        // not index a SkinVertex* here: its GPU array stride can be rounded to
-        // 16 bytes by the target layout, unlike the host's tightly packed BDA.
         uint* words     = (uint*) this.skinAddress;
         uint wordOffset = vertexId * 3u;
         SkinVertex result;

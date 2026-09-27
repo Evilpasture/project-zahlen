@@ -9,7 +9,7 @@ namespace ZHLN::ECS {
 void EntityCommandBuffer::Playback() {
     ZHLN::HashMap<uint32_t, Entity> tempToRealMap;
 
-    for (auto& cmd: _commands) { // Use non-const reference so we can mutate cmd
+    for (auto& cmd: _commands) {
         Entity target = cmd.entity;
 
         if (target.generation == 0xFFFFFFFF) {
@@ -33,7 +33,7 @@ void EntityCommandBuffer::Playback() {
                 }
                 if (cmd.destructor != nullptr && cmd.componentData != nullptr) {
                     cmd.destructor(cmd.componentData);
-                    cmd.componentData = nullptr; // Prevent double-free in Reset()
+                    cmd.componentData = nullptr;
                 }
                 break;
             }
@@ -55,4 +55,4 @@ void EntityCommandBuffer::Reset() noexcept {
     _tempIndexCounter = 0xF0000000;
 }
 
-} // namespace ZHLN::ECS
+}

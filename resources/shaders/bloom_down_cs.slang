@@ -1,17 +1,8 @@
-// resources/shaders/bloom_down_cs.slang
-//
-// Dual Kawase downsample, compute port. Source-texel offsets ride in the push
-// constants (rcpWidth/rcpHeight = 1 / SOURCE resolution); the destination UV
-// is derived from the dispatch thread id, so one shader serves every cascade
-// level without recompilation.
 
 struct KawasePush {
-    int   mode; // 0 = downsample (kept for parity with the raster-era layout)
+    int   mode;
     float rcpWidth;
     float rcpHeight;
-    // Named for the word the bright pass reads: the whole chain pushes ONE
-    // block (RenderContext::Impl::KawasePushConstants) at offset 0, and this
-    // stage ignores the fourth word the same way it ignores `mode`.
     float glowIntensity;
 };
 
@@ -33,9 +24,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
-    // --- DUAL KAWASE DOWNSAMPLE
-    // Bilinear average of 4 samples offset by half a source texel to capture
-    // 16 pixels of detail
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
     float2 halfPixel = texelSize * 0.5f;
     float3 sum       = 0.0f;
