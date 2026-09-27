@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/Engine.cpp
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
@@ -44,41 +43,24 @@
 
 namespace ZHLN {
 
-// Core Lifecycle Errors (Tier 3)
-// Application bootstrap code branches on these specific failure reasons.
 
 enum class EngineInitError : uint8_t {
-    // Window/TTY/render failures live on KernelInitError (Kernel.cpp), physics
-    // on WorldInitError (World.cpp); the composition root itself can only fail
-    // to allocate. Error carries the annotated description in every case.
     EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
 };
 
 struct EngineImpl {
-    // Declaration order encodes the teardown order (reverse of declaration):
-    // the World (registry, physics, Jolt) dies before the Kernel (GPU, windows,
-    // GLFW), and the script module dies before the Kernel's FS::FileSystemWatcher
-    // whose subscriptions it owns. Kernel is declared first so it outlives
-    // every callback-owning client during normal and partial-init teardown.
     std::unique_ptr<Kernel> kernel;
     std::unique_ptr<World>  world;
 
     std::unique_ptr<ScriptRunner>       scriptRunner;
     std::unique_ptr<NativeScriptModule> nativeScriptModule;
-    // Hot-reload watches for whichever boot scripts the installed runtime
-    // declares. Empty until a host installs one; core names no file here.
     std::vector<FS::FileWatchHandle> bootScriptWatches;
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback uiCallback = nullptr;
-    // 2D geometry the UI phase produced for this frame; consumed by
-    // RenderSystem when the frame is open. See Engine::SetPendingUIData.
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
-    // Optional-layer wiring; see the Engine.hpp seam docs. Vectors because any
-    // number of extras modules may contribute, and each rebuild (scene reset)
-    // replays the whole list.
     std::vector<Engine::FrameSchedulerExtension> frameSchedulerExtensions;
     std::vector<Engine::SystemGraphsExtension>   systemGraphsExtensions;
     Engine::CharacterStepHooks                   characterStepHooks;
@@ -88,17 +70,8 @@ struct EngineImpl {
 
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
-    // Fixed-timestep leftover for PhysicsSystem::Update, which is stateless
-    // and receives it by reference. Engine-owned, like currentAlpha, so it
-    // resets when the engine is destroyed and never leaks into another test
-    // case's engine.
     float physicsAccumulator = 0.0f;
 
-    // Built once per engine, not once per scene: materialising the atlas
-    // uploads a full-size bindless texture that nothing ever releases. The
-    // scene owns a *copy* in UISettingsComponent, which Registry::Clear()
-    // throws away, so the engine keeps the authoritative one and re-seeds each
-    // new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
     void*        gameState    = nullptr;
@@ -125,11 +98,6 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
-        // First resolution only: fonts are first-class assets with an AssetID.
-        // A cooked font baked into the mounted paks (data/base.pak's
-        // fonts/default.zfont) seeds the core bake slot and is cached under
-        // kDefaultFontAssetID. The asset cache outranks the embedded default;
-        // the loader hook, when installed, still wins inside CreateFontAtlasTexture.
         PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
         PrefabFactory::CreateFontAtlasTexture(
             GetRenderContext(), reg, GetAssetManager(), GUI::kDefaultFontAssetID
@@ -143,28 +111,12 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
 
 namespace {
 
-// Crash Observers
-// Each subsystem describes how to dump itself, and diagnostics/CrashHandler.cpp
-// iterates whatever is registered without knowing any of these types exist.
-// That is the whole point: the crash handler used to #include <Zahlen/Engine.hpp>,
-// <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> to reach into
-// Camera::frustum and PhysicsContext directly, which made the crash path depend
-// on the engine and on Jolt, and meant a new subsystem dump meant editing the
-// crash handler.
-//
-// These run from a crash, on state that the fault may already have corrupted.
-// They are only invoked from the deferred path (see DumpContext in
-// CrashHandler.cpp), never from inside the signal handler itself.
-//
-// The `context` parameter is how a member function gets here: each of these is a
-// captureless lambda or free function that casts the void* back to the
-// subsystem it was registered with.
 
-void DumpEngineState(void* context, const SignalEvent& /*event*/) noexcept {
+void DumpEngineState(void* context, const SignalEvent& ) noexcept {
     ZHLN::Trace(*static_cast<Engine*>(context));
 }
 
-void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
+void DumpCameraState(void* context, const SignalEvent& ) noexcept {
     auto& cam = *static_cast<Camera*>(context);
 
     auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
@@ -177,8 +129,6 @@ void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
     Diagnostics::WriteCrashOutput(frust_hdr);
     const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
 
-    // Jolt packs the six planes into two SoA blocks of four lanes; the plane a
-    // caller thinks of as "index i" is block i/4, lane i%4.
     for (int i = 0; i < 6; ++i) {
         const int block     = i / 4;
         const int lane      = i % 4;
@@ -191,36 +141,27 @@ void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
     ZHLN::Dump(cam.frustum);
 }
 
-void DumpPhysicsState(void* context, const SignalEvent& /*event*/) noexcept {
+void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
     static_cast<PhysicsContext*>(context)->TraceDiagnostics();
 }
 
-// Registers the subsystem dumps above. Returns nothing: a subsystem that fails
-// to register costs its own section of the crash report and nothing else, and
-// failing engine startup over a missing diagnostic would be the wrong trade.
 void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
-    // Order matters -- it is the order the sections appear in the crash report.
     Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
     Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world.GetCamera());
     Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
 }
 
-} // namespace
+}
 
 Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
-    // The Kernel rebuilds everything it owns: the GPU context and every
-    // extra-window viewport. World-side state survives untouched, which is the
-    // point of the split -- only GPU resources need re-uploading.
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
     PrefabFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
 
-    // Core has rebuilt everything it owns. Owners outside the engine now
-    // re-upload against the new context, in the order they registered.
     for (const auto& callback: _impl->deviceLostCallbacks) {
         if (callback) {
             callback(*this);
@@ -247,30 +188,14 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl               = std::make_unique<EngineImpl>();
     _impl->config       = cfg;
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
-    // A host installs its runtime after Create() returns, so the boot-script
-    // watches are registered when that happens rather than here -- and the paths
-    // come from the runtime itself, never from core.
     _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
-    // The World comes first: the window input callbacks write InputStateComponent
-    // into the registry, so the registry must exist before the Kernel's first
-    // event pump. It also means a Kernel-only host (UI editor, cooker) never
-    // pays for physics or a simulation.
     auto world_res = World::Create(cfg.physics);
     if (!world_res) {
         return std::unexpected(world_res.error());
     }
     _impl->world = std::move(world_res.value());
 
-    // Keys land in InputStateComponent twice over: held state in the bitset for
-    // gameplay, and a queue of presses plus typed characters for text fields.
-    // The engine still does not interpret any of it as text -- it does not own a
-    // GUI::Context (the caller does, see app/main.cpp:151), so it has no way to
-    // know which field is focused. GUI::Context::BeginFrame drains the queue;
-    // Context::PushKey/PushChar feed the same queue for hosts with no window.
-    //
-    // Every press is queued, not just the editing keys. Deciding which keys a
-    // text field acts on is TextBuffer.hpp's business; this is only the pump.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
         auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
@@ -304,9 +229,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
         state->QueueChar(codepoint);
     };
 
-    // userdata is the heap-allocated World (stable for the engine's whole life,
-    // unlike `this`), which owns the registry the callbacks write to. The Kernel
-    // never touches ECS -- it only forwards events through this receiver.
     World*              worldPtr = _impl->world.get();
     WindowInputReceiver receiver = {
         .userdata = worldPtr, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
@@ -320,9 +242,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
 
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
-    // From here on a crash report can include this engine's state. Done after
-    // the contexts exist, since an observer holds a raw pointer to them. A host
-    // that did not supply a CrashState gets no subsystem dumps.
     if (_impl->config.crashState != nullptr) {
         RegisterCrashObservers(*_impl->config.crashState, *this, *_impl->world);
     }
@@ -335,8 +254,6 @@ void Engine::RegisterBootScriptWatches() {
         return;
     }
 
-    // Drop the previous runtime's watches first: a host may replace the runtime,
-    // and the paths belong to whichever one is installed now.
     for (const FS::FileWatchHandle handle: _impl->bootScriptWatches) {
         static_cast<void>(_impl->kernel->GetFileSystemWatcher().Unwatch(handle));
     }
@@ -358,44 +275,25 @@ void Engine::RegisterBootScriptWatches() {
 }
 
 Engine::~Engine() {
-    // InitInternal can fail before _impl is built, and Engine::Create deletes a
-    // half-built engine.
     if (_impl == nullptr) {
         return;
     }
 
-    // Before anything below is destroyed: a crash observer holds a raw pointer
-    // to the camera and to the physics context, and a fault during teardown
-    // would otherwise dump memory that has already been freed.
     if (_impl->config.crashState != nullptr) {
         Diagnostics::ClearCrashObservers(*_impl->config.crashState);
     }
 
     if (_impl->kernel != nullptr && _impl->world != nullptr) {
-        // Optional layers that park engine-scoped state in process-global
-        // storage release it here, while the engine and its registry are still
-        // whole. Runs before any subsystem below is destroyed. The fallback
-        // preset (extras/FallbackScene) is the canonical example: its entity
-        // handles name entities in the registry that is about to be cleared,
-        // so they must not survive into the next engine.
         for (const auto hook: _impl->teardownHooks) {
             hook(*this);
         }
 
-        // Ragdolls retain Jolt resources outside the registry. Drain them while
-        // both the components and PhysicsContext still exist. InitInternal may
-        // fail before this system is created, so teardown must tolerate that path.
         _impl->world->GetArticulationSystem().Shutdown(*this);
         _impl->world->GetRegistry().Clear();
         _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
     }
 
-    // World first (registry, physics, Jolt), then the script module (its
-    // watches live in the Kernel's FS::FileSystemWatcher), then the Kernel
-    // (GPU, windows, watcher, GLFW). See EngineImpl's declaration order.
     _impl->world.reset();
-    // The subscriptions live in the watcher's own map, so they die with it; the
-    // handles are only this side's bookkeeping and must not outlive it.
     _impl->bootScriptWatches.clear();
     _impl->nativeScriptModule.reset();
     _impl->kernel.reset();
@@ -410,25 +308,14 @@ void Engine::ProcessEvents() {
         ZHLN::CheckForCrashes(*_impl->config.crashState, this);
     }
 
-    // Input-state bookkeeping is World-side: the pump writes into the registry.
     auto& reg        = _impl->world->GetRegistry();
     auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
 
-    // No branch on session kind before the pump: a headless host's PollEvents()
-    // is a no-op and a host that cannot quit reports that it does not want to,
-    // so this is the same call in all three sessions. The old early-return for
-    // headless existed because the kernel used to call glfwPollEvents() itself
-    // and had to be stopped from doing it; the host owns its event source now.
     _impl->kernel->ProcessEvents();
 
-    // The one place the session's shape changes behaviour, and it is derived
-    // rather than asked: no window, but a native presentation descriptor, is a
-    // console driving KMS/DRM directly. It has an event source and no focus
-    // model, so the UI's capture flags would only swallow input that nothing is
-    // competing for. See PlatformHost::HasNativeSurface().
     const auto& host = _impl->kernel->GetPlatformHost();
     if (inputState != nullptr && host.AsWindow() == nullptr && host.HasNativeSurface()) {
         inputState->wantCaptureKeyboard = false;
@@ -437,10 +324,6 @@ void Engine::ProcessEvents() {
 }
 
 void Engine::PollLateInput() {
-    // The raw pump only: no ResetDeltas (the frame-top sample's deltas stay
-    // accumulated), no session-shape fixups (those ran at frame top). What the
-    // pump writes -- key/mouse levels plus motion/wheel accumulation -- is
-    // idempotent to re-sample, which is what makes a second pump per frame safe.
     _impl->kernel->ProcessEvents();
 }
 
@@ -661,22 +544,16 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
-    // Qualified: unqualified lookup would find this member again (0 args).
     return ZHLN::InitializeDefaultScene(*this);
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     _impl->activeGameplayDriver = driver;
 
-    // Resource contexts retain owner/handle pairs outside ECS component
-    // storage. Reconcile before any phase can observe this frame's world.
     _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
-    // The whole frame is the scheduler's ordered step list; the two SystemGraphs
-    // are steps inside it (see BuildFrameScheduler), so their hazard analysis
-    // only ever orders systems within a graph, never the phases around them.
     _impl->scheduler.Execute(*this, dt, ctx);
 
     _impl->frameCounter++;
@@ -711,15 +588,12 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
         TaskSystem::Shutdown();
-        return std::unexpected(engine_res.error()); // Propagate the exact Error!
+        return std::unexpected(engine_res.error());
     }
 
     auto engine = std::move(engine_res.value());
     engine->GetPlatformHost().Focus();
 
-    // Optional gameplay layers install before the default scene is built, so
-    // their contributed systems and components are already wired when
-    // InitializeDefaultScene registers components and compiles the graphs.
     if (installExtensions != nullptr) {
         installExtensions(*engine);
     }
@@ -751,35 +625,18 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
             }
         }
 
-        // Display-locked pacing: when the closed-loop presenter knows the
-        // hardware refresh interval (fixed-refresh display, feedback arrived),
-        // the display owns the frame cadence -- unless the fps cap asks for a
-        // slower one. Within 5% counts as the same rate: a cap at the display
-        // rate is the display's job, not the CPU limiter's, and measurement
-        // noise means the two are never bit-equal. Simulation then advances by
-        // the measured interval instead of the wall clock, so physics and
-        // gameplay step on the same cadence the presents are aimed at, and the
-        // CPU limiter below stands down: padding a display-paced frame to a
-        // wall-clock budget as well would double-pace against the V-blanks,
-        // making presents miss the ones they were aimed at. Everywhere else --
-        // other policies, headless, variable refresh, the bootstrap frames, a
-        // binding fps cap -- the wall clock stays the dt and the limiter runs.
         constexpr double           kFpsCapSlack = 1.05;
         const std::optional<float> pacedDt      = engine->GetRenderContext().GetPacedDeltaTime();
         const bool                 displayPaced = pacedDt.has_value() &&
                                  (options.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
         float tickDt = displayPaced ? *pacedDt : rawDt;
 
-        // Single synchronized engine tick
         GameplayStatus status = engine->Tick(tickDt, options.driver);
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;
         }
 
-        // The CPU limiter only binds when no display cadence owns the frame (see
-        // displayPaced above): sleeping a display-paced frame to a wall-clock
-        // budget would pace it twice, wall clock plus V-blank.
         if (options.fpsLimit > 0 && !displayPaced) {
             auto   now          = std::chrono::high_resolution_clock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
@@ -796,7 +653,7 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     }
 
     TaskSystem::Shutdown();
-    return {}; // Success!
+    return {};
 }
 
-} // namespace ZHLN
+}

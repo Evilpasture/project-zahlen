@@ -11,12 +11,6 @@
 #include <string_view>
 #include <version>
 
-// For TARGET_OS_MAC in the platform block below. It sits here, at file scope,
-// rather than in the `#elif defined(__APPLE__)` branch that reads it: an
-// include inside namespace ZHLN declares whatever that header declares in ZHLN
-// as well as at global scope (macros are the same either way, which is why the
-// misplacement was harmless here), and configure/check_reflection_boundary.py fails
-// any include inside a namespace.
 #if defined(__APPLE__) && defined(__MACH__)
 #include <TargetConditionals.h>
 #endif
@@ -25,11 +19,9 @@
 #define ZHLN_VERSION_MINOR 1
 #define ZHLN_VERSION_PATCH 0
 
-// 1. The "Stringize" helper macros
 #define ZHLN_STR_HELPER(x) #x
 #define ZHLN_STR(x)        ZHLN_STR_HELPER(x)
 
-// 2. Combine them using string literal concatenation
 #define ZHLN_VERSION_STR ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
 
 #ifndef ZHLN_GIT_COMMIT_HASH
@@ -60,17 +52,14 @@ namespace ZHLN {
 
 constexpr std::string_view GetSTLVersion() noexcept {
 #if defined(_LIBCPP_VERSION)
-    // LLVM libc++
     return "LLVM libc++ " ZHLN_STR(_LIBCPP_VERSION);
 #elif defined(__GLIBCXX__)
-// GNU libstdc++
 #if defined(_GLIBCXX_RELEASE)
     return "GNU libstdc++ " ZHLN_STR(_GLIBCXX_RELEASE) " (Date: " ZHLN_STR(__GLIBCXX__) ")";
 #else
     return "GNU libstdc++ (Date: " ZHLN_STR(__GLIBCXX__) ")";
 #endif
 #elif defined(_MSVC_STL_VERSION)
-    // MSVC STL
     return "MSVC STL " ZHLN_STR(_MSVC_STL_VERSION);
 #else
     return "Unknown Standard Library";
@@ -122,7 +111,6 @@ inline constexpr std::string_view Sanitizers = "enabled";
 inline constexpr std::string_view Sanitizers = "disabled";
 #endif
 
-// --- PLATFORM DETECTION
 #if defined(_WIN32) || defined(_WIN64)
 inline constexpr std::string_view PlatformName = "Windows";
 inline constexpr bool             isWindows    = true;
@@ -134,7 +122,6 @@ inline constexpr bool             isWindows    = false;
 inline constexpr bool             isLinux      = true;
 inline constexpr bool             isMac        = false;
 #elif defined(__APPLE__) && defined(__MACH__)
-// TARGET_OS_MAC comes from <TargetConditionals.h>, included at file scope above.
 #if TARGET_OS_MAC && !TARGET_OS_IPHONE
 inline constexpr std::string_view PlatformName = "macOS";
 inline constexpr bool             isWindows    = false;
@@ -159,7 +146,6 @@ static constexpr std::string_view ProjectRoot = ZHLN_PROJECT_ROOT;
 static constexpr std::string_view ProjectRoot = "";
 #endif
 
-// --- ARCHITECTURE DETECTION
 #if defined(__x86_64__) || defined(_M_X64)
 inline constexpr std::string_view Architecture = "x86_64";
 inline constexpr bool             isX64        = true;
@@ -175,17 +161,15 @@ inline constexpr bool             isARM64      = false;
 #endif
 
 #if defined(__x86_64__) || defined(_M_X64)
-// Virtually all modern x86_64 CPUs use 64-byte cache lines
 inline constexpr size_t CacheLineSize = 64;
 #elif defined(__aarch64__) || defined(_M_ARM64)
-// Apple Silicon (M1/M2/M3) uses 128-byte cache lines for performance cores
 #if defined(__APPLE__)
 inline constexpr size_t CacheLineSize = 128;
 #else
 inline constexpr size_t CacheLineSize = 64;
 #endif
 #else
-inline constexpr size_t CacheLineSize = 64; // Safe fallback
+inline constexpr size_t CacheLineSize = 64;
 #endif
 
 inline constexpr bool isLittleEndian = (std::endian::native == std::endian::little);
@@ -201,7 +185,7 @@ struct PhysicsConfig {
     uint32_t maxBodies             = 1024;
     uint32_t maxBodyPairs          = 1024;
     uint32_t maxContactConstraints = 1024;
-    uint32_t tempAllocatorSize     = 32 * 1024 * 1024; // 32MB
+    uint32_t tempAllocatorSize     = 32 * 1024 * 1024;
 };
 
 enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
@@ -214,36 +198,16 @@ struct RenderConfig {
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
-    // Create-time mesh-shading request. The vertex pipeline is always built;
-    // when this is false (or `ZHLN_NO_MESH_SHADING` is set in the environment
-    // at Create), scene geometry stays on the vertex path even if the device
-    // supports VK_EXT_mesh_shader.
     bool enableMeshShading = true;
-    // Where the driver pipeline cache is loaded from and saved to. Empty means
-    // the engine resolves it: `build/cache/pipeline_cache.bin` inside the
-    // source tree, the per-user cache directory anywhere else (see
-    // RuntimePaths in src/engine). Set it to decide yourself; the renderer
-    // never invents a path.
     std::string pipelineCachePath;
-    // Where a vendor GPU crash dump is written, empty to let the engine resolve
-    // it the same way. The directory is created on demand, and the path that
-    // was used is logged when a dump is written.
     std::string crashDumpPath;
 };
 
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
-    // When true (the default), a missing boot script or native gameplay
-    // module injects the compiled-in fallback scene. Hosts that own the
-    // scene -- tests, the editor, samples -- set this false so the preset
-    // cannot add its own sun, floor and camera.
     bool enableFallbackScene = true;
-    // Where crash diagnostics keep their state. The caller owns the storage --
-    // see Core/CrashState.hpp. Null means this engine does not poll for parked
-    // crashes and registers no subsystem dumps, so a fault still produces the
-    // platform's own report but not a Zahlen one.
     CrashState* crashState = nullptr;
 };
 
-} // namespace ZHLN
+}

@@ -23,9 +23,6 @@
 [submodule "extern/mimalloc"]
 	path = extern/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
-[submodule "extern/yoga"]
-	path = extern/yoga
-	url = https://github.com/facebook/yoga.git
 [submodule "extern/meshoptimizer"]
 	path = extern/meshoptimizer
 	url = https://github.com/zeux/meshoptimizer.git
@@ -41,3 +38,6 @@
 [submodule "extern/slang"]
 	path = extern/slang
 	url = https://github.com/shader-slang/slang.git
+[submodule "extern/simdjson"]
+	path = extern/simdjson
+	url = https://github.com/simdjson/simdjson.git

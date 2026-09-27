@@ -14,8 +14,6 @@ struct RenderTarget {
     Image      image;
     ImageView  view;
     VkExtent2D extent {};
-    // VK_EXT_descriptor_heap: the parameters used to create `view` — image
-    // descriptors in the heaps consume VkImageViewCreateInfo instead of handles.
     VkImageViewCreateInfo viewInfo {};
 
     RenderTarget() = default;
@@ -149,9 +147,8 @@ struct MipmappedRenderTarget {
     }
 };
 
-// Define the Transition overload here where RenderTarget is fully complete
 template <VkImageLayout TargetLayout, VkFormat F>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> /*unused*/) noexcept;
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> ) noexcept;
 
 template <typename T>
 struct TargetFormat;
@@ -200,9 +197,6 @@ struct UsageLayout {
     static constexpr VkImageAspectFlags aspect = Usage::Resource::aspect;
 };
 
-/**
- * @brief Automatically resolves layout and aspect from compile-time Graph Usages.
- */
 template <typename Usage, typename T>
 [[nodiscard]] constexpr auto Assume(const T& resource) noexcept {
     using Layout = UsageLayout<Usage>;
@@ -217,9 +211,6 @@ constexpr auto TransitionSingle(VkCommandBuffer cmd, const T& res) noexcept {
 template <VkImageLayout TargetLayout, typename... Resources>
 [[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd, const Resources&... resources) noexcept;
 
-/**
- * @brief Batch transitions a tuple/pack of Vulkan images to a target layout using std::apply.
- */
 template <VkImageLayout L, typename Tuple>
 [[nodiscard]] auto TransitionAllTo(VkCommandBuffer cmd, const Tuple& atts) {
     return std::apply([&](const auto&... a) { return Vk::TransitionBatch<L>(cmd, a...); }, atts);
@@ -232,27 +223,21 @@ struct RenderTargetBundle {
     constexpr explicit RenderTargetBundle(Targets&... t) noexcept: targets(t...) {
     }
 
-    // 1. Batch Recreate (Resize)
     void Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) const {
         std::apply([&](auto&... t) { ((t = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {})), ...); }, targets);
     }
 
-    // 2. Batch Transition
     template <VkImageLayout TargetLayout>
     [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd) const noexcept {
         return std::apply([&](const auto&... t) { return TransitionBatch<TargetLayout>(cmd, t...); }, targets);
     }
 };
 
-// CTAD Factory
 template <typename... Ts>
 [[nodiscard]] constexpr auto TieTargets(Ts&... tgts) noexcept {
     return RenderTargetBundle<Ts...>(tgts...);
 }
 
-/**
- * @brief Automatically ties, transitions, clears, and prepares a color attachment group.
- */
 template <typename... Images>
 [[nodiscard]] auto ClearAndPrepareGroup(VkCommandBuffer cmd, VkExtent2D extent, Color4 clear, Images&... imgs) {
     auto bundle = Vk::TieTargets(imgs...);
@@ -261,6 +246,6 @@ template <typename... Images>
     return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
 }
 
-} // namespace ZHLN::Vk
+}
 
 #include "RenderTarget.inl"

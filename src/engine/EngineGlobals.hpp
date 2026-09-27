@@ -5,8 +5,6 @@
 
 namespace ZHLN {
 
-// Process-global GLFW/Jolt registration and the optional RenderDoc bind.
-// First in registers, last out tears down; not Engine instance state.
 
 void InitRenderDocAPI();
 
@@ -16,4 +14,4 @@ void ReleaseJoltRegistration();
 [[nodiscard]] auto AcquireGlfw() -> bool;
 void               ReleaseGlfw();
 
-} // namespace ZHLN
+}

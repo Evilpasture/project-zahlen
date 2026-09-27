@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/memory/StagingContext.cpp
 // clang-format off
 #include "Rendering.hpp"
 // clang-format on
@@ -16,7 +15,6 @@ StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _alloc
 }
 
 StagingContext::~StagingContext() {
-    // Destructor automatically cleans up the fence
     if (_fence != VK_NULL_HANDLE) {
         Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
@@ -130,7 +128,6 @@ void StagingContext::AddBuffer(Buffer&& buf) {
 void StagingContext::ExecuteAsync() {
     _recording.reset();
 
-    // Destroy the previous fence if this context is being reused
     if (_fence != VK_NULL_HANDLE) {
         Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
@@ -153,4 +150,4 @@ void StagingContext::Wait() noexcept {
     }
 }
 
-} // namespace ZHLN::Vk
+}

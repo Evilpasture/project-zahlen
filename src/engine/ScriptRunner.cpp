@@ -1,12 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/ScriptRunner.cpp
-//
-// The forwarding half of ScriptRunner. Deliberately the whole of core's
-// scripting support: it holds an IScriptRuntime and calls through it, so the
-// engine and the fallback preset can ask for script work without knowing
-// whether anything is listening.
 
 #include <Zahlen/Scripting.hpp>
 #include <utility>
@@ -35,8 +29,6 @@ void ScriptRunner::RunFile(std::string_view path) {
 }
 
 void ScriptRunner::CallUpdate(Engine* engine, float dt) {
-    // Initialize is called on every tick, as it was before the runtime left
-    // core; the implementation is expected to make it a no-op once primed.
     if (_runtime && engine != nullptr) {
         _runtime->Initialize(engine);
         _runtime->TickUpdate(engine, dt);
@@ -55,4 +47,4 @@ void ScriptRunner::ReloadFile(std::string_view path) {
     }
 }
 
-} // namespace ZHLN
+}

@@ -1,19 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Core/Reflection/Enums.hpp
-//
-// Everything about an enum: how many enumerators there are, what they are
-// called (EnumNames/EnumToString), the other direction (StringToEnum),
-// whether a value names a real enumerator (EnumHasValue -- the guard
-// Zahlen/Error.hpp's zero-value static_assert is built on), the annotated
-// tables Error::Message() reads, and the dispatchers that turn a runtime
-// value into a compile-time one (DispatchEnum/ForEachEnumerator).
-//
-// Deliberately <string>-free: the one enum helper that builds a std::string,
-// EnumToFlagsString, lives in Utilities.hpp instead, because this header sits
-// on the error path (ErrorCode.hpp -> Error.hpp) where a diagnostics-only
-// allocation is exactly what should not be paid for by every failure.
 
 #pragma once
 
@@ -45,7 +32,7 @@ consteval auto EnumeratorsOf() {
     return std::define_static_array(std::meta::enumerators_of(^^E));
 }
 
-} // namespace TemplatedDetail
+}
 
 template <typename E>
     requires std::is_enum_v<E>
@@ -62,13 +49,6 @@ constexpr auto EnumToString(E value) -> std::string_view {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto StringToEnum(std::string_view name) -> std::optional<E> {
-    // Match into a plain flag plus a value-initialized enum, then build the
-    // optional once on a single non-lambda path. Holding the result in a
-    // std::optional<E> that is only ever assigned from inside the expanded
-    // lambda leaves GCC unable to prove the optional's payload was ever
-    // constructed, and it reports -Wmaybe-uninitialized at every `*parsed` in
-    // a caller. Value-initializing the enum keeps the read well-defined on the
-    // no-match path too, where 0 is always in an enum's value range.
     bool found = false;
     E    value {};
     [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
@@ -156,16 +136,11 @@ consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, Templat
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumMessageOf(E value) -> std::string_view {
-    // MakeEnumMessageTable<E>() takes no runtime arguments, so the call is
-    // always a constant expression and this function can never be
-    // reclassified as immediate.
     constexpr auto   table = MakeEnumMessageTable<E>();
     std::string_view last {};
     bool             matched = false;
     for (const auto& entry: table) {
         if (static_cast<std::underlying_type_t<E>>(value) == entry.value) {
-            // Last matching enumerator wins, mirroring the overwrite
-            // semantics of GetEnumeratorAnnotation for aliased values.
             last    = entry.message;
             matched = true;
         }
@@ -173,23 +148,23 @@ constexpr auto EnumMessageOf(E value) -> std::string_view {
     return matched ? last : std::string_view {};
 }
 
-#else // No C++26 static reflection: this module's degraded stand-ins.
+#else
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::string_view EnumToString(E /*unused*/) {
+constexpr std::string_view EnumToString(E ) {
     return "Unknown";
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-consteval auto EnumHasValue(std::underlying_type_t<E> /*targetValue*/) noexcept -> bool {
-    return false; // Safe fallback when compiler reflection is disabled
+consteval auto EnumHasValue(std::underlying_type_t<E> ) noexcept -> bool {
+    return false;
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::optional<E> StringToEnum(std::string_view /*unused*/) {
+constexpr std::optional<E> StringToEnum(std::string_view ) {
     return std::nullopt;
 }
 
@@ -213,18 +188,18 @@ consteval std::string_view EnumUnderlyingTypeName() {
 
 template <typename E, typename F>
     requires std::is_enum_v<E>
-constexpr void ForEachEnumerator(F&& /*unused*/) {
+constexpr void ForEachEnumerator(F&& ) {
 }
 
 template <typename Tag, typename E>
     requires std::is_enum_v<E>
-constexpr std::optional<Tag> GetEnumeratorAnnotation(E /*unused*/) {
+constexpr std::optional<Tag> GetEnumeratorAnnotation(E ) {
     return std::nullopt;
 }
 
 template <typename E>
     requires std::is_enum_v<E>
-constexpr std::string_view EnumMessageOf(E /*unused*/) {
+constexpr std::string_view EnumMessageOf(E ) {
     return {};
 }
 
@@ -243,9 +218,6 @@ constexpr void DispatchEnum(E value, F&& f) {
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumToMessage(E value) -> std::string_view {
-    // Annotation lookup happens entirely at compile time inside
-    // EnumMessageOf's table; see the comment there for why no
-    // reflection-dependent call may remain in this runtime path.
     if (auto message = EnumMessageOf(value); !message.empty()) {
         return message;
     }
@@ -258,4 +230,4 @@ consteval auto EnumHasValue(E targetValue) noexcept -> bool {
     return EnumHasValue<E>(static_cast<std::underlying_type_t<E>>(targetValue));
 }
 
-} // namespace ZHLN::Reflect
+}

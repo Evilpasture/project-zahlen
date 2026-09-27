@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/filesystem/MappedFile.cpp
-// Extracted from src/engine/Platform.cpp — low-level file mapping belongs to
-// zahlen_filesystem, not to window/platform.
 
 #include <Zahlen/FileSystem/MappedFile.hpp>
 
@@ -75,4 +72,4 @@ void CloseMappedFile(MappedFile& file) {
     file.data = nullptr;
 }
 
-} // namespace ZHLN::FS
+}

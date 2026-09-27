@@ -1,7 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# src/ecs/CMakeLists.txt
 
 add_library(zahlen_ecs OBJECT
     ECS.cpp
@@ -15,7 +14,6 @@ set_target_properties(zahlen_ecs PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-# ECS implementation headers are not part of the API surface.
 target_include_directories(zahlen_ecs
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
@@ -23,8 +21,6 @@ target_include_directories(zahlen_ecs
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-if(NOT MSVC)
-    target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
-endif()
+target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
 
 target_link_libraries(zahlen_ecs PRIVATE zahlen_warnings)

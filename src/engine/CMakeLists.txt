@@ -1,15 +1,7 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Engine implementation. This is the game-facing orchestration layer: scene
-# assembly, systems and platform services. The Vulkan backend, the rendering
-# passes and the windowing subsystem own their source lists in sibling
-# directories -- Window itself lives in src/window/, which is where GLFW is
-# linked and where the presentation bridge is published from.
 set(RAW_ENGINE_SOURCES
-    # AssertHandler.cpp used to hold all of this in one 670-line file. Logging
-    # and the crash path are separate concerns with different rules -- the crash
-    # path cannot allocate -- so they live in separate translation units.
     Log.cpp
     diagnostics/CrashHandler.cpp
     diagnostics/StackTrace.cpp
@@ -26,6 +18,7 @@ set(RAW_ENGINE_SOURCES
     system/TextureSystem.cpp
     system/AnimationSystem.cpp
     AssetManager.cpp
+    RadianceMap.cpp
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp
@@ -46,15 +39,9 @@ set(RAW_ENGINE_SOURCES
     ScriptRunner.cpp
 )
 
-# Reflection-capable compilers compile these files directly; other compilers
-# receive their generated counterparts. Keep the ownership of this source list
-# here so the root only composes engine subsystems.
 zahlen_transpile_sources(ENGINE_SOURCES ${RAW_ENGINE_SOURCES})
 target_sources(zahlen_engine PRIVATE ${ENGINE_SOURCES})
 
-# Transpiled sources live under the build tree, where quote includes no longer
-# resolve beside their original files. Engine and system-private headers must
-# therefore remain available for both source variants.
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system

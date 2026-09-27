@@ -1,4 +1,3 @@
-// resources/shaders/volumetric_fog_inject.hlsl
 
 import hash;
 import uniforms;
@@ -12,9 +11,9 @@ namespace Dispatch {
 
 struct GPUVolumetricVolume {
     float4x4 invTransform;
-    float4 extentsAndType;   // xyz = extents, w = type (0=Box, 1=Sphere)
-    float4 colorAndDensity;  // xyz = color, w = density
-    float4 emissiveAndAniso; // xyz = emissive, w = anisotropy
+    float4 extentsAndType;
+    float4 colorAndDensity;
+    float4 emissiveAndAniso;
 };
 
 struct VolumetricFogPushConstants {
@@ -70,17 +69,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
     float time      = frame.camPos.w;
 
-    // --- 1. GLOBAL HEIGHT FOG + NOISE
     float boundedY   = max(worldPos.y - fogPC.heightOffset, -10.0f);
     float fogDensity = fogPC.density * exp(-fogPC.heightFalloff * boundedY);
 
     if (fogPC.enableNoise != 0 && fogDensity > 0.00001f) {
-        // Tileable 3D noise is baked at startup; one hardware trilinear fetch
-        // replaces three octaves of procedural value noise per voxel.
-        // The baked 64^3 tile contains octaves at periods 64/32/16 cells, all
-        // integer divisors of the tile size, so the composite is fully tileable.
-        // Dividing p by 64 maps one original first-octave noise cell (1 unit in
-        // p) to one texel and one tile to 64 cells; the repeat sampler wraps.
         float3 p        = worldPos * fogPC.noiseScale +
                           float3(time * fogPC.noiseSpeed * 0.2f, time * fogPC.noiseSpeed * 0.1f, time * fogPC.noiseSpeed * 0.15f);
         float3 noisePos = p * (1.0f / 64.0f);
@@ -91,7 +83,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 scatteringCoeff = fogPC.scatteringColor * fogDensity;
     float3 extinctionCoeff = (fogPC.scatteringColor + fogPC.absorptionColor) * fogDensity;
 
-    // Local Probe Clipping (Indoor/Tunnel Masking)
     if (frame.probeMin.w > 0.0f) {
         float3 center  = (frame.probeMax.xyz + frame.probeMin.xyz) * 0.5f;
         float3 extents = (frame.probeMax.xyz - frame.probeMin.xyz) * 0.5f;
@@ -101,19 +92,18 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         extinctionCoeff *= mask;
     }
 
-    // --- 2. LOCAL FOG VOLUMES INJECTION
     for (uint i = 0; i < fogPC.volumeCount; ++i) {
         GPUVolumetricVolume vol = fogVolumes[i];
         float3 localPos         = mul(vol.invTransform, float4(worldPos, 1.0f)).xyz;
 
         float volMask = 0.0f;
-        if (vol.extentsAndType.w == 0.0f) { // Box Volume
+        if (vol.extentsAndType.w == 0.0f) {
             float3 d   = abs(localPos) / vol.extentsAndType.xyz;
             float maxD = max(d.x, max(d.y, d.z));
             if (maxD < 1.0f) {
                 volMask = smoothstep(1.0f, 0.8f, maxD);
             }
-        } else { // Sphere Volume
+        } else {
             float dist = length(localPos) / vol.extentsAndType.x;
             if (dist < 1.0f) {
                 volMask = smoothstep(1.0f, 0.0f, dist);

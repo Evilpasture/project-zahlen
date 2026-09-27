@@ -10,7 +10,6 @@ namespace ZHLN {
 template <size_t N, typename F>
 constexpr void Unroll(F&& f) {
     [&f]<size_t... Is>(std::index_sequence<Is...>) -> auto {
-        // Forward f inside the fold expression
         (std::forward<F>(f)(std::integral_constant<size_t, Is> {}), ...);
     }(std::make_index_sequence<N> {});
 }
@@ -21,7 +20,6 @@ constexpr void Unroll(F&& f) {
     constexpr size_t ActualN    = (N > MAX_UNROLL) ? MAX_UNROLL : N;
 
     [&f]<size_t... Is>(std::index_sequence<Is...>) -> auto {
-        // Forward f inside the fold expression
         (std::forward<F>(f)(std::integral_constant<size_t, Is> {}), ...);
     }(std::make_index_sequence<ActualN> {});
 }
@@ -40,8 +38,7 @@ constexpr void UnrollLoop(size_t total, F&& f) {
 template <size_t N, typename F>
 constexpr void Repeat(F&& f) {
     [&f]<size_t... Is>(std::index_sequence<Is...>) -> auto {
-        // Forward f inside the fold expression
         ((static_cast<void>(Is), std::forward<F>(f)()), ...);
     }(std::make_index_sequence<N> {});
 }
-} // namespace ZHLN
+}

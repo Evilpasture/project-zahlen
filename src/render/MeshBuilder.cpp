@@ -21,15 +21,6 @@ namespace ZHLN::PrefabFactory {
 
 namespace {
 
-// VK_EXT_mesh_shader: partitions a procedurally generated mesh and uploads the
-// three meshlet streams onto `mesh`. Without this, procedural geometry (boxes,
-// planes, terrain) carries meshletCount == 0 and silently stays on the vertex
-// pipeline forever, even on hardware that supports mesh shading -- only
-// glTF-imported and zcook-cooked meshes would ever take the mesh path.
-//
-// `indices` may be empty for the non-indexed builders below: meshlet micro
-// indices address the vertex pool directly, so a trivial 0..n-1 index stream
-// produces exactly the same clusters and leaves the (absent) IBO alone.
 void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
     if (positions.empty()) {
         return;
@@ -44,7 +35,6 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
         indices = sequential;
     }
 
-    // Triangle lists only: anything else has no meshlet representation.
     if (indices.size() < 3 || (indices.size() % 3) != 0) {
         return;
     }
@@ -54,8 +44,6 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
         return;
     }
 
-    // Storage, not vertex data: the task/mesh shaders reach these only through
-    // their device address, they are never bound to the input assembler.
     mesh.meshletBuffer       = ctx.CreateStorageBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
     mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
     mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint8_t));
@@ -71,7 +59,7 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
     mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
 }
 
-} // namespace
+}
 
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     std::vector<VertexPosition>   positions = {{{1.0f, 1.0f, 1.0f}}, {{-1.0f, -1.0f, 1.0f}}, {{-1.0f, 1.0f, -1.0f}}, {{1.0f, -1.0f, -1.0f}}};
@@ -107,7 +95,6 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-// LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
 
 auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);
@@ -150,7 +137,6 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     const float z = halfExtents.GetZ();
     PackedRGBA8 c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
-    // Front/Back/Top/Bottom/Right/Left normals
     Packed1010102 nZ  = Math::PackNormal(0, 0, 1);
     Packed1010102 tZ  = Math::PackNormal(1, 0, 0, 1);
     Packed1010102 nNZ = Math::PackNormal(0, 0, -1);
@@ -170,42 +156,36 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     auto uv11 = Math::PackUV(1.0f, 1.0f);
 
     std::vector<VertexPosition> positions = {
-        // Front (+Z)
         {{-x, -y, z}},
         {{x, -y, z}},
         {{x, y, z}},
         {{x, y, z}},
         {{-x, y, z}},
         {{-x, -y, z}},
-        // Back (-Z)
         {{x, -y, -z}},
         {{-x, -y, -z}},
         {{-x, y, -z}},
         {{-x, y, -z}},
         {{x, y, -z}},
         {{x, -y, -z}},
-        // Top (+Y)
         {{-x, y, z}},
         {{x, y, z}},
         {{x, y, -z}},
         {{x, y, -z}},
         {{-x, y, -z}},
         {{-x, y, z}},
-        // Bottom (-Y)
         {{-x, -y, -z}},
         {{x, -y, -z}},
         {{x, -y, z}},
         {{x, -y, z}},
         {{-x, -y, z}},
         {{-x, -y, -z}},
-        // Right (+X)
         {{x, -y, z}},
         {{x, -y, -z}},
         {{x, y, -z}},
         {{x, y, -z}},
         {{x, y, z}},
         {{x, -y, z}},
-        // Left (-X)
         {{-x, -y, -z}},
         {{-x, -y, z}},
         {{-x, y, z}},
@@ -215,42 +195,36 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     };
 
     std::vector<VertexAttributes> attributes = {
-        // Front (+Z)
         {.normal = nZ, .tangent = tZ, .uv = uv01, .color = c},
         {.normal = nZ, .tangent = tZ, .uv = uv11, .color = c},
         {.normal = nZ, .tangent = tZ, .uv = uv10, .color = c},
         {.normal = nZ, .tangent = tZ, .uv = uv10, .color = c},
         {.normal = nZ, .tangent = tZ, .uv = uv00, .color = c},
         {.normal = nZ, .tangent = tZ, .uv = uv01, .color = c},
-        // Back (-Z)
         {.normal = nNZ, .tangent = tNZ, .uv = uv01, .color = c},
         {.normal = nNZ, .tangent = tNZ, .uv = uv11, .color = c},
         {.normal = nNZ, .tangent = tNZ, .uv = uv10, .color = c},
         {.normal = nNZ, .tangent = tNZ, .uv = uv10, .color = c},
         {.normal = nNZ, .tangent = tNZ, .uv = uv00, .color = c},
         {.normal = nNZ, .tangent = tNZ, .uv = uv01, .color = c},
-        // Top (+Y)
         {.normal = nY, .tangent = tY, .uv = uv01, .color = c},
         {.normal = nY, .tangent = tY, .uv = uv11, .color = c},
         {.normal = nY, .tangent = tY, .uv = uv10, .color = c},
         {.normal = nY, .tangent = tY, .uv = uv10, .color = c},
         {.normal = nY, .tangent = tY, .uv = uv00, .color = c},
         {.normal = nY, .tangent = tY, .uv = uv01, .color = c},
-        // Bottom (-Y)
         {.normal = nNY, .tangent = tNY, .uv = uv01, .color = c},
         {.normal = nNY, .tangent = tNY, .uv = uv11, .color = c},
         {.normal = nNY, .tangent = tNY, .uv = uv10, .color = c},
         {.normal = nNY, .tangent = tNY, .uv = uv10, .color = c},
         {.normal = nNY, .tangent = tNY, .uv = uv00, .color = c},
         {.normal = nNY, .tangent = tNY, .uv = uv01, .color = c},
-        // Right (+X)
         {.normal = nX, .tangent = tX, .uv = uv01, .color = c},
         {.normal = nX, .tangent = tX, .uv = uv11, .color = c},
         {.normal = nX, .tangent = tX, .uv = uv10, .color = c},
         {.normal = nX, .tangent = tX, .uv = uv10, .color = c},
         {.normal = nX, .tangent = tX, .uv = uv00, .color = c},
         {.normal = nX, .tangent = tX, .uv = uv01, .color = c},
-        // Left (-X)
         {.normal = nNX, .tangent = tNX, .uv = uv01, .color = c},
         {.normal = nNX, .tangent = tNX, .uv = uv11, .color = c},
         {.normal = nNX, .tangent = tNX, .uv = uv10, .color = c},
@@ -280,9 +254,6 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     return finalMesh;
 }
 
-// UV sphere. The grid carries duplicated seam and pole vertices so normals and
-// UVs stay continuous per face; the degenerate pole triangles are simply not
-// emitted. Winding matches CreateBoxMesh (counter-clockwise seen from outside).
 auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) -> Mesh {
     constexpr int kRings    = 12;
     constexpr int kSegments = 24;
@@ -319,10 +290,10 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
             const uint32_t b  = a + 1;
             const uint32_t cc = a + static_cast<uint32_t>(kSegments + 1);
             const uint32_t d  = cc + 1;
-            if (iy != 0) { // upper triangle collapses at the top pole
+            if (iy != 0) {
                 indices.insert(indices.end(), {a, cc, b});
             }
-            if (iy != kRings - 1) { // lower triangle collapses at the bottom pole
+            if (iy != kRings - 1) {
                 indices.insert(indices.end(), {b, cc, d});
             }
         }
@@ -350,8 +321,6 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
     return finalMesh;
 }
 
-// Open-ended? No: capped cylinder. Side uses the sphere's winding; the top cap
-// fans one way, the bottom the other, so both normals point out of the solid.
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -373,7 +342,6 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
-    // Side
     for (int ix = 0; ix <= kSegments; ++ix) {
         const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
         const float     theta = u * 2.0f * JPH::JPH_PI;
@@ -388,7 +356,6 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
         indices.insert(indices.end(), {a, a + 1, b, b, a + 1, b + 1});
     }
 
-    // Caps
     for (int sign = 0; sign < 2; ++sign) {
         const float     y     = (sign == 0) ? hy : -hy;
         const JPH::Vec3 n     = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
@@ -429,8 +396,6 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
     return finalMesh;
 }
 
-// Cone: side fan from the apex (slanted outward normal), flat bottom cap. No
-// top cap -- the apex is a point.
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
     const float   r         = radius > 1e-4f ? radius : 1e-4f;
@@ -438,7 +403,6 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     const float   hy        = h * 0.5f;
     PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
-    // Slant: the side normal tilts up by the cone's half-angle.
     const float slant = std::atan2(r, h);
     const float ny    = std::sin(slant);
     const float nr    = std::cos(slant);
@@ -467,7 +431,6 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
         indices.insert(indices.end(), {apex, static_cast<uint32_t>(ix + 2), static_cast<uint32_t>(ix + 1)});
     }
 
-    // Bottom cap
     const uint32_t ct    = pushVert(JPH::Vec3(0, -hy, 0), JPH::Vec3(0, -1, 0), 0.5f, 0.5f);
     const uint32_t first = static_cast<uint32_t>(positions.size());
     for (int ix = 0; ix <= kSegments; ++ix) {
@@ -500,4 +463,4 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     return finalMesh;
 }
 
-} // namespace ZHLN::PrefabFactory
+}

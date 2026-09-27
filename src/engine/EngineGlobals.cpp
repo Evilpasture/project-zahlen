@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/EngineGlobals.cpp
 #include "EngineGlobals.hpp"
 #include <GLFW/glfw3.h>
-#include <Zahlen/Core/Platform.hpp> // isLinux
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -51,14 +50,6 @@ void InitRenderDocAPI() {
     }
 }
 
-// --- PROCESS-GLOBAL JOLT REGISTRATION
-//
-// JPH::Factory::sInstance and the registered type list are process state, not
-// engine state. Acquisition was already guarded, but release was not: the first
-// engine destroyed called JPH::UnregisterTypes() and deleted the factory out
-// from under every other engine in the process. That is one of the things that
-// made a second engine unusable, and it blocks running more than one physics
-// world. Refcounted: first in registers, last out unregisters.
 namespace {
 
 ZHLN::Mutex s_JoltRegistrationMutex;
@@ -68,7 +59,7 @@ ZHLN::Mutex s_GlfwMutex;
 uint32_t    s_GlfwUsers  = 0;
 bool        s_GlfwInited = false;
 
-} // namespace
+}
 
 void AcquireJoltRegistration() {
     const MutexGuard lock(s_JoltRegistrationMutex);
@@ -105,9 +96,6 @@ void ReleaseJoltRegistration() {
     JPH::Factory::sInstance = nullptr;
 }
 
-// GLFW is process-global the same way. Extra windows on one engine (and a
-// second windowed engine) must not glfwTerminate() while another window still
-// needs it. First in inits, last out terminates.
 auto AcquireGlfw() -> bool {
     const MutexGuard lock(s_GlfwMutex);
     if (s_GlfwInited) {
@@ -115,19 +103,12 @@ auto AcquireGlfw() -> bool {
         return true;
     }
 
-    // The whole GLFW bootstrap lives here so that nothing above this layer has
-    // to include <GLFW/glfw3.h> to start a windowed session: the kernel asks for
-    // a platform host and gets one, and never learns which window system is
-    // behind it.
 
-    // GLFW reports its own failures through a global callback rather than a
-    // return code, so it is installed before anything can fail.
     glfwSetErrorCallback([](int error, const char* description) -> void {
         ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
     });
 
     if constexpr (isLinux) {
-        // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
         if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
             std::getenv("NGFX_INJECTION") != nullptr) {
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
@@ -135,8 +116,6 @@ auto AcquireGlfw() -> bool {
     }
 
     if (!glfwInit()) {
-        // GLFW reports why through this, not through a return code, and the
-        // caller has no GLFW headers to ask with -- so it is reported here.
         const char* desc = nullptr;
         const int   err  = glfwGetError(&desc);
         if (desc != nullptr) {
@@ -164,4 +143,4 @@ void ReleaseGlfw() {
     }
 }
 
-} // namespace ZHLN
+}

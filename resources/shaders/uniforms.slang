@@ -1,4 +1,3 @@
-// resources/shaders/uniforms.slang
 module uniforms;
 
 import cxx_abi;
@@ -38,10 +37,11 @@ public struct FrameUniforms {
     public float4 skyHorizon;
     public float4 skyGround;
 
-    public float4x4 viewmodelViewProj; // Appended at the end!
-    public float4x4 invProj;           // View-space unprojection for cluster bounds
+    public float4x4 viewmodelViewProj;
+    public float4x4 invProj;
     public float nearZ;
     public float farZ;
+    public int environmentMode;
 };
 
 public struct GISettings {

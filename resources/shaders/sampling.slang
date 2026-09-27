@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Shared Monte Carlo / IBL sampling. BRDF LUT, specular prefilter, and
-// spherical-harmonic projection all import this module so the Hammersley
-// sequence and GGX importance sampler cannot drift from the shading BRDF.
 module sampling;
 
 public static const float PI = 3.141592653589793f;
@@ -49,9 +46,9 @@ public float3 GetCubeDirection(int face, float u, float v) {
     if (face == 1)
         return normalize(float3(-1.0f, -vc, uc));
     if (face == 2)
-        return normalize(float3(uc, 1.0f, -vc));
+        return normalize(float3(uc, 1.0f, vc));
     if (face == 3)
-        return normalize(float3(uc, -1.0f, vc));
+        return normalize(float3(uc, -1.0f, -vc));
     if (face == 4)
         return normalize(float3(uc, -vc, 1.0f));
     return normalize(float3(-uc, -vc, -1.0f));
@@ -70,9 +67,6 @@ public float3 EvaluateProceduralSky(float3 D, float3 zenith, float3 horizon, flo
     return color;
 }
 
-// Fallbacks for tools that do not push a scene palette. Production IBL
-// reads skyZenith / skyHorizon / skyGround / sunDir from IBLBakePush so
-// the prefilter matches PostProcessSettingsComponent.
 [ForceInline]
 public float3 DefaultSkyZenith() {
     return float3(0.003f, 0.008f, 0.020f);

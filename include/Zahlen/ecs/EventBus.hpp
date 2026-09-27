@@ -3,15 +3,6 @@
 
 #pragma once
 
-// Typed event queues for the ECS.
-//
-// Systems do not call each other. A producer Push<T>()s a POD (or otherwise
-// copyable) event; a consumer Drain<T>()s the queue later in the frame. The
-// GUI ActionRegistry is one producer: a document names "inventory.use_potion"
-// and Bind stores a UseItemEvent that Invoke copies onto this bus.
-//
-// Queues are keyed by GetTypeHash<T>(), not ComponentFamily, so event types
-// do not steal sparse-set family ids from components.
 
 #include <Zahlen/ecs/ECS.hpp>
 #include <span>
@@ -48,7 +39,6 @@ class EventBus {
         return {q->data(), q->size()};
     }
 
-    // Calls @p fn for each pending T, then drops that queue. Other types stay.
     template <typename T, typename Fn>
     void Drain(Fn&& fn) {
         Queue* slot = Find(GetTypeHash<T>());
@@ -118,4 +108,4 @@ class EventBus {
     }
 };
 
-} // namespace ZHLN::ECS
+}

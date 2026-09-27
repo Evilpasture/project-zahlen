@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/SamplerBuilder.hpp
 
 #pragma once
 
@@ -28,8 +27,6 @@ class SamplerBuilder {
 
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::ErrorCode>;
 
-    // The accumulated VkSamplerCreateInfo (used to write sampler descriptors
-    // into a VK_EXT_descriptor_heap sampler heap via vkWriteSamplerDescriptorsEXT).
     [[nodiscard]] auto Info() const noexcept -> VkSamplerCreateInfo {
         return _info;
     }
@@ -38,4 +35,4 @@ class SamplerBuilder {
     VkSamplerCreateInfo _info {};
 };
 
-} // namespace ZHLN::Vk
+}

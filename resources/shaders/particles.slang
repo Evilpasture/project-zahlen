@@ -1,9 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Authoritative particle state and emitter parameter schemas. C++ fills the
-// same 64 / 96 / 160-byte layouts; Slang owns integration, turbulence, and
-// lifetime easing.
 module particles;
 
 __exported import hash;

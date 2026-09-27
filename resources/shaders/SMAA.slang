@@ -1,6 +1,4 @@
-// resources/shaders/SMAA.slang
 
-// Configuration & Presets
 #ifndef SMAA_THRESHOLD
 #define SMAA_THRESHOLD 0.1f
 #endif
@@ -29,13 +27,8 @@ static const float2 SMAA_SEARCHTEX_SIZE         = float2(66.0f, 33.0f);
 static const float2 SMAA_SEARCHTEX_PACKED_SIZE  = float2(64.0f, 16.0f);
 static const float SMAA_CORNER_ROUNDING_NORM    = float(SMAA_CORNER_ROUNDING) / 100.0f;
 
-// Host-Reflected Parameters
 struct PushConstants {
-    // NOTE FOR HOST-SIDE INTEGRATION:
-    // If additional parameters are appended here, ensure they are
-    // aligned to 16-byte boundaries (using alignas(16) on the C++ side)
-    // to match Vulkan std430 layout requirements.
-    float4 rtMetrics; // x: 1/w, y: 1/h, z: w, w: h
+    float4 rtMetrics;
 };
 
 [vk::push_constant]
@@ -63,7 +56,6 @@ SamplerState linearSampler;
 SamplerState pointSampler;
 #endif
 
-// Core Utility Functions
 
 void Movc(bool2 cond, inout float2 variable, float2 value) {
     if (cond.x)
@@ -126,7 +118,7 @@ float2 AreaDiag(Texture2D areaTex, SamplerState smp, float2 dist, float2 e, floa
     texcoord        = SMAA_AREATEX_PIXEL_SIZE * texcoord + 0.5f * SMAA_AREATEX_PIXEL_SIZE;
     texcoord.x += 0.5f;
     texcoord.y += SMAA_AREATEX_SUBTEX_SIZE * offset;
-    return areaTex.SampleLevel(smp, texcoord, 0.0f).rg; // FIXED: Returns raw .rg to support downstream .gr swizzling
+    return areaTex.SampleLevel(smp, texcoord, 0.0f).rg;
 }
 
 float AreaDiagInternal(float2 p1, float2 p2, float2 p) {
@@ -351,8 +343,6 @@ public float2 LumaEdgeDetectionPS(float2 texcoord, float4 offset[3], Texture2D c
     delta.xy     = abs(L - float2(Lleft, Ltop));
     float2 edges = step(threshold, delta.xy);
 
-    // FIXED: Removed the fragment discard branch. Returning clean zero vector
-    // prevents warp divergence and early-z bubbles on tiled mobile architectures.
 
     float Lright  = dot(colorTex.SampleLevel(smp, offset[1].xy, 0.0f).rgb, weights);
     float Lbottom = dot(colorTex.SampleLevel(smp, offset[1].zw, 0.0f).rgb, weights);
@@ -378,7 +368,7 @@ public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, floa
     float2 e       = edgesTex.SampleLevel(smp, texcoord, 0.0f).rg;
 
     [branch]
-    if (e.g > 0.0f) { // Edge at north
+    if (e.g > 0.0f) {
 #if !defined(SMAA_DISABLE_DIAG_DETECTION)
         weights.rg = CalculateDiagWeights(edgesTex, areaTex, smp, texcoord, e, subsampleIndices, rtMetrics);
 
@@ -417,36 +407,27 @@ public float4 BlendingWeightCalculationPS(float2 texcoord, float2 pixcoord, floa
     }
 
     [branch]
-    if (e.r > 0.0f) { // Edge at west
+    if (e.r > 0.0f) {
         float2 d;
 
-        // Find the distance to the top:
         float3 coords;
         coords.y = SearchYUp(edgesTex, searchTex, smp, offset[1].xy, offset[2].z, rtMetrics);
         coords.x = offset[0].x;
         d.x      = coords.y;
 
-        // Fetch the top crossing edges:
         float e1 = edgesTex.SampleLevel(smp, coords.xy, 0.0f).g;
 
-        // Find the distance to the bottom:
         coords.z = SearchYDown(edgesTex, searchTex, smp, offset[1].zw, offset[2].w, rtMetrics);
         d.y      = coords.z;
 
-        // We want the distances to be in pixel units:
         d = abs(round(rtMetrics.ww * d - pixcoord.yy));
 
-        // SMAAArea below needs a sqrt, as the areas texture is compressed
-        // quadratically:
         float2 sqrt_d = sqrt(d);
 
-        // Fetch the bottom crossing edges:
         float e2 = edgesTex.SampleLevel(smp, coords.xz, 0.0f, int2(0, 1)).g;
 
-        // Get the area for this direction:
         weights.ba = Area(areaTex, smp, sqrt_d, e1, e2, subsampleIndices.x);
 
-        // Fix corners:
         coords.x = texcoord.x;
         DetectVerticalCornerPattern(edgesTex, smp, weights.ba, coords.xyxz, d, rtMetrics);
     }
@@ -481,7 +462,6 @@ public float4 NeighborhoodBlendingPS(float2 texcoord, float4 offset, Texture2D c
     }
 }
 
-// PASS 1: Edge Detection
 #if defined(EDGE_PASS)
 struct EdgeVSOutput {
     float4 position : SV_Position;
@@ -507,7 +487,6 @@ float4 SmaaEdgePS(EdgeVSOutput input) : SV_Target0 {
 }
 #endif
 
-// PASS 2: Blending Weight Calculation
 #if defined(WEIGHT_PASS)
 struct WeightVSOutput {
     float4 position : SV_Position;
@@ -537,7 +516,6 @@ float4 SmaaWeightPS(WeightVSOutput input) : SV_Target0 {
 }
 #endif
 
-// PASS 3: Neighborhood Blending
 #if defined(BLEND_PASS)
 struct BlendVSOutput {
     float4 position : SV_Position;

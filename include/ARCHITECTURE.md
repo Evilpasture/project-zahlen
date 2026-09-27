@@ -354,11 +354,15 @@ wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
 `<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
 ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
 
-`configure/check_include_provenance.py` runs at CMake configure time and fails the
+`configure/check_include_provenance.pl` runs at CMake configure time and fails the
 build when a file spells a tracked first-party type, or any `JPH::` type, that no
 include in its own closure provides — and when an include names a first-party
-header that does not resolve. As with the boundary rule above, this is enforced
-rather than documented.
+header that does not resolve. It is Perl rather than Python because the check
+re-reads the whole tree at every configure: it caches per-file scan results in
+the system temp directory keyed by path, mtime and size, so a rerun on an
+unchanged tree revalidates instead of rescanning, and a changed or missing file
+is always recomputed from scratch. As with the boundary rule above, this is
+enforced rather than documented.
 
 `Zahlen/Render/GpuLayout.hpp` is the one deliberate exception: the shader tool
 emits it, it is the only public header that reaches the generated file, and only

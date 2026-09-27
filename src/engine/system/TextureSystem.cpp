@@ -8,12 +8,11 @@
 
 namespace ZHLN {
 
-void TextureSystem::Update(SystemContext& /*ctx*/, float /*dt*/) {
-    // Space reserved for async texture streaming / mip-fading
+void TextureSystem::Update(SystemContext& , float ) {
 }
 
 uint32_t TextureSystem::ResolveIndex(Engine& engine, TextureHandle handle) noexcept {
     return engine.GetRenderContext().GetBindlessIndex(handle);
 }
 
-} // namespace ZHLN
+}

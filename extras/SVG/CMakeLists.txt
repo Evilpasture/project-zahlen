@@ -63,8 +63,9 @@ endforeach()
 if(NOT ZHLN_SVG_TARGET)
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
-        # QUIET, not REQUIRED: extras/json's simdjson check is REQUIRED because
-        # zahlen_serialization cannot build without it, and this one is not.
+        # QUIET, not REQUIRED: pkg-config is only the first discovery step
+        # here; a missing entry falls through to the bare-library search
+        # below instead of failing.
         pkg_check_modules(ZHLN_RESVG QUIET IMPORTED_TARGET resvg)
         if(ZHLN_RESVG_FOUND AND TARGET PkgConfig::ZHLN_RESVG)
             set(ZHLN_SVG_TARGET PkgConfig::ZHLN_RESVG)

@@ -131,12 +131,17 @@ set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # --- SPIRV-Reflect (tracked in third_party/) ---
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 
+# --- simdjson (vendored at extern/simdjson) ---
+# extras/json is its only consumer. Provisioned here like every other extern/
+# entry so no platform needs a system simdjson: pkg-config discovery has no
+# story on a bare Windows toolchain, which is exactly what used to break
+# extras/json there. As a subproject simdjson turns its developer mode and
+# install rules off by itself; BUILD_SHARED_LIBS is OFF project-wide, so its
+# simdjson target is a static archive, aliased as simdjson::simdjson.
+add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
+
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-# set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-
-# add_subdirectory(${CMAKE_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")

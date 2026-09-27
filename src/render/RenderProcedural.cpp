@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/RenderProcedural.cpp
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
-#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what BakeSpec declares
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -12,8 +11,6 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, ErrorCode> {
-    // Reflect the bake layout out of the compiled shader instead of allocating
-    // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
             ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
@@ -31,10 +28,8 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 
     ZHLN_ShaderDesc shaderDesc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
 
-    // procedural_bake.slang declares BAKE_TYPE as its constant_id 0: one field,
-    // one entry, and one pipeline per pattern the bake can generate.
     struct BakeSpec {
-        int bakeType = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
+        int bakeType = 0;
     };
 
     Vk::Specialization<BakeSpec> bakeSpec;
@@ -76,16 +71,12 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             }
             auto writeView = std::move(*view_res);
 
-            // VK_EXT_descriptor_heap: the bake is out-of-frame, so BeginImmediate
-            // rewinds the bake partition and the write hands back the block the
-            // dispatch pushes.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
                 ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
             );
 
-            // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
 
@@ -95,8 +86,6 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
                     cmd, BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion}
                 );
-                // Slot-independent mapping: the pushed word is the block's base
-                // slot, not an ordinal.
                 Vk::PushHeapIndex(cmd, bakeHeapBindings.indexPushOffset, block.slot);
                 proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
@@ -111,4 +100,4 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 #pragma GCC diagnostic pop
 #endif
 
-} // namespace ZHLN
+}

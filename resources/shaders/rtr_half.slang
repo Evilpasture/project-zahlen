@@ -1,27 +1,8 @@
-// resources/shaders/rtr_half.slang
-//
-// Half-resolution RT reflection tracing for the VNDF roughness band
-// (0.04, 0.40]. Divergent lobe rays are the worst case for SIMD coherence
-// inside a fragment shader: neighboring pixels fan into different
-// directions and every warp stalls on the slowest traversal. Tracing the
-// band here at quarter resolution cuts the ray count by 75% and gets the
-// traversal out of the fragment quads entirely; the reflection pass
-// bilinearly upsamples the composited result.
-//
-// Tiering (shared with reflection.slang):
-//   roughness <  0.04 -> mirror ray, traced in-shader (warp-coherent)
-//   0.04 .. 0.40      -> traced here
-//   > 0.40            -> never traced, IBL only
-//
-// Output: rgb = composed reflection color (same max/lerp composition the
-// fragment caller used to do), a = confidence. Pixels outside the band,
-// sky, and ray misses write zero and the fragment falls back to IBL.
 
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-// Local fallback SafeNormalize for older slangc that fails to import from pbr_helpers
 float3 SafeNormalizeLocal(float3 v, float3 fallback) {
     float len = length(v);
     if (len < 1e-5f || len != len || len > 1e10f)
@@ -57,8 +38,6 @@ SamplerState pointSampler;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<InstanceData> g_instances;
 
-// Blue noise tile for the VNDF lobe jitter, declared before the TLAS to
-// keep the positional binding table identical to reflection.slang's tail.
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
@@ -72,8 +51,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
     outImage[tid.xy] = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    // Trace from the top-left pixel of each 2x2 block; the bilinear
-    // upsample in the reflection pass spreads the result over the block.
     uint2 fullPos = tid.xy * 2u;
     float depth   = texDepth.Load(int3(fullPos, 0)).r;
     if (depth >= 1.0f) {
@@ -83,7 +60,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 normRough = texNormalRoughness.Load(int3(fullPos, 0));
     float  roughness = normRough.z;
     if (roughness < 0.04f || roughness > 0.4f) {
-        return; // mirror tier traces in-shader; above 0.4 is IBL-only
+        return;
     }
 
     float3 N        = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
@@ -95,7 +72,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    // --- VNDF lobe ray (band guarantees roughness >= 0.04)
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 tangentX  = normalize(cross(up, N));
     float3 tangentY  = cross(N, tangentX);
@@ -109,8 +85,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 H       = normalize(mul(toWorld, H_local));
 
     float3 R = reflect(-V, H);
-    // A microfacet normal tilted away from N can reflect below the surface;
-    // such a ray would only ever hit the surface it started on.
     if (dot(R, N) <= 0.0f) {
         R = reflect(-V, N);
     }
@@ -135,7 +109,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 fallbackColor = float3(0.0f, 0.0f, 0.0f);
     float2 hitUV        = float2(-1.0f, -1.0f);
 
-    // --- Fast path: on-screen reprojection takes the already-shaded color
     bool fastHit = false;
     float4 fastClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
     if (fastClip.w > 0.1f) {
@@ -154,12 +127,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
 
     if (!fastHit) {
-        // --- Slow path: BDA geometric normal + analytic sun/SH, then the
-        // depth/normal-gated reprojection. Mirrors RaytraceRTR in
-        // reflection.slang exactly.
 
-        // CommittedInstanceID is the instanceCustomIndex written as the
-        // draw-queue slot; CommittedInstanceIndex must not be used here.
         uint instanceID = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
@@ -194,8 +162,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             hitNormal = -hitNormal;
         }
 
-        // Tone down fallback: no unshadowed sun (60 -> 19 white), use ambient only
-        // to avoid blinding white outline when reprojection fails.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
@@ -227,7 +193,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
 
                 if (depthMask > 0.1f) {
-                    // Continuous ramp, not 0.8-1 floor that left 20% white.
                     confidence = saturate(onScreen * depthMask);
                     gated      = true;
                 }
@@ -238,19 +203,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    // --- Composition: Do NOT init with fallbackColor (20 white) when
-    // reprojection fails (hitUV<0, confidence=0). That white with alpha=0
-    // gets bilinearly bled in reflection.slang's smp sample of texRtrHalf:
-    // 0.5*screenColor + 0.5*20 = ~10 white outline. Init to 0 and only
-    // compose when valid.
     float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
     if (hitUV.x >= 0.0f && confidence > 0.0f) {
         float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
         if (hitNormRough.z != 0.0f) {
             float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
-            // Lerp screenColor*0.5 to screenColor by confidence, not involving
-            // white fallback at all when confidence is low. Fallback is only for
-            // valid hits that need some base, but we already have screenColor.
             reflectionColor = lerp(screenColor * 0.5f, screenColor, confidence);
         }
     }

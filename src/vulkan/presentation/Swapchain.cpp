@@ -8,7 +8,6 @@
 
 namespace ZHLN::Vk {
 
-// SwapchainSupport & Swapchain Implementation
 
 auto SwapchainSupport::Formats() const noexcept -> std::span<const VkSurfaceFormatKHR> {
     return {raw.formats, raw.format_count};
@@ -72,4 +71,4 @@ void Swapchain::Destroy() noexcept {
         ZHLN_DestroySwapchain(_device, &_raw);
     }
 }
-} // namespace ZHLN::Vk
+}

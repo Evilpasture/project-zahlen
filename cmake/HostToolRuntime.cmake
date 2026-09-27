@@ -24,14 +24,15 @@
 # prefix's runtime directories reach the libraries and the executables in one
 # place instead of one call site per tool.
 #
-# It is inert unless ZHLN_USE_CUSTOM_LIBCXX is ON and the compiler is Clang --
-# the GCC and system-Clang builds have their runtime on the loader's path
-# already, and CMAKE_BUILD_RPATH stays unset.
+# It is inert unless ZHLN_USE_CUSTOM_LIBCXX is ON and the compiler actually
+# speaks -stdlib=libc++ (feature-probed at the root) -- the GCC and
+# system-Clang builds have their runtime on the loader's path already, and
+# CMAKE_BUILD_RPATH stays unset.
 #
 # Set ZHLN_BUILD_RUNTIME_DIRS to add directories by hand, for a prefix this file
 # cannot guess (semicolon-separated, like any CMake list).
 
-if(ZHLN_USE_CUSTOM_LIBCXX AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+if(ZHLN_USE_CUSTOM_LIBCXX AND ZHLN_HAS_STDLIB_LIBCXX)
     set(_zhln_runtime_dirs "")
 
     # The prefix as tools/build.sh passes it (LLVM_BLOOMBERG_BUILD points at the

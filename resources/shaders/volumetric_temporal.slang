@@ -1,4 +1,3 @@
-// resources/shaders/volumetric_temporal.hlsl
 
 import uniforms;
 import volumetric_grid;
@@ -53,7 +52,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float depthVS   = 0.0f;
     float3 worldPos = GetVoxelWorldPos(tid, float3(gridDim), depthVS);
 
-    // Reproject world position to previous frame's clip space
     float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
 
     if (prevClip.w <= 0.1f) {
@@ -75,11 +73,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float4 history = inVoxelIntegratedHistory.SampleLevel(linearSampler, prevUVW, 0);
 
-    // --- 3D NEIGHBORHOOD CLAMPING
     float4 minBox = current;
     float4 maxBox = current;
 
-    // Axis cross: 7 taps rather than a 3x3x3 27-tap neighborhood.
     const int3 offsets[7] = {int3(0, 0, 0), int3(1, 0, 0),  int3(-1, 0, 0), int3(0, 1, 0),
                              int3(0, -1, 0), int3(0, 0, 1), int3(0, 0, -1)};
     [unroll]

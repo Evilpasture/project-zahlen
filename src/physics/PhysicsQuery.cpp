@@ -50,7 +50,7 @@ auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, Z
     return false;
 }
 
-} // namespace
+}
 
 auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, ZHLN::Entity ignore) const -> Physics::RaycastResult {
     const auto& world = GetWorld();
@@ -437,4 +437,4 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
     world.system->GetBroadPhaseQuery().CollideAABox(frustumAABB, collector);
 }
 
-} // namespace ZHLN
+}

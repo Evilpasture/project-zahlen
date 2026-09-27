@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/RenderInit.cpp
 #include "RenderInternal.hpp"
 #include "pipeline/ComputePass.hpp"
 #include "Resources.hpp"
@@ -55,17 +54,12 @@ std::expected<Vk::Pipeline, ErrorCode>
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
-    // Ray tracing is a device-creation decision now: the trio of extensions is
-    // either enabled or not, and Context::RayTracingSupported() answers which.
     if (!ctx.RayTracingSupported()) {
         ZHLN::Log("WARNING: Ray tracing not enabled on this device. RTR will be disabled.");
     } else {
         ZHLN::Log("Ray tracing enabled (acceleration structure + ray query).");
     }
 
-    // The task/mesh statistic bits need meshShaderQueries ENABLED on the
-    // device (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069); ask what the
-    // chain enabled rather than probing the physical device for what it offers.
     const bool meshShaderQueries = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
         return f.meshShaderQueries == VK_TRUE;
     });
@@ -88,13 +82,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            return CompileShadowPipeline(
-                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
+            return shadows.CompileCascadePipelines(
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
             );
         })
         .and_then([&]() {
-            return CompilePunctualShadowPipeline(
-                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+            return shadows.CompilePunctualPipeline(
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(),
+                Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
             );
         })
         .and_then([&]() { return InitCSGPipelines(); });
@@ -123,9 +118,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
-    // Must exist before the first pipeline is built: every PipelineBuilder and
-    // ComputePipelineBuilder further down this chain reads pipelineCache.Get().
-    // Loading it first is also what lets the second run skip compiling them.
     pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, pipelineCachePath);
 
     return allocator.Init(ctx)
@@ -141,11 +133,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() { return InitDiagnosticsAndProfiling(); })
         .and_then([&]() { return InitShadowResources(); })
-        // VK_EXT_descriptor_heap ordering: InitBindless must run FIRST. It
-        // initializes the heaps and reserves the globalTextures[] region, and
-        // every later pass binding allocates its slots AFTER that region.
-        // Allocating pass slots first (the old order) let culling/cluster
-        // descriptors land inside the texture array and clobber it.
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
@@ -158,8 +145,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // The UI renderer needs no window handle: it draws into the frame's
-            // destination, and input arrives through the engine's own receiver.
             return SetupUI();
         })
         .and_then([&]() { return InitParallelRecorders(); })
@@ -175,4 +160,4 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         });
 }
 
-} // namespace ZHLN
+}

@@ -68,8 +68,11 @@ endfunction()
 function(zahlen_use_custom_libcxx TARGET_NAME)
     option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
 
-    # Only apply custom LLVM libc++ when explicitly enabled on Clang
-    if(NOT ZHLN_USE_CUSTOM_LIBCXX OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    # Only apply custom LLVM libc++ when explicitly enabled and the compiler
+    # actually speaks -stdlib=libc++ (feature-probed at the root: GCC refuses
+    # the flag, so the probe keeps this function Clang-shaped without naming
+    # any compiler).
+    if(NOT ZHLN_USE_CUSTOM_LIBCXX OR NOT ZHLN_HAS_STDLIB_LIBCXX)
         return()
     endif()
 
@@ -115,7 +118,7 @@ endfunction()
 function(zahlen_enable_reflection TARGET_NAME)
     if(COMPILER_HAS_REFLECTION)
         target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        if(ZHLN_HAS_ANNOTATION_ATTRIBUTES)
             target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()
         target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")

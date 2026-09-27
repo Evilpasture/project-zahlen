@@ -1,29 +1,4 @@
-// resources/shaders/basic_mesh.slang
-//
-// VK_EXT_mesh_shader mesh stage. One workgroup emits exactly one meshlet:
-//   * 64 threads, one output vertex each (kMeshletMaxVertices == 64)
-//   * up to 124 primitives, 2 per thread (kMeshletMaxTriangles == 124)
-//
-// The vertex work is a verbatim port of basic.slang:VSMain -- same skinning,
-// morphing, viewmodel/shadow matrix selection and material unpacking -- so the
-// fragment shaders (PSMain / PSShadow / PSForward) are shared unchanged between
-// the vertex and the mesh path, and the two paths must produce identical
-// pixels. VSOutput itself is declared once in common.slang.
 
-// resources/shaders/basic_mesh.slang
-//
-// VK_EXT_mesh_shader mesh stage. One workgroup emits exactly one meshlet:
-//   * 64 threads, one output vertex each (kMeshletMaxVertices == 64)
-//   * up to 124 primitives, 2 per thread (kMeshletMaxTriangles == 124)
-//
-// The vertex work is a verbatim port of basic.slang's vertex build -- same skinning, morphing,
-// viewmodel/shadow matrix selection and material unpacking -- so the fragment shaders are shared
-// unchanged between the vertex and mesh paths and the two must produce identical pixels. Each
-// pass narrows to its own varying struct from common.slang via the IScenePassOutput emitters, so
-// the three mesh entry points type-check against exactly the interface their pipeline
-// rasterises. MeshMainShadow is the only entry point declaring SV_ViewID: reading it in a mesh
-// stage requires multiviewMeshShader, and the shared non-shadow entries must stay buildable
-// without it.
 
 import common;
 
@@ -35,11 +10,6 @@ import common;
 #define ZHLN_MESHLET_MAX_TRIANGLES 124
 #endif
 
-// The pass-agnostic meshlet vertex build. Everything a pass can differ in is
-// narrowed to the E emitter (which varying struct gets rasterised and how the
-// payload narrows into it) and the isShadow constant: shadow instantiations
-// take the clip position from the multiview cascade matrices and never
-// produce the motion-vector pair, and both branches fold away at compile time.
 E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     GPUMeshlet m, InstanceData inst, uint gtid, uint viewId
 ) {
@@ -100,10 +70,14 @@ E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     float metallicFactor   = inst.metallicFactor;
     float roughnessFactor  = inst.roughnessFactor;
     float alphaCutoff      = inst.alphaCutoff;
+    output.transmissionParams   = inst.transmissionParams();
+    output.volumeParams         = inst.volumeParams();
+    output.volumeParams.z       = AverageWorldScale(inst.world);
+    output.transmissionTextures = inst.transmissionTextures();
+    output.coatParams           = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
+    output.coatTextures         = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
 
     if (isShadow) {
-        // Multiview cascades: ViewIndex names the cascade/layer (the mesh
-        // shader runs once per view under viewMask 0x0F).
         output.pos             = mul(scene.frame.lightSpaceMatrices[min(viewId, 3u)], worldPos);
         output.uv              = localUV;
         output.baseColorFactor = baseColorFactor;
@@ -166,14 +140,10 @@ void MeshMain(
     uint triangleCount  = min(m.triangleCount, (uint) ZHLN_MESHLET_MAX_TRIANGLES);
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
-    // 1. Cooperative vertex fetch + transform (one vertex per thread).
     if (gtid < vertexCountOut) {
         outVertices[gtid] = EmitMeshletVertex<GBufferPassOutput, false>(m, inst, gtid, 0);
     }
 
-    // ------------------------------------------------------------------
-    // 2. Cooperative micro-index assembly (124 prims / 64 threads => 2 each)
-    // ------------------------------------------------------------------
     for (uint i = gtid; i < triangleCount; i += 64u) {
         uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));
@@ -210,14 +180,10 @@ void MeshMainForward(
     uint triangleCount  = min(m.triangleCount, (uint) ZHLN_MESHLET_MAX_TRIANGLES);
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
-    // 1. Cooperative vertex fetch + transform (one vertex per thread).
     if (gtid < vertexCountOut) {
         outVertices[gtid] = EmitMeshletVertex<ForwardPassOutput, false>(m, inst, gtid, 0);
     }
 
-    // ------------------------------------------------------------------
-    // 2. Cooperative micro-index assembly (124 prims / 64 threads => 2 each)
-    // ------------------------------------------------------------------
     for (uint i = gtid; i < triangleCount; i += 64u) {
         uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));
@@ -255,14 +221,10 @@ void MeshMainShadow(
     uint triangleCount  = min(m.triangleCount, (uint) ZHLN_MESHLET_MAX_TRIANGLES);
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
-    // 1. Cooperative vertex fetch + transform (one vertex per thread).
     if (gtid < vertexCountOut) {
         outVertices[gtid] = EmitMeshletVertex<ShadowPassOutput, true>(m, inst, gtid, viewId);
     }
 
-    // ------------------------------------------------------------------
-    // 2. Cooperative micro-index assembly (124 prims / 64 threads => 2 each)
-    // ------------------------------------------------------------------
     for (uint i = gtid; i < triangleCount; i += 64u) {
         uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));

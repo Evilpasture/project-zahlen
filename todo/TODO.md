@@ -1106,3 +1106,30 @@ Open questions for the Godot side:
   engine's loop time is not externally addressable yet);
 * how much of the studio look Godot must reproduce — the goldens need to frame
   the scene, not match its shading.
+
+---
+
+## Fidelity: HDR-driven IBL (plan for review)
+
+Implemented. The asset layer decodes raw `.hdr` and cooked `ZRD1` (RGBA32F).
+`EnvironmentMapComponent` carries the path and `renderSkybox`; `RenderSystem`
+resolves it and passes floats to the renderer, which never parses the file.
+SH and the specular prefilter sample the equirect (no solid-angle jacobian,
+no `lightDir` rotation, exposure stays a shade-time knob). The prefiltered
+cube is RGBA16F for an HDR bake and stays UNORM for the procedural path.
+Background modes are stamped on `FrameUniforms::environmentMode` (0
+procedural, 1 cube mip 0, 2 omit / alpha 0). The suite captures PAM so that
+alpha reaches the metric; `CaptureScreenshotPPM` stays P6 for every other
+caller. An unauthored 180-intensity sun is suppressed while the component is
+set. Live specular LOD remains `roughness * 5.0`.
+
+Decisions that landed with it: the renderer never parses the file (no stb in
+`src/render`); the bake samples the equirect directly rather than resampling
+to a cube first; there is no solid-angle jacobian (Karis `NdotL`); exposure
+stays `ambientExposure` at shade time; specular LOD stays `roughness * 5.0`.
+`zcook` writes `ZRD1` for `.hdr` and copies every other texture verbatim.
+Re-run the suite to see the score move.
+
+Success measure: re-run `run_fidelity.py`; the near-misses (-1 to -2 dB) should
+close toward the -22 dB convention once the same HDR lights the scene, with the
+residual gap attributable to unsupported `KHR_materials_*` extensions.

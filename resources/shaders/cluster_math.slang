@@ -1,16 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Authoritative clustered-lighting slice math. Lighting, volumetric inject,
-// and cluster-bounds generation all import this module so the logarithmic
-// depth mapping cannot drift across shaders.
 module cluster_math;
 
 __exported import cluster_grid;
 
-// Slice near/far are specialization constants so a pipeline can override the
-// defaults without rewriting this module. Shaders evaluate the log mapping
-// in-place from these values.
 namespace Cluster {
     [[vk::constant_id(1100)]] public const float Near = 0.1f;
     [[vk::constant_id(1101)]] public const float Far  = 1000.0f;
@@ -53,7 +47,6 @@ public uint ViewDepthToClusterZ(float viewDepth) {
     return uint(max(0.0f, log(viewDepth) * ClusterZScale() + ClusterZBias()));
 }
 
-// --- Dynamic near/far variants (actual camera planes, not the 0.1/1000 defaults) ---
 [ForceInline]
 public float ClusterZScaleWith(float nearZ, float farZ) {
     float n = max(nearZ, 0.001f);

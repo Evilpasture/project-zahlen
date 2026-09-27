@@ -1,0 +1,134 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "passes/gbuffer/GBufferResolvePass.hpp"
+#include "passes/SceneDraw.hpp"
+#include <ShaderBindings.hpp>
+#include <algorithm>
+
+namespace ZHLN::Passes {
+
+namespace {
+
+// Second GPU-culling dispatch: `passIndex = 1` makes the shader read the
+// candidate list the base pass's dispatch produced instead of testing every
+// instance again, and the draw reads the second indirect buffer.
+void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+    VkCommandBuffer cmd = recorder.cmd;
+    auto&           ctx = recorder.ctx;
+
+    Vk::BufferBarrier(
+        cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
+        Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
+    );
+
+    Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
+
+    Vk::BufferBarrier(
+        cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+        Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
+    );
+
+    const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+    const auto     sceneVp = ctx.EffectiveViewport();
+    const RenderContext::Impl::CullingConstants pc {
+        .viewProj       = ctx.unjittered_view_proj,
+        .hizScreenSize  = {sceneVp.width, sceneVp.height},
+        .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
+        .drawCount      = drawCount,
+        .passIndex      = 1,
+    };
+    const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
+        ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
+        Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex]),
+        Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
+        Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
+        Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
+    );
+    ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
+
+    using enum Vk::BarrierStage;
+    using enum Vk::BarrierAccess;
+    Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
+
+    Vk::DynamicPass(in.sceneColor.extent)
+        .Viewport(sceneVp)
+        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .Execute(cmd, [&]() {
+            recorder.EnsureHeapState(cmd);
+
+            for (const auto& group: groups) {
+                if (!group.material->pipeline.Valid()) {
+                    continue;
+                }
+                recorder.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+                    {
+                        .pipeline       = group.material->pipeline.Get(),
+                        .layout         = group.material->layout,
+                        .heap           = true,
+                        .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
+                        .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
+                        .drawCount      = group.count,
+                    },
+                    RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                );
+            }
+            DrawCSGMeshes(recorder, in.sceneColor.extent);
+            Draw3DParticles(recorder);
+        });
+}
+
+// CPU path: no second culling dispatch to replay, so this is only the work
+// that could not run until the GBuffer's depth buffer was complete.
+void RecordCpuCulled(const FrameRecorder& recorder, const GBufferTargets& in) noexcept {
+    VkCommandBuffer cmd = recorder.cmd;
+    auto&           ctx = recorder.ctx;
+
+    Vk::DynamicPass(in.sceneColor.extent)
+        .Viewport(ctx.EffectiveViewport())
+        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .Execute(cmd, [&]() {
+            ctx.BindHeapsAndPushFrame(cmd);
+            DrawCSGMeshes(recorder, in.sceneColor.extent);
+            Draw3DParticles(recorder);
+        });
+}
+
+} // namespace
+
+void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
+    FrameRecorder recorder(cmd, impl);
+
+    const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
+    StampScenePass(
+        impl.scenePass2, impl, drawCount, !(drawCount == 0 && impl.queues.MeshParticleEmitters().empty() && impl.queues.CsgDraws().empty())
+    );
+    if (drawCount == 0 && impl.queues.MeshParticleEmitters().empty() && impl.queues.CsgDraws().empty()) {
+        return;
+    }
+
+    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(impl);
+
+    const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                               !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
+    impl.scenePass2.gpuCulling = useGpuCulling;
+
+    const GBufferTargets in = GBufferSceneTargets(impl);
+    if (useGpuCulling) {
+        RecordGpuCulled(recorder, groups, drawCount, in);
+    } else {
+        RecordCpuCulled(recorder, in);
+    }
+}
+
+}

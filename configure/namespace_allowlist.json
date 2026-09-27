@@ -47,11 +47,6 @@
       "namespace": "ZHLN::Test::Headless::Detail",
       "member": "SessionDepth",
       "reason": "The task-system refcount that BeginSession and EndSession increment and decrement. Every suite in a group binary has to touch the same counter, or the first EndSession shuts the task system down under the suites that run after it, so it lives behind an inline function's local static in a header that has no TU."
-    },
-    {
-      "path": "tests/render/NoiseFrameCapture.hpp",
-      "namespace": "ZHLN::Test::Frame::detail",
-      "reason": "A sort-and-index helper for the Bernoulli fit below. Header-only capture fixture included by several render test TUs with none of its own; inline keeps one definition across them and detail keeps it off the fixture's surface, which is the measurements rather than how a percentile is taken."
     }
   ]
 }

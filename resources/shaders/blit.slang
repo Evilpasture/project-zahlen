@@ -1,4 +1,3 @@
-// resources/shaders/blit.slang
 
 import pbr_helpers;
 import uniforms;
@@ -12,7 +11,6 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
 
-    // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
@@ -34,7 +32,7 @@ PushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;
-Texture2D<float4> texBloom; // Bound dynamically by BlitPass
+Texture2D<float4> texBloom;
 Texture2D<float> texDepth;
 ConstantBuffer<FrameUniforms> frame;
 
@@ -69,21 +67,19 @@ float3 NeutralTonemap(float3 color) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-    float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
+    float4 hdrSample = texInput.SampleLevel(smp, input.uv, 0);
+    float3 hdrColor  = hdrSample.rgb;
+    float alpha = hdrSample.a;
 
-    // Bypasses all final colour processing when fullbright is enabled.
     if (pc.fullBright != 0) {
-        return float4(hdrColor, 1.0f);
+        return float4(hdrColor, alpha);
     }
 
-    // Sample bloom and blend additively.
     float3 bloom = texBloom.SampleLevel(smp, input.uv, 0).rgb;
     hdrColor += bloom * pc.bloomStrength;
 
-    // Exposure control: scales the HDR values before tonemapping.
     hdrColor *= pc.exposure;
 
-    // Tonemap HDR -> LDR. Unknown values intentionally fall back to Linear.
     float3 finalColor;
     switch (pc.tonemapper) {
         case 1: finalColor = ACESFilm(hdrColor); break;
@@ -92,15 +88,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         default: finalColor = hdrColor; break;
     }
 
-    // Grade after tonemapping: RGB tint, contrast around middle grey, then
-    // Rec.709-luma saturation. Negative values cannot reach the swapchain.
     finalColor *= pc.colorFilter;
     finalColor = (finalColor - 0.5f) * pc.contrast + 0.5f;
     float luma = dot(finalColor, float3(0.2126f, 0.7152f, 0.0722f));
     finalColor = lerp(luma.xxx, finalColor, pc.saturation);
     finalColor = max(finalColor, 0.0f);
 
-    // Apply Vignette overlay
     if (pc.vignetteIntensity > 0.0f) {
         float2 uvDist  = abs(input.uv - 0.5f) * pc.vignetteIntensity;
         float vignette = saturate(1.0f - dot(uvDist, uvDist));
@@ -108,5 +101,5 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         finalColor *= vignette;
     }
 
-    return float4(finalColor, 1.0f);
+    return float4(finalColor, alpha);
 }

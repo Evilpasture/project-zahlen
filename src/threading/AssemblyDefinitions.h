@@ -3,19 +3,15 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-/*
- */
 
 #pragma once
 
-// Architecture detection
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
 #define ARCH_X64
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm64__)
 #define ARCH_ARM64
 #endif
 
-// OS detection
 #if defined(_WIN32)
 #define OS_WIN
 #elif defined(__APPLE__)
@@ -24,7 +20,6 @@
 #define OS_LINUX
 #endif
 
-// Direct Apple mangling
 #if defined(OS_APPLE)
 #define CSYM(name) _##name
 #else

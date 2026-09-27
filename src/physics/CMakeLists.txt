@@ -28,8 +28,6 @@ target_link_libraries(zahlen_physics
         zahlen_threading
 )
 
-# PhysicsWorld and the command/synchronization internals are private to this
-# target; dependents receive the PhysicsContext façade only.
 target_include_directories(zahlen_physics
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
@@ -37,7 +35,6 @@ target_include_directories(zahlen_physics
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Pass Jolt specific configurations down
 target_compile_definitions(zahlen_physics PRIVATE
     JPH_DOUBLE_PRECISION
     JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
@@ -50,17 +47,6 @@ target_compile_definitions(zahlen_physics PUBLIC
     JPH_DEBUG_RENDERER
 )
 
-if(NOT MSVC)
-    target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # Forcefully strips -freflection out of this specific target's compile options
-    get_target_property(PHYS_OPTIONS zahlen_physics COMPILE_OPTIONS)
-    if(PHYS_OPTIONS)
-        list(REMOVE_ITEM PHYS_OPTIONS "-freflection")
-        set_target_properties(zahlen_physics PROPERTIES COMPILE_OPTIONS "${PHYS_OPTIONS}")
-    endif()
-endif()
+target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 
 target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)

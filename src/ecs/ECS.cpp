@@ -15,7 +15,6 @@ uint32_t                            s_TypeCounter = 0;
 HashMap<uint32_t, uint32_t>         s_HashToDense;
 HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
-// --- HELPER: Manual Aligned Realloc
 auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) -> void* {
     void* newPtr = ::operator new[](newSize, std::align_val_t {alignment});
     if (oldPtr != nullptr) {
@@ -25,7 +24,7 @@ auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignme
     return newPtr;
 }
 
-} // namespace
+}
 
 auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
     return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
@@ -49,11 +48,10 @@ auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
         if (id != nullptr) {
             return *id;
         }
-        return 0xFFFFFFFF; // Invalid
+        return 0xFFFFFFFF;
     });
 }
 
-// SparseSet
 
 SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor):
     _elementSize(elementSize), _alignment(alignment), _sync(syncPtr), _destructor(destructor) {
@@ -137,7 +135,6 @@ auto SparseSet::InsertEmpty(Entity entity) -> void* {
         _dense[denseIdx]      = entity;
         _sparse[entity.index] = denseIdx;
 
-        // Zero-initialize the generic memory slot
         std::memset(_data + (denseIdx * _elementSize), 0, _elementSize);
     }
     return _data + (denseIdx * _elementSize);
@@ -218,7 +215,6 @@ auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
     return view;
 }
 
-// Registry
 
 Registry::Registry() {
     sync.viewExportCount.store(0, std::memory_order::relaxed);
@@ -267,12 +263,12 @@ void Registry::EnsureComponentCapacity(uint32_t id) {
         return;
     }
     size_t oldCap = _compCapacity;
-    _compCapacity = id + 8; // Small growth for component pointer array
+    _compCapacity = id + 8;
     _components   = static_cast<SparseSet**>(std::realloc(static_cast<void*>(_components), _compCapacity * sizeof(SparseSet*)));
     for (size_t i = oldCap; i < _compCapacity; ++i) {
         _components[i] = nullptr;
     }
-    _typeInfo.resize(_compCapacity); // Resizes tracking metadata vector on demand
+    _typeInfo.resize(_compCapacity);
 }
 
 auto Registry::Create() -> Entity {
@@ -312,7 +308,7 @@ void Registry::Clear() {
             }
         }
         _freeCount   = 0;
-        _entityCount = 0; // Reset active entity tracking
+        _entityCount = 0;
         for (size_t i = 0; i < _entityCapacity; ++i) {
             _generations[i]++;
             _freeIndices[_freeCount++] = static_cast<uint32_t>(i);
@@ -336,7 +332,7 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
         }
 
         _typeInfo[id] = {.name = name, .size = size, .alignment = alignment, .debugDump = [](const void*, std::string& out) -> void {
-                             out += "{}"; // Fallback representation for non-static dynamic components
+                             out += "{}";
                          }};
     });
     return id;
@@ -352,4 +348,4 @@ auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     });
 }
 
-} // namespace ZHLN::ECS
+}

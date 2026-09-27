@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/system/ParticleSystem.hpp
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -21,13 +20,7 @@ class ZHLN_API ParticleSystem {
     ParticleSystem(ParticleSystem&&)                 = default;
     ParticleSystem& operator=(ParticleSystem&&)      = default;
 
-    /**
-     * @brief Processes active particle emitters:
-     *  - Lazily allocates GPU storage buffers for new emitters.
-     *  - Resolves camera-relative attachment offsets.
-     *  - Submits emitter render commands to the RenderContext for GPU compute update & rendering.
-     */
     void Update(SystemContext& ctx, float dt);
 };
 
-} // namespace ZHLN
+}

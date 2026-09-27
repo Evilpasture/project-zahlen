@@ -1,6 +1,4 @@
-// resources/shaders/mlaa.slang
 
-// Layout & Push Constants
 
 struct MLAAPushConstants {
     float rcpFrameX;
@@ -15,46 +13,37 @@ MLAAPushConstants pc;
 Texture2D colorTex;
 SamplerState sPoint;
 
-// Structures
 
 struct VSOutput {
     float4 pos : SV_Position;
     float2 uv : TEXCOORD0;
 };
 
-// Vertex Shader Entry Point
 
 [shader("vertex")]
 VSOutput VSMain(uint vertexID: SV_VertexID) {
     VSOutput output;
     output.uv = float2((vertexID << 1) & 2, vertexID & 2);
-    // Flip-free projection; top-left of the texture maps straight to top-left of clip space (-1, -1)
     output.pos = float4(output.uv.x * 2.0f - 1.0f, output.uv.y * 2.0f - 1.0f, 0.0f, 1.0f);
     return output;
 }
 
-// Helper Utilities
 
-// Computes perceptual luma using Rec. 709 coefficients
 float GetLuma(float3 color) {
     return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
 }
 
-// Evaluates whether a local edge exists between two points
 bool IsEdge(float lumaA, float lumaB) {
     return abs(lumaA - lumaB) > pc.threshold;
 }
 
-// Checks edge presence at a specific offset
 bool IsEdgeAtOffset(float2 uv, float2 offset) {
     float3 colA = colorTex.SampleLevel(sPoint, uv, 0.0f).rgb;
     float3 colB = colorTex.SampleLevel(sPoint, uv + offset, 0.0f).rgb;
     return IsEdge(GetLuma(colA), GetLuma(colB));
 }
 
-// Procedural Edge Search Loops
 
-// Search upward along a vertical edge line
 float SearchUp(float2 uv, float maxSteps) {
     float2 step      = float2(0.0f, -pc.rcpFrameY);
     float2 currentUV = uv + step;
@@ -71,7 +60,6 @@ float SearchUp(float2 uv, float maxSteps) {
     return maxSteps;
 }
 
-// Search downward along a vertical edge line
 float SearchDown(float2 uv, float maxSteps) {
     float2 step      = float2(0.0f, pc.rcpFrameY);
     float2 currentUV = uv + step;
@@ -88,7 +76,6 @@ float SearchDown(float2 uv, float maxSteps) {
     return maxSteps;
 }
 
-// Search leftward along a horizontal edge line
 float SearchLeft(float2 uv, float maxSteps) {
     float2 step      = float2(-pc.rcpFrameX, 0.0f);
     float2 currentUV = uv + step;
@@ -105,7 +92,6 @@ float SearchLeft(float2 uv, float maxSteps) {
     return maxSteps;
 }
 
-// Search rightward along a horizontal edge line
 float SearchRight(float2 uv, float maxSteps) {
     float2 step      = float2(pc.rcpFrameX, 0.0f);
     float2 currentUV = uv + step;
@@ -122,9 +108,7 @@ float SearchRight(float2 uv, float maxSteps) {
     return maxSteps;
 }
 
-// Analytical Weight Calculations
 
-// Mathematically approximates the area under the crossing edge line
 float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
     float totalLength = d1 + d2 + 1.0f;
     float position    = d1;
@@ -139,7 +123,6 @@ float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
     return 0.5f * (1.0f - position / totalLength);
 }
 
-// Pixel/Fragment Shader Entry Point
 
 [shader("fragment")]
 float4 PSMain(VSOutput input) : SV_Target0 {
@@ -163,7 +146,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float weightTop  = 0.0f;
     float maxSteps   = (float) pc.maxSearchSteps;
 
-    // 1. Process Vertical Discontinuities (Horizontal Blend Search)
     if (edgeLeft) {
         float dUp   = SearchUp(uv, maxSteps);
         float dDown = SearchDown(uv, maxSteps);
@@ -174,7 +156,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         weightLeft = CalculateArea(dUp, dDown, orthoUp, orthoDown);
     }
 
-    // 2. Process Horizontal Discontinuities (Vertical Blend Search)
     if (edgeTop) {
         float dLeft  = SearchLeft(uv, maxSteps);
         float dRight = SearchRight(uv, maxSteps);
@@ -189,7 +170,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         return centerColor;
     }
 
-    // 3. Neighborhood Color Blending
     float4 finalColor = centerColor;
 
     if (weightLeft > 0.0f) {

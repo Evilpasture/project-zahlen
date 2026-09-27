@@ -43,7 +43,6 @@ void LODSystem::Update(Engine& engine) {
 
             float dist = (worldPos - cam.position).Length();
 
-            // Default to the lowest detail mesh available
             uint8_t selectedLOD = lodGroup.count - 1;
 
             for (uint8_t l = 0; l < lodGroup.count; ++l) {
@@ -61,4 +60,4 @@ void LODSystem::Update(Engine& engine) {
     });
 }
 
-} // namespace ZHLN
+}

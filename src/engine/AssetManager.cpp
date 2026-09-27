@@ -1,10 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/AssetManager.cpp
-//
-// High-level Asset Manager: caching of ModelPrefab and BakedFontAsset via
-// FS::AssetCache, delegation of low-level I/O to FS::VirtualFileSystem.
 
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -45,6 +41,7 @@ void AssetManager::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefa
 
 void AssetManager::ClearCache() noexcept {
     _prefabCache.Clear();
+    _radianceCache.Clear();
 }
 
 uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
@@ -71,4 +68,12 @@ uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t m
     return _fontCache.GetAll(outFonts, maxCount);
 }
 
-} // namespace ZHLN
+RadianceMap* AssetManager::GetCachedRadiance(uint64_t hash) {
+    return _radianceCache.Find(hash);
+}
+
+void AssetManager::CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map) {
+    _radianceCache.Insert(hash, std::move(map));
+}
+
+}

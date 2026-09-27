@@ -1,14 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Input.hpp
 #pragma once
 
 #include <cstdint>
 
 namespace ZHLN {
 
-// Platform-neutral key / mouse button identifiers.
 enum class KeyCode : uint8_t {
     Unknown = 0,
     Num0,
@@ -78,15 +76,12 @@ enum class KeyCode : uint8_t {
     LButton,
     RButton,
     MButton,
-    // Line / page navigation. Appended at the end so every previously
-    // published numeric value (scripts address keys by number) stays put.
     Home,
     End,
     PageUp,
     PageDown,
-    // OS Super: Linux Super, Windows key, macOS Command (GLFW_MOD_SUPER).
     LSuper,
     RSuper
 };
 
-} // namespace ZHLN
+}

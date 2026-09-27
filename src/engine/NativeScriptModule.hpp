@@ -18,9 +18,6 @@ class NativeScriptModule {
   public:
     using UpdateFn = GameplayStatus (*)(Engine*, float);
 
-    // Automatically resolves platform prefix/extension if omitted (e.g. "scripts/gameplay").
-    // The engine service dispatches ReloadFromFileEvent on FramePhase::HotReload,
-    // before this module's Update can execute gameplay code for that frame.
     NativeScriptModule(Engine& engine, std::string_view libPath): m_libPath(ResolveModulePath(libPath)), m_fileSystemWatcher(&engine.GetFileSystemWatcher()) {
         m_watchHandle = m_fileSystemWatcher->WatchFile(m_libPath, [this](const FS::FileWatchEvent& event) { ReloadFromFileEvent(event); });
         LoadModule();
@@ -53,7 +50,6 @@ class NativeScriptModule {
         namespace fs = std::filesystem;
         fs::path p(basePath);
 
-        // If no file extension is present, format based on active platform.
         if (!p.has_extension()) {
             std::string filename = p.filename().string();
             if constexpr (isWindows) {
@@ -90,7 +86,6 @@ class NativeScriptModule {
             return;
         }
 
-        // Shadow copy binary to avoid OS file-locking during background compilation.
         std::string     shadowPath = m_libPath + ".shadow";
         std::error_code ec;
         std::filesystem::copy_file(m_libPath, shadowPath, std::filesystem::copy_options::overwrite_existing, ec);
@@ -122,4 +117,4 @@ class NativeScriptModule {
     UpdateFn             m_updateFn          = nullptr;
 };
 
-} // namespace ZHLN
+}

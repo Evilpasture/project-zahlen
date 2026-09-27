@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/DescriptorHeap.cpp
 
 #include "DescriptorHeap.hpp"
 #include "memory/Allocator.hpp"
@@ -16,20 +15,6 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// Refuses a batch that would write outside the heap.
-//
-// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
-// carries, so one out-of-range slot writes over the implementation's reserved
-// range at the tail of the buffer -- and past the mapping entirely if the slot
-// is far enough out. Nothing upstream bounds it in general: regions addressed
-// by raw offset rather than through SlotAllocator (the bindless
-// globalTextures[] array, every HeapPassBindings block) compute their slot
-// arithmetically, so an unchecked index arrives here as a plausible-looking
-// number.
-//
-// Dropping the batch loses a descriptor, which shows up as a wrong or missing
-// texture. That is strictly better than the alternative, and the log names the
-// slot that overflowed.
 [[nodiscard]] auto BatchFitsHeap(const uint32_t* slots, uint32_t count, uint32_t maxSlot, uint32_t capacity, const char* heapName) noexcept -> bool {
     if (count == 0 || slots == nullptr || maxSlot < capacity) {
         return true;
@@ -38,9 +23,8 @@ namespace {
     return false;
 }
 
-} // namespace
+}
 
-// DescriptorHeap Implementation
 
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::~DescriptorHeap() noexcept {
@@ -90,7 +74,6 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
     }
 
-    // volkLoadDevice() already filled the optional-extension Volk globals.
     if constexpr (Type == DescriptorHeapType::Samplers) {
         if (vkCmdBindSamplerHeapEXT == nullptr || vkWriteSamplerDescriptorsEXT == nullptr) [[unlikely]] {
             return std::unexpected(DescriptorHeapError::FunctionLoaderFailed);
@@ -125,9 +108,6 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         heap_alignment = props.samplerHeapAlignment;
         max_heap_size  = props.maxSamplerHeapSize;
     } else {
-        // Unified stride: every resource slot must be able to hold any resource
-        // descriptor and stay aligned for both image and buffer descriptors
-        // (the reservedRangeOffset VUIDs demand multiples of BOTH alignments).
         const VkDeviceSize max_size  = std::max(props.bufferDescriptorSize, props.imageDescriptorSize);
         const VkDeviceSize max_align = std::max(props.bufferDescriptorAlignment, props.imageDescriptorAlignment);
         _stride                      = ZHLN::Math::AlignUp(max_size, max_align);
@@ -137,8 +117,6 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     if (_stride == 0) [[unlikely]] {
-        // A well-formed implementation always advertises non-zero descriptor
-        // sizes; treat zero as "extension unusable".
         return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
     }
 
@@ -170,15 +148,10 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         return std::unexpected(DescriptorHeapError::DeviceAddressFailed);
     }
 
-    // The heap binding VUIDs demand heapRange.address be a multiple of the
-    // heap alignment. VMA honors minAlignment on VMA >= 3.1; verify at runtime
-    // so older VMA builds fail loudly instead of binding a misaligned heap.
     if ((address % std::max<VkDeviceSize>(heap_alignment, 1)) != 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DeviceAddressFailed);
     }
 
-    // Cache the bind descriptor; the heap layout never changes after init.
-    // Secondary command buffers reuse it for heap-state inheritance.
     _bindInfo = {
         .sType               = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
         .pNext               = nullptr,
@@ -192,8 +165,6 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept {
-    // Descriptors are written by the driver directly into our persistent
-    // mapping; make them coherent before the GPU binds this heap.
     _buffer.Flush(offset, size);
 }
 
@@ -216,8 +187,6 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     if (Valid() && vkWriteResourceDescriptorsEXT != nullptr) {
         const auto  count = batch.SlotCount();
         const auto* slots = batch.SlotsData();
-        // Resolve the dirty byte range BEFORE Flush() clears the batch's slot
-        // vector (clear() does not free but we don't want to rely on that).
         VkDeviceSize flushOffset = 0;
         VkDeviceSize flushSize   = 0;
         if (count > 0 && slots != nullptr && _stride > 0) {
@@ -227,8 +196,6 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
             }
             flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
             flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
-            // vkFlushMappedMemoryRanges requires offsets/sizes aligned to
-            // nonCoherentAtomSize; round down the offset and extend the size.
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
@@ -265,11 +232,10 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     }
 }
 
-// ResourceWriteBatch Implementation (PIMPL)
 
 struct ResourceWriteBatch::Impl {
     std::vector<VkImageDescriptorInfoEXT> imageInfos;
-    std::vector<VkImageViewCreateInfo>    viewInfos; // Local copy to protect structure lifetime
+    std::vector<VkImageViewCreateInfo>    viewInfos;
     std::vector<VkDeviceAddressRangeEXT>  addressRanges;
     std::vector<uint32_t>                 slots;
     std::vector<VkDescriptorType>         types;
@@ -295,20 +261,16 @@ auto ResourceWriteBatch::SlotsData() const noexcept -> const uint32_t* {
 }
 
 void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    // 1. Store the structure by value to keep it alive until Flush() completes
     _impl->viewInfos.push_back(viewInfo);
 
-    // 2. Queue with pView set to nullptr for now. We will resolve stable memory pointers inside Flush()!
     _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 }
 
 void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    // 1. Store the structure by value to keep it alive until Flush() completes
     _impl->viewInfos.push_back(viewInfo);
 
-    // 2. Queue with pView set to nullptr for now. We will resolve stable memory pointers inside Flush()!
     _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
@@ -327,8 +289,6 @@ void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, VkDeviceAddress a
 }
 
 void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
-    // Acceleration structure descriptors ignore the range size (only the
-    // 256-byte address alignment is validated), so a zero size is safe.
     _impl->addressRanges.push_back({.address = address, .size = 0});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
@@ -367,13 +327,12 @@ void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize st
     vkWriteResourceDescriptorsEXT(device, total_count, resource_infos.data(), ranges.data());
 
     _impl->imageInfos.clear();
-    _impl->viewInfos.clear(); // Safely clear out lifetime-tied structures
+    _impl->viewInfos.clear();
     _impl->addressRanges.clear();
     _impl->slots.clear();
     _impl->types.clear();
 }
 
-// SamplerWriteBatch Implementation (PIMPL)
 
 struct SamplerWriteBatch::Impl {
     std::vector<VkSamplerCreateInfo> createInfos;
@@ -384,7 +343,6 @@ SamplerWriteBatch::SamplerWriteBatch() noexcept: _impl(std::make_unique<Impl>())
 }
 SamplerWriteBatch::~SamplerWriteBatch() noexcept = default;
 
-// Impl has non-trivial elements, so we must support explicit moving
 SamplerWriteBatch::SamplerWriteBatch(SamplerWriteBatch&& other) noexcept                    = default;
 auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch& = default;
 
@@ -422,7 +380,6 @@ void SamplerWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize str
     _impl->slots.clear();
 }
 
-// SlotAllocator Implementation (PIMPL)
 
 struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
@@ -476,7 +433,6 @@ void SlotAllocator::Clear() noexcept {
     _impl->freeSlots.clear();
 }
 
-// HeapManager Implementation
 
 auto HeapManager::Init(
     const Context& ctx,
@@ -497,9 +453,6 @@ auto HeapManager::Init(
     _staticResourceAlloc.Init(staticResourceCount, DescriptorHeapError::ResourceSlotsExhausted);
     _staticSamplerAlloc.Init(staticSamplerCount, DescriptorHeapError::SamplerSlotsExhausted);
 
-    // Sampler slots stay static: a sampler binding is addressed at a constant
-    // heap offset, so there is nothing per-frame for a transient partition to
-    // hold.
     const uint32_t total_resource_count =
         staticResourceCount + (doubleBufferCount * frameTransientResourceCount) + immediateTransientResourceCount;
     const uint32_t total_sampler_count = staticSamplerCount;
@@ -514,7 +467,6 @@ auto HeapManager::Init(
         return std::unexpected(samp_heap_init.error());
     }
 
-    // Capture push-data budget (vkCmdPushDataEXT limit) for the engine.
     VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
         .pNext = nullptr,
@@ -532,9 +484,6 @@ auto HeapManager::Init(
 
 void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
     if constexpr (isDev) {
-        // The frame partition is a fixed capacity, so a frame that nearly fills
-        // it is worth surfacing before the overflow error fires: the peak is a
-        // sum over every dispatch the frame recorded.
         if (_frameTransientResourceCount > 0 && _frameTransientAllocated * 4 > _frameTransientResourceCount * 3) [[unlikely]] {
             ZHLN::Log(
                 "[VK_EXT_descriptor_heap] frame transient partition {}% full ({} of {} slots); raise kFrameTransientResourceSlots.",
@@ -567,9 +516,6 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
 }
 
 auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept -> std::expected<uint32_t, ErrorCode> {
-    // Vk::Fork records its sub-passes on worker threads, and every one of them
-    // allocates its blocks here: two unsynchronized bumps hand out the *same*
-    // base slot and the two passes then write descriptors over each other.
     const ZHLN::MutexGuard guard(_writeMutex);
 
     if (lifecycle == HeapLifecycle::Immediate) {
@@ -590,10 +536,6 @@ auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle l
 }
 
 void HeapManager::FlushResourceBatch(ResourceWriteBatch& batch) noexcept {
-    // The batch writes into the shared mapped heap buffer and then flushes a
-    // host-cache range over it; serialized with allocation and with every other
-    // writer so two forked passes cannot interleave their writes or their
-    // flushes over the same cache lines.
     const ZHLN::MutexGuard guard(_writeMutex);
     _resourceHeap.Flush(batch);
 }
@@ -617,7 +559,6 @@ auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept 
     return base;
 }
 
-// Host-Side Descriptor Writes
 
 void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     if (!handle.Valid()) {
@@ -673,8 +614,7 @@ void HeapManager::WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& 
     FlushSamplerBatch(batch);
 }
 
-// Explicit template instantiations for class-level compilation protection
 template class DescriptorHeap<DescriptorHeapType::Resources>;
 template class DescriptorHeap<DescriptorHeapType::Samplers>;
 
-} // namespace ZHLN::Vk
+}

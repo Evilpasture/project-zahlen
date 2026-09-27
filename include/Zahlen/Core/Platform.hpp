@@ -1,8 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// INCLUDE THIS HEADER INSTEAD OF <windows.h>!!!
-
 #pragma once
 
 #include <cstddef>
@@ -22,10 +20,6 @@
 
 #pragma comment(lib, "User32.lib")
 
-// -------------------------------------------------------------------------
-// 1. Near / Far / other spatial keywords
-//    Clash with camera nearZ/farZ, Jolt's math, and GLSL-style naming
-// -------------------------------------------------------------------------
 #undef near
 #undef far
 #undef Near
@@ -33,59 +27,32 @@
 #undef NEAR
 #undef FAR
 
-// -------------------------------------------------------------------------
-// 2. Threading / Synchronization / Memory
-//    These stomp std::, Jolt atomics, and your custom Mutex/Fiber
-// -------------------------------------------------------------------------
 #undef MemoryBarrier
 #undef Yield
-#undef CreateThread // conflicts if you wrap thread creation
+#undef CreateThread
 #undef GetCurrentThread
-#undef Sleep // std::this_thread::sleep_for is safer anyway
+#undef Sleep
 
-// -------------------------------------------------------------------------
-// 3. Math / Geometry types & Booleans
-// -------------------------------------------------------------------------
 #undef Rect
 #undef Point
-#undef min // redundant if NOMINMAX, but be explicit
+#undef min
 #undef max
 
-// Replace Win32 preprocessor booleans with type-safe C++ constants
 #undef BOOL
-#undef TRUE
-#undef FALSE
 
 using BOOL = int;
 
-// Was a good idea until miniaudio pass FALSE to a function that expects a pointer.
-// inline constexpr BOOL TRUE  = 1;
-// inline constexpr BOOL FALSE = 0;
+#undef interface
+#undef OPAQUE
+#undef TRANSPARENT
+#undef DrawText
+#undef DrawState
+#undef CreateFont
+#undef LoadImage
+#undef LoadBitmap
+#undef GetObject
+#undef SetPort
 
-// Unfortunately this has to be macros. Fuck you WIN32 conventions.
-
-#define TRUE  1
-#define FALSE 0
-
-// -------------------------------------------------------------------------
-// 4. Graphics / UI / COM
-//    LLGL and Vulkan headers especially hate these
-// -------------------------------------------------------------------------
-#undef interface   // COM keyword, breaks C++ class/concept design
-#undef OPAQUE      // Vulkan and LLGL use this as an identifier
-#undef TRANSPARENT // same
-#undef DrawText    // GDI macro, A/W suffixed — nukes any DrawText method
-#undef DrawState   // GDI
-#undef CreateFont  // GDI — A/W macro that breaks font manager classes
-#undef LoadImage   // GDI — A/W macro, nukes asset loaders named LoadImage
-#undef LoadBitmap  // GDI
-#undef GetObject   // GDI — extremely common name, nukes asset/ECS code
-#undef SetPort     // nukes any networking or port abstractions
-
-// -------------------------------------------------------------------------
-// 5. Error / Status codes redefined as macros
-//    These corrupt enum values or constexpr error code definitions
-// -------------------------------------------------------------------------
 #undef ERROR
 #undef NO_ERROR
 #undef DELETE
@@ -94,48 +61,37 @@ using BOOL = int;
 #undef IGNORE
 #undef STRICT
 
-// -------------------------------------------------------------------------
-// 6. String / Encoding macros
-//    Force redefinition as A/W variants that silently corrupt your own APIs
-// -------------------------------------------------------------------------
-#undef GetMessage   // A/W macro — conflicts with message queue classes
-#undef SendMessage  // same
-#undef PostMessage  // same
-#undef PeekMessage  // same — LLGL pumps its own event loop
-#undef CreateWindow // A/W macro — stomps Window factory functions
+#undef GetMessage
+#undef SendMessage
+#undef PostMessage
+#undef PeekMessage
+#undef CreateWindow
 #undef CreateWindowEx
 #undef FindWindow
 #undef RegisterClass
 #undef UnregisterClass
 #undef GetClassName
 
-// -------------------------------------------------------------------------
-// 7. Process / Module
-//    Clash with engine module/plugin systems
-// -------------------------------------------------------------------------
 #undef GetCurrentProcess
 #undef OpenProcess
 #undef TerminateProcess
-#undef LoadModule // old Win16 relic, still defined in some SDK versions
+#undef LoadModule
 #undef FreeModule
-#undef GetModuleHandle   // A/W macro
-#undef GetModuleFileName // A/W macro
+#undef GetModuleHandle
+#undef GetModuleFileName
 
-// -------------------------------------------------------------------------
-// 8. Misc identifiers that appear in engine/physics/renderer namespaces
-// -------------------------------------------------------------------------
-#undef DIFFERENCE // set-math name occasionally defined
-#undef DOMAIN     // math.h / <cmath> conflict on MSVC
-#undef pascal     // old calling convention keyword still lurking
+#undef DIFFERENCE
+#undef DOMAIN
+#undef pascal
+
 #undef cdecl
 #undef CDECL
 #undef small
 
-// Replace Win32 VOID macro with standard C++ type alias
 #undef VOID
 using VOID = void;
 
-#endif // _WIN32
+#endif
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #include <fcntl.h>
@@ -172,20 +128,16 @@ inline auto GetPID() noexcept {
 #endif
 }
 
-// Check if the compiler supports a standardized debug break hook
 inline void DebugBreak() noexcept {
 #if defined(_WIN32) || defined(_WIN64)
-// We are strictly on Windows
 #if defined(_MSC_VER) || defined(__clang__)
     __debugbreak();
 #endif
 #elif defined(__linux__)
-// We are strictly on Linux
 #if defined(__GNUC__) || defined(__clang__)
     __builtin_trap();
 #endif
 #elif defined(__APPLE__)
-// We are strictly on macOS
 #if defined(__GNUC__) || defined(__clang__)
     __builtin_trap();
 #endif
@@ -210,30 +162,11 @@ inline void HaltThread() noexcept {
 #endif
 }
 
-// Cached Stack Bounds
-
-/**
- * @brief The bounds of the stack that is currently running.
- *
- * `base` is the highest address (where a downwards-growing stack starts),
- * `limit` the lowest one it may grow to.
- */
 struct StackBounds {
     void* base  = nullptr;
     void* limit = nullptr;
 };
 
-/**
- * @brief Reads the stack bounds the OS recorded for the calling thread.
- *
- * Some platforms keep a copy of the active stack bounds in per-thread OS state:
- * Windows stores them in the TEB, where the kernel, stack probes, SEH and
- * GetCurrentThreadStackLimits() all read them. Anything that swaps stacks by
- * hand (fibers, coroutines, user-space schedulers) has to keep that copy in
- * sync with the stack it switches to.
- *
- * Platforms with no such bookkeeping return a zeroed struct.
- */
 [[nodiscard]] inline auto GetCurrentStackBounds() noexcept -> StackBounds {
 #if defined(_WIN32)
     auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
@@ -243,17 +176,12 @@ struct StackBounds {
 #endif
 }
 
-/**
- * @brief Overwrites the OS's copy of the calling thread's stack bounds.
- * No-op on platforms that don't keep one.
- */
 inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept {
 #if defined(_WIN32)
     auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
     tib->StackBase  = bounds.base;
     tib->StackLimit = bounds.limit;
 #else
-    // Nothing to keep in sync.
 #endif
 }
 

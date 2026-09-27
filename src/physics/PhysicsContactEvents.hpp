@@ -12,7 +12,7 @@ class ContactListener final: public JPH::ContactListener {
     }
     ~ContactListener() override;
 
-    auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg /*inBaseOffset*/, const JPH::CollideShapeResult& /*inCollisionResult*/)
+    auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg , const JPH::CollideShapeResult& )
         -> JPH::ValidateResult override {
         uint32_t d1 = GetDense(b1.GetID());
         uint32_t d2 = GetDense(b2.GetID());
@@ -26,11 +26,11 @@ class ContactListener final: public JPH::ContactListener {
         return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
     }
 
-    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& /*ioSettings*/) override {
+    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& ) override {
         Record(ContactType::Added, b1, b2, m);
     }
 
-    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& /*ioSettings*/) override {
+    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings& ) override {
         Record(ContactType::Persisted, b1, b2, m);
     }
 
@@ -118,16 +118,6 @@ class CharacterListener final: public JPH::CharacterContactListener {
         return Filter(inChar->GetUserData(), inContact.mCharacterB->GetUserData());
     }
 
-    // Note: OnAdjustBodyVelocity is intentionally left to Jolt's default. The
-    // contact velocity is already computed from the body's real linear and
-    // angular velocity (io velocity is filled in before the callback), so a
-    // character standing on a moving or rotating platform is carried with it
-    // with no override. Overriding it to re-add the rotational surface
-    // velocity double-counts the spin. Likewise the contact-added/persisted
-    // callbacks are left to their (empty) defaults: gameplay impulses a
-    // character exerts on props are controller policy, applied in the
-    // character layer's fixed-step hook through the public physics API, not
-    // hidden inside a contact callback.
 
   private:
     PhysicsWorld* _world;
@@ -154,4 +144,4 @@ class CharacterListener final: public JPH::CharacterContactListener {
     }
 };
 
-} // namespace ZHLN::Physics
+}

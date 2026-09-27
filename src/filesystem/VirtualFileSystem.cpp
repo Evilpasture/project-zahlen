@@ -1,12 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/filesystem/VirtualFileSystem.cpp
-//
-// Low-level VFS / PakArchive manager. Pure binary I/O, no Mesh/Texture/Prefab
-// knowledge. Extracted from AssetManager.cpp to zahlen_filesystem so
-// that zcook and tests can mount .pak without linking zahlen_engine
-// (Jolt/Vulkan/ECS).
 
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/FileSystem/MappedFile.hpp>
@@ -88,11 +82,6 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
         return false;
     }
 
-    // --- Validate header to avoid SIGBUS on corrupt/truncated paks ---
-    // Version 2 is the packed .pak ABI (see Zahlen/FileSystem/VFS.hpp). A
-    // version-1 archive pads the header to 24 bytes and every TOC entry to 40,
-    // so reading one with the current structs would land tocOffset on the wrong
-    // bytes; rejecting it here is what turns that into a clean mount failure.
     if (header.version != kPakFormatVersion) {
         CloseMappedFile(archive->mapped);
         delete archive;
@@ -117,7 +106,6 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
 
     const auto* baseData = static_cast<const char*>(archive->mapped.data);
 
-    // Pre-validate each entry's payload range
     for (uint32_t i = 0; i < header.entryCount; ++i) {
         PakEntry tmp {};
         std::memcpy(&tmp, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
@@ -131,7 +119,7 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
             delete archive;
             return false;
         }
-        if (tmp.uncompressedSize > (100ULL << 20)) { // 100 MiB sanity
+        if (tmp.uncompressedSize > (100ULL << 20)) {
             CloseMappedFile(archive->mapped);
             delete archive;
             return false;
@@ -141,18 +129,6 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
     bool ok = Lock(_catalogMutex, [&]() -> bool {
         if (_archiveCount >= _archiveCapacity) {
             size_t newCap = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
-            // GCC's own C++ front end builds a null-check conditional inside a
-            // `new (std::nothrow) T[n]` with a runtime bound, and its own
-            // -Wduplicated-branches then fires on that compiler-generated conditional:
-            // a false positive with no source-level condition behind it (PR c++/125422,
-            // fixed on GCC trunk, with this construct as its test case,
-            // g++.dg/warn/Wduplicated-branches10.C -- "new (nothrow) T[n] with a runtime
-            // variable must not trigger -Wduplicated-branches"). -fno-exceptions is what
-            // leaves this construct as the way to allocate, so the diagnostic is switched
-            // off around this statement rather than the allocation being reshaped for a
-            // compiler bug. Delete the two pragmas once the toolchain carries the fix.
-            // The __clang__ guard is not optional: Clang does not know the warning group
-            // and answers an unguarded pragma with its own "unknown warning group".
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wduplicated-branches"
@@ -266,7 +242,7 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
     req->outData    = ::operator new[](entry.uncompressedSize, std::align_val_t {16});
     req->isZeroCopy = false;
 
-    if (entry.compression == 2) { // ZStandard
+    if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
         size_t result = ZSTD_decompress(req->outData, entry.uncompressedSize, payloadRaw, entry.compressedSize);
         if (ZSTD_isError(result)) {
@@ -279,7 +255,7 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
         req->success = false;
         return;
 #endif
-    } else if (entry.compression == 1) { // LZ4 Placeholder
+    } else if (entry.compression == 1) {
         FreeMemory(*req);
         req->success = false;
         return;
@@ -303,7 +279,6 @@ auto VirtualFileSystem::Exists(uint64_t assetID) const noexcept -> bool {
 }
 
 auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t {
-    // Try mounted directories first (dev mode)
     auto tryDirs = Lock(_mountDirMutex, [&]() -> size_t {
         for (size_t i = 0; i < _mountDirCount; ++i) {
             std::filesystem::path full = std::filesystem::path(_mountDirs[i]) / virtualPath;
@@ -316,7 +291,7 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
                 return static_cast<size_t>(sz);
             }
             if (sz > outCapacity) {
-                return 0; // buffer too small
+                return 0;
             }
             std::ifstream f(full, std::ios::binary);
             if (!f) {
@@ -334,7 +309,6 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
         return tryDirs;
     }
 
-    // Fallback to pak via assetID
     uint64_t id = Hash64(virtualPath);
     const CatalogEntry* catEntry = nullptr;
     PakArchive* archive = nullptr;
@@ -364,8 +338,6 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
     }
     if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
-        // Declared here, not above the #if: its only use is inside this block, so
-        // a build without zstd would otherwise warn on an unused variable.
         char*  payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
         size_t res        = ZSTD_decompress(outData, outCapacity, payloadRaw, entry.compressedSize);
         if (ZSTD_isError(res)) {
@@ -379,4 +351,4 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
     return 0;
 }
 
-} // namespace ZHLN::FS
+}

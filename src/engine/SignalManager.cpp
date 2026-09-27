@@ -102,7 +102,7 @@ auto IsKnownNative(int sig) noexcept -> bool {
 struct sigaction s_previous[sizeof(kPosixSignals) / sizeof(kPosixSignals[0])] {};
 bool             s_havePrevious[sizeof(kPosixSignals) / sizeof(kPosixSignals[0])] {};
 
-void PosixHandler(int sig, siginfo_t* info, void* /*context*/) {
+void PosixHandler(int sig, siginfo_t* info, void* ) {
     if (!IsKnownNative(sig)) {
         return;
     }
@@ -171,7 +171,7 @@ LONG WINAPI VectoredCrashHandler(PEXCEPTION_POINTERS info) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-void WinAbortHandler(int /*sig*/) {
+void WinAbortHandler(int ) {
     const SignalEvent ev {
         .signal       = Signal::Abort,
         .faultAddress = nullptr,
@@ -190,7 +190,7 @@ auto AllocateId() noexcept -> uint32_t {
     return id;
 }
 
-} // namespace
+}
 
 void SignalManager::Install() noexcept {
     const std::lock_guard lock(s_mu);
@@ -320,4 +320,4 @@ void SignalManager::Dispatch(const SignalEvent& ev) noexcept {
     }
 }
 
-} // namespace ZHLN
+}

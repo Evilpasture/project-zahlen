@@ -10,6 +10,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -27,10 +28,6 @@
 
 namespace ZHLN {
 
-// Frame-composition errors
-// The engine's own frame failures, as opposed to anything the renderer reports:
-// this system can be told to draw a frame that has no main camera to draw it
-// with, which no Vulkan call knows anything about.
 
 enum class RenderSystemError : uint8_t {
     NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
@@ -38,33 +35,52 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
-// as the only frame counter the shaders can see (see
-// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
-//
-// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
-// the shader recovers the integer frame index bit for bit. The old 0.0166f
-// did not, and past a couple of thousand frames consecutive frames decoded to
-// the same index -- freezing every blue-noise dither driven from this slot.
-// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
-// wrapping the clock instead of letting it lose its low bits.
+[[nodiscard]] auto HasAuthoredSun(const ECS::Registry& reg) noexcept -> bool {
+    for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
+        if (const auto* light = reg.Get<Components::LightComponent>(e); light != nullptr && light->type == LightType::Sun) {
+            return true;
+        }
+    }
+    return !reg.GetEntitiesWith<Components::SunTagComponent>().empty();
+}
+
+[[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
+    const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
+    if (ent == Entity::Null()) {
+        return rc.SetEnvironmentRadiance({});
+    }
+    const auto* env = reg.Get<Components::EnvironmentMapComponent>(ent);
+    if (env == nullptr || env->source.empty()) {
+        return rc.SetEnvironmentRadiance({});
+    }
+    auto loaded = LoadRadianceMap(engine.GetAssetManager(), std::string_view(env->source));
+    if (!loaded) {
+        Log("[IBL] Failed to load radiance '{}': {}", std::string_view(env->source), loaded.error());
+        return std::unexpected(loaded.error());
+    }
+    const RadianceMap& map = **loaded;
+    return rc.SetEnvironmentRadiance({
+        .rgba         = map.rgba.data(),
+        .width        = map.width,
+        .height       = map.height,
+        .contentHash  = map.contentHash,
+        .renderSkybox = env->renderSkybox,
+    });
+}
+
+
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
-// The physics-debug mesh is nothing special: a vertex-colored, double-sided,
-// alpha-blended draw is the ordinary basic material, so solid debug asks for
-// one and keeps it in the context's material registry under this builtin id
-// (the same registry scene materials live in, which reclaims the pool slot on
-// teardown). Compiled-in, so no per-frame allocation and no state anywhere.
 constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debug_solid_material");
 
-// Get-or-create that builtin material, the way the terrain and lightning
-// systems get theirs: create on first solid debug draw, register, then reuse.
 [[nodiscard]] auto GetOrCreatePhysicsDebugMaterial(RenderContext& rc) -> std::optional<Material> {
     if (auto existing = rc.GetGPUMaterial(kPhysicsDebugMaterialID)) {
         return existing;
     }
-    auto created = rc.CreateBasicMaterial(/*doubleSided=*/true, /*alphaBlend=*/true);
+    auto created = rc.CreateBasicMaterial(true, true);
     if (!created) {
         ZHLN::Log("[RenderSystem] Physics debug material creation failed: {}", created.error());
         return std::nullopt;
@@ -214,36 +230,15 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
         return extra;
     }
-    // A camera entity without a CameraComponent is positioned by its world
-    // transform alone; its yaw/pitch/fov stay the engine camera's. Camera rig
-    // overrides (third-person target cameras) are an extras/Camera concern
-    // and never read here.
     if (auto* world = reg.Get<Components::WorldTransformComponent>(cameraEnt); world != nullptr) {
         extra.position = world->world.GetTranslation();
     }
     return extra;
 }
 
-// Builds the optics of one camera entity into a SceneView for `target`.
 SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
     auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
-    // One camera per view. An entity that owns a camera component is rendered by
-    // the camera that component's matrices were built from: CameraSystem
-    // projects the engine camera, so that is the camera this view describes and
-    // the plain pair below is the unjittered partner of the matrix the frame is
-    // actually rasterized with. The rasterization matrix is the component's own
-    // viewProj, which carries the TAA subpixel jitter (GetJitteredProjectionMatrix)
-    // whenever the camera's AA mode is TAA; taa.slang compensates for exactly
-    // that jitter through frame.jitterParams.
-    //
-    // Deriving that pair from any other camera -- an extras camera rig's
-    // overrides, say -- would put the depth buffer in one frustum and the
-    // cluster cell the lighting pass picks in another: correct geometry,
-    // correct depth, correct cluster bounds, and a cell lookup that misses.
-    // An entity without a camera component has no component pair to partner,
-    // so its view is built from its own optics alone and the two halves are
-    // the same pair by construction.
     Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
@@ -267,7 +262,7 @@ SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& 
     };
 }
 
-} // namespace
+}
 
 std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
@@ -278,27 +273,16 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
         return std::unexpected(mainResult.error());
     }
     if (mainResult->has_value()) {
-        // FrameSkipped: there was nothing to draw into this frame, so there is
-        // nothing to end either -- no frame was begun, and the next tick tries
-        // again. Not a failure, and not something a caller of this system has to
-        // hear about.
         return {};
     }
 
     RenderDebug(engine, physicsDrawMode);
 
-    // The frame closes explicitly here: BeginFrame/EndFrame own synchronization
-    // and presentation, and every draw was dispatched by name above. A 2D-only
-    // client calls RenderUI instead and never pays for any of this.
     auto& rc      = engine.GetRenderContext();
     auto  end_res = rc.EndFrame();
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
-    // end_res->has_value() would be PresentSuboptimal: the frame was drawn, one
-    // of its presents did not go through as asked, and the renderer has already
-    // rebuilt the swapchain for it. Nothing for this system to do about it, and
-    // nothing to report as a failure.
 
     return {};
 }
@@ -318,13 +302,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    // --- Single graphics-settings sync point
-    // ECS components are the editing surface (GUI / scripts / presets);
-    // GraphicsSettings is the canonical model. One collect + delta-detected
-    // apply per frame replaces the former scattered SetGISettings /
-    // SetAAState / SetShadowResolution calls: anything that mutates the
-    // components — including Lua scripts — now gets reactive GPU updates
-    // (e.g. cascade shadow-target resizes) without calling the renderer.
     const GraphicsSettings gfx = SyncGraphicsSettings(engine);
 
     auto begin_res = rc.BeginFrame();
@@ -332,10 +309,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(begin_res.error());
     }
     if (begin_res->has_value()) {
-        // FrameSkipped: nothing was begun (there was nothing to draw into this
-        // frame), so nothing below can draw. Nothing is wrong -- the frame is
-        // simply not this tick's.
         return FrameSkipped {};
+    }
+    if (auto env = SyncEnvironmentMap(engine); !env) {
+        (void)rc.EndFrame();
+        return std::unexpected(env.error());
     }
     Entity cameraEntity = cameraEntities[0];
 
@@ -355,6 +333,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
+    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasAuthoredSun(reg)) {
+        if (const auto* env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env != nullptr && !env->source.empty()) {
+            sunIntensity = 0.0f;
+        }
+    }
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
@@ -387,10 +370,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3] = sunIntensity;
-    // lightCount is deliberately not set here: the renderer stamps it from the
-    // light list SetLights actually packed (see SetFrameData). An entity count
-    // taken here is a second opinion about the same array, and the two only
-    // agree by luck.
     uniforms.probeMin =
         JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
@@ -413,51 +392,22 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
-    // Compute simulations (cluster culling, volumetric fog, particle updates)
-    // run on the async compute queue ahead of the scene graph; the graphics
-    // submit waits on their timeline before the passes sample what they wrote.
-    // A failed submit (a lost device among them) propagates here -- this frame,
-    // with its call site attached -- instead of surfacing one frame late at a
-    // fence wait.
     if (auto sim_res = rc.DispatchSimulations(dt); !sim_res) {
         return std::unexpected(sim_res.error());
     }
 
-    // One view, one destination. The attachment is acquired before the scene is
-    // recorded: acquiring is what takes the window's image and opens the
-    // destination's command buffer for this frame, and the caller -- not the
-    // renderer -- decides what gets drawn into it.
     const ViewportRect viewport = rc.GetViewport();
-    // The kernel resolves which target this frame draws into; the renderer's
-    // low-level verb only wants the seam object, and this is the last place it
-    // is named in the frame path.
     const auto target = engine.AcquireTarget();
     if (!target) {
-        // The window could not become a destination this frame. It is said here
-        // because this is the call that asked, and once because it is the call
-        // that asks every frame: the renderer hands back the reason, and what to
-        // do with it is the frame's decision, not the acquiring call's.
         ZHLN::Log("[Render] Window attachment refused: {}", target.error());
     }
-    // Nothing acquired is not a failure: a swapchain image that was not handed
-    // out leaves the frame with nothing to draw into, and the passes skip what
-    // they cannot draw into.
     const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
     const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
-    // A hard failure propagates; a skipped scene (its target was not this
-    // frame's destination) is not the whole frame's failure -- EndFrame still
-    // closes and presents what the frame has, filling the unwritten image with
-    // the background -- so the skip value is consumed and dropped knowingly.
     if (auto scene_res = rc.RenderScene(sceneView, gfx); !scene_res) {
         return std::unexpected(scene_res.error());
     }
 
-    // 2D UI the UI phase built (HUD, editor chrome) is composed over the
-    // finished frame, into the same attachment. The payload carries its own
-    // geometry, so this costs one dynamic pass and never a 3D pass.
     if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
-        // Same contract as RenderScene: hard failure propagates, a skip (the
-        // payload has nowhere drawable to land) is consumed knowingly.
         if (auto ui_res = rc.RenderUI(
                 UIView {
                     .viewport   = viewport,
@@ -491,9 +441,6 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
         if (isWireframe) {
-            // Jolt emits line segments for colliders/constraints; they ride the
-            // context's own line pipeline through DrawLine, so no material is
-            // involved.
             auto UnpackColorVec4 = [](uint32_t packed) {
                 float r = static_cast<float>(packed & 0xFF) / 255.0f;
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
@@ -508,10 +455,6 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (debugData.triangleCount > 0) {
-            // Jolt emits filled triangles for colliders. There is nothing
-            // debug-specific about drawing them: they are a vertex-colored,
-            // double-sided, alpha-blended mesh, which is what
-            // CreateBasicMaterial(true, true) builds.
             auto debugMat = GetOrCreatePhysicsDebugMaterial(rc);
             if (!debugMat) {
                 return;
@@ -554,4 +497,4 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     }
 }
 
-} // namespace ZHLN
+}

@@ -1,26 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/Error.hpp
-//
-// ZHLN::Error is the *diagnostic* form of the engine's error channel. The channel itself --
-// what std::expected<T, ...> carries, what functions return, what crosses a task or a
-// pipeline -- is ZHLN::ErrorCode in Zahlen/ErrorCode.hpp: the same two words, without the
-// machinery that turns them into text. Error adds that machinery on demand: Category(),
-// Message() and Name() resolve through the process-wide category registry. Error never sees
-// a zero-valued error: ErrorCode's constructor -- the only way an enum enters the channel --
-// rejects zero-having enums at compile time and zero values with a break at run time.
-//
-// Conversion both ways is implicit and free (identical bytes, both trivially copyable), so a
-// code is promoted at the exact boundary where somebody reads it:
-//
-//     Error err = result.error();      // promotion, 8 bytes
-//     Log("{} ({}): {}", err.Category(), err.Name(), err.Message());
-//
-// Formatting either type prints the annotated message, so `Log("{}", result.error())` works
-// too. There is deliberately no free ToString(): each spelling has a name -- format the value
-// (an enum formats as its annotated message), call Message(), or ask for an enumerator's
-// identifier with Reflect::EnumToString.
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -35,20 +15,14 @@
 
 namespace ZHLN {
 
-// Compressed 8-Byte Polymorphic Error Wrapper
 
 class Error {
   public:
     constexpr Error() noexcept = default;
 
-    // Promotion from the plain carrier: the two words already have the right
-    // shape, so this is a copy -- no category lookup happens here, Category()/
-    // Message()/Name() resolve it lazily, when somebody asks for text.
     constexpr Error(ErrorCode code) noexcept: _category_hash(code.category), _value(code.value) {
     }
 
-    // Demotion: ErrorCode is exactly this state, so a code can go back into
-    // plumbing (or into an expected<T, ErrorCode>) without a round trip.
     [[nodiscard]] constexpr operator ErrorCode() const noexcept {
         return ErrorCode(_category_hash, _value);
     }
@@ -89,8 +63,6 @@ class Error {
         }
     }
 
-    // The enumerator identifier ("EngineInitFailed"), where Message() may
-    // return the enumerator's Description annotation instead.
     [[nodiscard]] constexpr auto Name() const noexcept -> std::string_view {
         if consteval {
             return "CompileTimeError";
@@ -100,7 +72,6 @@ class Error {
         }
     }
 
-    // Evaluates to true if there is an active error (non-zero)
     constexpr explicit operator bool() const noexcept {
         return _value != 0;
     }
@@ -116,14 +87,11 @@ static_assert(std::is_standard_layout_v<Error>);
 static_assert(std::is_trivially_copyable_v<Error> && std::is_trivially_destructible_v<Error>);
 static_assert(sizeof(Error) == 8);
 
-// The promotion, spelled out where a signature wants to say it: ErrorCode's
-// members are declared in Zahlen/ErrorCode.hpp (which cannot see Error), and
-// defined here, where Error is complete.
 inline Error ErrorCode::ToError() const noexcept {
     return Error(*this);
 }
 
-} // namespace ZHLN
+}
 
 namespace std {
 template <>
@@ -133,18 +101,10 @@ struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
     }
 };
 
-// Formatting a code is a logging boundary: it promotes to the rich form, so
-// `Log("{}", result.error())` prints the annotated message like a ZHLN::Error does.
-//
-// This is the std::format path, and the only one: ZHLN::Log and ZHLN::Panic format through
-// std::vformat and pick it up, while ZHLN::Println/Print go through ZHLN::Format's own
-// AppendValue dispatch (Core/Format.hpp), which knows a fixed list of types and silently
-// writes "?" for the rest. A code handed to Println must be spelled
-// `ZHLN::Error(code).Message()`.
 template <>
 struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
     auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {
         return formatter<string_view, char>::format(ZHLN::Error(code).Message(), ctx);
     }
 };
-} // namespace std
+}

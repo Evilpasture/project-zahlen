@@ -1,4 +1,3 @@
-// src/render/RenderDrawCommands.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -25,17 +24,12 @@ struct ResolvedMeshMaterial {
     VkDeviceAddress posAddr         = 0;
     VkDeviceAddress attrAddr        = 0;
 
-    // VK_EXT_mesh_shader streams (0 / 0 when the mesh has no meshlets, which
-    // makes both the task shader and the CPU-side path fall back to vertices).
     VkDeviceAddress meshletAddr       = 0;
     VkDeviceAddress meshletVertexAddr = 0;
     VkDeviceAddress meshletTriAddr    = 0;
     uint32_t        meshletCount      = 0;
 };
 
-// Meshlet streams describe the ORIGINAL vertex pool. A GPU-skinned draw
-// renders from a separate, post-skinning vertex buffer, so its meshlet vertex
-// indices would no longer line up: those draws keep the vertex pipeline.
 [[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferHandle::Invalid && mesh.meshletVertexBuffer != BufferHandle::Invalid &&
            mesh.meshletTriBuffer != BufferHandle::Invalid && skinnedVertexBuffer == BufferHandle::Invalid;
@@ -47,6 +41,15 @@ struct BindlessIndices {
     uint32_t pbr;
     uint32_t emissive;
 };
+
+constexpr uint32_t kNoFilmTexture = 0xFFFFu;
+
+[[nodiscard]] uint32_t FilmTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
+    if (handle == TextureHandle::Invalid) {
+        return kNoFilmTexture;
+    }
+    return impl->textureManager.GetBindlessIndex(handle) & kNoFilmTexture;
+}
 
 [[nodiscard]] inline std::array<float, 4> UnpackMorphWeights(const float* weights) noexcept {
     if (weights == nullptr) {
@@ -64,23 +67,17 @@ struct BindlessIndices {
     };
 }
 
-// Inputs for one GPU instance record. `resolved` may be null: the line queue
-// owns its vertex buffers itself and has no mesh material, so it contributes no
-// skin / IBO / meshlet addresses.
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
     JPH::Mat44 world     = JPH::Mat44::sIdentity();
     JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
 
-    // The line queue points at its own position/attribute pair; mesh draws take
-    // theirs from the resolved mesh.
     uint64_t posAddress  = 0;
     uint64_t attrAddress = 0;
 
     BindlessIndices indices {};
 
-    // Mirrors `Material::alphaMode`: 0 opaque, 1 masked, 2 blend.
     uint32_t alphaMode   = 0;
     bool     isViewmodel = false;
     bool     isSkinned   = false;
@@ -100,23 +97,57 @@ struct InstanceDataDesc {
     std::array<float, 4> morphWeights    = {};
     std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    float transmissionFactor = 0.0f;
+    float iridescenceFactor  = 0.0f;
+    float filmThicknessNm    = 0.0f;
+    float filmThicknessMinNm = 0.0f;
+    float volumeThicknessM   = 0.0f;
+    float ior                = 1.5f;
+    float normalScale        = 1.0f;
+    uint32_t filmThicknessTex = kNoFilmTexture;
+    uint32_t iridescenceTex   = kNoFilmTexture;
+    uint32_t volumeThicknessTex = kNoFilmTexture;
+    float    clearcoatFactor          = 0.0f;
+    float    clearcoatRoughnessFactor = 0.0f;
+    float    clearcoatNormalScale     = 1.0f;
+    uint32_t clearcoatTex             = kNoFilmTexture;
+    uint32_t clearcoatRoughnessTex    = kNoFilmTexture;
+    uint32_t clearcoatNormalTex       = kNoFilmTexture;
 };
 
-/**
- * @brief Pack an `InstanceDataDesc` into the GPU instance record.
- *
- * The bit-packing (the two texture-index pairs, the viewmodel/skinned/alpha-mode
- * flag word), the skin/IBO/meshlet address derivation and the two padding fields
- * lived in three copies; this is the single place that knows them. The counts and
- * the position/attribute addresses stay explicit because the call sites
- * legitimately disagree: the line queue has no indices at all, and the CSG path
- * draws `finalPosMesh` rather than `posMesh`.
- */
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
     const ResolvedMeshMaterial* res = desc.resolved;
 
     const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
     const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
+    const float    clampedT    = std::clamp(desc.transmissionFactor, 0.0f, 1.0f);
+    const uint32_t transmission8 = static_cast<uint32_t>(clampedT * 255.0f + 0.5f);
+
+    std::array<float, 4> emissive = desc.emissiveFactor;
+    std::array<float, 4> baseColor = desc.baseColorFactor;
+    float                alphaCutoff = desc.alphaCutoff;
+    float                metallic = desc.metallicFactor;
+    uint32_t             paddingCenter = 0;
+    uint32_t             paddingMeshlet = 0;
+    if (transmission8 != 0) {
+        emissive[0] = desc.normalScale;
+        emissive[3] = desc.iridescenceFactor;
+        alphaCutoff = desc.filmThicknessNm;
+        metallic    = desc.ior;
+        baseColor[3] = desc.volumeThicknessM;
+        const uint32_t filmMin = static_cast<uint32_t>(std::clamp(desc.filmThicknessMinNm, 0.0f, 65535.0f));
+        paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
+        paddingMeshlet = (filmMin << 16) | (desc.iridescenceTex & kNoFilmTexture);
+    } else {
+        const uint32_t coat8 = static_cast<uint32_t>(std::clamp(desc.clearcoatFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
+        if (coat8 != 0) {
+            const uint32_t scale8 = static_cast<uint32_t>(std::clamp(desc.clearcoatNormalScale * 64.0f, 0.0f, 255.0f) + 0.5f);
+            emissive[3]           = desc.clearcoatRoughnessFactor;
+            paddingCenter         = (desc.clearcoatRoughnessTex << 16) | (desc.clearcoatTex & kNoFilmTexture);
+            paddingMeshlet        = (scale8 << 24) | (coat8 << 16) | (desc.clearcoatNormalTex & kNoFilmTexture);
+        }
+    }
 
     return InstanceData {
         .world            = desc.world,
@@ -130,25 +161,23 @@ struct InstanceDataDesc {
         .texIndices0      = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
         .texIndices1      = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
         .cullRadius       = desc.cullRadius,
-        .metallicFactor   = desc.metallicFactor,
+        .metallicFactor   = metallic,
         .roughnessFactor  = desc.roughnessFactor,
-        .alphaCutoff      = desc.alphaCutoff,
-        .flags            = (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .alphaCutoff      = alphaCutoff,
+        .flags            = (transmission8 << 24) | (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset      = desc.jointOffset,
         .morphOffset      = desc.morphOffset,
         .activeMorphCount = desc.activeMorphCount,
         .localCenter      = desc.localCenter,
-        ._paddingCenter   = 0,
+        ._paddingCenter   = paddingCenter,
         .morphWeights     = desc.morphWeights,
-        .baseColorFactor  = desc.baseColorFactor,
-        .emissiveFactor   = desc.emissiveFactor,
-        // VK_EXT_mesh_shader streams (all zero => vertex pipeline). Debug lines
-        // are not meshletized: LINE_LIST topology has no mesh pipeline variant.
+        .baseColorFactor  = baseColor,
+        .emissiveFactor   = emissive,
         .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
-        ._paddingMeshlet      = 0,
+        ._paddingMeshlet      = paddingMeshlet,
     };
 }
 
@@ -156,35 +185,35 @@ struct InstanceDataDesc {
     ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     using enum BufferHandle;
 
-    auto posMesh_res        = impl->geometry.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = impl->geometry.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = impl->pipelines.Resolve(material.pipeline);
+    auto* posMesh        = impl->geometry.Resolve(mesh.posBuffer);
+    auto* attrMesh       = impl->geometry.Resolve(mesh.attrBuffer);
+    auto* nativeMaterial = impl->pipelines.Resolve(material.pipeline);
 
-    if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
+    if (posMesh == nullptr || attrMesh == nullptr || nativeMaterial == nullptr) [[unlikely]] {
         return std::nullopt;
     }
 
     ResolvedMeshMaterial res;
-    res.posMesh  = posMesh_res.value();
-    res.attrMesh = attrMesh_res.value();
-    res.material = nativeMaterial_res.value();
+    res.posMesh  = posMesh;
+    res.attrMesh = attrMesh;
+    res.material = nativeMaterial;
 
     if (material.prePassPipeline != PipelineHandle::Invalid) {
-        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline).value_or(nullptr);
+        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline);
     }
 
-    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer) : nullptr;
+    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
+    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer) : res.posMesh;
 
     res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
     res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
-        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer).value_or(nullptr);
-        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
-        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
+        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
+        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer);
+        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
             res.meshletAddr       = meshletMesh->vboAddress;
@@ -203,12 +232,9 @@ struct InstanceDataDesc {
     return res;
 }
 
-} // namespace
+}
 
-// RenderContext::Impl Internal Member Functions
 
-// The draw-queue sort moved to DrawQueueManager::Sort (DrawQueueManager.cpp),
-// which owns the queue and the scratch it sorts with.
 
 void RenderContext::Impl::FlushLineQueue() {
     activeLineVertexCount = 0;
@@ -263,8 +289,6 @@ void RenderContext::Impl::FlushLineQueue() {
     auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map();
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);
 
-    // Debug lines run on their own position/attribute pair, carry no indices and
-    // are not meshletized (resolved == nullptr zeroes skin/IBO/meshlet).
     dst[lineInstanceIdx] = BuildGPUInstanceData(
         InstanceDataDesc {
             .posAddress  = posAddr,
@@ -279,7 +303,6 @@ void RenderContext::Impl::FlushLineQueue() {
     queues.Lines().clear();
 }
 
-// RenderContext Public Member Functions
 
 void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;
@@ -312,7 +335,6 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .resolved  = &*resolved,
                  .world     = params.transform,
                  .prevWorld = params.prevTransform,
-                 // posAddress points at scratchMesh for basic.slang.
                  .posAddress       = resolved->posAddr,
                  .attrAddress      = resolved->attrAddr,
                  .indices          = tex,
@@ -339,6 +361,22 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                      (params.emissiveOverride[3] >= 0.0f) ?
                          params.emissiveOverride :
                          std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                 .transmissionFactor = material.transmissionFactor,
+                 .iridescenceFactor  = material.iridescenceFactor,
+                 .filmThicknessNm    = material.filmThicknessNm,
+                 .filmThicknessMinNm = material.filmThicknessMinNm,
+                 .volumeThicknessM   = material.volumeThicknessM,
+                 .ior                = material.ior,
+                 .normalScale        = material.normalScale,
+                 .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                 .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                 .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                 .clearcoatFactor          = material.clearcoatFactor,
+                 .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
+                 .clearcoatNormalScale     = material.clearcoatNormalScale,
+                 .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
+                 .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                 .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
              }
          ),
          .material            = resolved->material,
@@ -369,8 +407,6 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         return {
             .instanceData =
-                // CSG cutters are stencil-only draws; they still carry the
-                // meshlet streams so they can take the mesh path too.
             BuildGPUInstanceData(
                 InstanceDataDesc {
                     .resolved        = &*resolved,
@@ -390,6 +426,22 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .alphaCutoff     = material.alphaCutoff,
                     .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
                     .emissiveFactor  = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                    .transmissionFactor = material.transmissionFactor,
+                    .iridescenceFactor  = material.iridescenceFactor,
+                    .filmThicknessNm    = material.filmThicknessNm,
+                    .filmThicknessMinNm = material.filmThicknessMinNm,
+                    .volumeThicknessM   = material.volumeThicknessM,
+                    .ior                = material.ior,
+                    .normalScale        = material.normalScale,
+                    .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                    .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                    .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                    .clearcoatFactor          = material.clearcoatFactor,
+                    .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
+                    .clearcoatNormalScale     = material.clearcoatNormalScale,
+                    .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
+                    .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                    .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
                 }
             ),
             .material            = resolved->material,
@@ -436,4 +488,4 @@ void RenderContext::DrawDecal(const DecalParams& params) noexcept {
     );
 }
 
-} // namespace ZHLN
+}

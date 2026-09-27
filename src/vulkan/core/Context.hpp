@@ -7,35 +7,20 @@
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
-// EnabledFeatureSet and FindEnabledFeature: Context owns the snapshot of what
-// the feature chain enabled, and answers GetFeature<T>() from it.
 #include "Features.hpp"
 #include "Instance.hpp"
 
 namespace ZHLN::Vk {
 
-// Vulkan instance/device bring-up failures for the Context subsystem.
 enum class ContextError : uint8_t {
     InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed">{}) = 1,
     NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found">{}),
 };
 
-// What device creation enabled for presentation: extension plus feature, both,
-// per capability. Recorded once by Builder::Build from the inputs it handed to
-// vkCreateDevice, so the presentation pacer resolves its policy from
-// enablement rather than re-probing advertisement (which cannot distinguish
-// "the driver has it" from "this device enabled it"). Surface-side support is
-// per-surface and stays the pacer's own query.
 struct DevicePresentSupport {
-    // VK_KHR_present_mode_fifo_latest_ready (or the EXT alias) plus the
-    // presentModeFifoLatestReady feature: FIFO_LATEST_READY is legal to use.
     bool fifoLatestReady = false;
-    // VK_EXT_present_timing plus the presentTiming feature: past-timing
-    // feedback and timing properties are queryable.
     bool presentTiming = false;
-    // ... plus the presentAtAbsoluteTime feature: absolute target timestamps.
     bool presentAtAbsoluteTime = false;
-    // VK_KHR_present_id2 plus the presentId2 feature: non-zero present ids.
     bool presentId2 = false;
 };
 
@@ -84,19 +69,10 @@ class Context {
         return ZHLN_GetBufferDeviceAddress(_device.handle, buffer);
     }
 
-    // VK_EXT_descriptor_heap capability. The entry points (vkCmdBindResourceHeapEXT,
-    // vkCmdBindSamplerHeapEXT, vkCmdPushDataEXT, vkWriteResourceDescriptorsEXT,
-    // vkWriteSamplerDescriptorsEXT) are Volk globals: call sites invoke them
-    // directly and gate on this flag, the way the ray-tracing wrappers do.
     [[nodiscard]] auto DescriptorHeapsSupported() const noexcept -> bool {
         return _device.descriptor_heap_enabled;
     }
 
-    // VK_EXT_mesh_shader capability. The vkCmdDrawMeshTasks*EXT entry points are
-    // Volk globals that the command encoder invokes directly; a mesh pipeline can
-    // only exist when the extension is enabled, which is what gates the draws.
-    // True only when the extension, its entry points AND the required hardware
-    // limits are all present (see ZHLN_MeshShaderLimitsSufficient).
     [[nodiscard]] auto MeshShadersSupported() const noexcept -> bool {
         return _device.mesh_shader_enabled;
     }
@@ -105,44 +81,20 @@ class Context {
         return ZHLN_QueryMeshShaderLimits(_physical.handle);
     }
 
-    // VK_KHR_ray_tracing capability
 
-    // True only when device creation enabled the whole trio -- acceleration
-    // structure, ray query and deferred host operations -- which is the
-    // strength every RT path needs: a BLAS/TLAS build alone is not enough for
-    // the ray-query shading that consumes it. A per-device flag set once at
-    // ZHLN_CreateDevice rather than a probe of the Volk globals: with a second
-    // live device the globals would answer for whichever loaded last.
     [[nodiscard]] auto RayTracingSupported() const noexcept -> bool {
         return _device.ray_tracing_enabled;
     }
 
-    // The presentation capabilities device creation enabled (see
-    // DevicePresentSupport): the device-side half of the pacing policy, read
-    // once by each presenter's pacer at bring-up.
     [[nodiscard]] auto PresentSupport() const noexcept -> const DevicePresentSupport& {
         return _present;
     }
 
-    // The optional hardware features device creation enabled, by struct type.
-    //
-    // This is the answer to "is this feature on", and it needs no per-feature
-    // plumbing: the snapshot Builder::Build takes is the very chain that was
-    // handed to vkCreateDevice, so a caller reads enablement rather than
-    // advertisement (a physical-device query cannot tell "the driver has it"
-    // from "this device turned it on", and using an unenabled feature is a
-    // VUID, not a fallback). Adding a feature costs nothing here -- no flag to
-    // declare, thread through and keep in sync.
-    //
-    // Returns nullptr when the chain did not enable the struct, which is also
-    // what a caller must treat as "off".
     template <typename FeatureStruct>
     [[nodiscard]] auto GetFeature() const noexcept -> const FeatureStruct* {
         return FindEnabledFeature<FeatureStruct>(_enabledFeatures);
     }
 
-    // The common case: a predicate over one enabled struct, false when the
-    // struct is absent, so a pass never has to null-check first.
     template <typename FeatureStruct, typename Predicate>
     [[nodiscard]] auto HasFeature(Predicate&& predicate) const noexcept -> bool {
         const FeatureStruct* enabled = GetFeature<FeatureStruct>();
@@ -158,16 +110,11 @@ class Context {
     }
 
   private:
-    // Qualified: the Instance() accessor above shadows the class name in
-    // class scope. Owns the handle, the persistent debug messenger, and the
-    // validation/device-lost diagnostics.
     Vk::Instance            _instanceObject {};
     VkSurfaceKHR            _surface        = VK_NULL_HANDLE;
     ZHLN_PhysicalDeviceInfo _physical       = {};
     ZHLN_Device             _device         = {};
     DevicePresentSupport    _present        = {};
-    // What the chain handed to vkCreateDevice actually enabled, copied so it
-    // outlives the chain (see EnabledFeature).
     EnabledFeatureSet _enabledFeatures;
 };
 
@@ -197,10 +144,6 @@ class Context::Builder {
         return *this;
     }
 
-    // Owning variant: transfers a Vk::Instance (created via BuildInstance())
-    // into this builder so Build() can move it into the Context. Required for
-    // the final Build(); the raw setter above only provides a non-owning view
-    // for query paths (SelectPhysicalDevice and friends).
     constexpr Builder& Instance(Vk::Instance&& inst) noexcept {
         _instanceObject = std::move(inst);
         _instanceView   = _instanceObject.Handle();
@@ -222,28 +165,16 @@ class Context::Builder {
         return *this;
     }
 
-    // Support standard spans
     constexpr Builder& DeviceExtensions(std::span<const char* const> exts) noexcept {
         _deviceExtensions.assign(exts.begin(), exts.end());
         return *this;
     }
 
-    // Direct overload to resolve single-step implicit conversions from ExtensionResult
     constexpr Builder& DeviceExtensions(const std::vector<const char*>& exts) noexcept {
         _deviceExtensions.assign(exts.begin(), exts.end());
         return *this;
     }
 
-    // Takes the chain itself rather than a raw root pointer, and on purpose:
-    // Build() has to record what the chain enabled, and a caller handing over
-    // only GetRoot() would leave Context with nothing to answer GetFeature<T>()
-    // from -- every feature would silently read as off. There is deliberately
-    // no pointer overload to fall back into.
-    //
-    // The chain arrives finished: .Build() is the terminator of the expression
-    // that assembled it, and calling it again here would only suggest the two
-    // do different things. The chain must still outlive Build(), because
-    // _features borrows its storage.
     template <typename... Ts>
     Builder& DeviceFeatures(FeatureChain<Ts...>& chain) noexcept {
         _features        = chain.GetRoot();
@@ -257,10 +188,6 @@ class Context::Builder {
         return *this;
     }
 
-    // --- Build Steps
-    // Creates the instance and moves OWNERSHIP out: hold the returned Vk::Instance
-    // and feed it back via Instance(Vk::Instance&&) before Build(). (A temporary
-    // Builder that owns the instance destroys it when it goes out of scope.)
     [[nodiscard]] std::expected<Vk::Instance, ZHLN::ErrorCode>            BuildInstance() noexcept;
     [[nodiscard]] std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::ErrorCode> SelectPhysicalDevice() const noexcept;
     [[nodiscard]] std::expected<Context, ZHLN::ErrorCode>                 Build() noexcept;
@@ -277,12 +204,10 @@ class Context::Builder {
 
     std::vector<std::string_view> _instanceExtensions;
     std::vector<const char*>      _deviceExtensions;
-    // Borrowed from the caller's chain until Build() consumes it.
     const VkPhysicalDeviceFeatures2* _features = nullptr;
-    // Owned copy of what that chain enabled, moved into the Context by Build().
     EnabledFeatureSet  _enabledFeatures;
     ZHLN_DeviceScoreFn _scoreFn       = nullptr;
     void*              _scoreUserdata = nullptr;
 };
 
-} // namespace ZHLN::Vk
+}

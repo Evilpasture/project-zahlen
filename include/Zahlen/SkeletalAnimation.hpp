@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/SkeletalAnimation.hpp
 #pragma once
 #include <Zahlen/Math3D.hpp>
 #include <cstdint>
@@ -15,7 +14,7 @@ enum class AnimationPathType : uint8_t { Translation, Rotation, Scale, Weights }
 enum class InterpolationType : uint8_t { Linear, Step, CubicSpline };
 
 struct AnimationChannel {
-    int32_t            targetNodeIndex = -1; // Direct index into ModelPrefab::nodes
+    int32_t            targetNodeIndex = -1;
     AnimationPathType  path;
     InterpolationType  interpolation;
     std::vector<float> keyTimes;
@@ -30,8 +29,8 @@ struct AnimationClip {
 
 struct Joint {
     String64   name;
-    int32_t    parentIndex       = -1; // Index into the skeleton's joints array
-    int32_t    nodeIndex         = -1; // Index into ModelPrefab::nodes
+    int32_t    parentIndex       = -1;
+    int32_t    nodeIndex         = -1;
     JPH::Mat44 inverseBindMatrix = JPH::Mat44::sIdentity();
 };
 
@@ -40,4 +39,4 @@ struct Skeleton {
     std::vector<Joint> joints;
 };
 
-} // namespace ZHLN
+}

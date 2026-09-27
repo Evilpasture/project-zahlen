@@ -1,9 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/window/PlatformHost.cpp
 
-#include "NativeSurfaceInternal.hpp" // DrmTarget, NativeSurfaceHandle::Impl, Overloaded
+#include "NativeSurfaceInternal.hpp"
 #include "PresentationTarget.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
@@ -17,17 +16,9 @@
 
 namespace ZHLN {
 
-// The three session shapes, as plain state rather than classes. Each one holds
-// only what it actually has -- a window, a TTY lease, or an extent -- and
-// PlatformHost's members dispatch across them with std::visit. Nothing here is
-// polymorphic, which is the point: no vtable, no key function to keep the vtable
-// out of every translation unit, and no virtual standing in for a dynamic_cast
-// that -fno-rtti will not let anyone write.
 
 namespace {
 
-// Offscreen. No display, no event queue, no window system -- and no Window
-// object anywhere in it, which is the whole point of the shape.
 struct HeadlessBackend {
     PresentationTarget target;
     std::string        clipboard;
@@ -39,22 +30,15 @@ struct HeadlessBackend {
         return true;
     }
     [[nodiscard]] auto IsRunning() const noexcept -> bool {
-        // No flag of its own: the target records that an end was asked for, and
-        // a second copy here is how the two come apart.
         return !target.WasClosed();
     }
     void PollEvents() noexcept {
-        // No event source. Deliberately not a call into GLFW: a headless session
-        // never initialised it.
     }
     void Close() const noexcept {
         target.Close();
     }
 };
 
-// Direct to display on a Linux console. Takes the TTY over through TTYBackendState
-// (libseat + libevdev) and presents through VK_KHR_display. GLFW is never
-// initialised for one of these, and no Window is ever constructed.
 struct TTYBackendState {
     PresentationTarget  target;
     WindowInputReceiver receiver;
@@ -64,14 +48,9 @@ struct TTYBackendState {
     TTYBackendState(uint32_t width, uint32_t height, const WindowInputReceiver& rx) noexcept: receiver(rx) {
         ttyContext = TTYBackend::Init(width, height);
 
-        // The descriptor says which card the session is on so the RHI asks for
-        // VK_KHR_display and nothing else; Vulkan builds a direct-to-display
-        // surface from the physical device, not from the fd. fd is -1 until the
-        // session claims a connector, which is what the target shipped with
-        // before this was a variant alternative.
         auto surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0}));
         target       = PresentationTarget::ForTTY(
-            ttyContext, [](void* /*ctx*/) noexcept { /* the destructor restores text mode; see ~TTYBackendState */ }, {.width = width, .height = height},
+            ttyContext, [](void* ) noexcept {  }, {.width = width, .height = height},
             std::move(surface)
         );
     }
@@ -83,10 +62,6 @@ struct TTYBackendState {
         }
     }
 
-    // A user-declared destructor suppresses the implicit move constructor and
-    // leaves a copy constructor that would copy ttyContext -- two owners of one
-    // lease, and Shutdown called on it twice. Move is written out and nulls the
-    // source; copy is gone.
     TTYBackendState(TTYBackendState&& other) noexcept:
         target(std::move(other.target)), receiver(other.receiver), ttyContext(other.ttyContext), clipboard(std::move(other.clipboard)) {
         other.ttyContext = nullptr;
@@ -113,27 +88,18 @@ struct TTYBackendState {
         return ttyContext != nullptr;
     }
     [[nodiscard]] auto IsRunning() const noexcept -> bool {
-        // Close() records the request on the target; the terminal itself stays
-        // up until the destructor restores text mode, which is what the crash
-        // handler's EmergencyRestore also depends on.
         return !target.WasClosed() && ttyContext != nullptr && TTYBackend::IsRunning(ttyContext);
     }
     void PollEvents() noexcept {
         if (ttyContext != nullptr) {
-            // The same WindowInputReceiver callbacks GLFW drives, so nothing
-            // above this line can tell which source produced the event.
             TTYBackend::ProcessEvents(ttyContext, receiver);
         }
     }
     void Close() const noexcept {
-        // The target's close hook is deliberately a no-op here: ending a console
-        // session means restoring text mode, and that is the destructor's job.
         target.Close();
     }
 };
 
-// A desktop window. The only shape that touches a window system, and the only
-// one whose AsWindow() is non-null.
 struct WindowedBackend {
     std::unique_ptr<Window> window;
 
@@ -147,9 +113,6 @@ struct WindowedBackend {
         return window != nullptr && window->IsRunning();
     }
     void PollEvents() noexcept {
-        // The process-wide poll, not a per-window one: GLFW delivers every
-        // window's events through the single queue, so the kernel polls once
-        // and then asks each window what it saw.
         glfwPollEvents();
     }
     void Close() const noexcept {
@@ -157,20 +120,16 @@ struct WindowedBackend {
     }
 };
 
-} // namespace
+}
 
 struct PlatformHost::Impl {
     using BackendVariant = std::variant<std::monostate, HeadlessBackend, TTYBackendState, WindowedBackend>;
 
     BackendVariant backend;
 
-    // What the empty host hands back, so Target() never has to invent a
-    // reference. Nobody can draw into it: it is headless, zero-sized and has no
-    // descriptor.
     PresentationTarget fallback = PresentationTarget::ForHeadless({.width = 0, .height = 0});
 };
 
-// --- Construction
 
 PlatformHost::PlatformHost() noexcept: _impl(std::make_unique<Impl>()) {
 }
@@ -178,8 +137,6 @@ PlatformHost::PlatformHost() noexcept: _impl(std::make_unique<Impl>()) {
 PlatformHost::~PlatformHost() noexcept = default;
 
 PlatformHost::PlatformHost(PlatformHost&& other) noexcept: _impl(std::move(other._impl)) {
-    // Leaving the source empty rather than null, so a moved-from host is still
-    // a host that answers -- every member is a no-op or a default.
     other._impl = std::make_unique<Impl>();
 }
 
@@ -233,7 +190,6 @@ auto PlatformHost::Valid() const noexcept -> bool {
     );
 }
 
-// --- Lifecycle
 
 auto PlatformHost::IsRunning() const noexcept -> bool {
     return std::visit(
@@ -256,9 +212,6 @@ void PlatformHost::PollEvents() noexcept {
 }
 
 void PlatformHost::Close() const noexcept {
-    // _impl is a unique_ptr, so operator-> on a const host still yields a
-    // mutable Impl: what a const Close() changes is run state behind the host,
-    // which is exactly the constness it claims.
     std::visit(
         Overloaded {
             [](std::monostate&) noexcept {},
@@ -268,13 +221,7 @@ void PlatformHost::Close() const noexcept {
     );
 }
 
-// --- Presentation
 
-// Private: the kernel asks here, and this is the one place that knows all four
-// shapes a session can have. A windowed session presents through the window it
-// owns -- the host is a facade over it -- which is why Window names this class
-// its one friend; the windowless two own their target outright, and the empty
-// host hands back its fallback rather than inventing a reference.
 auto PlatformHost::Target() noexcept -> PresentationTarget& {
     return std::visit(
         Overloaded {
@@ -291,15 +238,10 @@ auto PlatformHost::Target() const noexcept -> const PresentationTarget& {
     return const_cast<PlatformHost*>(this)->Target();
 }
 
-// Private, and the door the kernel asks a window's destination through: a
-// window's target is the windowing subsystem's business, so the engine asks the
-// session for it rather than reaching into the window. Window grants this class
-// the friendship that makes the call below legal.
 auto PlatformHost::TargetFor(Window& window) noexcept -> PresentationTarget& {
     return window.Target();
 }
 
-// --- Geometry
 
 auto PlatformHost::GetSize() const noexcept -> Extent2D {
     return Target().GetFramebufferExtent();
@@ -309,7 +251,6 @@ auto PlatformHost::HasNativeSurface() const noexcept -> bool {
     return Target().GetNativeSurface().Valid();
 }
 
-// --- Desktop-only
 
 void PlatformHost::Focus() noexcept {
     std::visit(
@@ -326,8 +267,6 @@ void PlatformHost::Focus() noexcept {
 auto PlatformHost::IsFocused() const noexcept -> bool {
     return std::visit(
         Overloaded {
-            // A session with no window has nothing to be unfocused; reporting false
-            // here would make callers that gate on focus skip work they should do.
             [](const std::monostate&) noexcept -> bool { return true; },
             [](const HeadlessBackend&) noexcept -> bool { return true; },
             [](const TTYBackendState&) noexcept -> bool { return true; },
@@ -377,8 +316,6 @@ void PlatformHost::SetClipboardText(std::string_view text) {
     std::visit(
         Overloaded {
             [](std::monostate&) {},
-            // Captured, not passed: std::visit's parameters after the visitor
-            // are further variants to visit, not arguments to forward.
             [text](HeadlessBackend& backend) { backend.clipboard.assign(text); },
             [text](TTYBackendState& backend) { backend.clipboard.assign(text); },
             [text](WindowedBackend& backend) { backend.window->SetClipboardText(text); },
@@ -399,7 +336,6 @@ void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const File
     );
 }
 
-// --- The window, without a downcast
 
 auto PlatformHost::AsWindow() noexcept -> Window* {
     if (auto* backend = std::get_if<WindowedBackend>(&_impl->backend)) {
@@ -409,11 +345,7 @@ auto PlatformHost::AsWindow() noexcept -> Window* {
 }
 
 auto PlatformHost::AsWindow() const noexcept -> const Window* {
-    // A const host answers the question with a const window. Note this is not
-    // reached through a const Impl -- _impl is a unique_ptr, whose operator-> is
-    // itself const -- so the constness here is a promise to the caller, not a
-    // restriction the compiler would have imposed.
     return const_cast<PlatformHost*>(this)->AsWindow();
 }
 
-} // namespace ZHLN
+}

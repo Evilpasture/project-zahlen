@@ -12,7 +12,6 @@
 namespace ZHLN::TaskSystem {
 auto GetWorkerIndex() -> uint32_t;
 auto GetWorkerCount() -> uint32_t;
-// The function signature for a Job
 using TaskFn = void (*)(void*);
 
 struct Task {
@@ -20,37 +19,18 @@ struct Task {
     void*  arg;
 };
 
-// A sync point to wait for a batch of jobs to finish
 struct Counter {
     ZHLN::Atomic<uint32_t> value {0};
 };
 
-/**
- * @brief Boots up the OS worker threads and pre-allocates the Fiber pool.
- * @param numThreads 0 = Auto-detect CPU cores
- */
 void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
 
-/**
- * @brief Shuts down the threads and cleans up memory.
- */
 void Shutdown();
 
-/**
- * @brief Kicks off a batch of tasks. Non-blocking.
- * @param tasks An array of Tasks to run.
- * @param counter Optional counter to track completion.
- */
 void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 
-/**
- * @brief Yields the current thread/fiber until the counter hits zero.
- */
 void Wait(Counter* counter);
 
-/**
- * @brief Internal use. Used by Mutex.cpp to wake up a sleeping Fiber.
- */
 void WakeUp(ZHLN::Fiber* fiber);
 
 template <typename Func>
@@ -59,7 +39,7 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
         return;
     }
     if (count <= chunkSize) {
-        std::forward<Func>(func)(0, count, 0); // start, end, chunkIdx
+        std::forward<Func>(func)(0, count, 0);
         return;
     }
 
@@ -67,8 +47,6 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
     uint32_t           adjustedChunkSize = chunkSize;
     uint32_t           numChunks         = (count + adjustedChunkSize - 1) / adjustedChunkSize;
 
-    // Rescale chunk size to fit our bounds, then dynamically compute
-    // the exact number of active chunks required to avoid launching empty tasks.
     if (numChunks > MaxChunks) {
         adjustedChunkSize = (count + MaxChunks - 1) / MaxChunks;
         numChunks         = (count + adjustedChunkSize - 1) / adjustedChunkSize;
@@ -85,7 +63,6 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
     std::array<Task, MaxChunks>     tasks {};
     std::array<ChunkJob, MaxChunks> jobs {};
 
-    // Zero-overhead address retrieval (Bypasses any custom operator& overloads)
     const DecayedFunc* funcPtr = std::addressof(func);
 
     for (uint32_t i = 0; i < numChunks; ++i) {
@@ -105,7 +82,7 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
 
     Counter sync;
     Dispatch(std::span<const Task>(tasks.data(), numChunks), &sync);
-    Wait(&sync); // Fiber yields cleanly; stack frame stays 100% frozen and valid
+    Wait(&sync);
 }
 
-} // namespace ZHLN::TaskSystem
+}

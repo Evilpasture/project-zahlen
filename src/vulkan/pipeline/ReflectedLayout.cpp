@@ -13,13 +13,8 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// Reserved specialization-constant IDs used only as reflected metadata for a
-// shader-owned fixed logical dispatch domain.
 constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
 
-// Runs the builder and adopts what it found. A false return leaves `layout`
-// exactly as it was -- the builder clears the scratch array it was handed, not
-// the layout -- which is what every Build overload's caller assumes.
 [[nodiscard]] bool BuildInto(ReflectedLayout& layout, ReflectedLayoutBuilder& builder) noexcept {
     std::array<ReflectedSet, 4> reflected {};
     if (!builder.BuildUnsafe(reflected)) {
@@ -29,7 +24,7 @@ constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
     return true;
 }
 
-} // namespace
+}
 
 auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
     if (shader.code == nullptr || shader.size == 0) {
@@ -45,9 +40,6 @@ auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> st
     if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {
         entryPoint = spvReflectGetEntryPoint(&module, shader.entry_point);
     } else {
-        // A descriptor with no explicit name is valid only when its module has
-        // one compute entry point. Refuse ambiguity rather than reflecting a
-        // different kernel's LocalSize by accident.
         for (uint32_t i = 0; i < module.entry_point_count; ++i) {
             const auto& candidate = module.entry_points[i];
             if (candidate.shader_stage != SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT) {
@@ -133,7 +125,7 @@ auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t const
     return result;
 }
 
-} // namespace
+}
 
 auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
     return ReflectSpecializationConstant<uint32_t>(shader, constantId);
@@ -143,14 +135,10 @@ auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t co
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
-bool ReflectedLayout::Build(VkDevice /*device*/, const ShaderStages& shaders) noexcept {
+bool ReflectedLayout::Build(VkDevice , const ShaderStages& shaders) noexcept {
     ReflectedLayoutBuilder builder;
     auto                   vert_spv = shaders.GetVertSpv();
     auto                   frag_spv = shaders.GetFragSpv();
-    // VK_EXT_mesh_shader: task/mesh declare the very same `scene` parameter
-    // block as the vertex stage, so they must contribute their stage flags to
-    // the reflected bindless layout or the heap mapping table would advertise
-    // the resources as vertex-only.
     auto task_spv = shaders.GetTaskSpv();
     auto mesh_spv = shaders.GetMeshSpv();
     if (!vert_spv.empty()) {
@@ -168,13 +156,13 @@ bool ReflectedLayout::Build(VkDevice /*device*/, const ShaderStages& shaders) no
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice /*device*/, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+bool ReflectedLayout::Build(VkDevice , const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
     ReflectedLayoutBuilder builder;
     builder.AddStageUnsafe(shader, stage);
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice /*device*/, std::span<const ReflectedStageInput> stages) noexcept {
+bool ReflectedLayout::Build(VkDevice , std::span<const ReflectedStageInput> stages) noexcept {
     ReflectedLayoutBuilder builder;
     for (const auto& s: stages) {
         builder.AddStageUnsafe(s.shader, s.stage);
@@ -193,7 +181,6 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
         set.bindings.clear();
     }
 
-    // Sorted map: SetIndex -> BindingIndex -> binding (merged across stages).
     struct MergedBinding {
         VkDescriptorType         type   = VK_DESCRIPTOR_TYPE_MAX_ENUM;
         uint32_t                 count  = 0;
@@ -221,14 +208,12 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
 
                 auto& merged = merged_sets[reflected_set->set][rb->binding];
                 merged.type  = static_cast<VkDescriptorType>(rb->descriptor_type);
-                // Runtime-sized arrays (Slang `T arr[]` in a ParameterBlock)
-                // reflect with count == 0; treat them as bindless pools.
                 const bool is_runtime_array = (rb->count == 0);
                 const bool is_bindless_pool = is_runtime_array || (rb->count >= 1024);
                 merged.count                = is_bindless_pool ? 4096 : rb->count;
                 merged.stages |= stage.stage;
                 if (merged.name.empty() && rb->name != nullptr) {
-                    merged.name = rb->name; // Stages of one pipeline name a binding identically.
+                    merged.name = rb->name;
                 }
                 if (is_bindless_pool) {
                     merged.flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
@@ -261,4 +246,4 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
     return any;
 }
 
-} // namespace ZHLN::Vk
+}

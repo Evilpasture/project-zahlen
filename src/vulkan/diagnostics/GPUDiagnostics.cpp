@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Rendering.hpp"
-#include "GPUDiagnostics.hpp" // the trackers this unit implements
+#include "GPUDiagnostics.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstring>
 #include <filesystem>
@@ -15,10 +15,10 @@ namespace ZHLN::Vk {
 
 #if !defined(ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND)
 GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(
-    GPUVendor /*vendor*/,
-    VkDevice /*device*/,
-    VkPhysicalDevice /*physical*/,
-    DiagnosticConfig /*config*/
+    GPUVendor ,
+    VkDevice ,
+    VkPhysicalDevice ,
+    DiagnosticConfig
 ) {
     return {};
 }
@@ -41,7 +41,7 @@ void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view na
     vkCmdInsertDebugUtilsLabelEXT(cmd, &label);
 }
 
-void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> /*spirv*/, std::string_view /*entryPoint*/) const {
+void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> , std::string_view ) const {
 }
 
 void DebugUtilsTracker::OnDeviceLost() const {
@@ -69,9 +69,6 @@ void LogVendorInfo(std::string_view label, const VkDeviceFaultVendorInfoKHR& ven
     ZHLN::Log("  {}: code=0x{:08X} data=0x{:016X} \"{}\"", label, vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description);
 }
 
-// Writes the vendor's fault payload to the configured destination. An empty
-// path means the caller configured no destination -- the fault report itself
-// has already been logged, only the binary blob is skipped.
 void WriteVendorBinary(const void* data, size_t size, std::string_view destination) noexcept {
     if (data == nullptr || size == 0) {
         return;
@@ -239,14 +236,13 @@ void DumpExtDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcep
     WriteVendorBinary(info.pVendorBinaryData, counts.vendorBinarySize, crashDumpPath);
 }
 
-} // namespace
+}
 
 void DeviceFaultTracker::OnDeviceLost() const noexcept {
     if (device == VK_NULL_HANDLE) {
         return;
     }
 
-    // Spec: these queries remain valid after VK_ERROR_DEVICE_LOST.
     if (vkGetDeviceFaultReportsKHR != nullptr) {
         DumpKhrDeviceFault(device, crashDumpPath);
         return;
@@ -254,4 +250,4 @@ void DeviceFaultTracker::OnDeviceLost() const noexcept {
     DumpExtDeviceFault(device, crashDumpPath);
 }
 
-} // namespace ZHLN::Vk
+}

@@ -23,7 +23,7 @@ extern std::string_view GetRenderGraphDump(AAMode currentMode) noexcept;
 auto GetGitCommitHash() noexcept -> std::string_view {
     return ZHLN_GIT_COMMIT_HASH;
 }
-} // namespace ZHLN
+}
 
 namespace {
 
@@ -38,7 +38,7 @@ namespace Ansi {
 [[maybe_unused]] constexpr std::string_view Cyan    = "\033[36m";
 [[maybe_unused]] constexpr std::string_view BCyan   = "\033[1;36m";
 [[maybe_unused]] constexpr std::string_view Gray    = "\033[90m";
-} // namespace Ansi
+}
 
 struct Token {
     std::string_view key;
@@ -332,10 +332,6 @@ constexpr std::array Handlers = {
             if (v == "cpp" || v == "c++" || v == "native") {
                 opt.driver = ZHLN::GameplayDriver::Cpp;
             } else if (v == "scripted" || v == "fennel" || v == "lua") {
-                // "scripted" is the canonical value: the engine names no
-                // language. "fennel" and "lua" are the scripting extra's
-                // aliases, accepted here so hosts keep working across the
-                // rename.
                 opt.driver = ZHLN::GameplayDriver::Scripted;
             } else if (v == "hybrid") {
                 opt.driver = ZHLN::GameplayDriver::Hybrid;
@@ -356,7 +352,6 @@ void PrintHelp(std::string_view exeName) {
     std::println("{}Options:{}", BCyan, Reset);
 
     for (const auto& handler: Handlers) {
-        // Measure uncolored length to calculate exact column padding
         std::string rawOpt;
         if (!handler.shortKey.empty()) {
             rawOpt += handler.shortKey;
@@ -372,7 +367,6 @@ void PrintHelp(std::string_view exeName) {
         size_t           padLen      = (rawOpt.length() < targetWidth) ? (targetWidth - rawOpt.length()) : 2;
         std::string      padding(padLen, ' ');
 
-        // Format colored column
         std::string optCol = "  ";
         if (!handler.shortKey.empty()) {
             optCol += std::format("{}{}{}, ", Yellow, handler.shortKey, Reset);
@@ -404,7 +398,7 @@ void PrintHelp(std::string_view exeName) {
     std::println("");
 }
 
-} // namespace
+}
 
 namespace ZHLN {
 
@@ -457,4 +451,4 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
     }
     return options;
 }
-} // namespace ZHLN
+}

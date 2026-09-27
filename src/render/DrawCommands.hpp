@@ -1,36 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/DrawCommands.hpp
-//
-// What a frame's draw submission is made of: the GPU-resident mesh and material
-// records the queues point at, the per-queue command payloads, and the queues
-// themselves. Pure data -- no pass, no pipeline, no device state.
-//
-// These live in their own header rather than in RenderInternal.hpp for one
-// structural reason: RenderContext::Impl's destructor is defined inline there,
-// so a manager holding an incomplete type cannot be a member of Impl. Any
-// manager that owns a queue therefore needs these types visible without
-// dragging all 1100 lines of Impl in behind them.
-//
-// Two include rules keep this header compile-checkable on its own:
-//
-//   * <Zahlen/Render/GpuLayout.hpp> is included because DrawCommand holds
-//     InstanceData by value and the emitter commands hold their parameter
-//     structs by value. That is a real dependency, not an oversight -- the
-//     generated structs are part of the payload's layout.
-//   * src/render/GpuAbi.hpp is deliberately NOT included. It is the header that
-//     makes a render translation unit uncompilable without the shader cook
-//     (#embed ZHLN_GPU_ABI_MODULE plus a consteval parse of the cooked module),
-//     and nothing here needs the ABI check -- only the structs.
 
 #pragma once
 #include "Rendering.hpp"
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Render/GpuLayout.hpp> // InstanceData, ParticleEmitterParams, MeshParticleEmitterParams
-#include <Zahlen/Render/Types.hpp>     // DrawFlags, CSGOperation, BufferHandle, JPH math
+#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstdint>
 #include <span>
@@ -38,16 +16,11 @@
 
 namespace ZHLN {
 
-// ---------------------------------------------------------------------------
-// GPU-resident records the queues point at
-// ---------------------------------------------------------------------------
 
 struct NativeMesh {
     Vk::Buffer                 buffer;
     uint32_t                   vertexCount = 0;
     VkDeviceAddress            vboAddress  = 0;
-    // Self-owning BLAS: the handle carries the device it was created on, so
-    // the destructor retires it through DeviceHandle with no other reference.
     Vk::AccelerationStructure  blas;
     VkDeviceAddress            blasAddress = 0;
     Vk::Buffer                 blasBuffer;
@@ -66,11 +39,8 @@ struct NativeMesh {
 
 struct NativeMaterial {
     Vk::Pipeline     pipeline;
-    VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
+    VkPipelineLayout layout = VK_NULL_HANDLE;
 
-    // VK_EXT_mesh_shader variant of the same material (task+mesh+fragment); invalid
-    // when the device cannot mesh-shade or the material opted out, and draw submission
-    // then falls back to `pipeline`.
     Vk::Pipeline meshPipeline;
 
     [[nodiscard]] bool HasMeshPipeline() const noexcept {
@@ -78,9 +48,6 @@ struct NativeMaterial {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Per-queue command payloads
-// ---------------------------------------------------------------------------
 
 struct DrawCommand {
     InstanceData         instanceData;
@@ -143,13 +110,7 @@ struct MeshParticleEmitterCommand {
     MaterialID                materialAsset;
 };
 
-// ---------------------------------------------------------------------------
-// The frame's queues
-// ---------------------------------------------------------------------------
 
-// A plain aggregate. The frame lifecycle around these -- clearing, sorting,
-// per-queue access -- lives in DrawQueueManager, which is the only thing that
-// touches this struct.
 struct RenderQueues {
     ZHLN::Array<DrawCommand>                drawQueue;
     ZHLN::Array<CSGDrawCommand>             csgDrawQueue;
@@ -159,4 +120,4 @@ struct RenderQueues {
     ZHLN::Array<LineSegment>                lineQueue;
 };
 
-} // namespace ZHLN
+}

@@ -16,4 +16,4 @@ class ZHLN_API TextureSystem {
     [[nodiscard]] static uint32_t ResolveIndex(Engine& engine, TextureHandle handle) noexcept;
 };
 
-} // namespace ZHLN
+}

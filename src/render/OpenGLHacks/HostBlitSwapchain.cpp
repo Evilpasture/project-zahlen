@@ -2,42 +2,16 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// HostBlit — offscreen host presenter (black-box plugin, declarations in HostBlit.hpp)
-//
-// macOS has no native Vulkan WSI (no VK_KHR_surface in the Lavapipe ICD), so the
-// engine renders headlessly into an offscreen VkImage and this file puts it on
-// screen: the image is copied into a plugin-private host-visible staging buffer
-// and blitted with glDrawPixels through a plain OpenGL 2.1 GLFW window.
-//
-//   * Owns everything it creates -- command ring, staging buffer, memory -- and
-//     touches none of the engine's streams, fences, heaps or swapchain. The only
-//     engine object it references is the VkImage it is handed, which it reads
-//     (COPY src) and transitions straight back to the layout it came in with.
-//     The renderer's stateless recording helpers are borrowed for vocabulary,
-//     never for lifetimes: the engine tears its RenderContext down before its
-//     Window, so nothing here may depend on that ordering.
-//   * A window with no GL context (every engine window is GLFW_NO_API) gets a
-//     plugin-owned 2.1 window instead. Never call glfwTerminate(): GLFW belongs
-//     to the engine.
-//   * Init/Present/Shutdown run on one thread -- the one that owns `queue`
-//     submissions. Present submits and blocks on its own fence, which is also
-//     what guarantees the engine's prior rendering is complete.
-//   * Nothing touches the GPU before Init(); Shutdown() is inert without it, and
-//     a native swapchain means this file must not be called at all.
 
-// macOS-only: non-Apple builds compile just the inert definitions at the bottom
-// and never include an OpenGL or GLFW header.
 #if defined(__APPLE__)
 
 #include <GLFW/glfw3.h>
-#include <OpenGL/gl.h> // legacy 2.1 API: glDrawPixels & friends
-#include <Rendering.hpp> // Vulkan core (PCH of the render module)
+#include <OpenGL/gl.h>
+#include <Rendering.hpp>
 
 #include <cstdint>
 #include <cstdio>
 
-// GL 1.2 imaging constants — present in every GL 2.1 header we target, but
-// pinned here so the file compiles even against a minimal GL 1.1 gl.h.
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
 #endif
@@ -48,28 +22,18 @@
 namespace ZHLN::HostBlit {
 namespace {
 
-// Plugin-private state: everything Vulkan here is created by this file.
 struct State {
-    // Plumbing handed to Init().
     VkPhysicalDevice gpu         = VK_NULL_HANDLE;
     VkDevice         device      = VK_NULL_HANDLE;
     VkQueue          queue       = VK_NULL_HANDLE;
     uint32_t         queueFamily = 0;
 
-    // Private Vulkan objects. The ring owns the command pool, the single
-    // command buffer and its fence -- capacity 1 is exactly what this path
-    // needs, and its Init() reports failure instead of skipping a broken slot.
-    // QueueType is a compile-time tag only; the real queue family is whatever
-    // Init() was handed.
     Vk::CommandRing<Vk::QueueType::Graphics, 1> ring;
     VkBuffer                                    staging  = VK_NULL_HANDLE;
     VkDeviceMemory                              memory   = VK_NULL_HANDLE;
     void*                                       mapped   = nullptr;
     VkDeviceSize                                capacity = 0;
 
-    // GL presentation window (owned only when the caller's window has no
-    // GL context, which is the case for every engine window: GLFW_NO_API).
-    // The window is plugin-owned; GLFW itself never is (see ResolveWindow).
     GLFWwindow* glWindow = nullptr;
 
     bool ready = false;
@@ -79,9 +43,6 @@ void Log(const char* msg) {
     std::fprintf(stderr, "Zahlen: [HostBlit] %s\n", msg);
 }
 
-// Find a HOST_VISIBLE|HOST_COHERENT memory type, preferring HOST_CACHED when
-// the device offers one — trivially satisfied on Lavapipe, whose memory is
-// unified anyway. Falls back to any host-visible coherent type.
 bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
     VkPhysicalDeviceMemoryProperties props {};
     vkGetPhysicalDeviceMemoryProperties(g.gpu, &props);
@@ -169,17 +130,10 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     return true;
 }
 
-// Copy mip 0 / layer 0 of `image` into the mapped staging buffer and block until
-// the pixels are CPU-visible, then transition the image back to the layout the
-// caller declared. Uses the renderer's stateless recording helpers (synchronization2,
-// which the 1.3 instance already requires).
 bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
-    // Acquire() waits for this slot's previous submission and resets fence and
-    // pool, so the buffer is initial before the guard below begins it.
     auto [slot, fence]      = g.ring.Acquire();
     const VkCommandBuffer cmd = slot;
 
-    // Scoped so the guard ends the buffer before it is submitted.
     {
         Vk::CommandBufferGuard recording(cmd);
 
@@ -195,7 +149,7 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
                                       .dst_stage  = dstStage,
                                       .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
                                       .base_mip   = 0,
-                                      .mip_count  = 1, // mip 0 only; 0 would mean "all remaining"
+                                      .mip_count  = 1,
                                   });
         };
 
@@ -204,8 +158,6 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
             VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
         );
 
-        // Tightly packed: the helper sets bufferRowLength to the image width,
-        // which is how the staging buffer was sized.
         Vk::CopyImageToBuffer(cmd, image, g.staging, VkExtent2D {width, height});
 
         barrier(
@@ -227,13 +179,9 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
     };
     if (vkQueueSubmit(g.queue, 1, &si, fence) != VK_SUCCESS)
         return false;
-    // Waited here, not left to the next Acquire(): GlBlit reads the mapped
-    // staging buffer immediately afterwards.
     return vkWaitForFences(g.device, 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
 }
 
-// Pick a GL window with a usable context: the caller's if it has one, otherwise a
-// plugin-owned 2.1 window sized to the caller's.
 GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height) noexcept {
     if (requested != nullptr && glfwGetWindowAttrib(requested, GLFW_CLIENT_API) != GLFW_NO_API) {
         return requested;
@@ -241,7 +189,7 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     if (g.glWindow != nullptr && !glfwWindowShouldClose(g.glWindow)) {
         return g.glWindow;
     }
-    if (g.glWindow != nullptr) { // user closed the plugin window
+    if (g.glWindow != nullptr) {
         glfwDestroyWindow(g.glWindow);
         g.glWindow = nullptr;
     }
@@ -249,12 +197,10 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
         Log("glfwInit failed; cannot open a host presentation window.");
         return nullptr;
     }
-    // glfwInit() also succeeds when the engine already initialized GLFW, so this
-    // file never assumes ownership (see the banner: no glfwTerminate()).
 
     int fbW = static_cast<int>(width), fbH = static_cast<int>(height);
     if (requested != nullptr) {
-        glfwGetFramebufferSize(requested, &fbW, &fbH); // Retina-aware
+        glfwGetFramebufferSize(requested, &fbW, &fbH);
     }
 
     glfwDefaultWindowHints();
@@ -271,9 +217,6 @@ GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height
     return g.glWindow;
 }
 
-// Legacy-GL blit: raster pos at top-left plus negative zoom flips the top-down
-// Vulkan readback into GL's bottom-up framebuffer and scales it to the window in
-// the same step. Nearest filtering -- a debug presenter, not a scaler.
 void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     int fbW = 0;
     int fbH = 0;
@@ -303,30 +246,22 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
     glViewport(0, 0, fbW, fbH);
     glDisable(GL_DEPTH_TEST);
 
-    // Set byte alignment dynamically
     glPixelStorei(GL_UNPACK_ALIGNMENT, (glFormat == GL_RGB) ? 1 : 4);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Direct window-space origin (Top-Left start position for inverted zoom)
     glWindowPos2i(0, fbH);
 
-    // Scale to framebuffer + flip Y axis
     glPixelZoom(static_cast<float>(fbW) / static_cast<float>(width), -static_cast<float>(fbH) / static_cast<float>(height));
 
-    // Pump host Vulkan memory straight to screen
     glDrawPixels(static_cast<int>(width), static_cast<int>(height), glFormat, glType, g.mapped);
 
     glPixelZoom(1.0f, 1.0f);
-    // No swap here: Present() owns the single per-frame swap. A second
-    // glfwSwapBuffers would flip the never-drawn back buffer up, which on macOS
-    // shows as an alternating black frame.
 }
 
-} // namespace
+}
 
-// Public surface (declared in HostBlit.hpp).
 void Shutdown() noexcept;
 
 [[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept {
@@ -341,8 +276,6 @@ void Shutdown() noexcept;
     g.queue       = queue;
     g.queueFamily = queueFamily;
 
-    // The ring builds pool, command buffer and a pre-signalled fence in one call,
-    // reports which failed, and cleans itself up on the way out.
     if (auto res = g.ring.Init(device, queueFamily); !res) {
         const std::string_view why = ZHLN::Error(res.error()).Message();
         std::fprintf(stderr, "Zahlen: [HostBlit] Command ring init failed: %.*s\n", static_cast<int>(why.size()), why.data());
@@ -358,22 +291,13 @@ void Shutdown() noexcept;
     if (!g.ready || !src.Valid() || width == 0 || height == 0)
         return false;
 
-    // The only place in the renderer's reach that knows the opaque handle is a
-    // GLFWwindow*. Callers pass nullptr anyway: every engine window is
-    // GLFW_NO_API, so ResolveWindow would reject it and open the plugin's own
-    // 2.1 window regardless.
     GLFWwindow* target = ResolveWindow(static_cast<GLFWwindow*>(nativeWindow), width, height);
     if (target == nullptr)
         return false;
-    // Keeps the plugin window responsive; required when the plugin is the only
-    // GLFW consumer (a TTY-mode session), harmless when the engine polls too.
     glfwPollEvents();
     if (glfwWindowShouldClose(target))
         return false;
 
-    // The plugin window must follow the caller's resizes: GlBlit scales the source
-    // to the window's current framebuffer, so a stale size squashes the frame into
-    // the old aspect. Skip the blit on the catch-up frame.
     bool catchUp = false;
     if (target == g.glWindow) {
         int curW = 0;
@@ -385,7 +309,6 @@ void Shutdown() noexcept;
         }
     }
 
-    // 4 bytes/px covers every supported format (RGB8 rows are ≤ RGBA8 size).
     if (!EnsureStaging(static_cast<VkDeviceSize>(width) * height * 4))
         return false;
     if (!ReadBackPixels(src.Handle(), width, height, srcLayout)) {
@@ -405,17 +328,14 @@ void Shutdown() noexcept {
     if (g.device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(g.device);
         DestroyStaging();
-        // Releases the fence and the command pool, ordered against the wait above.
         g.ring.Cleanup();
     }
     if (g.glWindow != nullptr)
         glfwDestroyWindow(g.glWindow);
-    // Deliberately no glfwTerminate(): the engine owns GLFW and destroys its
-    // Window AFTER this plugin, so terminating here would free its window handles.
     g = State {};
 }
 
-} // namespace ZHLN::HostBlit
+}
 
 #else
 
@@ -423,8 +343,6 @@ void Shutdown() noexcept {
 
 namespace ZHLN::HostBlit {
 
-// The target exists on every platform so callers need no platform checks; native
-// swapchain presentation is used everywhere but macOS, so these stay inert.
 [[nodiscard]] bool Init(VkPhysicalDevice, VkDevice, VkQueue, uint32_t) noexcept {
     return false;
 }
@@ -436,6 +354,6 @@ namespace ZHLN::HostBlit {
 void Shutdown() noexcept {
 }
 
-} // namespace ZHLN::HostBlit
+}
 
-#endif // defined(__APPLE__)
+#endif

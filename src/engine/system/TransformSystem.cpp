@@ -30,7 +30,7 @@ JPH::Mat44 GetLogicalWorldTransform(const ECS::Registry& reg, Entity e) noexcept
     return localMatrix;
 }
 
-} // namespace
+}
 
 JPH::Mat44 TransformSystem::GetWorldTransform(const ECS::Registry& reg, Entity e) const noexcept {
     const auto* trans       = reg.Get<Components::TransformComponent>(e);
@@ -69,4 +69,4 @@ void TransformSystem::UpdateTransformHistory(ECS::Registry& reg) noexcept {
     }
 }
 
-} // namespace ZHLN
+}

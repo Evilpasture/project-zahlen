@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/Hierarchy.cpp
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
@@ -35,7 +34,7 @@ void CollectDespawnPostorder(ECS::Registry& registry, Entity entity, std::vector
 }
 
 
-} // namespace
+}
 
 void DespawnEntity(Engine& engine, Entity entity) {
     auto& registry = engine.GetRegistry();
@@ -48,8 +47,6 @@ void DespawnEntity(Engine& engine, Entity entity) {
             continue;
         }
 
-        // These systems keep external handles outside component storage, and
-        // therefore receive the entity while its component data is still valid.
         engine.GetArticulationSystem().Release(engine, current);
         engine.GetAudioContext().ReleaseOwner(current);
         if (const auto* physics = registry.Get<Components::PhysicsComponent>(current); physics != nullptr) {
@@ -60,4 +57,4 @@ void DespawnEntity(Engine& engine, Entity entity) {
     }
 }
 
-} // namespace ZHLN
+}

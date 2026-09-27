@@ -41,7 +41,7 @@
 // is rough metal (0.8, past the cutoff) and must stay byte-still when the
 // switch flips.
 
-#include "NoiseFrameCapture.hpp"
+#include "helpers/ImageTesting.hpp"
 #include "RayTracedNoiseMetrics.hpp"
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -86,16 +86,16 @@ enum class ReflectionNoiseError : uint8_t {
 
 namespace {
 
-using ZHLN::Test::Frame::BBox;
-using ZHLN::Test::Frame::LumaPlane;
-using ZHLN::Test::Frame::TemporalMoments;
-using ZHLN::Test::Frame::BBoxOfChangedPixels;
-using ZHLN::Test::Frame::Crop;
-using ZHLN::Test::Frame::LoadPPM;
-using ZHLN::Test::Frame::LumaDifference;
-using ZHLN::Test::Frame::RgbImage;
-using ZHLN::Test::Frame::RmsInRegion;
-using ZHLN::Test::Frame::RunningMeanResidualSeries;
+using ZHLN::Test::Image::BBox;
+using ZHLN::Test::Image::LumaPlane;
+using ZHLN::Test::Image::TemporalMoments;
+using ZHLN::Test::Image::BBoxOfChangedPixels;
+using ZHLN::Test::Image::Crop;
+using ZHLN::Test::Image::LoadPPM;
+using ZHLN::Test::Image::LumaDifference;
+using ZHLN::Test::Image::RgbImage;
+using ZHLN::Test::Image::RmsInRegion;
+using ZHLN::Test::Image::RunningMeanResidualSeries;
 
 constexpr int kWidth  = 640;
 constexpr int kHeight = 480;

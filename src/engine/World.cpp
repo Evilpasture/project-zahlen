@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/World.cpp
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
@@ -16,7 +15,6 @@
 
 namespace ZHLN {
 
-// World bootstrap errors
 
 enum class WorldInitError : uint8_t {
     PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}) = 1,
@@ -24,9 +22,6 @@ enum class WorldInitError : uint8_t {
 };
 
 struct World::Impl {
-    // Member order encodes the teardown order (reverse of declaration): the
-    // registry dies before the physics world, matching the original engine
-    // sequence where Registry::Clear() ran before PhysicsContext destruction.
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
     Camera                          mainCamera;
@@ -52,8 +47,6 @@ auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::uni
     instance->_impl = std::make_unique<Impl>();
     auto& impl      = *instance->_impl;
 
-    // Singleton InputStateComponent must exist before the first event pump
-    // writes into it (the window callbacks target this very registry).
     impl.registry.Create(Components::InputStateComponent {});
 
     AcquireJoltRegistration();
@@ -74,8 +67,6 @@ World::~World() {
         return;
     }
 
-    // Reverse declaration order: visibility buffers, systems, command buffer,
-    // graphs, camera, registry, then the physics world, then Jolt itself.
     _impl->visibleShadowEntities.clear();
     _impl->visibleEntities.clear();
     _impl->articulationSystem.reset();
@@ -132,4 +123,4 @@ auto World::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
     return _impl->visibleShadowEntities;
 }
 
-} // namespace ZHLN
+}

@@ -1,11 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/PrefabFactory.hpp
-//
-// High-level asset factory / entity spawner. Creates Jolt colliders, ECS
-// entities, GPU buffers from cached prefabs. This is the high-level spawning
-// layer that belongs to src/engine, not to filesystem/VFS.
 
 #pragma once
 
@@ -27,11 +22,10 @@ class ArticulationSystem;
 namespace ECS {
 class Registry;
 }
-} // namespace ZHLN
+}
 
 namespace ZHLN::PrefabFactory {
 
-// --- Low-Level GPU Geometry Builders
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
 auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
 auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
@@ -97,9 +91,6 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
 
-// `art` owns the world's joint-slot allocator and inverse bind matrices: the
-// low-level form has no Engine, so the world's ArticulationSystem is named
-// explicitly, the same way pc is.
 auto InstantiatePrefab(
     RenderContext&      ctx,
     ECS::Registry&      reg,
@@ -116,4 +107,4 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
-} // namespace ZHLN::PrefabFactory
+}

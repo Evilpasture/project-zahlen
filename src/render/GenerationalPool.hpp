@@ -1,18 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/render/GenerationalPool.hpp
-//
-// A fixed-capacity pool of heap objects addressed by a packed
-// (generation, index) handle. Destroying an entry bumps its generation, so a
-// handle held past the object's lifetime fails the generation check and
-// resolves to nothing instead of onto the slot's new occupant -- the same
-// stale-handle discipline DestinationRegistry enforces for windows.
-//
-// Lifted out of RenderInternal.hpp because GeometryManager owns the buffer
-// handle table and cannot include the renderer's private header: DI means the
-// manager does not know the context exists, and that only works if the
-// containers it is built from are reachable on their own.
 
 #pragma once
 #include <Zahlen/Core/Array.hpp>
@@ -20,33 +8,23 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstdint>
-#include <expected>
 #include <utility>
 
 namespace ZHLN {
 
-// GenerationalPool Template
 
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
   public:
-    enum class Error : uint8_t {
-        InvalidHandle = 1, // The handle was 0/Null
-        StaleHandle,       // Generational mismatch (the resource was already destroyed)
-        OutOfBoundsIndex,  // Index exceeds pool capacity
-        NullResource       // Internal error: slot points to null pointer
-    };
-
     GenerationalPool() {
         _freeIndices.reserve(MaxObjects);
         for (size_t i = 0; i < MaxObjects; ++i) {
             _freeIndices.push_back(MaxObjects - 1 - i);
         }
-        _generations.fill(1); // Generations start at 1
+        _generations.fill(1);
     }
 
     ~GenerationalPool() {
-        // Automatically sweeps and safely destroys all remaining active allocations on shutdown
         for (size_t i = 0; i < MaxObjects; ++i) {
             if (_pointers[i] != nullptr) {
                 _pool.Destroy(_pointers[i]);
@@ -54,7 +32,6 @@ class GenerationalPool {
         }
     }
 
-    // Non-copyable, non-movable matching engine context lifetime
     GenerationalPool(const GenerationalPool&)                    = delete;
     auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
 
@@ -84,32 +61,46 @@ class GenerationalPool {
         auto gen       = static_cast<uint32_t>(rawHandle >> 32);
 
         if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
-            return; // Safely ignore stale or invalid handles
+            return;
         }
 
         _pool.Destroy(_pointers[index]);
         _pointers[index] = nullptr;
-        _generations[index]++; // Increment generation to invalidate stale handles
+        _generations[index]++;
         _freeIndices.push_back(index);
     }
 
-    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> std::expected<T*, Error> {
-        auto rawHandle = static_cast<uint64_t>(handle);
+    // Null for every way a handle can fail to name a live object: zero,
+    // out of range, stale generation, or a slot that was destroyed and has
+    // not been refilled.
+    //
+    // This returned a std::expected<T*, Error> once, with four ways to fail:
+    // InvalidHandle, StaleHandle, OutOfBoundsIndex, NullResource. Every call
+    // site but one asked only "is there an object" -- twenty-three of them
+    // wrote `.value_or(nullptr)` and then tested the pointer -- which a null
+    // pointer answers without making them name a vocabulary they do not use.
+    //
+    // The exception is BuildMeshBLAS, whose failure MeshBuilder and the glTF
+    // importer log as a warning. It gets a code of its own at the point of
+    // use -- RenderFeatureError::UnresolvedMeshHandle -- so the log line
+    // survives. Worth stating plainly: the four-way distinction is gone, so a
+    // stale handle and an out-of-range one now read the same. If a bug ever
+    // needs telling apart, that is the argument for bringing the error back,
+    // and it is a better one than "somebody might want it".
+    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> T* {
+        const auto rawHandle = static_cast<uint64_t>(handle);
         if (rawHandle == 0) [[unlikely]] {
-            return std::unexpected(Error::InvalidHandle);
+            return nullptr;
         }
 
-        auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen   = static_cast<uint32_t>(rawHandle >> 32);
+        const auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
+        const auto gen   = static_cast<uint32_t>(rawHandle >> 32);
 
         if (index >= MaxObjects) [[unlikely]] {
-            return std::unexpected(Error::OutOfBoundsIndex);
+            return nullptr;
         }
         if (_generations[index] != gen) [[unlikely]] {
-            return std::unexpected(Error::StaleHandle);
-        }
-        if (_pointers[index] == nullptr) [[unlikely]] {
-            return std::unexpected(Error::NullResource);
+            return nullptr;
         }
 
         return _pointers[index];
@@ -122,4 +113,4 @@ class GenerationalPool {
     ZHLN::Array<uint32_t>            _freeIndices;
 };
 
-} // namespace ZHLN
+}

@@ -18,16 +18,11 @@ enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 
 enum class GameplayDriver : uint8_t {
-    Scripted, // A scripting runtime owns the game loop & logic (Default). The engine is agnostic which one --
-              // the canonical flag is --driver=scripted; language names (e.g. fennel, lua) are aliases the
-              // scripting extra documents.
-    Cpp,      // Native C++ (.so / .dll) owns the game loop
-    Hybrid    // Native C++ handles core loop/physics; the scripting runtime handles scripted UI
+    Scripted,
+    Cpp,
+    Hybrid
 };
 
-// What the gameplay driver asked the host to do after a tick. Lives beside
-// GameplayDriver rather than with the renderer's types so naming a tick's
-// outcome does not pull in the renderer/math headers.
 enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
 
 struct CommandLineOptions {
@@ -42,10 +37,8 @@ struct CommandLineOptions {
     bool                   enableRenderDoc = false;
     bool                   benchmark       = false;
 
-    // Configurable Game Loop Driver
     GameplayDriver driver = GameplayDriver::Scripted;
 
-    // User requests
     bool helpRequested       = false;
     bool versionRequested    = false;
     bool printGraphRequested = false;
@@ -59,4 +52,4 @@ struct EngineError {
 
 ZHLN_API auto HandleCommandLine(std::span<char* const> args) -> std::expected<CommandLineOptions, ErrorCode>;
 
-} // namespace ZHLN
+}

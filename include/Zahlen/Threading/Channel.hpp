@@ -71,9 +71,6 @@ class Channel {
             _waiters.push(Waiter {.fiber = self, .outMsg = &result, .signaled = &signaled});
         });
 
-        // Dequeued under the lock: done. The old check re-read _queue
-        // unlocked and demanded `signaled`, so a fiber that popped an
-        // available message waited forever for a wakeup nobody would send.
         if (got) {
             return result;
         }
@@ -130,4 +127,4 @@ class Channel {
     std::queue<Waiter>  _waiters;
 };
 
-} // namespace ZHLN
+}

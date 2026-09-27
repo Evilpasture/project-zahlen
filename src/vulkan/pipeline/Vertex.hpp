@@ -11,7 +11,6 @@
 
 namespace ZHLN::Vk {
 
-// Type to Vulkan Format Mapping
 
 template <typename T>
 struct FormatOf;
@@ -71,7 +70,6 @@ template <typename T>
     return {.binding = binding, .stride = sizeof(T), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
 }
 
-// Automatic Layout Reflection Engine
 
 template <typename T>
 struct AutoReflectAttributes {
@@ -80,7 +78,7 @@ struct AutoReflectAttributes {
         std::array<VkVertexInputAttributeDescription, count> attrs {};
         uint32_t                                             location = 0;
 
-        ZHLN::Reflect::ForEachFieldInfo<T>([&]<typename FieldType>(std::string_view /*name*/, std::size_t offset) {
+        ZHLN::Reflect::ForEachFieldInfo<T>([&]<typename FieldType>(std::string_view , std::size_t offset) {
             attrs[location] = VkVertexInputAttributeDescription {
                 .location = location, .binding = 0, .format = FormatOf<FieldType>::value, .offset = static_cast<uint32_t>(offset)
             };
@@ -107,4 +105,4 @@ concept IsVertex = requires {
     { VertexTraits<T>::Attributes().data() } -> std::convertible_to<const VkVertexInputAttributeDescription*>;
 };
 
-} // namespace ZHLN::Vk
+}

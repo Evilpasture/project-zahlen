@@ -313,7 +313,13 @@ void DrawModelNodeRows(
     const bool sameFactors = std::equal(std::begin(a.baseColorFactor), std::end(a.baseColorFactor), std::begin(b.baseColorFactor)) &&
                              std::equal(std::begin(a.emissiveFactor), std::end(a.emissiveFactor), std::begin(b.emissiveFactor));
     return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
-           (a.alphaCutoff == b.alphaCutoff);
+           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.iridescenceFactor == b.iridescenceFactor) &&
+           (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&
+           (a.ior == b.ior) && (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
+           (a.volumeThicknessMap == b.volumeThicknessMap) && (a.clearcoatFactor == b.clearcoatFactor) &&
+           (a.clearcoatRoughnessFactor == b.clearcoatRoughnessFactor) && (a.clearcoatNormalScale == b.clearcoatNormalScale) &&
+           (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) &&
+           (a.clearcoatNormalMap == b.clearcoatNormalMap);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {

@@ -33,8 +33,6 @@ struct ObservedEntry {
 };
 
 struct ScanResult {
-    // False means some paths could not be inspected. Existing entries absent
-    // from this partial snapshot must not be mistaken for deletions.
     bool                                 complete = true;
     std::map<std::string, ObservedEntry> entries;
 };
@@ -131,7 +129,7 @@ void BeginSettling(TrackedEntry& entry, FileWatchAction action, SteadyClock::tim
     entry.settleState   = SettleState::Settling;
 }
 
-} // namespace
+}
 
 struct FileSystemWatcher::Impl {
     struct Subscription {
@@ -204,16 +202,10 @@ struct FileSystemWatcher::Impl {
 
     static void Observe(FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now, std::vector<StagedEvent>& ready) {
         if (!watch.initialized) {
-            // Do not establish a baseline from an incomplete scan: a locked or
-            // inaccessible directory must not turn its pre-existing content
-            // into synthetic Created events once it becomes readable.
             if (!scan.complete) {
                 return;
             }
 
-            // Existing content is the subscription baseline. A later file
-            // creation is still observed because a missing target produces an
-            // empty baseline on this first scan.
             for (const auto& [key, observed]: scan.entries) {
                 watch.entries.emplace(
                     key, TrackedEntry {
@@ -254,9 +246,6 @@ struct FileSystemWatcher::Impl {
             }
         }
 
-        // A partial scan cannot prove a path was removed. This protects a
-        // subscription from reporting a deletion while a tool holds a file or
-        // the directory is temporarily inaccessible.
         if (scan.complete) {
             for (auto& [key, entry]: watch.entries) {
                 if (scan.entries.contains(key) || !entry.exists) {
@@ -265,8 +254,6 @@ struct FileSystemWatcher::Impl {
 
                 entry.exists = false;
                 if (!entry.deliveredExists) {
-                    // A new file disappeared before its creation settled, so
-                    // it was never observable by subscribers at all.
                     entry.settleState = SettleState::Idle;
                 } else {
                     BeginSettling(entry, FileWatchAction::Deleted, now);
@@ -364,8 +351,6 @@ auto FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
 
 void FileSystemWatcher::DispatchEvents() {
     if (std::this_thread::get_id() != _impl->dispatchThread) {
-        // Called from wrong thread — ignore. Logging would require engine Log,
-        // but zahlen_filesystem must stay free of engine dependencies.
         return;
     }
 
@@ -392,4 +377,4 @@ void FileSystemWatcher::DispatchEvents() {
     }
 }
 
-} // namespace ZHLN::FS
+}

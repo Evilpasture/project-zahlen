@@ -29,7 +29,20 @@ class AssetManager;
 
 namespace GLTF {
 auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path) -> ModelPrefab*;
-auto LoadGLBPrefabFromMemory(RenderContext& ctx, AssetManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab*;
+
+// Like LoadGLBPrefab, but consumes bytes already read by the caller. Split
+// .gltf assets store geometry and textures in external .bin/image files whose
+// URIs only resolve relative to the .gltf's own location; `bytesPath` is that
+// on-disk location (leave empty when the bytes came from a network fetch of a
+// self-contained .glb). It is used only to resolve external resources, never
+// to re-read the file.
+auto LoadGLBPrefabFromMemory(
+    RenderContext&           ctx,
+    AssetManager&            cwMgr,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    std::string_view         bytesPath = {}
+) -> ModelPrefab*;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 
 // Import straight from a byte buffer and spawn it in one call. Core has no

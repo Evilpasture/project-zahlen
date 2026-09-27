@@ -14,7 +14,7 @@
 # InstallBakedFontLoader (Fonts.hpp) installs core's BakedFontLoader hook; the
 # composition root calls it before InitializeDefaultScene and core takes over.
 # stb_image is not compiled here -- STB_IMAGE_IMPLEMENTATION lives in
-# extern/stbi_impl.c inside zahlen_engine, so the decode symbols arrive through
+# src/engine/stbi_impl.c inside zahlen_engine, so the decode symbols arrive through
 # the engine link, the same way extras/glTF gets them.
 #
 # Public headers are reached as <Fonts/Fonts.hpp>.

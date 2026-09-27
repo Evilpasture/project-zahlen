@@ -1,4 +1,3 @@
-// resources/shaders/pbr_helpers.slang
 module pbr_helpers;
 
 __exported import hash;
@@ -7,7 +6,6 @@ __exported import instance_data;
 __exported import uniforms;
 __exported import vertex_format;
 
-// CONSTANTS & NOISE
 public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                                     float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
                                                     float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
@@ -29,7 +27,6 @@ public float GetShadowDither(float2 screenPos) {
     return InterleavedGradientNoise(screenPos);
 }
 
-// MATH UTILITIES
 public float2 PackNormalOctahedron(float3 N) {
     N /= (abs(N.x) + abs(N.y) + abs(N.z));
     float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
@@ -60,8 +57,6 @@ public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) 
 }
 
 public bool IsFiniteFloat(float x) {
-    // isfinite is HLSL intrinsic; fallback via self-comparison for NaN and large-value for Inf
-    // NaN != NaN, Inf has abs > 1e20 in practice for our scene scales
     return x == x && abs(x) < 1e20f;
 }
 public bool IsFiniteFloat3(float3 v) {
@@ -73,7 +68,6 @@ public float3 SafeNormalize(float3 v, float3 fallback) {
     if (len < 1e-5f || len != len || len > 1e10f)
         return fallback;
     float3 r = v / len;
-    // Guard Inf/NaN from v itself being Inf (Inf/Inf = NaN)
     if (r.x != r.x || r.y != r.y || r.z != r.z)
         return fallback;
     if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
@@ -97,7 +91,6 @@ public float SoftClamp(float x, float limit) {
     return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
 
-// PERCENTAGE-CLOSER SOFT SHADOWS (PCSS)
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
@@ -107,11 +100,6 @@ public float FindBlocker(float2 uv, float zReceiver, float searchRadius, Texture
     int numBlockers   = 0;
     float blockerBias = 0.0005f;
 
-    // The halved variant strides the fixed Poisson disk by two: same
-    // deterministic pattern at half the taps, for callers that blend this
-    // result against a higher-quality estimator anyway. The stride is
-    // runtime-selectable, so the loop stays dynamic; the fetches are
-    // independent and pipeline either way.
     const int stride = halved ? 2 : 1;
 
     for (int i = 0; i < BLOCKER_SEARCH_SAMPLES; i += stride) {
@@ -144,23 +132,16 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
     float bias            = max(0.0015f * (1.0 - dot(N, L)), 0.0005f) * resolutionScale;
     zReceiver -= bias;
 
-    // 1. Blocker Search
     float searchRadius    = 4.0 * texelSize;
     float avgBlockerDepth = FindBlocker(projCoords.xy, zReceiver, searchRadius, shadowMap, linearSampler, cascadeIndex, reduced);
 
     if (avgBlockerDepth == -1.0f)
         return 1.0f;
 
-    // 2. Penumbra Estimation
-    // NDC depth deltas converted with the cascade's own ortho depth range
-    // (world metres per unit of NDC z). The old constant 400 was only right
-    // for the near cascades: the outer ones span up to 1000 m, so penumbras
-    // there collapsed 2.5x too sharp.
     float worldDepthDiff = (zReceiver - avgBlockerDepth) * worldDepthPerNdc;
     float penumbraWidth  = worldDepthDiff * 0.5f;
     float filterRadius   = clamp(penumbraWidth, 2.5f, 16.0f) * texelSize;
 
-    // 3. Filtered PCF pass
     float shadow = 0.0f;
     float angle  = GetShadowDither(screenPos) * 2.0 * 3.14159265;
     float s      = sin(angle);
@@ -178,28 +159,6 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
 }
 
 #ifndef DISABLE_RTR
-/**
- * @brief Stochastically sampled soft ray-traced shadow.
- *
- * Dithering moved from Interleaved Gradient Noise to the blue noise LUT, and
- * the single rotated PoissonDisk[0] offset became a real Vogel disk over the
- * sun. Two reasons:
- *
- *  - IGN is a fixed diagonal lattice. Any spatial filter downstream (A-Trous,
- *    bilateral, TAA) blurs *along* that diagonal, so the 1-bit estimate turns
- *    into visible streaking instead of averaging to grey. Blue noise has no
- *    preferred direction, so the same filters integrate it cleanly.
- *  - One rotated point per pixel is not a sun-disk sample at all -- it is a
- *    single fixed direction per dither angle. The Vogel disk is uniform in
- *    area, so even at 1 SPP the per-pixel estimate is unbiased over the disk
- *    and penumbra width tracks `sunSize` instead of the lattice period.
- *
- * `samples` is the per-frame SPP budget (RayTracingConfig::shadowSamples).
- * Extra samples decorrelate through SampleBlueNoiseAt, so 2 SPP is two
- * different disk points, not the same point twice.
- *
- * Returns 1.0 for fully lit, 0.0 for fully shadowed.
- */
 public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
                                       Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
@@ -213,11 +172,8 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
     float visibility = 0.0f;
     for (uint i = 0u; i < spp; ++i) {
-        // .xy drives the disk angle/radius; .zw is left free for a second
-        // consumer so one fetch can serve both the shadow and a glossy lobe.
         float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, pixelPos, frameIdx, i);
 
-        // Vogel disk: uniform in area over the sun's angular radius.
         float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
         RayDesc ray;
@@ -239,10 +195,7 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 #endif
 
-// ANALYTICAL PBR LIGHTING
 public float DistributionGGX(float3 N, float3 H, float roughness) {
-    // Roughness 0 + NdotH=1 → denom 0 → 0/0 NaN → black square. Clamp roughness
-    // and denom to keep D finite (0 for mirror, large but finite for near-mirror).
     float r     = max(roughness, 0.001f);
     float a     = r * r;
     float a2    = a * a;
@@ -261,12 +214,87 @@ public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
+public float ClearcoatFresnel(float NdotV) {
+    float f  = saturate(1.0f - NdotV);
+    float f2 = f * f;
+    return 0.04f + 0.96f * (f2 * f2 * f);
+}
+
+public float ClearcoatDirectSpecular(float3 N, float3 V, float3 L, float roughness) {
+    float3 H    = SafeNormalize(V + L, N);
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float D     = DistributionGGX(N, H, roughness);
+    float G     = GeometrySmith(N, V, L, roughness);
+    float F     = ClearcoatFresnel(saturate(dot(H, V)));
+    return (D * G * F) / max(4.0f * NdotV * NdotL, 0.001f) * NdotL;
+}
+
 public float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }
 
 public float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(1.0f - roughness, 1.0f - roughness, 1.0f - roughness), F0) - F0) * pow(saturate(1.0f - cosTheta), 5.0f);
+}
+
+float3 EvalIridescenceSensitivity(float opd, float3 shift) {
+    const float kPi = 3.14159265f;
+    float phase = 2.0f * kPi * opd * 1.0e-9f;
+    float phaseSq = phase * phase;
+    float3 val = float3(5.4856e-13f, 4.4201e-13f, 5.2481e-13f);
+    float3 pos = float3(1.6810e+06f, 1.7953e+06f, 2.2084e+06f);
+    float3 var = float3(4.3278e+09f, 9.3046e+09f, 6.6121e+09f);
+    float3 xyz = val * sqrt(2.0f * kPi * var) * cos(pos * phase + shift) * exp(-phaseSq * var);
+    xyz.x += 9.7470e-14f * sqrt(2.0f * kPi * 4.5282e+09f) * cos(2.2399e+06f * phase + shift.x) * exp(-4.5282e+09f * phaseSq);
+    xyz /= 1.0685e-7f;
+    return float3(
+        dot(float3(3.2404542f, -1.5371385f, -0.4985314f), xyz),
+        dot(float3(-0.9692660f, 1.8760108f, 0.0415560f), xyz),
+        dot(float3(0.0556434f, -0.2040259f, 1.0572252f), xyz)
+    );
+}
+
+public float3 EvalIridescence(float outsideIor, float filmIor, float3 baseF0, float thicknessNm, float cosTheta1) {
+    float sinTheta2Sq = pow(outsideIor / filmIor, 2.0f) * (1.0f - cosTheta1 * cosTheta1);
+    float cosTheta2Sq = 1.0f - sinTheta2Sq;
+    if (cosTheta2Sq < 0.0f) {
+        return float3(1.0f, 1.0f, 1.0f);
+    }
+    float cosTheta2 = sqrt(cosTheta2Sq);
+
+    float R0 = pow((filmIor - outsideIor) / (filmIor + outsideIor), 2.0f);
+    float R12 = R0 + (1.0f - R0) * pow(saturate(1.0f - cosTheta1), 5.0f);
+    float T121 = 1.0f - R12;
+
+    float3 safeF0 = min(baseF0 + 0.0001f, float3(0.999f, 0.999f, 0.999f));
+    float3 sqrtF0 = sqrt(safeF0);
+    float3 baseIor = (1.0f + sqrtF0) / (1.0f - sqrtF0);
+    float3 R1 = (baseIor - filmIor) / (baseIor + filmIor);
+    R1 = R1 * R1;
+    float3 R23 = R1 + (1.0f - R1) * pow(saturate(1.0f - cosTheta2), 5.0f);
+
+    const float kPi = 3.14159265f;
+    float phi12 = filmIor < outsideIor ? kPi : 0.0f;
+    float phi21 = kPi - phi12;
+    float3 phi23 = float3(
+        baseIor.x < filmIor ? kPi : 0.0f,
+        baseIor.y < filmIor ? kPi : 0.0f,
+        baseIor.z < filmIor ? kPi : 0.0f
+    );
+    float3 phi = phi21.xxx + phi23;
+    float opd = 2.0f * filmIor * thicknessNm * cosTheta2;
+
+    float3 R123 = clamp(R12 * R23, 1.0e-5f, 0.9999f);
+    float3 r123 = sqrt(R123);
+    float3 Rs = (T121 * T121) * R23 / (1.0f - R123);
+    float3 I = R12 + Rs;
+    float3 Cm = Rs - T121;
+    Cm *= r123;
+    I += Cm * (2.0f * EvalIridescenceSensitivity(opd, phi));
+    Cm *= r123;
+    I += Cm * (2.0f * EvalIridescenceSensitivity(2.0f * opd, 2.0f * phi));
+    return max(I, 0.0f);
 }
 
 public float GetDirectionalAlbedo(float NoX, float roughness, Texture2D brdfLUT, SamplerState clampSampler) {
@@ -278,7 +306,6 @@ public float GetAverageAlbedo(float roughness) {
     return 1.0f - roughness * (0.334f - roughness * 0.125f);
 }
 
-// IBL & GLOBAL ILLUMINATION
 public float3 EvaluateSH(float3 N, float4 sh[9]) {
     float3 result = sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z + sh[3].xyz * -0.488603f * N.x +
                     sh[4].xyz * 1.092548f * N.x * N.y + sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
@@ -300,7 +327,6 @@ public float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float
     return normalize(intersectPositionWS - probePos);
 }
 
-// AREA LIGHTS (LTC)
 public float3 IntegrateEdgeVector(float3 v1, float3 v2) {
     float x              = dot(v1, v2);
     float y              = abs(x);
@@ -316,7 +342,6 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
     float3 proj = V - N * dot(V, N);
     float lenProj = length(proj);
     if (lenProj < 1e-5f || lenProj != lenProj || lenProj > 1e10f) {
-        // V parallel to N (looking straight at surface) -> pick any perpendicular
         float3 up = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
         proj = cross(up, N);
         lenProj = length(proj);
@@ -368,7 +393,6 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
     return sum;
 }
 
-// REFLECTIONS
 public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, out float confidence, out float debugValue, Texture2D<float> texDepth,
                           SamplerState pointSampler, float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
     debugValue = 0.0f;
@@ -516,18 +540,14 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
     return float2(0.0f, 0.0f);
 }
 
-// GGX VNDF SAMPLING (Heitz 2018 / Dupuy 2023)
 
 public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
-    // 1. Stretch view vector to hemisphere configuration
     float3 Vh = normalize(float3(alpha * V_local.x, alpha * V_local.y, max(V_local.z, 0.001f)));
 
-    // 2. Orthonormal basis around Vh
     float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
     float3 T1   = (lensq > 1e-7f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
     float3 T2   = cross(Vh, T1);
 
-    // 3. Parameterize projected area
     float r   = sqrt(u.x);
     float phi = 2.0f * 3.141592653589793f * u.y;
     float t1  = r * cos(phi);
@@ -535,10 +555,8 @@ public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
     float s   = 0.5f * (1.0f + Vh.z);
     t2        = (1.0f - s) * sqrt(max(0.0f, 1.0f - t1 * t1)) + s * t2;
 
-    // 4. Reprojection onto hemisphere
     float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
 
-    // 5. Unstretch to retrieve final microfacet normal
     return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(Nh.z, 0.0f)));
 }
 

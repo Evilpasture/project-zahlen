@@ -30,4 +30,4 @@ void BuildTLAS(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc, VkAcceler
     ZHLN_CmdBuildTlas(cmd, &desc, dst, scratch, instanceCount);
 }
 
-} // namespace ZHLN::Vk
+}

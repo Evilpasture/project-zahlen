@@ -62,9 +62,7 @@ class HashMap {
         Key   keyCopy   = key;
         Value valueCopy = value;
 
-        // Factor both active entries and tombstones into load factor calculation
         if ((_size + _tombstones) * 2 >= _capacity) {
-            // If table has many tombstones but few active items, rehash in-place to purge tombstones
             size_t new_capacity = (_size * 4 <= _capacity && _capacity >= InitialCapacity) ? _capacity : _capacity * 2;
             Resize(new_capacity);
         }
@@ -85,7 +83,6 @@ class HashMap {
             idx = (idx + 1) & mask;
         }
 
-        // Reuse first tombstone slot if encountered, otherwise use empty slot
         size_t insertIdx = (firstTomb != static_cast<size_t>(-1)) ? firstTomb : idx;
 
         if (_states[insertIdx] == 2) {
@@ -118,9 +115,6 @@ class HashMap {
         return const_cast<Value*>(std::as_const(*this).Find(key));
     }
 
-    /**
-     * @brief O(1) Tombstone Erasure.
-     */
     auto Erase(const Key& key) noexcept -> bool {
         if (_capacity == 0 || _size == 0) {
             return false;
@@ -133,7 +127,7 @@ class HashMap {
             if (_states[idx] == 1 && _keys[idx] == key) {
                 _keys[idx].~Key();
                 _values[idx].~Value();
-                _states[idx] = 2; // Tombstone / Deleted
+                _states[idx] = 2;
                 _size--;
                 _tombstones++;
                 return true;
@@ -192,7 +186,7 @@ class HashMap {
 
   private:
     void AllocateStorage() {
-        _states = new uint8_t[_capacity](); // 0 = Empty, 1 = Active, 2 = Tombstone
+        _states = new uint8_t[_capacity]();
         _keys   = static_cast<Key*>(::operator new[](_capacity * sizeof(Key)));
         _values = static_cast<Value*>(::operator new[](_capacity * sizeof(Value)));
     }
@@ -213,7 +207,7 @@ class HashMap {
         size_t   old_capacity = _capacity;
 
         _capacity = new_capacity;
-        AllocateStorage(); // Fresh zeroed status array automatically purges tombstones
+        AllocateStorage();
         _size       = 0;
         _tombstones = 0;
 
@@ -260,7 +254,7 @@ class HashMap {
         }
     }
 
-    uint8_t* _states     = nullptr; // 0 = Empty, 1 = Active, 2 = Tombstone
+    uint8_t* _states     = nullptr;
     Key*     _keys       = nullptr;
     Value*   _values     = nullptr;
     size_t   _capacity   = 0;
@@ -268,4 +262,4 @@ class HashMap {
     size_t   _tombstones = 0;
 };
 
-} // namespace ZHLN
+}

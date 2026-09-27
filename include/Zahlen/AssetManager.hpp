@@ -1,11 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/AssetManager.hpp
-//
-// High-level asset manager: caching of ModelPrefab and BakedFontAsset via
-// FS::AssetCache, delegation of low-level I/O to FS::VirtualFileSystem.
-// Low-level VFS lives in zahlen_filesystem.
 
 #pragma once
 
@@ -15,6 +10,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <cstdint>
 #include <string_view>
 
@@ -125,6 +121,9 @@ class AssetManager {
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
+    RadianceMap* GetCachedRadiance(uint64_t hash);
+    void CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map);
+
     void ClearCache() noexcept;
     void ClearFontCache() noexcept;
 
@@ -139,6 +138,7 @@ class AssetManager {
 
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
+    FS::AssetCache<RadianceMap> _radianceCache;
 };
 
-} // namespace ZHLN
+}

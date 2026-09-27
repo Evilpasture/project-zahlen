@@ -28,4 +28,4 @@ class PhysicsDebugRenderer final: public JPH::DebugRendererSimple {
     JPH::Array<DebugVertex> triangles;
 };
 
-} // namespace ZHLN::Physics
+}

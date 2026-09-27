@@ -29,6 +29,10 @@ file(GLOB SAMPLE_SOURCES
 #                              (zahlen_gltf); its model-list crawl goes through
 #                              ZHLN::GitHub (zahlen_github, over extras/HTTP
 #                              and extras/json).
+#   FidelityHarness            headless glTF-Render-Fidelity runner: imports
+#                              with ZHLN.glTF (zahlen_gltf) and reads the
+#                              Khronos scenario JSONs with ZHLN::ReflectJSON
+#                              (zahlen_serialization -- extras/json).
 #
 # Linking the named domains instead of the zahlen_extras aggregate is the point
 # of the decomposition: a sample's build now waits on the module interfaces it
@@ -37,6 +41,7 @@ file(GLOB SAMPLE_SOURCES
 set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
 set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
+set(ZHLN_SAMPLE_EXTRAS_FidelityHarness zahlen_gltf zahlen_serialization)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)
@@ -97,7 +102,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)
     endif()
 
-    if(NOT MSVC AND WIN32)
+    if(WIN32)
         target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
     endif()
 

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/tty/TTYBackend.cpp
 #include "TTYBackend.hpp"
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -36,7 +35,7 @@ struct TakenDevice {
     uint32_t  min;
     int       fd;
     libevdev* dev;
-    int       device_id; // Assigned by libseat
+    int       device_id;
 };
 
 struct TTYState {
@@ -56,9 +55,6 @@ struct TTYState {
 
 TTYState* g_CrashState = nullptr;
 
-// libevdev / libseat ABI constants. Copied so this TU does not include the
-// development headers or link the libraries; SharedLibrary resolves the .so
-// the first time TTY mode is actually taken.
 constexpr unsigned kEvdevReadSync        = 1;
 constexpr unsigned kEvdevReadNormal      = 2;
 constexpr int      kEvdevReadStatusSync  = 1;
@@ -107,7 +103,7 @@ template <typename Fn>
 }
 
 [[nodiscard]] auto LoadSeatAndEvdev() -> bool {
-    static int state = 0; // 0 unknown, 1 ok, -1 fail
+    static int state = 0;
     if (state != 0) {
         return state == 1;
     }
@@ -151,11 +147,9 @@ template <typename Fn>
     return true;
 }
 
-// 1. Consteval mapping (Natural forward direction)
 [[maybe_unused]] consteval auto KeyCodeToEvdev(KeyCode key) noexcept -> uint16_t {
     using enum KeyCode;
     switch (key) {
-        // Numbers 0 - 9
         case Num0:
             return KEY_0;
         case Num1:
@@ -177,7 +171,6 @@ template <typename Fn>
         case Num9:
             return KEY_9;
 
-        // Alphabet A - Z
         case A:
             return KEY_A;
         case B:
@@ -231,7 +224,6 @@ template <typename Fn>
         case Z:
             return KEY_Z;
 
-        // Function Keys F1 - F12
         case F1:
             return KEY_F1;
         case F2:
@@ -257,7 +249,6 @@ template <typename Fn>
         case F12:
             return KEY_F12;
 
-        // Modifiers
         case LShift:
             return KEY_LEFTSHIFT;
         case RShift:
@@ -271,7 +262,6 @@ template <typename Fn>
         case RAlt:
             return KEY_RIGHTALT;
 
-        // Navigation & Editing
         case Space:
             return KEY_SPACE;
         case Escape:
@@ -285,7 +275,6 @@ template <typename Fn>
         case Delete:
             return KEY_DELETE;
 
-        // Arrow Keys
         case Up:
             return KEY_UP;
         case Down:
@@ -295,7 +284,6 @@ template <typename Fn>
         case Right:
             return KEY_RIGHT;
 
-        // Line / page navigation
         case Home:
             return KEY_HOME;
         case End:
@@ -305,7 +293,6 @@ template <typename Fn>
         case PageDown:
             return KEY_PAGEDOWN;
 
-        // Mouse Buttons
         case LButton:
             return BTN_LEFT;
         case RButton:
@@ -318,7 +305,6 @@ template <typename Fn>
     }
 }
 
-// 2. C++26 Reflection generates the inverted O(1) lookup table at compile time!
 consteval auto BuildEvdevToKeyCodeTable() noexcept {
     std::array<KeyCode, KEY_MAX + 1> table {};
     table.fill(KeyCode::Unknown);
@@ -333,7 +319,6 @@ consteval auto BuildEvdevToKeyCodeTable() noexcept {
     return table;
 }
 
-// 3. Runtime function: Single instruction array access (O(1) / Branchless)
 auto MapEvdevKey(uint16_t code) noexcept -> KeyCode {
     static constexpr auto Table = BuildEvdevToKeyCodeTable();
     if (code <= KEY_MAX) [[likely]] {
@@ -342,7 +327,7 @@ auto MapEvdevKey(uint16_t code) noexcept -> KeyCode {
     return KeyCode::Unknown;
 }
 
-void handle_enable_seat(struct libseat* /*seat*/, void* data) {
+void handle_enable_seat(struct libseat* , void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = true;
     ZHLN::Log("[TTY] libseat: Seat session enabled and active.");
@@ -359,7 +344,7 @@ struct libseat_seat_listener seat_listener = {
     .enable_seat  = handle_enable_seat,
     .disable_seat = handle_disable_seat,
 };
-} // namespace
+}
 
 auto IsSupported() -> bool {
     return access("/dev/tty", R_OK | W_OK) == 0 && LoadSeatAndEvdev();
@@ -394,7 +379,6 @@ auto Init(uint32_t width, uint32_t height) -> void* {
         }
     }
 
-    // 1. Establish libseat session
     g_seat.set_log_level(kSeatLogInfo);
     state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
@@ -403,7 +387,6 @@ auto Init(uint32_t width, uint32_t height) -> void* {
         return nullptr;
     }
 
-    // Dispatch initial setup events until seat is marked active
     while (!state->active) {
         if (g_seat.dispatch(state->seat, -1) == -1) {
             ZHLN::Log("[TTY] FATAL: Error dispatching libseat during startup.");
@@ -412,23 +395,20 @@ auto Init(uint32_t width, uint32_t height) -> void* {
         }
     }
 
-    // 2. Initialize epoll
     state->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
     if (state->epoll_fd < 0) {
         Shutdown(state);
         return nullptr;
     }
 
-    // Add the libseat connection FD to epoll so we get notified on session switches
     int seat_fd = g_seat.get_fd(state->seat);
     if (seat_fd >= 0) {
         epoll_event ev {};
         ev.events   = EPOLLIN;
-        ev.data.ptr = state->seat; // Store pointer to differentiate from evdev
+        ev.data.ptr = state->seat;
         epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, seat_fd, &ev);
     }
 
-    // 3. Scan and Open input devices via libseat
     DIR* dir = opendir("/dev/input");
     if (dir != nullptr) {
         struct dirent* ent = nullptr;
@@ -559,7 +539,6 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     static bool altDown  = false;
 
     for (int i = 0; i < n; i++) {
-        // --- Process internal libseat messages
         if (events[i].data.ptr == state->seat) {
             g_seat.dispatch(state->seat, 0);
             continue;
@@ -594,7 +573,6 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
                     altDown = (ev.value != 0);
                 }
 
-                // --- EMERGENCY ESCAPE HATCH
                 if (ctrlDown && altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
                     ZHLN::Log("[TTY] Emergency Escape Hatch triggered! Restoring terminal...");
                     EmergencyRestore();
@@ -643,10 +621,6 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
 }
 
 auto GetRequiredInstanceExtensions() -> std::vector<std::string_view> {
-    // Spec-stable extension name strings (the Vulkan spec's extension pages),
-    // spelled out rather than taken from volk.h: this backend reports what the
-    // display flow needs, it uses no Vulkan API, and its header reaches the
-    // window target, which by design knows no Vulkan.
     return {
         "VK_KHR_surface", "VK_KHR_display", "VK_KHR_get_surface_capabilities2",
         "VK_KHR_surface_maintenance1"
@@ -677,4 +651,4 @@ bool IsRunning(void*) {
 
 #endif
 
-} // namespace ZHLN::TTYBackend
+}

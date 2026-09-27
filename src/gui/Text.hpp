@@ -23,4 +23,4 @@ auto AppendTextVertices(
     const JPH::Vec4&   color
 ) -> uint32_t;
 
-} // namespace ZHLN::GUI
+}

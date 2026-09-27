@@ -36,9 +36,6 @@ void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT,
     if (channel.interpolation == InterpolationType::Step) {
         factor = 0.0f;
     } else {
-        // Minimum-jerk interpolation avoids the constant velocity and hard
-        // derivative changes of a linear keyframe blend. Optional pose providers
-        // may add further temporal filtering through generic extension hooks.
         factor = factor * factor * factor * (factor * (factor * 6.0f - 15.0f) + 10.0f);
     }
 
@@ -90,7 +87,7 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
     }
 }
 
-} // namespace
+}
 
 void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt, BonePosePostProcessor postProcessor) {
     auto entities  = reg.GetEntitiesWith<Components::AnimatorComponent>();
@@ -196,10 +193,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     }
 
                     if (channel.path == AnimationPathType::Weights) {
-                        // A morph channel with no key times has no weights to
-                        // interpolate and no count to derive -- SampleWeightsChannel
-                        // guards the same case -- so the division is skipped
-                        // rather than taken on a zero denominator.
                         const uint32_t numWeights = channel.keyTimes.empty() ?
                                                         0u :
                                                         static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
@@ -254,12 +247,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 auto _ = GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
             }
 
-            // Animation modifiers run here, between pose evaluation and joint
-            // upload -- they need the solved hierarchy AND must be visible to
-            // everything downstream (mesh attachment, GPU joints), which is
-            // why this cannot be an ordinary system-graph node. Core ships no
-            // modifier; extras/Animation installs the two-bone IK solver
-            // through Engine::SetBonePosePostProcessor.
             if (postProcessor != nullptr) {
                 postProcessor(reg, rootEntity, prefab, localTransforms, worldTransforms);
             }
@@ -277,19 +264,6 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
 
                 if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
-                    // Write-only, deliberately. This body runs on a TaskSystem
-                    // chunk beside every other chunk, and an Add here is one
-                    // insert per chunk into the same component SparseSet -- one
-                    // count, one dense array, one sparse table, plus the
-                    // reallocation an insert can trigger -- with nothing
-                    // synchronizing them, which is heap corruption, not a lost
-                    // update. Nothing is missing by not inserting: the factory
-                    // is the only writer that can set `offset` (part.morphOffset,
-                    // written where the importer allocated the primitive's
-                    // deltas) and it attaches the component in the same breath,
-                    // so a mesh without one has no deltas to sample -- morphing
-                    // it would read morphDeltasBuffer at offset 0, another
-                    // primitive's deltas.
                     if (auto* morphComp = reg.Get<Components::MorphTargetComponent>(childEnt)) {
                         morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
                         morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
@@ -300,13 +274,11 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
                     const Skeleton& skeleton = prefab.skeletons[skelMesh->skeletonIndex];
 
-                    // Compute pure Model-Space pose (no invMeshWorld!)
                     for (size_t j = 0; j < skeleton.joints.size(); ++j) {
                         const auto& joint                           = skeleton.joints[j];
                         calculatedJoints[skelMesh->jointOffset + j] = worldTransforms[joint.nodeIndex] * joint.inverseBindMatrix;
                     }
                 } else {
-                    // Non-skinned parts (attachments/accessories) follow their node hierarchy transform
                     const Math::TransformTRS trs = Math::Decompose(worldTransforms[mesh->nodeIndex]);
 
                     if (auto* childTrans = reg.Get<Components::TransformComponent>(childEnt)) {
@@ -324,4 +296,4 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
     }
 }
 
-} // namespace ZHLN
+}
