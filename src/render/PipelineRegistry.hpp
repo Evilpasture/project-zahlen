@@ -44,8 +44,7 @@ class PipelineRegistry {
 
     void Destroy(PipelineHandle handle) { _materials.Destroy(handle); }
 
-    using ResolveError = GenerationalPool<NativeMaterial, 2048, PipelineHandle>::Error;
-    [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> std::expected<NativeMaterial*, ResolveError> { return _materials.Resolve(handle); }
+    [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* { return _materials.Resolve(handle); }
 
   private:
     [[nodiscard]] auto BuildMeshVariant(const PipelineDesc& desc) const noexcept -> Vk::Pipeline;
@@ -59,7 +58,11 @@ class PipelineRegistry {
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;
 };
 
-static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineHandle>())),
-                             std::expected<NativeMaterial*, PipelineRegistry::ResolveError>>);
+// Pins the return type where a caller can see it break. Resolve is on the
+// per-draw path -- every mesh in the frame goes through it -- and used to
+// answer with a std::expected that twenty-odd call sites immediately reduced
+// to a pointer with .value_or(nullptr). A nullptr is the answer now, and this
+// is what stops it drifting back into a wrapper type nobody reads.
+static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineHandle>())), NativeMaterial*>);
 
 }

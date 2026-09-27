@@ -99,7 +99,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                        .ViewMask(Passes::ShadowPass::kCascadeViewMask)
+                        .ViewMask(ShadowRenderer::kCascadeViewMask)
                         .CullNone()
                         .Cache(pipelineCache.Get())
                         .Build(ctx.Device())
@@ -191,6 +191,8 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return targets.InitShadows(); })
 
+        .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
+
         .and_then([&]() -> auto {
             return CreateDoubleBuffered(
                        allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
@@ -208,15 +210,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        .and_then([&](auto&& lsb) -> auto {
-            frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
-            return CreateDoubleBuffered(
-                       allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect, Vk::MemoryUsage::CPUToGPU
-            )
-                .transform_error([](auto err) -> ErrorCode { return err; });
-        })
-
-        .transform([&](auto&& sib) -> auto { frames.shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
+        .transform([&](auto&& lsb) -> void { frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb); });
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
@@ -378,77 +372,6 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     }
 
     return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
-}
-
-auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
-    shadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, vert, frag)
-        .transform_error([](auto err) -> ErrorCode { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, ErrorCode> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .ViewMask(Passes::ShadowPass::kCascadeViewMask)
-                .CullNone()
-                .Cache(pipelineCache.Get())
-                .Build(device)
-                .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        })
-        .and_then([&, device]() -> std::expected<void, ErrorCode> {
-            const bool multiviewMesh = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
-                return f.multiviewMeshShader == VK_TRUE;
-            });
-            if (!ctx.MeshShadersSupported() || !multiviewMesh) {
-                return {};
-            }
-
-            auto shaders = Vk::ShaderStages::CreateMesh<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS>(device);
-            if (!shaders) {
-                ZHLN::Log("[RenderResources] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-
-            auto pipeline = Vk::PipelineBuilder {}
-                                .Shaders(*shaders)
-                                .Layout(emptyPipelineLayout)
-                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                                .DepthOnly()
-                                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                                .ViewMask(Passes::ShadowPass::kCascadeViewMask)
-                                .CullNone()
-                                .Cache(pipelineCache.Get())
-                                .Build(device);
-            if (!pipeline) {
-                ZHLN::Log("[RenderResources] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
-                return {};
-            }
-            shadowMeshPipeline = std::move(*pipeline);
-            return {};
-        });
-}
-
-auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
-    punctualShadowPipelineLayout = emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, vert, frag)
-        .transform_error([](auto err) -> ErrorCode { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, ErrorCode> {
-            return Vk::PipelineBuilder {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .DepthOnly()
-                .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .ViewMask(0x3F)
-                .CullNone()
-                .Cache(pipelineCache.Get())
-                .Build(device)
-                .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
-                .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {

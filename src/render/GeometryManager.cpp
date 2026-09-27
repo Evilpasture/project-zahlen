@@ -93,7 +93,7 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
         return;
     }
-    auto* nativeMesh = _buffers.Resolve(handle).value_or(nullptr);
+    auto* nativeMesh = _buffers.Resolve(handle);
     if (nativeMesh == nullptr) {
         return;
     }

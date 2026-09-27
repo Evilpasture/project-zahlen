@@ -52,8 +52,8 @@ enum class MeshShaderTestError : uint8_t {
     PathDivergence ZHLN_ANNOTATION(ZHLN::Description<"The mesh-shader path and the vertex path produced different images.">{}),
     ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the comparison frames.">{}),
     ConfigDidNotSelectPath ZHLN_ANNOTATION(ZHLN::Description<"RenderConfig::enableMeshShading did not select the expected geometry path.">{}),
-    MeshletConeCullingFalsePositive ZHLN_ANNOTATION(ZHLN::Description<"Meshlet normal-cone culling culled a front-facing meshlet when camera was close (apex singularity).">{}) = 8,
-    MeshletBlackHoleDetected ZHLN_ANNOTATION(ZHLN::Description<"Close-up render produced a black square where a meshlet should be (falsely culled).">{}),
+    MeshletBlackHoleDetected
+    ZHLN_ANNOTATION(ZHLN::Description<"Close-up render produced a black square where a meshlet should be: a front-facing meshlet was culled.">{}) = 8,
 };
 
 namespace {
@@ -640,96 +640,42 @@ struct MeshShaderTestSuite {
         }
 
         // ====================================================================
-        // 5. Meshlet cone culling: apex singularity must not cull front-facing
+        // 5. Close-up render must not produce a black hole where meshlet culled
         // ====================================================================
         //
-        // Regression for DamagedHelmet visor black square. The apex-based
-        // ConeBackfaceCulled flips when camera passes apex plane (apex behind
-        // surface, camera zooms in close and goes behind apex). Sphere
-        // formulation dot(toCenter, axis) >= cutoff*dist + radius has no
-        // singularity. This CPU test reproduces the exact math that was
-        // failing: camera behind apex but still in front of surface should
-        // NOT be culled.
-        std::expected<void, ZHLN::ErrorCode> cone_culling_sphere_formulation_no_false_positive() {
-            struct Case {
-                JPH::Vec3 coneApex;
-                JPH::Vec3 sphereCenter;
-                float radius;
-                JPH::Vec3 axis;
-                float cutoff;
-                JPH::Vec3 camPos;
-                bool shouldCull; // expected for sphere formulation
-            };
-
-            // Visor patch: sphere at origin, radius 0.5, apex behind at -0.5,
-            // axis outward +Z, cutoff 0.5 (60 deg half angle).
-            const std::array<Case, 5> cases = {{
-                // Far camera in front: both formulations say visible.
-                {JPH::Vec3(0, 0, -0.5f), JPH::Vec3(0, 0, 0), 0.5f, JPH::Vec3(0, 0, 1), 0.5f, JPH::Vec3(0, 0, 2), false},
-                // Close camera in front, just above surface: visible.
-                {JPH::Vec3(0, 0, -0.5f), JPH::Vec3(0, 0, 0), 0.5f, JPH::Vec3(0, 0, 1), 0.5f, JPH::Vec3(0, 0, 0.1f), false},
-                // Camera behind apex but still outside sphere? apex -0.5, cam -0.6,
-                // old apex formulation: toCluster = apex - cam = 0.1, dot=+1 >=0.5 => CULL (false positive).
-                // Sphere: toCenter = 0 - (-0.6)=0.6, dot=0.6, dist=0.6, cutoff*dist+radius=0.8, 0.6>=0.8? false => visible (correct).
-                {JPH::Vec3(0, 0, -0.5f), JPH::Vec3(0, 0, 0), 0.5f, JPH::Vec3(0, 0, 1), 0.5f, JPH::Vec3(0, 0, -0.6f), false},
-                // Camera inside sphere but in front of apex: should still be visible (no singularity).
-                {JPH::Vec3(0, 0, -0.5f), JPH::Vec3(0, 0, 0), 0.5f, JPH::Vec3(0, 0, 1), 0.5f, JPH::Vec3(0, 0, -0.2f), false},
-                // Camera behind object, looking away: should cull.
-                {JPH::Vec3(0, 0, -0.5f), JPH::Vec3(0, 0, 0), 0.5f, JPH::Vec3(0, 0, 1), 0.5f, JPH::Vec3(0, 0, -2.0f), false}, // actually still not cull because axis outward, camera behind still sees back? Let's make axis opposite.
-            }};
-
-            // Re-implement both formulations in C++ to show old fails, new passes.
-            auto oldCulls = [](JPH::Vec3 apex, JPH::Vec3 axis, float cutoff, JPH::Vec3 cam) -> bool {
-                if (cutoff >= 1.0f) return false;
-                JPH::Vec3 toCluster = apex - cam;
-                float len = toCluster.Length();
-                if (len < 1e-5f) return false;
-                toCluster /= len;
-                return toCluster.Dot(axis) >= cutoff;
-            };
-            auto newCulls = [](JPH::Vec3 center, float radius, JPH::Vec3 axis, float cutoff, JPH::Vec3 cam) -> bool {
-                if (cutoff >= 1.0f) return false;
-                JPH::Vec3 toCenter = center - cam;
-                float dist = toCenter.Length();
-                if (dist < 1e-5f) return false;
-                return toCenter.Dot(axis) >= cutoff * dist + radius;
-            };
-
-            bool allOk = true;
-            for (size_t i = 0; i < cases.size(); ++i) {
-                const auto& c = cases[i];
-                bool oldResult = oldCulls(c.coneApex, c.axis, c.cutoff, c.camPos);
-                bool newResult = newCulls(c.sphereCenter, c.radius, c.axis, c.cutoff, c.camPos);
-
-                // The critical case is index 2: old culls (true), new does not (false).
-                // That is the black square regression.
-                if (i == 2) {
-                    ZHLN::Test::ExpectTrue(oldResult); // old DOES falsely cull
-                    allOk &= ZHLN::Test::ExpectTrue(oldResult);
-                    ZHLN::Test::ExpectFalse(newResult); // new must NOT cull
-                    allOk &= ZHLN::Test::ExpectFalse(newResult);
-                    ZHLN::Println("    [INFO] case {} (camera behind apex): old culls={}, new culls={} (expected old=true false-positive, new=false).", i, oldResult, newResult);
-                } else {
-                    // For other cases, new should match expected shouldCull
-                    ZHLN::Test::ExpectEq(newResult, c.shouldCull);
-                    allOk &= ZHLN::Test::ExpectEq(newResult, c.shouldCull);
-                }
-            }
-
-            if (!allOk) {
-                return std::unexpected(MeshShaderTestError::MeshletConeCullingFalsePositive);
-            }
-            return {};
-        }
-
-        // ====================================================================
-        // 6. Close-up render must not produce a black hole where meshlet culled
-        // ====================================================================
+        // GPU regression for the DamagedHelmet visor black square: put the
+        // camera right up against a surface and check the mesh-shader path
+        // does not drop a meshlet the vertex path keeps. Both paths are
+        // rendered and compared, so what is asserted is a silhouette
+        // difference, not an absolute colour.
         //
-        // GPU regression: zoom in close to a surface (like DamagedHelmet visor
-        // in screenshot) and ensure mesh-shader path does not drop a meshlet.
-        // The test renders a single box at very close distance with mesh shading
-        // enabled vs disabled and checks that center pixels are not black.
+        // Two subjects, and only the second can exercise cone culling:
+        //
+        //   box     Every face is flat, so every normal in a meshlet is the
+        //           same, coneCutoff is 1.0, and ConeBackfaceCulledSphere
+        //           returns false on its first line. A box can never be cone
+        //           culled. It stays because it is what the original report
+        //           was filed against, and it still covers every non-cone way
+        //           a meshlet can go missing up close.
+        //
+        //   sphere  Curved, so a meshlet's normals span a real cone with a
+        //           half-angle under 90 degrees and its bounding sphere sits
+        //           behind the patch it bounds. This is the subject where the
+        //           apex formulation flipped as the camera passed the apex
+        //           plane and culled a meshlet the camera was looking straight
+        //           at -- the bug this test exists to keep out.
+        //
+        // The box used to be spawned with half-extents of 1.0 with the camera
+        // 0.6 out, which put the camera INSIDE it: the frame was the sky seen
+        // through backfaces, the centre was never black, and the test passed
+        // without a single meshlet in view. Half-extents of 0.5 are what the
+        // comment always claimed -- front face at z = +0.5, camera 0.1 in
+        // front of it.
+        struct CloseupSubject {
+            const char* name;
+            bool        sphere;
+        };
+
         std::expected<void, ZHLN::ErrorCode> meshlet_closeup_no_black_hole() {
             auto acquire = [](bool meshShading) {
                 return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions{
@@ -749,7 +695,7 @@ struct MeshShaderTestSuite {
                 return {};
             }
 
-            auto setupCloseup = [](ZHLN::Engine& engine) {
+            auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) {
                 auto& reg = engine.GetRegistry();
                 auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -771,20 +717,25 @@ struct MeshShaderTestSuite {
                 }
                 engine.GetRenderContext().SetAAState(ZHLN::AAState{.mode = ZHLN::AAMode::None});
 
-                // Camera very close to origin, looking at a box that fills screen.
-                // This is the scenario where apex-based culling would cull front-facing
-                // meshlets and leave a black square.
+                // Camera 0.1-0.2m off the surface it is aimed at, the regime
+                // where the apex formulation used to cull what it was facing.
                 auto& cam = engine.GetCamera();
-                cam.position = JPH::Vec3(0.0f, 0.0f, 0.6f);
                 cam.yaw = -90.0f;
                 cam.pitch = 0.0f;
                 cam.fov = 30.0f;
                 cam.nearZ = 0.01f;
                 cam.farZ = 10.0f;
 
-                // One box at origin, 1m size, so its front face is 0.1m from camera.
-                ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
-                    ZHLN::PrefabFactory::SpawnParams{.position = JPH::RVec3(0, 0, 0), .createPhysics = false});
+                const ZHLN::PrefabFactory::SpawnParams atOrigin {.position = JPH::RVec3(0, 0, 0), .createPhysics = false};
+                if (subject.sphere) {
+                    // Radius 0.5: surface at z = +0.5, camera 0.20 in front of it.
+                    cam.position = JPH::Vec3(0.0f, 0.0f, 0.70f);
+                    ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, atOrigin);
+                } else {
+                    // Half-extents 0.5: front face at z = +0.5, camera 0.10 in front of it.
+                    cam.position = JPH::Vec3(0.0f, 0.0f, 0.60f);
+                    ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(0.5f, 0.5f, 0.5f), atOrigin);
+                }
             };
 
             constexpr float dt = 1.0f / 60.0f;
@@ -798,58 +749,85 @@ struct MeshShaderTestSuite {
                 return LoadPPM(path);
             };
 
-            setupCloseup(*vertexEngine);
-            const Image vertexImg = capture(*vertexEngine, "headless_meshlet_closeup_vertex.ppm");
+            // Both captures for one path are taken before the other path is
+            // acquired: the pool is a single slot, so acquiring the mesh
+            // engine destroys the vertex engine (see HeadlessEngineFixture).
+            const std::array<CloseupSubject, 2> subjects {
+                CloseupSubject {.name = "box"},
+                CloseupSubject {.name = "sphere", .sphere = true},
+            };
+
+            std::array<Image, 2> vertexFrames {};
+            std::array<Image, 2> meshFrames {};
+
+            for (size_t i = 0; i < subjects.size(); ++i) {
+                if (i > 0) {
+                    ZHLN::Test::Headless::ResetScene(*vertexEngine);
+                }
+                setupCloseup(*vertexEngine, subjects[i]);
+                vertexFrames[i] = capture(*vertexEngine, std::string("headless_meshlet_closeup_") + subjects[i].name + "_vertex.ppm");
+            }
 
             auto meshEngine = acquire(true);
             if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
-            setupCloseup(*meshEngine);
-            const Image meshImg = capture(*meshEngine, "headless_meshlet_closeup_mesh.ppm");
 
-            if (!(ZHLN::Test::ExpectTrue(vertexImg.Valid()) && ZHLN::Test::ExpectTrue(meshImg.Valid()))) {
-                return std::unexpected(MeshShaderTestError::RenderOutputBlank);
-            }
-
-            // Check center region (where box should be) is not black.
-            // A falsely culled meshlet leaves a 120x120 or smaller black square.
-            const int cx = meshImg.width / 2;
-            const int cy = meshImg.height / 2;
-            const int half = 20;
-            uint32_t blackPixels = 0;
-            uint32_t total = 0;
-            for (int y = cy - half; y <= cy + half; ++y) {
-                for (int x = cx - half; x <= cx + half; ++x) {
-                    if (x < 0 || x >= meshImg.width || y < 0 || y >= meshImg.height) continue;
-                    size_t idx = (static_cast<size_t>(y) * meshImg.width + x) * 3;
-                    uint8_t r = meshImg.rgb[idx + 0];
-                    uint8_t g = meshImg.rgb[idx + 1];
-                    uint8_t b = meshImg.rgb[idx + 2];
-                    // Black square detection: near 0,0,0
-                    if (r < 10 && g < 10 && b < 10) ++blackPixels;
-                    ++total;
+            for (size_t i = 0; i < subjects.size(); ++i) {
+                if (i > 0) {
+                    ZHLN::Test::Headless::ResetScene(*meshEngine);
                 }
+                setupCloseup(*meshEngine, subjects[i]);
+                meshFrames[i] = capture(*meshEngine, std::string("headless_meshlet_closeup_") + subjects[i].name + "_mesh.ppm");
             }
 
-            const double blackRate = total > 0 ? static_cast<double>(blackPixels) / total : 1.0;
-            ZHLN::Println("    [INFO] closeup center {}x{} region: {} black / {} total ({:.2f}%).", half * 2 + 1, half * 2 + 1, blackPixels, total, blackRate * 100.0);
+            for (size_t i = 0; i < subjects.size(); ++i) {
+                const Image& vertexImg = vertexFrames[i];
+                const Image& meshImg   = meshFrames[i];
+                const char*  name      = subjects[i].name;
 
-            // Also compare mesh vs vertex: they should be nearly identical.
-            const ImageDiff diff = CompareImages(vertexImg, meshImg, 2);
-            ZHLN::Println("    [INFO] mesh vs vertex closeup: over-tol {}, mask mismatch {}, mean delta {}.", diff.fractionOverTol, diff.maskMismatchRate, diff.meanChannelDelta);
+                if (!(ZHLN::Test::ExpectTrue(vertexImg.Valid()) && ZHLN::Test::ExpectTrue(meshImg.Valid()))) {
+                    return std::unexpected(MeshShaderTestError::RenderOutputBlank);
+                }
 
-            // If >20% of center is black, it's the black hole bug.
-            if (!ZHLN::Test::ExpectLe(blackRate, 0.20)) {
-                WriteDiffImage("headless_meshlet_closeup_diff.ppm", vertexImg, meshImg);
-                ZHLN::Println("    [FAIL] Black hole detected in closeup meshlet render — {}% center black.", blackRate * 100.0);
-                return std::unexpected(MeshShaderTestError::MeshletBlackHoleDetected);
-            }
+                // A falsely culled meshlet leaves a black square in the middle
+                // of the frame where the surface should be.
+                const int cx = meshImg.width / 2;
+                const int cy = meshImg.height / 2;
+                const int half = 20;
+                uint32_t blackPixels = 0;
+                uint32_t total = 0;
+                for (int y = cy - half; y <= cy + half; ++y) {
+                    for (int x = cx - half; x <= cx + half; ++x) {
+                        if (x < 0 || x >= meshImg.width || y < 0 || y >= meshImg.height) continue;
+                        size_t idx = (static_cast<size_t>(y) * meshImg.width + x) * 3;
+                        uint8_t r = meshImg.rgb[idx + 0];
+                        uint8_t g = meshImg.rgb[idx + 1];
+                        uint8_t b = meshImg.rgb[idx + 2];
+                        if (r < 10 && g < 10 && b < 10) ++blackPixels;
+                        ++total;
+                    }
+                }
 
-            // Also ensure paths don't diverge too much.
-            if (!ZHLN::Test::ExpectLe(diff.maskMismatchRate, 0.10)) {
-                WriteDiffImage("headless_meshlet_closeup_diff.ppm", vertexImg, meshImg);
-                return std::unexpected(MeshShaderTestError::PathDivergence);
+                const double blackRate = total > 0 ? static_cast<double>(blackPixels) / total : 1.0;
+                ZHLN::Println("    [INFO] {} closeup center {}x{} region: {} black / {} total ({:.2f}%).", name, half * 2 + 1, half * 2 + 1,
+                    blackPixels, total, blackRate * 100.0);
+
+                // Mesh vs vertex: the same surface, so the silhouette must match.
+                const ImageDiff diff = CompareImages(vertexImg, meshImg, 2);
+                ZHLN::Println("    [INFO] {} mesh vs vertex closeup: over-tol {}, mask mismatch {}, mean delta {}.", name,
+                    diff.fractionOverTol, diff.maskMismatchRate, diff.meanChannelDelta);
+
+                if (!ZHLN::Test::ExpectLe(blackRate, 0.20)) {
+                    WriteDiffImage(std::string("headless_meshlet_closeup_") + name + "_diff.ppm", vertexImg, meshImg);
+                    ZHLN::Println("    [FAIL] Black hole detected in {} closeup meshlet render - {}% center black.", name, blackRate * 100.0);
+                    return std::unexpected(MeshShaderTestError::MeshletBlackHoleDetected);
+                }
+
+                if (!ZHLN::Test::ExpectLe(diff.maskMismatchRate, 0.10)) {
+                    WriteDiffImage(std::string("headless_meshlet_closeup_") + name + "_diff.ppm", vertexImg, meshImg);
+                    return std::unexpected(MeshShaderTestError::PathDivergence);
+                }
             }
 
             return {};

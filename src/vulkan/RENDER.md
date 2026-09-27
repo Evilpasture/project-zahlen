@@ -126,19 +126,29 @@ This encapsulates `vkCmdBeginRendering`, sets up the dynamic viewports, scissors
 ### Automatic frame-graph instrumentation
 
 `CompileTimeFrameGraph` can instrument every pass at its execution boundary. Pass
-recording lambdas should not contain profiler scopes or breadcrumb calls:
+bodies should not contain profiler scopes or breadcrumb calls:
+
+A pass is a self-describing struct, not a closure: it inherits
+`Vk::RenderPass<"Name", Usages...>` and implements `operator()`. The name in that
+inheritance is the single source of truth for both systems.
 
 ```cpp
 enum class Stage : uint8_t { GBuffer, Lighting, PostProcess };
 Profiler::GpuProfiler<Stage> profiler;
 Vk::GPUDiagnostics diagnostics;
 
-// The pass name is the single source of truth for both systems.
-auto graph = Vk::CompileTimeFrameGraph(
-    Vk::MakePass<"Lighting", Vk::ShaderRead<GBuffer>, Vk::ColorWrite<Hdr>>(
-        [](auto& ctx) { RecordLighting(ctx.Cmd()); }
-    )
-);
+struct LightingPass: Vk::RenderPass<"Lighting", Vk::ShaderRead<GBuffer>, Vk::ColorWrite<Hdr>> {
+    RenderContext::Impl& impl;
+
+    // A raster pass that wants the automatic render-pass wrapper takes the
+    // context; one that opens its own `Vk::DynamicPass` takes the command
+    // buffer.
+    void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
+        RecordLighting(impl, ctx.Cmd());
+    }
+};
+
+auto graph = Vk::MakePassPack(LightingPass {impl}).BuildGraph();
 
 graph.Execute(cmd, binder, frameIndex, &profiler, &diagnostics);
 ```

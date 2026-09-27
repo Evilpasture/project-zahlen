@@ -52,8 +52,7 @@ class GeometryManager {
 
     void Destroy(BufferHandle handle);
 
-    using ResolveError = GenerationalPool<NativeMesh, 8192, BufferHandle>::Error;
-    [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> std::expected<NativeMesh*, ResolveError> { return _buffers.Resolve(handle); }
+    [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> NativeMesh* { return _buffers.Resolve(handle); }
 
 
     void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, mesh); }

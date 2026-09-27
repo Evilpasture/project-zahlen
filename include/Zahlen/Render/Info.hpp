@@ -13,6 +13,8 @@ namespace ZHLN {
 
 enum class RenderFeatureError : uint8_t {
     FeatureNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device"> {}) = 1,
+    UnresolvedMeshHandle
+        ZHLN_ANNOTATION(ZHLN::Description<"The mesh names a buffer handle that does not resolve to a live GPU buffer"> {}) = 2,
 };
 
 namespace Shadows {

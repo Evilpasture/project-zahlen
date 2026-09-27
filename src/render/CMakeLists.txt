@@ -31,11 +31,42 @@ set(RAW_RENDER_SOURCES
     Resources.cpp
     RenderDocInit.cpp
     RenderProcedural.cpp
-    RenderPasses.cpp
     RenderSetup.cpp
     pipelines/ComputeSimPipeline.cpp
     pipelines/DeferredPbrPipeline.cpp
     pipelines/UIPipeline.cpp
+    features/PostProcessFeature.cpp
+    features/ShadowRenderer.cpp
+    features/VolumetricFogSystem.cpp
+    passes/SceneDraw.cpp
+    passes/aa/FXAAPass.cpp
+    passes/aa/MLAAPass.cpp
+    passes/aa/SMAAPasses.cpp
+    passes/aa/TAAPass.cpp
+    passes/culling/ClusterCullingPass.cpp
+    passes/culling/HiZGeneratePass.cpp
+    passes/forward/ForwardPass.cpp
+    passes/forward/OpaqueSceneCopyPass.cpp
+    passes/forward/TranslucentPrePass.cpp
+    passes/gbuffer/DecalPass.cpp
+    passes/gbuffer/GBufferBasePass.cpp
+    passes/gbuffer/GBufferResolvePass.cpp
+    passes/gbuffer/ViewmodelPass.cpp
+    passes/lighting/ClusteredLightingPass.cpp
+    passes/lighting/GtaoPass.cpp
+    passes/lighting/ReflectionCompositePass.cpp
+    passes/lighting/RtrHalfTracePass.cpp
+    passes/lighting/ShadowPass.cpp
+    passes/lighting/TranslucentReflectionPass.cpp
+    passes/lighting/ReflectionInputs.cpp
+    passes/postprocess/BloomPass.cpp
+    passes/postprocess/HdrDenoisePass.cpp
+    passes/simulation/MeshParticleUpdatePass.cpp
+    passes/simulation/ParticleUpdatePass.cpp
+    passes/volumetric/VolumetricFogInjectPass.cpp
+    passes/volumetric/VolumetricIntegrationPass.cpp
+    passes/volumetric/VolumetricLightInjectPass.cpp
+    passes/volumetric/VolumetricTemporalPass.cpp
 )
 
 zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})

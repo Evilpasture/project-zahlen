@@ -34,11 +34,10 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
-    const auto& voxelDispatch = volumetricClearPass.fixedDispatchSize;
-    if (voxelDispatch[0] == 0 || voxelDispatch[1] == 0 || voxelDispatch[2] == 0) {
+    const VkExtent3D voxelExt = fog.VoxelDispatchExtent();
+    if (voxelExt.width == 0 || voxelExt.height == 0 || voxelExt.depth == 0) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
-    const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
     auto assign = [&](auto& member, auto e) -> std::expected<void, ErrorCode> {
         if (!e) {

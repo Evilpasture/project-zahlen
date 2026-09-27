@@ -36,6 +36,9 @@
 #include <Zahlen/Vertex.hpp>
 #include "GpuAbi.hpp"
 #include "ui/UIRenderer.hpp"
+#include "features/PostProcessFeature.hpp"
+#include "features/ShadowRenderer.hpp"
+#include "features/VolumetricFogSystem.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -143,13 +146,6 @@ using SMAABlendLayout             = Vk::ReflectedLayout;
 using LightingLayout              = Vk::ReflectedLayout;
 using ReflectionLayout            = Vk::ReflectedLayout;
 using BlitLayout                  = Vk::ReflectedLayout;
-using BloomThresholdCSLayout      = Vk::ReflectedLayout;
-using KawaseCSLayout              = Vk::ReflectedLayout;
-using VolumetricClearLayout       = Vk::ReflectedLayout;
-using VolumetricFogInjectLayout   = Vk::ReflectedLayout;
-using VolumetricLightInjectLayout = Vk::ReflectedLayout;
-using VolumetricIntegrationLayout = Vk::ReflectedLayout;
-using VolumetricTemporalLayout    = Vk::ReflectedLayout;
 using CullingLayout               = Vk::ReflectedLayout;
 using HiZGenerateLayout           = Vk::ReflectedLayout;
 using ClusterCullingLayout        = Vk::ReflectedLayout;
@@ -287,6 +283,13 @@ struct RenderContext::Impl {
 
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
+    // Multi-pass subsystems. Each owns the pipelines and scratch assets its
+    // passes need, so a pass is a description of recording work rather than a
+    // holder of GPU state.
+    ShadowRenderer      shadows;
+    VolumetricFogSystem fog;
+    PostProcessFeature  postProcess;
+
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
     std::optional<Vk::ScopedDeletionQueue> activeQueueGuard;
@@ -342,7 +345,6 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::Buffer>                                      indirectCommandsBuffersPass2;
         DoubleBuffered<Vk::Buffer>                                      secondPassCandidatesBuffers;
         DoubleBuffered<Vk::Buffer>                                      secondPassCountBuffers;
-        DoubleBuffered<Vk::Buffer>                                      shadowIndirectBuffers;
         DoubleBuffered<Vk::Buffer>                                      jointBuffers;
         DoubleBuffered<Vk::AccelerationStructure>                       tlas;
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
@@ -406,11 +408,6 @@ struct RenderContext::Impl {
 
     Vk::Sampler blueNoiseSampler;
 
-    Vk::Image      volumetricNoiseImage;
-    Vk::ImageView  volumetricNoiseView;
-    VkImageViewCreateInfo volumetricNoiseViewInfo {};
-
-
     Vk::FullscreenPass<TAALayout>        taaPass;
     Vk::FullscreenPass<FXAALayout>       fxaaPass;
     Vk::FullscreenPass<MLAALayout>       mlaaPass;
@@ -423,42 +420,13 @@ struct RenderContext::Impl {
     Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
     Vk::FullscreenPass<BlitLayout>       blitPass;
 
-    Vk::DynamicComputePass bloomThresholdCS;
-    Vk::DynamicComputePass hdrDenoiseCS;
-    Vk::DynamicComputePass rtrHalfCS;
-    Vk::DynamicComputePass gtaoCS;
-    Vk::DynamicComputePass bloomDownCS;
-    Vk::DynamicComputePass bloomUpCS;
-    Vk::HeapPassBindings bloomThresholdHeapBindings;
-    Vk::HeapPassBindings hdrDenoiseHeapBindings;
-    Vk::HeapPassBindings rtrHalfHeapBindings;
-    Vk::HeapPassBindings gtaoHeapBindings;
-    Vk::HeapPassBindings bloomDownHeapBindings;
-    Vk::HeapPassBindings bloomUpHeapBindings;
-
     Vk::FixedComputePass clusterBoundsPass;
     Vk::FixedComputePass clusterCullingPass;
     Vk::DynamicComputePass cullingPass;
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
-    Vk::FixedDoubleBufferedComputePass<VolumetricClearLayout> volumetricClearPass;
-    Vk::FixedDoubleBufferedComputePass<VolumetricFogInjectLayout> volumetricFogInjectPass;
-    Vk::FixedDoubleBufferedComputePass<VolumetricLightInjectLayout> volumetricLightInjectPass;
-    Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
-    Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout> volumetricTemporalPass;
-
-
     Vk::PipelineLayout skinningPipelineLayout;
-
-    // TODO(ShadowRenderer): viable, but it belongs to a future "pass object"
-    VkPipelineLayout   shadowPipelineLayout         = VK_NULL_HANDLE;
-    VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE;
-
-    Vk::TypedPipeline<0, true> shadowPipeline;
-    Vk::TypedPipeline<0, true> punctualShadowPipeline;
-
-    Vk::TypedPipeline<0, true> shadowMeshPipeline;
 
     bool enableMeshShading = true;
 
@@ -517,13 +485,6 @@ struct RenderContext::Impl {
     Vk::ReflectedLayout cullingLayout;
     Vk::DynamicComputePass hizGeneratePass;
     Vk::ReflectedLayout hizDescLayout;
-
-    Vk::ReflectedLayout bloomThresholdCSLayout;
-    Vk::ReflectedLayout hdrDenoiseCSLayout;
-    Vk::ReflectedLayout rtrHalfCSLayout;
-    Vk::ReflectedLayout gtaoCSLayout;
-    Vk::ReflectedLayout bloomDownCSLayout;
-    Vk::ReflectedLayout bloomUpCSLayout;
 
     Vk::ReflectedLayout clusterCullingDescLayout;
     Vk::ReflectedLayout clusterBoundsDescLayout;
@@ -670,8 +631,6 @@ struct RenderContext::Impl {
 
 
     uint32_t nextMorphDeltaIndex = 0;
-    uint32_t smaaAreaTexIdx      = 0;
-    uint32_t smaaSearchTexIdx    = 0;
     uint32_t blueNoiseTexIdx     = 0;
     uint32_t blueNoiseWidth      = 0;
     uint32_t blueNoiseHeight     = 0;
@@ -718,8 +677,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitCorePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();
     [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
-    [[nodiscard]] std::expected<void, ErrorCode> BuildVolumetricPipelines();
-    [[nodiscard]] std::expected<void, ErrorCode> BakeSMAALUTs();
 
     struct alignas(16) ComputePushConstants {
         VkDeviceAddress       particleBufferAddr;
@@ -789,55 +746,8 @@ struct RenderContext::Impl {
     };
     static_assert(sizeof(UIObjectConstants) == 96);
 
-    struct alignas(16) VolumetricFogPushConstants {
-        float density;
-        float heightFalloff;
-        float heightOffset;
-        float anisotropy;
-
-        float scatteringColor[3];
-        float noiseScale;
-
-        float absorptionColor[3];
-        float noiseSpeed;
-
-        float emissiveColor[3];
-        float noiseIntensity;
-
-        uint32_t volumeCount;
-        uint32_t enableNoise;
-        uint32_t _pad0;
-        uint32_t _pad1;
-    };
-    static_assert(sizeof(VolumetricFogPushConstants) == 80);
-
-    struct alignas(16) VolumetricLightInjectPushConstants {
-        float    scatteringIntensity;
-        float    ambientIntensity;
-        float    phaseAnisotropy;
-        uint32_t enableShadows;
-    };
-    static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
-
-    struct alignas(16) VolumetricTemporalPushConstants {
-        float    temporalWeight;
-        float    clampStrength;
-        uint32_t resetHistory;
-        uint32_t _pad;
-    };
-    static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
-
     using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
     using PPPushConstants = ScenePassPushConstants;
-
-    struct DecalPushConstants {
-        JPH::Mat44 worldMatrix;
-        JPH::Mat44 clipToLocal;
-        uint32_t   albedoIndex;
-        uint32_t   normalIndex;
-        float      roughness;
-        float      metallic;
-    };
 
     struct alignas(8) SkinningConstants {
         VkDeviceAddress inPosAddr;
@@ -862,68 +772,15 @@ struct RenderContext::Impl {
         float    distortion;
     };
 
-    struct KawasePushConstants {
-        int   mode;
-        float rcpWidth;
-        float rcpHeight;
-        float glowIntensity;
-    };
-
-    struct RtrHalfPushConstants {
-        uint32_t halfRes[2];
-        uint32_t _pad[2];
-    };
-
-    struct GtaoPushConstants {
-        uint32_t halfRes[2];
-        float    rcpFullRes[2];
-        float    time;
-        float    aoRadius;
-        float    aoBias;
-        float    aoPower;
-        uint32_t giSamples;
-        JPH::Mat44 invViewProj;
-        JPH::Mat44 viewProj;
-    };
-
-    struct HdrAtrousPushConstants {
-        uint32_t stepSize;
-        float    phiDepth;
-        float    phiNormal;
-        uint32_t _pad;
-    };
-
-    struct BlitPushConstants {
-        float vignetteIntensity;
-        float vignettePower;
-        int   fullBright;
-        float exposure;
-        float bloomStrength;
-        float contrast;
-        float saturation;
-        int   tonemapper;
-        float colorFilter[3];
-        float _padding;
-    };
-    static_assert(sizeof(BlitPushConstants) == 48, "BlitPushConstants must exactly mirror blit.slang");
-    static_assert(
-        offsetof(BlitPushConstants, colorFilter) == 32 && offsetof(BlitPushConstants, _padding) == 44,
-        "BlitPushConstants field offsets must exactly mirror blit.slang"
-    );
-
-    struct SmaaPushConstants {
-        float rtMetrics[4];
-    };
-
+    // The payloads still declared here are the ones with no single pass to
+    // live in: skinning, baking and the shared instance-draw constants are
+    // reached from more than one place. Every payload that belongs to exactly
+    // one pass is declared next to that pass and asserted there.
     static_assert(
         (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> && GpuAbi::ScenePassPayload<MeshParticleComputePush>
          && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants>
-         && GpuAbi::ScenePassPayload<VolumetricFogPushConstants> && GpuAbi::ScenePassPayload<VolumetricLightInjectPushConstants>
-         && GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants> && GpuAbi::ScenePassPayload<ScenePassPushConstants> && GpuAbi::ScenePassPayload<DecalPushConstants>
-         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<KawasePushConstants>
-         && GpuAbi::ScenePassPayload<RtrHalfPushConstants> && GpuAbi::ScenePassPayload<GtaoPushConstants> && GpuAbi::ScenePassPayload<HdrAtrousPushConstants>
-         && GpuAbi::ScenePassPayload<BlitPushConstants> && GpuAbi::ScenePassPayload<SmaaPushConstants>),
-        "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
+         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<ScenePassPushConstants>),
+        "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
     void ProvokeDeviceLostInternal() const;
@@ -939,8 +796,6 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
-    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
-    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
     [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
@@ -952,7 +807,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> BuildLightingPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildReflectionPipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildBlitPipeline();
-    [[nodiscard]] std::expected<void, ErrorCode> BuildBloomPipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHangGpuPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> InitPostProcessing();
     [[nodiscard]] std::expected<void, ErrorCode> InitCSGPipelines();
@@ -967,7 +821,9 @@ struct RenderContext::Impl {
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
 
-    void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
+    // The scene frame is assembled by the graph builder in
+    // RenderGraphBuilder.cpp; the compute frame lives in
+    // pipelines/ComputeSimPipeline.cpp next to the queue it is submitted on.
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
 
 
@@ -1051,98 +907,6 @@ struct GroupRange {
     uint32_t              start;
     uint32_t              count;
 };
-
-template <typename T, typename... Args>
-concept IsRenderPass = requires(T pass, Args&&... args) {
-    { pass.Execute(std::forward<Args>(args)...) };
-};
-
-template <typename Pass, typename... Args>
-    requires IsRenderPass<Pass, Args...>
-void RunPass(const Pass& pass, Args&&... args) {
-    pass.Execute(std::forward<Args>(args)...);
-}
-
-namespace Passes {
-
-struct ShadowPass {
-    static constexpr uint32_t kCubemapFaceMask  = 0x3F;
-    static constexpr uint32_t kCascadeViewMask  = 0x0F;
-    static constexpr float    kShadowClearDepth = 1.0f;
-    void                      Execute(const FrameRecorder& recorder) const noexcept;
-};
-
-struct MainPass1 {
-    void Execute(
-        const FrameRecorder&                                                                                       recorder,
-        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
-    ) const noexcept;
-};
-struct MainPass2 {
-    void Execute(
-        const FrameRecorder&                                                                                       recorder,
-        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
-    ) const noexcept;
-};
-
-struct DeferredLightingPass {
-    [[nodiscard]] auto Execute(
-        const FrameRecorder&                                                                               recorder,
-        SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> in
-    ) const noexcept -> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
-};
-
-struct TranslucentPrePass {
-    void Execute(
-        const FrameRecorder&                                             recorder,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         norm_att,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth_att
-    ) const noexcept;
-};
-
-struct ForwardPass {
-    void Execute(
-        const FrameRecorder&                                             recorder,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>         litColor,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depth
-    ) const noexcept;
-};
-
-struct BloomPass {
-    [[nodiscard]] auto Execute(const FrameRecorder& recorder, Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor) const noexcept
-        -> Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
-};
-
-struct AAPass {
-    using SceneRO      = SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
-    using ColorImageRO = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
-
-    [[nodiscard]] auto Execute(const FrameRecorder& recorder, SceneRO in) const noexcept -> SceneRO;
-
-  private:
-    [[nodiscard]] auto ExecuteTAA(VkCommandBuffer cmd, const FrameRecorder& recorder, const SceneRO& in, ColorImageRO color_ro) const noexcept -> ColorImageRO;
-    [[nodiscard]] auto ExecuteFXAA(VkCommandBuffer cmd, const FrameRecorder& recorder, const SceneRO& in, ColorImageRO color_ro) const noexcept -> ColorImageRO;
-    [[nodiscard]] auto ExecuteSMAA(VkCommandBuffer cmd, const FrameRecorder& recorder, const SceneRO& in, ColorImageRO color_ro) const noexcept -> ColorImageRO;
-};
-
-struct BlitPass {
-    void Execute(
-        const FrameRecorder&                                     recorder,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
-        Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
-        Vk::HeapBlockBase                                        blockBase,
-        int                                                      fullBright
-    ) const noexcept;
-};
-
-struct ViewmodelPass {
-    void Execute(
-        const FrameRecorder&                                                                                       recorder,
-        SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
-    ) const noexcept;
-};
-
-}
 
 inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     std::ifstream file(path, std::ios::ate | std::ios::binary);

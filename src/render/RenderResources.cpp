@@ -426,49 +426,6 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
     _impl->textureManager.Unload(handle);
 }
 
-namespace {
-
-[[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
-    const size_t count = static_cast<size_t>(size) * size * size;
-    std::vector<uint8_t> pixels(count * 4);
-    for (uint32_t z = 0; z < size; ++z) {
-        for (uint32_t y = 0; y < size; ++y) {
-            for (uint32_t x = 0; x < size; ++x) {
-                const float  n   = Math::TileableFbm3(
-                    {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F},
-                    static_cast<float>(size)
-                );
-                const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
-                const size_t idx = static_cast<size_t>((z * size + y) * size + x) * 4;
-                pixels[idx + 0]  = v;
-                pixels[idx + 1]  = v;
-                pixels[idx + 2]  = v;
-                pixels[idx + 3]  = 255;
-            }
-        }
-    }
-    return pixels;
-}
-
-}
-
-auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
-    constexpr uint32_t kVolumetricNoiseSize = 64;
-
-    const std::vector<uint8_t> pixels = Generate3DNoiseData(kVolumetricNoiseSize);
-
-    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
-        .Upload3D(
-            {.data = pixels.data(), .width = kVolumetricNoiseSize, .height = kVolumetricNoiseSize, .depth = kVolumetricNoiseSize,
-             .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
-        )
-        .transform([&](Vk::TextureResource tex) -> void {
-            volumetricNoiseImage    = std::move(tex.image);
-            volumetricNoiseView     = std::move(tex.view);
-            volumetricNoiseViewInfo = tex.viewInfo;
-        });
-}
-
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -595,7 +552,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -711,14 +668,18 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             if (!impl->ctx.RayTracingSupported()) {
                 return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
-            return impl->geometry.Resolve(mesh.posBuffer)
-                .transform_error([](auto err) -> ErrorCode { return err; })
-                .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
-                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
-                    return BuildContext {
-                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
-                    };
-                });
+            // The only caller chain that ever read the resolve failure: it is
+            // logged as a warning by MeshBuilder and the glTF importer, so it
+            // keeps a code of its own rather than collapsing into nullopt.
+            auto* pos = impl->geometry.Resolve(mesh.posBuffer);
+            if (pos == nullptr) [[unlikely]] {
+                return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+            }
+
+            auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
+            return BuildContext {
+                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
+            };
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
             b.geom = {

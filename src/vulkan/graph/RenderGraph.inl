@@ -669,34 +669,69 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         std::apply(
             [&](const auto&... sub) { (WriteScopeEnd(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
         );
-    } else if constexpr (requires { pass.record; }) {
-        // A leaf pass names its own record function. The branch is keyed on that
-        // member rather than assuming it: a group has no single record function,
-        // and GCC instantiates the common part of this body even for the group,
-        // so naming `PassType::RecordFn` outside a branch that exists for leaf
-        // passes is a hard error there (clang is lazier about it).
-        using RecordFn             = typename PassType::RecordFn;
-        using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
-        using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
-        constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+    } else {
+        // A leaf pass is a callable: the graph dispatches straight to
+        // `operator()`. There is no record member to look up, and the branch
+        // structure below is chosen entirely from the pass's own signature --
+        // no lambda-introspection, and no separate factory for graphics and
+        // compute passes.
+        static_assert(
+            FrameGraphPass<PassType>,
+            "a graph pass must either be a Vk::Fork group (static constexpr is_fork) or satisfy Vk::FrameGraphPass by inheriting Vk::RenderPass<\"Name\", Usages...>"
+        );
 
-        if constexpr (is_graphics) {
-            if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
-                pass.record(cmd);
+        using ColorWrites = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
+        using DepthWrites = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
+
+        constexpr bool is_raster = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+
+        if constexpr (is_raster) {
+            using AutoCtx = RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...>;
+
+            // Automatic render-pass wrapper: the executor opens the dynamic
+            // render pass over the pass's color and depth writes, hands the
+            // pass a context, and closes it when the pass returns.
+            if constexpr (std::is_invocable_v<PassType, AutoCtx&>) {
+                AutoCtx ctx(cmd, bindings);
+                pass(ctx);
+            }
+            // Manual render-pass control: the pass builds its own
+            // `Vk::DynamicPass`, which is what a pass that records through
+            // secondary command buffers (the GBuffer passes) has to do.
+            else if constexpr (std::is_invocable_v<PassType, VkCommandBuffer>) {
+                pass(cmd);
             } else {
-                RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(cmd, bindings);
-                pass.record(ctx);
+                static_assert(
+                    TemplatedDetail::DependentFalse<PassType>,
+                    "raster pass must implement operator()(RasterPassContext&) or operator()(VkCommandBuffer)"
+                );
             }
         } else {
-            pass.record(cmd);
+            // Compute and transfer passes always record onto the raw command
+            // buffer: there is no attachment set to wrap.
+            static_assert(std::is_invocable_v<PassType, VkCommandBuffer>, "compute/transfer pass must implement operator()(VkCommandBuffer)");
+
+            if constexpr (std::is_invocable_v<PassType, VkCommandBuffer>) {
+                pass(cmd);
+            }
         }
 
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
-    } else {
-        static_assert(
-            TemplatedDetail::DependentFalse<PassType>, "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
-        );
     }
+}
+
+// RasterPassContextBase Definitions
+
+inline VkCommandBuffer RasterPassContextBase::Cmd() const noexcept {
+    return m_cmd;
+}
+
+inline VkExtent2D RasterPassContextBase::Extent() const noexcept {
+    return m_extent;
+}
+
+inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
+    m_extent = extent;
 }
 
 // RasterPassContext Definitions
@@ -705,8 +740,8 @@ template <typename ResourceList, typename ColorWrites, typename DepthWrites, siz
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
     VkCommandBuffer                                      cmd,
     const std::array<GraphResource, ResourceList::size>& bindings
-) noexcept: m_cmd(cmd) {
-    m_extent = {};
+) noexcept: RasterPassContextBase(cmd) {
+    SetExtent({});
     ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
 
     uint32_t color_count = 0;
@@ -719,7 +754,7 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .pNext                = nullptr,
         .flags                = 0,
-        .renderArea           = {.offset = {.x = 0, .y = 0}, .extent = m_extent},
+        .renderArea           = {.offset = {.x = 0, .y = 0}, .extent = Extent()},
         .layerCount           = 1,
         .viewMask             = 0,
         .colorAttachmentCount = color_count,
@@ -728,29 +763,19 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
         .pStencilAttachment   = nullptr,
     };
 
-    vkCmdBeginRendering(m_cmd, &rendering_info);
+    vkCmdBeginRendering(Cmd(), &rendering_info);
 
     const VkViewport viewport = {
-        .x = 0.0F, .y = 0.0F, .width = static_cast<float>(m_extent.width), .height = static_cast<float>(m_extent.height), .minDepth = 0.0F, .maxDepth = 1.0F
+        .x = 0.0F, .y = 0.0F, .width = static_cast<float>(Extent().width), .height = static_cast<float>(Extent().height), .minDepth = 0.0F, .maxDepth = 1.0F
     };
-    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = m_extent};
-    vkCmdSetViewport(m_cmd, 0, 1, &viewport);
-    vkCmdSetScissor(m_cmd, 0, 1, &scissor);
+    const VkRect2D scissor = {.offset = {.x = 0, .y = 0}, .extent = Extent()};
+    vkCmdSetViewport(Cmd(), 0, 1, &viewport);
+    vkCmdSetScissor(Cmd(), 0, 1, &scissor);
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::~RasterPassContext() noexcept {
-    vkCmdEndRendering(m_cmd);
-}
-
-template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-VkCommandBuffer RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::Cmd() const noexcept {
-    return m_cmd;
-}
-
-template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-VkExtent2D RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::Extent() const noexcept {
-    return m_extent;
+    vkCmdEndRendering(Cmd());
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
@@ -761,22 +786,22 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     TypeList<DImgs...> /*unused*/
 ) noexcept {
     (([&]() {
-         if (m_extent.width == 0) {
+         if (Extent().width == 0) {
              using Img       = Imgs;
              const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
              // Explicitly truncate the 3D extent down to 2D for attachment rendering
-             m_extent = {ext.width, ext.height};
+             SetExtent({ext.width, ext.height});
          }
      }()),
      ...);
 
-    if (m_extent.width == 0) {
+    if (Extent().width == 0) {
         (([&]() {
-             if (m_extent.width == 0) {
+             if (Extent().width == 0) {
                  using Img       = DImgs;
                  const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
                  // Explicitly truncate the 3D extent down to 2D for attachment rendering
-                 m_extent = {ext.width, ext.height};
+                 SetExtent({ext.width, ext.height});
              }
          }()),
          ...);
