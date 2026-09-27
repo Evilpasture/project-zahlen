@@ -3,11 +3,11 @@
 # ==============================================================================
 FROM archlinux:latest AS builder
 
+# Combine keyring update, full system upgrade, and package installation into ONE RUN
 RUN pacman -Sy --noconfirm && \
     pacman -S --needed --noconfirm archlinux-keyring && \
-    pacman -Syu --noconfirm
-
-RUN pacman -S --needed --noconfirm \
+    pacman -Syu --noconfirm && \
+    pacman -S --needed --noconfirm \
     base-devel \
     gcc \
     clang \
