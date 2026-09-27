@@ -722,15 +722,15 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 
 // RasterPassContextBase Definitions
 
-VkCommandBuffer RasterPassContextBase::Cmd() const noexcept {
+inline VkCommandBuffer RasterPassContextBase::Cmd() const noexcept {
     return m_cmd;
 }
 
-VkExtent2D RasterPassContextBase::Extent() const noexcept {
+inline VkExtent2D RasterPassContextBase::Extent() const noexcept {
     return m_extent;
 }
 
-void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
+inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
     m_extent = extent;
 }
 
