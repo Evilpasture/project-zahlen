@@ -319,6 +319,10 @@ That is true, if your compiler supports standard C++26 features. Otherwise, toug
 The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
 However, precompiled headers are buggy due to unknown internal compiler errors.
 Make sure to pass your compiled runtime `-stdlib=libc++` to the compiler and `-lc++abi` to the linker.
+Bloomberg Clang also needs `-fparameter-reflection` alongside `-freflection` for P3096 callable
+parameter inspection (or the unified `-freflection-latest` flag). The root CMake configuration
+probes and applies the supported flag through `zahlen_enable_reflection()`; independent consumers
+of the headers must enable it too.
 
 I'd love to give instructions but it took an entire morning of my life to just get it to work.
 

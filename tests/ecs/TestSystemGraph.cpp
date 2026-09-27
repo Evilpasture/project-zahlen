@@ -79,6 +79,7 @@ void DeclarativeReader(ReadQuery query) {
 }
 
 void WildcardRegistrySystem(ZHLN::ECS::Registry&) {}
+void PlainCallable(int, const double&) {} // callable inspection does not require ECS types
 void NullarySystem() { nullaryCalls.fetch_add(1); }
 void MultipleQueries(ZHLN::ECS::Query<const TestCompA>, ZHLN::ECS::Query<TestCompA&>,
                      ZHLN::ECS::Query<const TestCompB&>) {}
@@ -348,26 +349,38 @@ struct SystemGraphTestSuite {
             using ZHLN::ECS::Access;
             using ZHLN::ECS::ComponentAccess;
             using ZHLN::ECS::ComponentFamily;
-            using ZHLN::Reflect::SystemInspector;
+            using ZHLN::ECS::SystemSignature;
+            using ZHLN::Reflect::CallableInspector;
 
-            if (SystemInspector<&DeclarativeWriter>::Name() != "DeclarativeWriter" ||
-                SystemInspector<&DeclarativeReader>::Name() != "DeclarativeReader" ||
-                SystemInspector<&ReadStatic::Update>::Name() != "ReadStatic" ||
-                SystemInspector<ReadFunctor {}>::Name() != "ReadFunctor" ||
-                SystemInspector<ReadLambda>::Name().empty() ||
-                std::string_view(SystemInspector<ReadLambda>::NameCString()) == SystemInspector<ReadLambda2>::NameCString()) {
+            if (CallableInspector<&DeclarativeWriter>::Name() != "DeclarativeWriter" ||
+                CallableInspector<&DeclarativeReader>::Name() != "DeclarativeReader" ||
+                CallableInspector<&ReadStatic::Update>::Name() != "ReadStatic" ||
+                CallableInspector<ReadFunctor {}>::Name() != "ReadFunctor" ||
+                CallableInspector<ReadLambda>::Name().empty() ||
+                std::string_view(CallableInspector<ReadLambda>::NameCString()) == CallableInspector<ReadLambda2>::NameCString() ||
+                CallableInspector<&PlainCallable>::Name() != "PlainCallable") {
+                return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
+            }
+
+            int parameterCount = 0;
+            bool plainParameterTypesMatch = true;
+            CallableInspector<&PlainCallable>::ForEachParameter([&]<typename Param>() {
+                plainParameterTypesMatch &= parameterCount == 0 ? std::is_same_v<Param, int> : std::is_same_v<Param, const double&>;
+                ++parameterCount;
+            });
+            if (parameterCount != 2 || !plainParameterTypesMatch) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
 
             std::vector<ComponentAccess> writer, reader, multiple, wildcard, functor, lambda, member, nullary;
-            SystemInspector<&DeclarativeWriter>::PopulateAccessPattern(writer);
-            SystemInspector<&DeclarativeReader>::PopulateAccessPattern(reader);
-            SystemInspector<&MultipleQueries>::PopulateAccessPattern(multiple);
-            SystemInspector<&WildcardRegistrySystem>::PopulateAccessPattern(wildcard);
-            SystemInspector<ReadFunctor {}>::PopulateAccessPattern(functor);
-            SystemInspector<ReadLambda>::PopulateAccessPattern(lambda);
-            SystemInspector<&ReadStatic::Update>::PopulateAccessPattern(member);
-            SystemInspector<&NullarySystem>::PopulateAccessPattern(nullary);
+            SystemSignature<&DeclarativeWriter>::PopulateAccessPattern(writer);
+            SystemSignature<&DeclarativeReader>::PopulateAccessPattern(reader);
+            SystemSignature<&MultipleQueries>::PopulateAccessPattern(multiple);
+            SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern(wildcard);
+            SystemSignature<ReadFunctor {}>::PopulateAccessPattern(functor);
+            SystemSignature<ReadLambda>::PopulateAccessPattern(lambda);
+            SystemSignature<&ReadStatic::Update>::PopulateAccessPattern(member);
+            SystemSignature<&NullarySystem>::PopulateAccessPattern(nullary);
             const uint32_t idA = ComponentFamily::GetTypeID<TestCompA>();
             const uint32_t idB = ComponentFamily::GetTypeID<TestCompB>();
             if (writer.size() != 1 || writer[0].familyId != idA || writer[0].mode != Access::Write ||
@@ -433,8 +446,8 @@ struct SystemGraphTestSuite {
             nullaryCalls.store(0);
             if (before.GetSystemCount() != 7 || !before.IsSystemEnabled("ReadStatic") ||
                 !before.IsSystemEnabled("ReadFunctor") ||
-                !before.IsSystemEnabled(ZHLN::Reflect::SystemInspector<ReadLambda>::NameCString()) ||
-                !before.IsSystemEnabled(ZHLN::Reflect::SystemInspector<ReadLambda2>::NameCString())) {
+                !before.IsSystemEnabled(ZHLN::ECS::SystemSignature<ReadLambda>::NameCString()) ||
+                !before.IsSystemEnabled(ZHLN::ECS::SystemSignature<ReadLambda2>::NameCString())) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             before.Compile();

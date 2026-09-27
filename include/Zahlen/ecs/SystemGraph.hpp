@@ -5,11 +5,11 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/Reflection/System.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/SystemAccess.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
+#include <Zahlen/ecs/SystemSignature.hpp>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -169,11 +169,11 @@ class ZHLN_API SystemGraph {
   private:
     template <auto SystemFn>
     static auto MakeSystemInfo() -> SystemInfo {
-        using Inspector = ZHLN::Reflect::SystemInspector<SystemFn>;
+        using Signature = SystemSignature<SystemFn>;
         SystemInfo info;
-        info.name        = Inspector::NameCString();
-        info.update_func = &Inspector::template Invoke<ParameterResolver, ZHLN::SystemContext>;
-        Inspector::PopulateAccessPattern(info.access_pattern);
+        info.name        = Signature::NameCString();
+        info.update_func = &Signature::template Invoke<ParameterResolver, ZHLN::SystemContext>;
+        Signature::PopulateAccessPattern(info.access_pattern);
         return info;
     }
 

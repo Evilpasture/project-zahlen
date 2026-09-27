@@ -448,7 +448,13 @@ component accesses. `Res<T>` and `ResMut<T>` inject required services,
 `OptionRes<T>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
 `FrameIndex` avoid guessing between otherwise identical scalar types. The
 legacy `AddSystem(SystemInfo)` API remains available to external callers.
-System signature reflection syntax is isolated in `Core/Reflection/System.hpp`.
+`Reflect::CallableInspector` in `Core/Reflection/Callable.hpp` provides
+reusable P2996/P3096 callable names, parameter types, and invocation without
+an ECS dependency. `ECS::SystemSignature` in `ecs/SystemSignature.hpp` applies
+ECS-specific query/registry access rules to those parameter types. Bloomberg
+Clang needs `-freflection` plus P3096's `-fparameter-reflection` (or the
+unified `-freflection-latest`) for this API; `zahlen_enable_reflection()` probes
+and applies the supported flag.
 
 ### 3.2 Graphics Settings Flow
 

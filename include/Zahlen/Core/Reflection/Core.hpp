@@ -7,9 +7,19 @@
 #include <string_view>
 #include <type_traits>
 
-#if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+// GCC without Clang's __has_feature cannot parse even a short-circuited
+// __has_feature(...) expression in #if; probe it only inside its own guard.
+#if defined(__cpp_impl_reflection)
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_REFLECTION_AVAILABLE 1
+#elif defined(__has_feature)
+#if __has_feature(reflection)
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define ZHLN_REFLECTION_AVAILABLE 1
+#else
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define ZHLN_REFLECTION_AVAILABLE 0
+#endif
 #else
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_REFLECTION_AVAILABLE 0

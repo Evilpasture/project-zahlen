@@ -267,6 +267,7 @@ using ZHLN::FS::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
+using ZHLN::Reflect::CallableInspector;
 using ZHLN::Reflect::CustomFormatter;
 using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
@@ -277,7 +278,6 @@ using ZHLN::Reflect::GetField;
 using ZHLN::Reflect::GetFieldByName;
 using ZHLN::Reflect::SetFieldByName;
 using ZHLN::Reflect::StringToEnum;
-using ZHLN::Reflect::SystemInspector;
 using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
 }
@@ -397,6 +397,7 @@ using ZHLN::ECS::ResMut;
 using ZHLN::ECS::SparseSet;
 using ZHLN::ECS::SystemGraph;
 using ZHLN::ECS::SystemInfo;
+using ZHLN::ECS::SystemSignature;
 using ZHLN::ECS::Write;
 }
 

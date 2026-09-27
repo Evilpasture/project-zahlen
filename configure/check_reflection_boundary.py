@@ -13,7 +13,7 @@ Five invariants, enforced at CMake configure time:
    splice opener) -- i.e. only they carry raw reflection tokens. Those headers
    are ``include/Zahlen/Core/Reflection.hpp`` (the umbrella, which spells none
    itself) and the modules directly under ``include/Zahlen/Core/Reflection/``:
-   Core, Enums, Annotations, Structs, Class, Dynamic, Utilities. Everything
+   Core, Enums, Annotations, Structs, Class, Callable, Dynamic, Utilities. Everything
    else consumes their public API. The directory is closed on purpose -- a
    nested subdirectory would have to be added to REFLECTION_DIRS here, which is
    the moment to ask whether the machinery really belongs in another module --
