@@ -1616,7 +1616,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 // Structural additions (pose overrides and attachment world transforms) need
 // Registry&: the inspector marks this evaluator as a wildcard component writer.
 // Keep the existing SystemContext entry point below for custom schedules.
-void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::ResMut<PhysicsContext> physicsRes,
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
                                ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept;
 
 void ProceduralAnimation::Register(Engine& engine) {
@@ -1844,11 +1844,11 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 }
 
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
-    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::ResMut<PhysicsContext> {ctx.physics},
+    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {ctx.physics},
                               ECS::ResMut<RenderContext> {ctx.render}, ECS::ResMut<Camera> {ctx.camera});
 }
 
-void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::ResMut<PhysicsContext> physicsRes,
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
                                ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
@@ -2088,7 +2088,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
-                ctx, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
         } else {
@@ -2144,7 +2144,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             const JPH::Mat44 worldToModel = rootWorld.Inversed();
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
-            Animation::UpdateItemDynamics(ctx, entity, *itemHandling, transform->position, rootRotation, dt);
+            Animation::UpdateItemDynamics(registry, physics, entity, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);

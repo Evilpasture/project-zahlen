@@ -483,7 +483,7 @@ void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
 void SolveLegGrounding(
-    SystemContext&                 ctx,
+    const PhysicsContext&          physics,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
@@ -505,7 +505,6 @@ void SolveLegGrounding(
         return;
     }
 
-    auto&           physics        = *ctx.physics;
     const JPH::Quat inverseRootRot = rootRotation.Inversed();
     const auto      toWorld        = [&](JPH::Vec3Arg local) { return JPH::Vec3(rootPosition) + rootRotation * local; };
     const auto      toModel        = [&](JPH::Vec3Arg world) { return inverseRootRot * (world - JPH::Vec3(rootPosition)); };
