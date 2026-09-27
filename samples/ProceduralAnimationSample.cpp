@@ -18,6 +18,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Camera/TargetCamera.hpp>
+#include <CharacterController/CharacterController.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
@@ -683,6 +684,12 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
+
+    // The visual spawner creates a CharacterVirtual and input/movement
+    // components, but it does not install the controller. Do that before the
+    // scene build so WASD intent, physics steering/gravity and grounding hooks
+    // (and the orientation graph node) all enter the initial schedules.
+    ZHLN::Character::Install(*engine);
 
     // Third-person camera rig: registers its component and contributes its
     // frame step (re-seeding the boot camera's rig component), before the

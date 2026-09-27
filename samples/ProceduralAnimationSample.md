@@ -21,15 +21,25 @@ cmake --build build --target ProceduralAnimationSample
 ./build/samples/ProceduralAnimationSample
 ```
 
-The subsystem is an optional extras module. Consumers opt in explicitly after
-initializing the core scene:
+The subsystem is an optional extras module. The sample installs its character
+controller and follow camera **before** building the core scene, then registers
+procedural animation:
 
 ```cpp
+#include <CharacterController/CharacterController.hpp>
+#include <Camera/TargetCamera.hpp>
 import ZHLN.ProceduralAnimation;
 
+ZHLN::Character::Install(engine); // required for WASD, gravity, jump and grounding
+ZHLN::CameraRig::Install(engine);
 engine.InitializeDefaultScene();
 ZHLN::ProceduralAnimation::Register(engine);
 ```
+
+Creating a `CharacterVirtual` and adding input/movement components does not
+install their frame steps or physics hooks. Consumers using only procedural
+animation (without character movement) can register just that subsystem after
+scene initialization.
 
 `Register` installs the extras-owned ECS types and inserts its evaluator before
 the generic core `ArticulationSystem` phase. Core knows only about
@@ -64,7 +74,15 @@ const auto bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
 const auto hull   = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
 ```
 
-Invalid or empty bounds retain the standard `DualShapeConfig` fallback.
+Invalid or empty bounds retain the standard `DualShapeConfig` fallback. The
+white debug lifter is a **sphere**: its center is one lifter radius above the
+player's physics origin, and its bottom is at that origin. Seeing its center
+above the feet is expected and does not disable movement. The reference GLB's
+bind-pose mesh starts about 0.035 m above its model origin; the sample initially
+spawns the player 0.20 m above the center platform to settle onto it. If an
+overridden GLB shows a persistent gap after settling, compare the logged
+`bounds.min.y` with its intended foot origin before changing the hull or input
+system; a differently authored model origin is a separate alignment issue.
 
 The sample also builds a five-box handgun at runtime, so no item asset is needed.
 Its geometry, placement offsets, grip points, grip radii, and obstacle probe are

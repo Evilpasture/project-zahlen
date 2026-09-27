@@ -12,8 +12,8 @@ file(GLOB SAMPLE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
-# Which extras domains each sample consumes, by sample name. A sample that
-# appears in none of these lists links no extras at all.
+# Which extras domains each sample consumes (imports, includes, or installs),
+# by sample name. A sample that appears in none of these lists links no extras.
 #
 #   ProceduralAnimationSample  imports ZHLN.Locomotion and
 #                              ZHLN.ProceduralAnimation (zahlen_animation),
@@ -22,7 +22,11 @@ file(GLOB SAMPLE_SOURCES
 #                              ground with <Terrain/TerrainFactory.hpp>
 #                              (zahlen_terrain), and drives its third-person
 #                              view through the extras camera rig
-#                              (<Camera/TargetCamera.hpp>, zahlen_camera).
+#                              (<Camera/TargetCamera.hpp>, zahlen_camera), and
+#                              installs the character controller that drives
+#                              its WASD and physics steps
+#                              (<CharacterController/CharacterController.hpp>,
+#                              zahlen_character_controller).
 #   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
 #   RemoteGLBSample            fetches through ZHLN::Remote (zahlen_remote_asset
 #                              over extras/HTTP) and imports with ZHLN.glTF
@@ -35,10 +39,9 @@ file(GLOB SAMPLE_SOURCES
 #                              (zahlen_serialization -- extras/json).
 #
 # Linking the named domains instead of the zahlen_extras aggregate is the point
-# of the decomposition: a sample's build now waits on the module interfaces it
-# actually imports and on nothing else, and a sample that wants no extras does
-# not get a link to simdjson, sockets or the VFX toolkits.
-set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera)
+# of the decomposition: a sample's build waits only on extras it uses, and a
+# sample that wants no extras gets no simdjson, sockets or VFX toolkits.
+set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
 set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
 set(ZHLN_SAMPLE_EXTRAS_FidelityHarness zahlen_gltf zahlen_serialization)
@@ -76,9 +79,9 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         zahlen_warnings
     )
 
-    # Link the extras domains this sample imports (e.g. ZHLN.Locomotion). Each
-    # one carries the extras include root and its module interfaces publicly, so
-    # this is all the sample needs to resolve <glTF/...> and the imports above.
+    # Link only the extras domains this sample uses (e.g. ZHLN.Locomotion and
+    # Character::Install). Each carries its public include root and any module
+    # interfaces, so the sample can resolve both <glTF/...> and imports above.
     foreach(ZHLN_SAMPLE_EXTRA IN LISTS ZHLN_SAMPLE_EXTRAS_${SAMPLE_NAME})
         target_link_libraries(${SAMPLE_NAME} PRIVATE ${ZHLN_SAMPLE_EXTRA})
     endforeach()
@@ -92,11 +95,10 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     # (see app/main.cpp and Fonts::VendoredDefaultFontSource) so its text renders
     # with a real font instead of core's embedded 8x8 fallback.
     #
-    # Not listed in ZHLN_SAMPLE_EXTRAS_*: that map is for domains a sample's
-    # source *imports*, and a missing entry there skips the sample. This link is
-    # optional by design -- with ZHLN_BUILD_EXTRAS=OFF there is no font domain to
-    # install, ZHLN_HAS_FONTS stays undefined, and the sample keeps building and
-    # running on the embedded bake.
+    # Not listed in ZHLN_SAMPLE_EXTRAS_*: those are required domains, and a
+    # missing target there skips the sample. This link is optional by design --
+    # without the font domain, ZHLN_HAS_FONTS stays undefined and the sample
+    # keeps building and running on the embedded bake.
     if(TARGET zahlen_fonts)
         target_link_libraries(${SAMPLE_NAME} PRIVATE zahlen_fonts)
         target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)

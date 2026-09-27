@@ -312,7 +312,8 @@ auto
     // 1. Draw Upper Bumper Oval (Green)
     DrawWireframeEllipsoid(rc, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
 
-    // 2. Draw Lower Lifter Sphere (White) - Touching ground at Y=0.0m
+    // 2. Draw Lower Lifter Sphere (White). Its bottom is the character
+    // origin, which rests on the supporting surface after settling.
     DrawWireframeSphere(rc, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector

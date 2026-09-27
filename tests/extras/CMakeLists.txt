@@ -80,6 +80,14 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# The sample owns its composition-root install order, not the controller
+# library. A source-level regression check catches accidentally omitting
+# Character::Install while the controller's unit tests still pass.
+add_test(NAME TestProceduralSampleWiring
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_procedural_sample_wiring.py"
+)
+set_tests_properties(TestProceduralSampleWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a
