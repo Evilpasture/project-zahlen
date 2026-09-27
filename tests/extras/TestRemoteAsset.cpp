@@ -76,7 +76,8 @@ auto MakeGLB(size_t contentBytes) -> std::vector<uint8_t> {
     bytes[1] = 'l';
     bytes[2] = 'T';
     bytes[3] = 'F';
-    bytes[4] = 2; // version, little-endian
+    bytes[4] = 2; // version 2, little-endian (all four version bytes matter)
+    bytes[5] = bytes[6] = bytes[7] = 0;
     const uint32_t total = static_cast<uint32_t>(bytes.size());
     bytes[8]  = static_cast<uint8_t>(total);
     bytes[9]  = static_cast<uint8_t>(total >> 8);
@@ -174,10 +175,13 @@ struct RemoteAssetTestSuite {
             bad[0] = 'X';
             ZHLN::Test::ExpectFalse(IsGLB(AsSpan(bad)));
 
-            // Version 1 is not version 2.
+            // All four bytes of the version field must describe version 2.
             std::vector<uint8_t> old = MakeGLB(16);
             old[4] = 1;
             ZHLN::Test::ExpectFalse(IsGLB(AsSpan(old)));
+            std::vector<uint8_t> badVersionHighByte = MakeGLB(16);
+            badVersionHighByte[5] = 1;
+            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(badVersionHighByte)));
 
             // The container disagrees with its own length.
             std::vector<uint8_t> shortByOne = MakeGLB(16);
@@ -258,7 +262,9 @@ struct RemoteAssetTestSuite {
             // temp file, so the winner is a complete file, never a mix.
             std::vector<uint8_t> a = MakeGLB(64);
             std::vector<uint8_t> b = MakeGLB(128);
-            for (size_t i = 0; i < b.size(); ++i) {
+            // Make the payloads differ without corrupting the GLB header:
+            // either writer must be a valid cache hit when its rename wins.
+            for (size_t i = 12; i < b.size(); ++i) {
                 b[i] ^= 0x5A;
             }
 
@@ -314,6 +320,36 @@ struct RemoteAssetTestSuite {
             // The bytes are on disk now, under the resolved name.
             const std::filesystem::path expected = dir / ZHLN::Remote::ResolveURL(url).cacheFileName;
             ZHLN::Test::ExpectTrue(std::filesystem::exists(expected));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> a_completed_transfer_can_be_reaped_without_losing_its_result() {
+            ZHLN::HTTP::LoopbackServer server;
+            if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
+                return std::unexpected(RemoteAssetTestError::ServerUnavailable);
+            }
+
+            const auto                   dir     = ScratchDir("reap");
+            ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
+            const uint32_t               id      = fetcher.Request(server.Url("/ok"), AnyNonEmpty, false);
+            const FetchStatus            status  = WaitTerminal(fetcher, id);
+            ZHLN::Test::ExpectEq(status, FetchStatus::Succeeded);
+            if (status != FetchStatus::Succeeded) {
+                return {};
+            }
+
+            // A worker publishes its result just before marking itself done.
+            // Give Poll repeated chances to reap it: destroying a joinable
+            // Job would terminate the entire test process before Take.
+            for (int i = 0; i < 20; ++i) {
+                fetcher.Poll();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            auto result = fetcher.Take(id);
+            ZHLN::Test::ExpectTrue(result.has_value());
+            if (result.has_value()) {
+                ZHLN::Test::ExpectEq(std::string_view(reinterpret_cast<const char*>(result->data.data()), result->data.size()), std::string_view("hello"));
+            }
             return {};
         }
 
