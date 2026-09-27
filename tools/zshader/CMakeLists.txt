@@ -94,13 +94,19 @@ target_compile_options(zshader PRIVATE
 # consumer of the generated headers queues behind them. All six parse the same
 # heavy set -- ZShader.hpp everywhere, slang.h in three, vulkan_core.h and the
 # RHI umbrella in Emit.cpp -- so the set is parsed once into a PCH instead of
-# six times. Every entry is already a dependency of some TU here (Rendering.hpp
-# through Emit.cpp), so this introduces no new build edge, and the flags are
-# uniform across the target, which is the one thing a PCH cannot survive.
+# six times. One ordering rule, and it is why vulkan_core.h is NOT listed
+# here: volk.h must come before the Vulkan headers (it re-spells every entry
+# point as a function pointer, which otherwise collides with the real
+# prototypes), and that ordering lives inside Rendering.hpp --
+# RenderingPCH.h includes volk.h before anything Vulkan. Listing
+# vulkan_core.h ahead of Rendering.hpp declared the prototypes first and
+# volk's pointers second, which is a hard redefinition error in the PCH and
+# only in the PCH: no single TU includes the pair in that order. Rendering.hpp
+# brings the Vulkan types along in the correct order, and every PCH entry is
+# already an include of some TU here, so this introduces no new build edge.
 target_precompile_headers(zshader PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
     "<slang.h>"
-    "<vulkan/vulkan_core.h>"
     "${CMAKE_SOURCE_DIR}/src/vulkan/Rendering.hpp"
 )
 
