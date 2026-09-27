@@ -135,13 +135,6 @@ target_link_libraries(zahlen_vulkan PUBLIC
 target_include_directories(zahlen_vulkan
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
-        # Build-tree definition of Vk::Result, generated at configure time (see
-        # cmake/VkResultMirror.cmake). PUBLIC: RenderCore.hpp is compiled by
-        # other targets through the Rendering.hpp umbrella -- zahlen_render
-        # compiles and precompiles it -- so they need the generated dir too.
-        # tools/zshader reads the umbrella without linking this module and
-        # carries the same directory on its own target.
-        ${ZHLN_VKRESULT_GENERATED_DIR}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )

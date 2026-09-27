@@ -105,6 +105,26 @@ struct CategoryRegistration {
     }();
 };
 
+// Manual category registration, the twin of CategoryRegistration above: for
+// codes that enter the channel without riding the enum constructor -- the
+// Vulkan layer's Vk::Error carries a foreign enum and holds its category as
+// data, so there is no E to instantiate the template with. Insert-only; a
+// hash already present is a no-op, so the first registration wins and the
+// rest dedup against it.
+inline void RegisterCategory(const uint32_t hash, const ErrorCategory* category) noexcept {
+    auto& head = GetRegistryHead();
+    for (auto* curr = head.load(std::memory_order::acquire); curr != nullptr; curr = curr->next) {
+        if (curr->hash == hash) {
+            return;
+        }
+    }
+    auto* node     = new RegistryNode {hash, category, head.load(std::memory_order::relaxed)};
+    auto  expected = node->next;
+    while (!head.compare_exchange_weak(expected, node, std::memory_order::release, std::memory_order::relaxed)) {
+        node->next = expected;
+    }
+}
+
 inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
     RegistryNode* curr = GetRegistryHead().load(std::memory_order::acquire);
     while (curr != nullptr) {
@@ -138,16 +158,17 @@ struct ErrorCode {
     // error": it is what ErrorCode{} carries and what operator bool tests, so
     // a zero-valued error would be indistinguishable from success. Foreign
     // codes with a zero enumerator (notably VkResult's VK_SUCCESS) cannot
-    // cross here and must be mapped into an engine enum at the layer boundary
-    // instead (see Vk::Result and Vk::ToFrameError).
+    // cross here and are wrapped at the layer boundary instead, in an
+    // explicit carrier that refuses the success value (see Vk::Error and
+    // Vk::ToFrameError).
     template <typename E>
         requires std::is_enum_v<E>
     constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {
         static_assert(
             !Reflect::EnumHasValue<E>(0),
             "Error enums must not contain a 0 enumerator: ErrorCode's value word uses 0 for 'no "
-            "error'. Start error enumerators at 1; map foreign codes (e.g. VkResult) into an engine "
-            "enum at the layer boundary."
+            "error'. Start error enumerators at 1; wrap foreign codes (e.g. VkResult) in the "
+            "boundary carrier (Vk::Error) instead."
         );
         if (static_cast<uint32_t>(val) == 0) {
             if consteval {
