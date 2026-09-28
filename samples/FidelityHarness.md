@@ -87,8 +87,12 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    and image-based lighting. The base is attenuated by one `(1 - Fc)`.
    `KHR_materials_anisotropy` now imports strength, rotation and the linear RG/B
    direction/strength texture. The deferred direct BRDF uses the extension's
-   anisotropic GGX; the split-sum cubemap uses a bent reflection and five
-   samples along its wide axis (an approximation, not a reference integrator).
+   anisotropic GGX; the split-sum cubemap uses one lookup along a bent
+   reflection, with LOD biased partway toward the wide-axis roughness (an
+   approximation, not an anisotropically prefiltered integrator). The HDR
+   prefilter uses 512 samples for mips 1–2 and 1024 for mips 3–5, versus 32
+   for procedural sky; mip 0 samples the environment directly. The HDR source
+   still has only mip 0, so very small bright lights can retain some aliasing.
    The area-light LTC and split-sum BRDF LUT remain isotropic approximations.
    The baseline diffuse SH/GI is gated by `(1 - F) * (1 - metallic)`, so metal
    no longer receives diffuse IBL on top of its specular term. Sheen and
@@ -102,8 +106,9 @@ the rows must no longer be identical, and increasing roughness should widen
 rather than whiten the highlight. The importer regression in
 `tests/render/TestGLTFImport.cpp` checks strength, rotation and the optional
 texture path; it is not a substitute for this GPU image comparison. The IBL
-uses an isotropic BRDF LUT and a five-tap directional cubemap approximation,
-so exact pixel agreement with a reference path tracer is not expected.
+uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
+anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
+is not expected.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

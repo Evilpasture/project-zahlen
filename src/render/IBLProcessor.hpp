@@ -247,13 +247,19 @@ class IBLProcessor {
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
                         const float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
+                        // The HDR source has only mip 0. At 32 samples a tiny
+                        // studio light is missed by most texels and becomes a
+                        // few bright speckles in the others. Spend the extra
+                        // samples once when baking HDR; the smaller rough mips
+                        // need more samples to resolve the whole hemisphere.
+                        const uint32_t sampleCount = mip == 0 ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
                         for (uint32_t face = 0; face < 6; ++face) {
                             const IBLBakePush push {
                                 .width       = mipSize,
                                 .height      = mipSize,
                                 .roughness   = roughness,
                                 .face        = face,
-                                .sampleCount = roughness == 0.0f ? 1u : 32u,
+                                .sampleCount = sampleCount,
                                 .hasRadiance = hasRadianceWord,
                                 .skyZenith   = sky.skyZenith,
                                 .skyHorizon  = sky.skyHorizon,

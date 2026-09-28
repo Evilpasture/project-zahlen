@@ -297,7 +297,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         float ao = litColorRaw.a;
 
-        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, N, T, roughness, strength) * frame.ambientExposure;
+        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, roughness, strength) * frame.ambientExposure;
         float3 specularIBL = prefilteredColor * FssEss * ao;
         float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
         if (coatRaw.a > 1.0f / 255.0f) {

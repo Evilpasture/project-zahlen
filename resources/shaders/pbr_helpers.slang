@@ -271,9 +271,8 @@ public float3 SpecularGGX(float3 N, float3 V, float3 L, float3 H, float roughnes
     return (D * G * F) / max(4.0f * saturate(dot(N, V)) * saturate(dot(N, L)), 0.001f);
 }
 
-// A split-sum cubemap is isotropic. Bend its central ray as in the extension's
-// IBL guidance, then integrate a few symmetric samples along the wide axis.
-// Weights sum to one, so strength changes the lobe, not the environment energy.
+// Khronos' bent-normal IBL direction. Keep this separate from the cubemap
+// lookup so reflection probes can parallax-correct the direction before sampling.
 public float3 AnisotropicReflection(float3 N, float3 V, float3 B, float roughness, float strength) {
     float3 R = reflect(-V, N);
     if (strength <= 1.0f / 255.0f) {
@@ -288,28 +287,21 @@ public float3 AnisotropicReflection(float3 N, float3 V, float3 B, float roughnes
     return SafeNormalize(lerp(R, bent, roughness * roughness), reflect(-V, N));
 }
 
-public float3 SampleAnisotropicEnvironment(TextureCube<float4> environment, SamplerState sampler, float3 R, float3 N, float3 T,
+// The PMREM is isotropic. Five widely spaced lookups at its sharpest mip
+// duplicate bright studio lights instead of stretching them continuously.
+// Sample the already bent (and optionally parallax-corrected) direction once.
+// A modest LOD bias towards the wide-axis roughness suppresses aliasing when
+// the base roughness is near zero, without blurring the narrow axis all the
+// way to sqrt(alphaT). The isotropic path retains its original LOD exactly.
+public float3 SampleAnisotropicEnvironment(TextureCube<float4> environment, SamplerState sampler, float3 bentDirection,
                                             float roughness, float strength) {
-    float lod = roughness * 5.0f;
-    float3 center = environment.SampleLevel(sampler, R, lod).rgb;
-    if (strength <= 1.0f / 255.0f) {
-        return center;
+    float baseRoughness = saturate(roughness);
+    float effectiveRoughness = baseRoughness;
+    if (strength > 1.0f / 255.0f) {
+        float2 alpha = AnisotropicAlphas(baseRoughness, strength);
+        effectiveRoughness = lerp(baseRoughness, sqrt(alpha.x), 0.4f);
     }
-
-    float2 alpha = AnisotropicAlphas(roughness, strength);
-    float spread = max(sqrt(alpha.x) - sqrt(alpha.y), 0.0f) * 0.9f;
-    float3 axis = OrthogonalTangent(R, T);
-    float3 nearPlus = SafeNormalize(R + axis * (spread * 0.5f), R);
-    float3 nearMinus = SafeNormalize(R - axis * (spread * 0.5f), R);
-    float3 farPlus = SafeNormalize(R + axis * spread, R);
-    float3 farMinus = SafeNormalize(R - axis * spread, R);
-    nearPlus = dot(nearPlus, N) > 0.0f ? nearPlus : R;
-    nearMinus = dot(nearMinus, N) > 0.0f ? nearMinus : R;
-    farPlus = dot(farPlus, N) > 0.0f ? farPlus : R;
-    farMinus = dot(farMinus, N) > 0.0f ? farMinus : R;
-    return center * 0.25f +
-           (environment.SampleLevel(sampler, nearPlus, lod).rgb + environment.SampleLevel(sampler, nearMinus, lod).rgb) * 0.25f +
-           (environment.SampleLevel(sampler, farPlus, lod).rgb + environment.SampleLevel(sampler, farMinus, lod).rgb) * 0.125f;
+    return environment.SampleLevel(sampler, bentDirection, effectiveRoughness * 5.0f).rgb;
 }
 
 public float ClearcoatFresnel(float NdotV) {

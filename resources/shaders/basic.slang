@@ -345,7 +345,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 R = AnisotropicReflection(N, V, cross(N, anisotropicT), roughness, aniso.z);
-    float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, N, anisotropicT, roughness, aniso.z) *
+    float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z) *
                       scene.frame.ambientExposure;
     float transmission = saturate(params.x);
     float3 color = lerp(albedo * scene.frame.ambientExposure * 0.5f, transmitted, transmission);
@@ -390,7 +390,7 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 F_rough  = FresnelSchlickRoughness(NdotV, F0, roughness);
     float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
     float3 FssEss   = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
-    float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, N, anisotropicT, roughness, aniso.z);
+    float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
     return float4(diffuseIBL + specularIBL + emissive, albedo.a);
