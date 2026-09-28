@@ -139,7 +139,7 @@ struct DrawParams {
     uint32_t             jointOffset      = 0;
     uint32_t             morphOffset      = 0;
     uint32_t             activeMorphCount = 0;
-    const float*         morphWeights     = nullptr;
+    std::array<float, 4> morphWeights     = {};
     DrawFlags            flags            = DrawFlags::None;
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;

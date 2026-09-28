@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
 #include <string_view>
@@ -180,25 +181,19 @@ inline constexpr bool DependentFalse = false;
 }
 
 
-struct ForkBody {
-    void* user                                               = nullptr;
-    void (*record)(void* user, VkCommandBuffer cmd) noexcept = nullptr;
-
-    void operator()(VkCommandBuffer cmd) const noexcept {
-        if (record != nullptr) {
-            record(user, cmd);
-        }
-    }
-};
+// Only borrowed during ExecuteFork; the graph owns the pass objects. Unlike
+// the old void*-plus-thunk pair, this view cannot point at a mutable pass or
+// be constructed from a temporary callable.
+using ForkCall = ZHLN::FunctionRef<void(VkCommandBuffer) const>;
 
 template <typename Executor>
-concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkBody> bodies) {
+concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkCall> bodies) {
     { executor.ExecuteFork(cmd, bodies) } noexcept;
 };
 
 struct SequentialFork {
-    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) noexcept {
-        for (const ForkBody& body: bodies) {
+    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkCall> bodies) noexcept {
+        for (const ForkCall& body: bodies) {
             body(cmd);
         }
     }
@@ -219,22 +214,10 @@ struct ParallelPass {
     constexpr explicit ParallelPass(SubPasses&&... passes) noexcept: subPasses(std::forward<SubPasses>(passes)...) {
     }
 
-    [[nodiscard]] auto Bodies(std::array<ForkBody, sizeof...(SubPasses)>& out) const noexcept -> std::span<const ForkBody> {
-        size_t index = 0;
-        std::apply(
-            [&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses
+    [[nodiscard]] auto Bodies() const noexcept -> std::array<ForkCall, sizeof...(SubPasses)> {
+        return std::apply(
+            [](const SubPasses&... pass) -> std::array<ForkCall, sizeof...(SubPasses)> { return {ForkCall {pass}...}; }, subPasses
         );
-        return {out.data(), out.size()};
-    }
-
-  private:
-    // A fork body is a pass recorded out of line, on a secondary command
-    // buffer, so it is replayed as a plain functor call -- exactly the shape
-    // `IsForkablePass` admits into a group. There is no record member to
-    // name: the pass *is* the callable.
-    template <typename SubPass>
-    static void RecordBody(void* user, VkCommandBuffer cmd) noexcept {
-        (*static_cast<const SubPass*>(user))(cmd);
     }
 };
 
@@ -368,7 +351,7 @@ template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
 
-// Whether a pass may be replayed as a raw fork body on a secondary command
+// Whether a pass may be recorded by a fork worker on a secondary command
 // buffer. A compute or transfer pass always can. A raster pass can only if it
 // manages its own render pass -- that is, if it is callable with a bare
 // `VkCommandBuffer`. A raster pass that takes `RasterPassContext&` is asking

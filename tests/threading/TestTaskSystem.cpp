@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <array>
 #include <atomic>
 #include <expected>
+#include <type_traits>
 #include <vector>
 
 // ============================================================================
@@ -15,7 +17,8 @@
 
 enum class TaskSystemError : uint32_t {
     DispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Dispatched tasks failed to execute or update shared memory.">{}) = 1,
-    ParallelForFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{})
+    ParallelForFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{}),
+    BorrowedTaskFailed ZHLN_ANNOTATION(ZHLN::Description<"Borrowed fiber tasks did not complete before their callables expired.">{})
 };
 
 // ============================================================================
@@ -71,6 +74,31 @@ struct TaskSystemTestSuite {
 
             if (accum.load(std::memory_order::relaxed) != 8) {
                 return std::unexpected(TaskSystemError::DispatchFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> borrowed_dispatch_waits_for_stack_callables() {
+            using Borrow = ZHLN::FunctionRef<void(uint32_t) const>;
+            static_assert(std::is_trivially_copyable_v<Borrow>);
+
+            std::atomic<uint32_t> total {0};
+            const auto add = [&](uint32_t value) { total.fetch_add(value, std::memory_order_relaxed); };
+            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>); // no borrowing a temporary
+            const Borrow view {add};
+            view(1);
+
+            // The outer worker borrows two closures in a nested dispatch. Both
+            // waits must finish before the corresponding stack views expire.
+            const auto nested = [&] {
+                ZHLN::TaskSystem::RunBorrowed(
+                    [&] { total.fetch_add(2, std::memory_order_relaxed); },
+                    [&] { total.fetch_add(4, std::memory_order_relaxed); }
+                );
+            };
+            ZHLN::TaskSystem::RunBorrowed(nested, [&] { total.fetch_add(8, std::memory_order_relaxed); });
+            if (!ZHLN::Test::ExpectEq(total.load(std::memory_order_relaxed), 15u)) {
+                return std::unexpected(TaskSystemError::BorrowedTaskFailed);
             }
             return {};
         }

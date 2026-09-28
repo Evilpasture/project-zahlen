@@ -21,6 +21,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -127,9 +128,9 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
         bool     isSkinned   = (skelMesh != nullptr);
         uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
 
-        uint32_t     morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
-        uint32_t     activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
-        const float* morphWeights     = (morphComp != nullptr) ? morphComp->weights.data() : nullptr;
+        uint32_t                   morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
+        uint32_t                   activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
+        const std::array<float, 4> morphWeights     = (morphComp != nullptr) ? morphComp->weights : std::array<float, 4> {};
 
         BufferHandle scratchVbo = BufferHandle::Invalid;
         if (isSkinned) {

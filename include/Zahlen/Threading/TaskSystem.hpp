@@ -3,11 +3,15 @@
 
 #pragma once
 #include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <type_traits>
+#include <utility>
 
 namespace ZHLN::TaskSystem {
 auto GetWorkerIndex() -> uint32_t;
@@ -32,6 +36,30 @@ void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 void Wait(Counter* counter);
 
 void WakeUp(ZHLN::Fiber* fiber);
+
+// Synchronous borrow across the low-level fiber Task boundary. Callables
+// (including temporary arguments) live through this call; their views stay
+// here until every dispatched task completes. The Task ABI's void* trampoline
+// is isolated here, rather than repeated in every scheduler.
+template <typename... Funcs>
+    requires(std::is_invocable_r_v<void, const std::remove_reference_t<Funcs>&> && ...)
+void RunBorrowed(Funcs&&... funcs) {
+    constexpr size_t count = sizeof...(Funcs);
+    if constexpr (count > 0) {
+        std::array<FunctionRef<void() const>, count> borrowed {FunctionRef<void() const> {funcs}...};
+        std::array<Task, count> tasks {};
+        for (size_t i = 0; i < count; ++i) {
+            tasks[i] = Task {
+                .func = [](void* arg) { (*static_cast<FunctionRef<void() const>*>(arg))(); },
+                .arg  = std::addressof(borrowed[i]),
+            };
+        }
+
+        Counter sync;
+        Dispatch(tasks, &sync);
+        Wait(&sync);
+    }
+}
 
 template <typename Func>
 void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {

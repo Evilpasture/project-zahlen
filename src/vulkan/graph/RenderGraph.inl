@@ -653,15 +653,15 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         // the caller's template argument, so this is a direct call -- no
         // vtable, and an executor that is `SequentialFork` (or absent) records
         // the same bodies in declaration order straight into `cmd`.
-        static_assert(ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept.");
+        static_assert(ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkCall>) noexcept.");
 
-        std::array<ForkBody, PassType::kBodyCount> body_storage {};
-        const std::span<const ForkBody>            bodies = pass.Bodies(body_storage);
+        const auto                     bodyStorage = pass.Bodies();
+        const std::span<const ForkCall> bodies {bodyStorage};
 
         if (forker != nullptr && bodies.size() > 1) {
             forker->ExecuteFork(cmd, bodies);
         } else {
-            for (const ForkBody& body: bodies) {
+            for (const ForkCall& body: bodies) {
                 body(cmd);
             }
         }

@@ -51,13 +51,6 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
     return impl->textureManager.GetBindlessIndex(handle) & kNoFilmTexture;
 }
 
-[[nodiscard]] inline std::array<float, 4> UnpackMorphWeights(const float* weights) noexcept {
-    if (weights == nullptr) {
-        return {0.0f, 0.0f, 0.0f, 0.0f};
-    }
-    return {weights[0], weights[1], weights[2], weights[3]};
-}
-
 [[nodiscard]] BindlessIndices ResolveMaterialTextures(RenderContext::Impl* impl, const Material& material) noexcept {
     return {
         .albedo   = (material.albedoMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.albedoMap) : 1,
@@ -331,8 +324,6 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
-    auto morphWeights = UnpackMorphWeights(params.morphWeights);
-
     _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
@@ -355,7 +346,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
                  .alphaCutoff      = material.alphaCutoff,
                  .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
-                 .morphWeights     = morphWeights,
+                 .morphWeights     = params.morphWeights,
                  .baseColorFactor = (params.colorOverride[3] >= 0.0f) ? params.colorOverride : material.baseColorFactor,
                  .emissiveFactor  = (params.emissiveOverride[3] >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
                  .transmissionFactor = material.transmissionFactor,
@@ -385,7 +376,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
          .jointOffset         = params.jointOffset,
          .morphOffset         = params.morphOffset,
          .activeMorphCount    = params.activeMorphCount,
-         .morphWeights        = morphWeights,
+         .morphWeights        = params.morphWeights,
          .flags               = params.flags}
     );
 }

@@ -19,8 +19,9 @@
 // set MorphTargetComponent::offset and it attaches the component in the same
 // breath as the deltas it points at.
 //
-// This suite pins three claims, all of them things that deletion could have
-// broken quietly:
+// This suite also checks the draw boundary: DrawParams owns its four morph
+// weights, so clearing the source component cannot change a pending draw.
+// The three pose-pass claims are:
 //
 //   1. The pose pass writes weights only into a MorphTargetComponent that
 //      already exists. It never inserts one, on any entity, however many
@@ -61,6 +62,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -82,6 +84,7 @@ enum class MorphPosePassTestError : uint8_t {
     DegenerateWeightsChannelWritten ZHLN_ANNOTATION(ZHLN::Description<"A weights channel with no key times changed morph state instead of being skipped."> {}),
     CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"Frame capture failed during the morph deformation test."> {}),
     MorphDeformationNotVisible ZHLN_ANNOTATION(ZHLN::Description<"Fully weighted morph targets did not change the rendered frame."> {}),
+    MorphWeightsBorrowed ZHLN_ANNOTATION(ZHLN::Description<"DrawParams borrowed morph weights instead of owning four floats."> {}),
 };
 
 struct MorphPosePassSuite {
@@ -257,6 +260,18 @@ struct MorphPosePassSuite {
     }
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> draw_params_own_morph_weights() {
+            ZHLN::Components::MorphTargetComponent morph {.weights = {0.25f, 0.5f, 0.75f, 1.0f}};
+            const ZHLN::DrawParams params {.morphWeights = morph.weights};
+            morph.weights.fill(0.0f);
+
+            if (!ZHLN::Test::ExpectEq(params.morphWeights, (std::array<float, 4> {0.25f, 0.5f, 0.75f, 1.0f})) ||
+                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, (std::array<float, 4> {}))) {
+                return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
+            }
+            return {};
+        }
+
         // ====================================================================
         // 1. The pose pass writes weights; it never inserts components.
         // ====================================================================

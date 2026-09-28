@@ -131,6 +131,7 @@ my %FIRST_PARTY = (
     RayTracingConfig => ['include/Zahlen/GraphicsSettings.hpp'],
     EnvironmentSettings => ['include/Zahlen/GraphicsSettings.hpp'],
     GraphicsSettings => ['include/Zahlen/GraphicsSettings.hpp'],
+    FunctionRef      => ['include/Zahlen/Core/FunctionRef.hpp'],
     Hash64           => ['include/Zahlen/Core/Hash.hpp'],
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],

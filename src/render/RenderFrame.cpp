@@ -277,23 +277,16 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
 namespace {
 
-struct ForkBodyCall {
-    const Vk::ForkBody* body = nullptr;
-
-    void operator()(Vk::RecordingSlot slot) const noexcept {
-        (*body)(slot.cmd);
-    }
-};
-
-template <size_t N, typename Recorder, typename Scheduler, size_t... Is>
-void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkBody> bodies, std::index_sequence<Is...>) noexcept {
-    const std::array<ForkBodyCall, N> calls {ForkBodyCall {&bodies[Is]}...};
-    rec.Record(scheduler, calls[Is]...);
+template <typename Recorder, typename Scheduler, size_t... Is>
+void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept {
+    // Record() waits for its workers before returning. These references cannot
+    // outlive the graph's pass objects or the local array of callable views.
+    rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
 }
 
-void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept {
+void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkCall> bodies) noexcept {
     auto& self = *impl;
 
     using Recorder          = std::remove_reference_t<decltype(self.parallelRecorders[0])>;
@@ -301,14 +294,14 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const size_t     count  = bodies.size();
 
     if (Diag::ForkSequentialForced()) {
-        for (const Vk::ForkBody& body: bodies) {
+        for (const Vk::ForkCall& body: bodies) {
             body(cmd);
         }
         return;
     }
 
     if (count < 2 || count > kSlots) {
-        for (const Vk::ForkBody& body: bodies) {
+        for (const Vk::ForkCall& body: bodies) {
             body(cmd);
         }
         return;
@@ -332,12 +325,12 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     TaskSystemScheduler scheduler;
     if (count == 2) {
-        RecordForkBodies<2>(rec, scheduler, bodies, std::make_index_sequence<2> {});
+        RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
     } else if constexpr (kSlots >= 3) {
         if (count == 3) {
-            RecordForkBodies<3>(rec, scheduler, bodies, std::make_index_sequence<3> {});
+            RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<3> {});
         } else if constexpr (kSlots >= 4) {
-            RecordForkBodies<4>(rec, scheduler, bodies, std::make_index_sequence<4> {});
+            RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<4> {});
         }
     }
 
