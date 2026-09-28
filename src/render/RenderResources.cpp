@@ -485,11 +485,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     blueNoiseSampler     = std::move(*samplerRes);
     blueNoiseSamplerInfo = samplerBuilder.Info();
-    blueNoiseWidth       = w;
-    blueNoiseHeight      = h;
-    blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-
-    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view), kFormat, 1, false);
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }

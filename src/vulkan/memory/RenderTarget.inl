@@ -8,16 +8,15 @@ namespace ZHLN::Vk {
 
 template <VkFormat F>
 inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
-    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent), viewInfo(other.viewInfo) {
+    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent) {
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderTarget& {
     if (this != &other) {
-        image    = std::move(other.image);
-        view     = std::move(other.view);
-        extent   = other.extent;
-        viewInfo = other.viewInfo;
+        view   = std::move(other.view);
+        image  = std::move(other.image);
+        extent = other.extent;
     }
     return *this;
 }
@@ -29,7 +28,8 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
         .view   = view.Get(),
         .extent = {.width = extent.width, .height = extent.height, .depth = 1}, // Explicit 2D -> 3D conversion
         .aspect = GetFormatAspect(F),
-        .format = F
+        .format = F,
+        .info   = view.Info()
     };
 }
 
@@ -65,10 +65,10 @@ inline auto
     }
     rt.image = std::move(img_res.value());
 
-    rt.viewInfo = desc.arrayLayers > 1
+    const auto viewDesc = desc.arrayLayers > 1
         ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
         : MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
-    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
+    auto view_res = CreateView(ctx.Device(), viewDesc);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
@@ -115,8 +115,7 @@ inline auto
     }
     rt.image = std::move(img_res.value());
 
-    rt.viewInfo = MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1);
-    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
+    auto view_res = CreateView(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
@@ -150,6 +149,9 @@ struct ResourceTraits<TypedImage<Layout, Format>> {
     static constexpr auto GetFormat(const TypedImage<Layout, Format>& res) noexcept {
         return res.format;
     }
+    static constexpr auto GetViewInfo(const TypedImage<Layout, Format>& res) noexcept -> VkImageViewCreateInfo {
+        return res.info;
+    }
 };
 
 template <VkFormat F>
@@ -161,14 +163,17 @@ struct ResourceTraits<RenderTarget<F>> {
     static constexpr auto GetView(const RenderTarget<F>& res) noexcept {
         return res.view.Get();
     }
-    static constexpr auto GetExtent(const RenderTarget<F>& res) noexcept {
-        return res.extent;
+    static constexpr auto GetExtent(const RenderTarget<F>& res) noexcept -> VkExtent3D {
+        return {.width = res.extent.width, .height = res.extent.height, .depth = 1};
     }
     static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
         return GetFormatAspect(F);
     }
     static constexpr auto GetFormat(const RenderTarget<F>& /*unused*/) noexcept {
         return F;
+    }
+    static auto GetViewInfo(const RenderTarget<F>& res) noexcept -> VkImageViewCreateInfo {
+        return res.view.Info();
     }
 };
 
@@ -210,7 +215,8 @@ template <VkImageLayout TargetLayout, typename... Resources>
                 .view   = Traits::GetView(res),
                 .extent = Traits::GetExtent(res),
                 .aspect = Traits::GetAspect(res),
-                .format = Traits::GetFormat(res)
+                .format = Traits::GetFormat(res),
+                .info   = Traits::GetViewInfo(res)
             };
         };
 

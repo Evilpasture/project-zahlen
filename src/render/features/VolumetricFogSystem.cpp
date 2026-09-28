@@ -64,9 +64,8 @@ auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::exp
              .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
         )
         .transform([this](Vk::TextureResource tex) -> void {
-            _noiseImage    = std::move(tex.image);
-            _noiseView     = std::move(tex.view);
-            _noiseViewInfo = tex.viewInfo;
+            _noiseView  = std::move(tex.view);
+            _noiseImage = std::move(tex.image);
         });
 }
 
@@ -107,7 +106,7 @@ auto VolumetricFogSystem::Temporal() noexcept -> Vk::FixedDoubleBufferedComputeP
 }
 
 auto VolumetricFogSystem::NoiseWrite() const noexcept -> Vk::ImageWrite {
-    return Vk::ImageWrite {.view = _noiseView.Get(), .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = &_noiseViewInfo};
+    return Vk::ImageWrite {_noiseView};
 }
 
 auto VolumetricFogSystem::VoxelDispatchExtent() const noexcept -> VkExtent3D {

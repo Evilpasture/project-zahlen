@@ -22,14 +22,6 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const uint32_t fIdx = impl.presenter.frameIndex;
 
-    const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-        .handle   = impl.textureManager.Image(impl.blueNoiseTexIdx).Handle(),
-        .view     = impl.textureManager.View(impl.blueNoiseTexIdx).Get(),
-        .extent   = {.width = impl.blueNoiseWidth, .height = impl.blueNoiseHeight, .depth = 1},
-        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format   = VK_FORMAT_R8G8B8A8_UNORM,
-        .viewInfo = &impl.blueNoiseViewInfo
-    };
     const Vk::AsAddressWrite tlas {
         .address = impl.frames.tlas.Current() ? Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas.Current().Get()) : 0
     };
@@ -40,7 +32,7 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
-        Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
+        Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx)),
         Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtrHalf)),
         Vk::Slot<"tlas">(tlas)
     );

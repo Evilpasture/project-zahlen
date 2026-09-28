@@ -11,13 +11,9 @@
 namespace ZHLN::Vk {
 
 struct TextureResource {
-    Image                 image;
-    ImageView             view;
-    VkImageViewCreateInfo viewInfo {};
-    VkExtent3D            extent {};
-    VkFormat              format = VK_FORMAT_UNDEFINED;
-    uint32_t              mipLevels = 1;
-    bool                  isCube = false;
+    Image      image;
+    ImageView  view;
+    VkExtent3D extent {};
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && view.Valid();

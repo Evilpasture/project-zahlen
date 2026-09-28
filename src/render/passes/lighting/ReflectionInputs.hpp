@@ -11,10 +11,10 @@ namespace ZHLN::Passes {
 // top-level acceleration structure. Only the GBuffer they resolve against
 // differs, so the two passes share the gathering of these four.
 struct ReflectionInputs {
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> prefiltered;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> brdfLut;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> blueNoise;
-    Vk::AsAddressWrite                                       tlas {};
+    Vk::ImageWrite    prefiltered;
+    Vk::ImageWrite    brdfLut;
+    Vk::ImageWrite    blueNoise;
+    Vk::AsAddressWrite tlas {};
 };
 
 [[nodiscard]] auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs;

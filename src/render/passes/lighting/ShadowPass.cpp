@@ -125,7 +125,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             .handle = ctx.graphResources.shadowMap.image.Handle(),
             .view   = ctx.graphResources.shadowMap.view.Get(),
             .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+            .format = VK_FORMAT_D32_SFLOAT,
+            .info   = ctx.graphResources.shadowMap.view.Info()
         };
 
         Vk::DynamicPass(shadowMapArrayImage.extent)
@@ -210,7 +212,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 .handle = ctx.graphResources.shadowAtlas.image.Handle(),
                 .view   = ctx.targets.PunctualViews()[light.shadowLayer].Get(),
                 .extent = {.width = 1024, .height = 1024, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .format = VK_FORMAT_D32_SFLOAT,
+                .info   = ctx.targets.PunctualViews()[light.shadowLayer].Info()
             };
 
             ExecutePunctualPass(subViewImage, [&]() {

@@ -71,10 +71,9 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             }
             auto writeView = std::move(*view_res);
 
-            const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
-                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(writeView)
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
@@ -92,7 +91,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            return textureManager.Adopt(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
+            return textureManager.Adopt(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView));
         });
 }
 

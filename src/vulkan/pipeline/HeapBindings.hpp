@@ -264,28 +264,28 @@ struct AsAddressWrite {
 
 namespace TemplatedDetail {
 
+// Return a value, never a pointer into a pass-local or a moved resource.
+// Views created by the engine carry their exact shape (cube/array/3D/mip).
+// Manually assembled TypedImages without view metadata retain the 2D fallback.
 template <typename T>
-const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateInfo& scratch) noexcept {
+[[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
     if constexpr (IsTypedImage<T>::value) {
-        if (img.viewInfo != nullptr) {
-            return img.viewInfo;
-        }
-        scratch = MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
-        return &scratch;
+        return img.info.image != VK_NULL_HANDLE ? img.info : MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
     } else if constexpr (std::is_same_v<T, ImageWrite>) {
-        if (img.viewInfo != nullptr) {
-            return img.viewInfo;
-        }
-        return nullptr;
+        return img.info;
+    } else if constexpr (std::is_same_v<T, ImageView>) {
+        return img.Info();
+    } else if constexpr (requires(const T& resource) { resource.view.Info(); }) {
+        return img.view.Info();
     }
-    return nullptr;
 }
 
 enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
 
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
-    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite>) {
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite> || std::is_same_v<T, ImageView> ||
+                  requires(const T& image) { image.view.Info(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -339,32 +339,22 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
-            VkImageViewCreateInfo        scratch {};
-            const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
-            if (info == nullptr || info->image == VK_NULL_HANDLE) {
+            const VkImageViewCreateInfo info = ViewInfoOf(arg);
+            if (info.image == VK_NULL_HANDLE) {
                 return true;
             }
-            const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            if constexpr (IsTypedImage<T>::value) {
-                constexpr VkImageLayout typedLayout = (T::layout == VK_IMAGE_LAYOUT_UNDEFINED) ? layout : T::layout;
-                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
-                } else {
-                    heap.WriteImage(TextureHandle {slot}, *info, typedLayout);
-                }
+            if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                heap.WriteStorageImage(StorageImageHandle {slot}, info, VK_IMAGE_LAYOUT_GENERAL);
             } else {
-                VkImageLayout argLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                if constexpr (requires { arg.layout; }) {
-                    argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
-                } else if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    argLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                if constexpr (IsTypedImage<T>::value) {
+                    if constexpr (T::layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                        layout = T::layout;
+                    }
+                } else if constexpr (std::is_same_v<T, ImageWrite>) {
+                    layout = arg.layout;
                 }
-                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
-                } else {
-                    heap.WriteImage(TextureHandle {slot}, *info, argLayout);
-                }
+                heap.WriteImage(TextureHandle {slot}, info, layout);
             }
             return true;
         }

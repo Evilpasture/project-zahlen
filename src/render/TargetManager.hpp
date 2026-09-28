@@ -188,10 +188,6 @@ class TargetManager {
     [[nodiscard]] auto AtlasCubeView() const noexcept -> const Vk::ImageView& { return _shadowAtlasCubeView; }
     [[nodiscard]] auto Atlas2DView() noexcept -> Vk::ImageView& { return _shadowAtlas2DView; }
     [[nodiscard]] auto Atlas2DView() const noexcept -> const Vk::ImageView& { return _shadowAtlas2DView; }
-    [[nodiscard]] auto AtlasCubeViewInfo() noexcept -> VkImageViewCreateInfo& { return _shadowAtlasCubeViewInfo; }
-    [[nodiscard]] auto AtlasCubeViewInfo() const noexcept -> const VkImageViewCreateInfo& { return _shadowAtlasCubeViewInfo; }
-    [[nodiscard]] auto Atlas2DViewInfo() noexcept -> VkImageViewCreateInfo& { return _shadowAtlas2DViewInfo; }
-    [[nodiscard]] auto Atlas2DViewInfo() const noexcept -> const VkImageViewCreateInfo& { return _shadowAtlas2DViewInfo; }
 
   private:
     [[nodiscard]] auto CreateCascadeViews(VkImage image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode>;
@@ -208,8 +204,6 @@ class TargetManager {
     ZHLN::Array<Vk::ImageView>             _punctualShadowViews;
     Vk::ImageView                          _shadowAtlasCubeView;
     Vk::ImageView                          _shadowAtlas2DView;
-    VkImageViewCreateInfo                  _shadowAtlasCubeViewInfo {};
-    VkImageViewCreateInfo                  _shadowAtlas2DViewInfo {};
 };
 
 }

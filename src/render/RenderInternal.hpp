@@ -97,8 +97,6 @@ struct IBLPayload {
     Image                    prefilteredImage;
     ImageView                prefilteredView;
     std::array<JPH::Vec4, 9> shCoeffs {};
-    VkImageViewCreateInfo brdfLutViewInfo {};
-    VkImageViewCreateInfo prefilteredViewInfo {};
     VkFormat prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t contentHash = 0;
     int environmentMode = 0;
@@ -388,9 +386,6 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo pointSamplerInfo {};
     VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
-    VkImageViewCreateInfo ltcMatViewInfo {};
-    VkImageViewCreateInfo ltcAmpViewInfo {};
-
     Vk::SamplerHandle globalSamplerSlot;
     Vk::SamplerHandle clampSamplerSlot;
     Vk::SamplerHandle pointSamplerSlot;
@@ -632,9 +627,6 @@ struct RenderContext::Impl {
 
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t blueNoiseTexIdx     = 0;
-    uint32_t blueNoiseWidth      = 0;
-    uint32_t blueNoiseHeight     = 0;
-    VkImageViewCreateInfo blueNoiseViewInfo {};
 
     float lastAspectRatio = 0.0f;
     float lastFov         = 0.0f;
@@ -859,11 +851,10 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }
-            Vk::ImageView               view      = std::move(*viewRes);
-            const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+            Vk::ImageView view = std::move(*viewRes);
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(
-                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view)
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
@@ -872,7 +863,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
                 pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
-            return textureManager.Adopt(std::move(image), std::move(view), format);
+            return textureManager.Adopt(std::move(image), std::move(view));
         });
 }
 

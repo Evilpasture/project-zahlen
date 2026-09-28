@@ -123,7 +123,7 @@ inline auto CreateView(VkDevice device, const VkImageViewCreateInfo& info) -> st
     if (res != VK_SUCCESS) {
         return std::unexpected(MapImageViewError(res));
     }
-    return ImageView {device, view};
+    return ImageView {device, view, info};
 }
 
 inline auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, ErrorCode> {

@@ -31,7 +31,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     const VkImage     rawImage = image.Handle();
     const VkImageView rawView  = view.Get();
 
-    auto bindless = textureManager.Adopt(std::move(image), std::move(view), format, 1, false);
+    auto bindless = textureManager.Adopt(std::move(image), std::move(view));
     if (!bindless) {
         return std::unexpected(bindless.error());
     }

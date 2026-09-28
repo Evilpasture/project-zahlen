@@ -182,26 +182,26 @@ class IBLProcessor {
 
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
-                    impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
+                    impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {brdfInfo})
                 );
 
                 const auto radianceInfo =
                     MakeViewCreateInfo2D(radianceImage->Handle(), VK_FORMAT_R32G32B32A32_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                const ImageWrite radianceWrite {.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = &radianceInfo};
+                const ImageWrite radianceWrite {radianceInfo};
 
-                std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
-                std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
+                std::array<HeapBlockBase, kMipLevels> specMipBlocks {};
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                    specMipInfos[mip] =
+                    const auto mipInfo =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
                     specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                        impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]}),
+                        impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {mipInfo}),
                         Vk::Slot<"radianceMap">(radianceWrite)
                     );
                 }
+                const auto shMipInfo =
+                    MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, 0);
                 const HeapBlockBase shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                    impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[0]}),
-                    Vk::Slot<"radianceMap">(radianceWrite)
+                    impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {shMipInfo}), Vk::Slot<"radianceMap">(radianceWrite)
                 );
 
                 ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
@@ -281,17 +281,15 @@ class IBLProcessor {
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 const auto info = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state), info](ImageView lutView) mutable -> auto {
-                    state.payload.brdfLutView     = std::move(lutView);
-                    state.payload.brdfLutViewInfo = info;
+                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView lutView) mutable -> auto {
+                    state.payload.brdfLutView = std::move(lutView);
                     return std::move(state);
                 });
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 const auto info = MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), state.payload.prefilteredFormat, kMipLevels);
-                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state), info](ImageView cubeView) mutable -> auto {
-                    state.payload.prefilteredView     = std::move(cubeView);
-                    state.payload.prefilteredViewInfo = info;
+                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView cubeView) mutable -> auto {
+                    state.payload.prefilteredView = std::move(cubeView);
                     return std::move(state);
                 });
             })

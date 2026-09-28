@@ -168,13 +168,10 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
-        constexpr uint32_t kIblMipLevels = 6;
-        const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), iblPayload.prefilteredFormat, kIblMipLevels);
-        heapManager.WriteImage(iblPrefilteredSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
     if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Valid()) {
-        const auto info = Vk::MakeViewCreateInfo2D(iblPayload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-        heapManager.WriteImage(iblBrdfLutSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 
@@ -186,8 +183,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    const auto info = Vk::MakeViewCreateInfo2D(graphResources.transLightingTarget.image.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-    heapManager.WriteImage(transLightingSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
@@ -307,9 +303,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
                     return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
                         .transform_error([](auto res) -> ErrorCode { return res; })
                         .transform([&](auto&& ampView) -> auto {
-                            ltcAmpView     = std::forward<decltype(ampView)>(ampView);
-                            ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                            ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                            ltcAmpView = std::forward<decltype(ampView)>(ampView);
                             ApplyImageDebugNames(*this);
                         });
                 });
@@ -385,7 +379,9 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         return std::unexpected(baked.error());
     }
     baked->contentHash = hash;
-    impl->iblPayload   = std::move(*baked);
+    // Swap keeps the retired images and their views together until the old
+    // payload is destroyed (views first), rather than assigning images first.
+    std::swap(impl->iblPayload, *baked);
     impl->WriteSceneStaticImageDescriptors();
     return {};
 }

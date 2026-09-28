@@ -99,6 +99,8 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!sm_res) {
         return std::unexpected(sm_res.error());
     }
+    // Retire supplemental views before replacing their backing images.
+    _shadowCascadeViews.clear();
     _graph.shadowMap = std::move(*sm_res);
 
     auto smp_res =
@@ -106,6 +108,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!smp_res) {
         return std::unexpected(smp_res.error());
     }
+    _shadowCascadeViewsPrev.clear();
     _shadowMapPrev = std::move(*smp_res);
 
     if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
@@ -126,19 +129,23 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
     }
-    _graph.shadowAtlas = std::move(*sa_res);
+    _punctualShadowViews.clear();
+    _shadowAtlasCubeView = {};
+    _shadowAtlas2DView   = {};
+    _graph.shadowAtlas   = std::move(*sa_res);
 
     const VkImage atlas = _graph.shadowAtlas.image.Handle();
-    _shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-    _shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-
-    auto cube_res = Vk::CreateView(_ctx.Device(), _shadowAtlasCubeViewInfo);
+    auto cube_res = Vk::CreateView(
+        _ctx.Device(), Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    );
     if (!cube_res) {
         return std::unexpected(cube_res.error());
     }
     _shadowAtlasCubeView = std::move(*cube_res);
 
-    auto array_res = Vk::CreateView(_ctx.Device(), _shadowAtlas2DViewInfo);
+    auto array_res = Vk::CreateView(
+        _ctx.Device(), Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    );
     if (!array_res) {
         return std::unexpected(array_res.error());
     }
@@ -174,15 +181,18 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             if (!sm_res) {
                 return std::unexpected(sm_res.error());
             }
-            _graph.shadowMap = std::move(*sm_res);
-
             auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
             );
             if (!smp_res) {
                 return std::unexpected(smp_res.error());
             }
-            _shadowMapPrev = std::move(*smp_res);
+
+            // Additional per-cascade views must die before their old images.
+            _shadowCascadeViews.clear();
+            _shadowCascadeViewsPrev.clear();
+            _graph.shadowMap = std::move(*sm_res);
+            _shadowMapPrev  = std::move(*smp_res);
 
             if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
                 return r;

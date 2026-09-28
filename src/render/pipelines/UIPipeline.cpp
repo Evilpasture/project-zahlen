@@ -18,6 +18,7 @@ static_assert(std::same_as<decltype(std::declval<Vk::ImageSlice>().MatchFormat<V
                            std::optional<LdrImage>>);
 using LdrPass = decltype(Vk::DynamicPass(VkExtent2D {}).AddColor(std::declval<LdrImage>()));
 static_assert(std::same_as<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>>);
+static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo&>);
 static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo*>);
 static_assert(!std::is_constructible_v<LdrPass, VkExtent2D>);
 static_assert(!std::is_constructible_v<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&&>);

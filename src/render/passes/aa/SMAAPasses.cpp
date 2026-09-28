@@ -3,7 +3,6 @@
 
 #include "passes/aa/SMAAPasses.hpp"
 #include <ShaderBindings.hpp>
-#include <tuple>
 
 namespace ZHLN::Passes {
 
@@ -38,34 +37,13 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     if (impl.smaaWeightPass.pipeline.Valid()) {
-        const auto& [areaView, searchView] =
-            std::tie(impl.textureManager.View(impl.postProcess.SmaaAreaTexture()), impl.textureManager.View(impl.postProcess.SmaaSearchTexture()));
-        const auto areaInfo =
-            Vk::MakeViewCreateInfo2D(impl.textureManager.Image(impl.postProcess.SmaaAreaTexture()).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-        const auto searchInfo = Vk::MakeViewCreateInfo2D(
-            impl.textureManager.Image(impl.postProcess.SmaaSearchTexture()).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT
-        );
-        const auto areaHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-            .handle   = impl.textureManager.Image(impl.postProcess.SmaaAreaTexture()).Handle(),
-            .view     = areaView.Get(),
-            .extent   = {.width = 160, .height = 560, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R8G8B8A8_UNORM,
-            .viewInfo = &areaInfo
-        };
-        const auto searchHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-            .handle   = impl.textureManager.Image(impl.postProcess.SmaaSearchTexture()).Handle(),
-            .view     = searchView.Get(),
-            .extent   = {.width = 64, .height = 16, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R8G8B8A8_UNORM,
-            .viewInfo = &searchInfo
-        };
+        const auto& areaView   = impl.textureManager.View(impl.postProcess.SmaaAreaTexture());
+        const auto& searchView = impl.textureManager.View(impl.postProcess.SmaaSearchTexture());
         const Vk::HeapBlockBase block = impl.smaaWeightPass.WriteHeapParameters<Shaders::SmaaWeight>(
             impl.ctx, impl.heapManager,
             Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(impl.graphResources.smaaEdgeTarget)),
-            Vk::Slot<"areaTex">(areaHeap),
-            Vk::Slot<"searchTex">(searchHeap)
+            Vk::Slot<"areaTex">(areaView),
+            Vk::Slot<"searchTex">(searchView)
         );
         impl.smaaWeightPass.ExecuteHeap<Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>(
             impl.ctx, ctx.Cmd(), MetricsOf(impl.graphResources.smaaWeightTarget.extent), block

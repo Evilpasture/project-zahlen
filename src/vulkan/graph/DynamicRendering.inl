@@ -197,9 +197,9 @@ auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags as
 
     if constexpr (requires { resource.State(); }) {
         auto state = resource.State();
-        src_image  = {state.handle, state.view, state.extent, state.aspect, state.format};
+        src_image  = {state.handle, state.view, state.extent, state.aspect, state.format, state.info};
     } else {
-        src_image = {resource.handle, resource.view, resource.extent, resource.aspect, resource.format};
+        src_image = {resource.handle, resource.view, resource.extent, resource.aspect, resource.format, resource.info};
     }
 
     return std::make_pair(transitioned_image, ScopedBarrierGuard<SrcState, DstState>(cmd, src_image, aspectOverride));
@@ -213,11 +213,12 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
     constexpr VkImageLayout in_layout  = LayoutMap<InState>::value;
     constexpr VkImageLayout out_layout = LayoutMap<OutState>::value;
 
-    VkImage            image = VK_NULL_HANDLE;
-    VkImageView        view  = VK_NULL_HANDLE;
-    VkExtent2D         extent {};
-    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    VkFormat           format = VK_FORMAT_UNDEFINED;
+    VkImage                image = VK_NULL_HANDLE;
+    VkImageView            view  = VK_NULL_HANDLE;
+    VkExtent3D             extent {};
+    VkImageAspectFlags     aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkFormat               format = VK_FORMAT_UNDEFINED;
+    VkImageViewCreateInfo  info {};
 
     if constexpr (requires { resource.handle; }) {
         image  = resource.handle;
@@ -225,11 +226,17 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
         extent = resource.extent;
         aspect = resource.aspect;
         format = resource.format;
+        info   = resource.info;
     } else if constexpr (requires { resource.image.Handle(); }) {
         image      = resource.image.Handle();
         view       = resource.view.Get();
-        extent     = resource.extent;
+        if constexpr (requires { resource.extent.depth; }) {
+            extent = resource.extent;
+        } else {
+            extent = {.width = resource.extent.width, .height = resource.extent.height, .depth = 1};
+        }
         aspect     = resource.State().aspect;
+        info       = resource.view.Info();
         using RawT = std::decay_t<T>;
         if constexpr (requires { TargetFormat<RawT>::value; }) {
             format = TargetFormat<RawT>::value;
@@ -242,14 +249,14 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
 
     TransitionLayout<in_layout, out_layout>(cmd, image, aspect);
 
-    return TypedImage<out_layout> {.handle = image, .view = view, .extent = extent, .aspect = aspect, .format = format};
+    return TypedImage<out_layout> {.handle = image, .view = view, .extent = extent, .aspect = aspect, .format = format, .info = info};
 }
 
 template <VkImageLayout NewLayout, VkImageLayout OldLayout>
 inline auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, VkImageAspectFlags overrideAspect) noexcept -> TypedImage<NewLayout> {
     VkImageAspectFlags aspect = (overrideAspect != VK_IMAGE_ASPECT_NONE) ? overrideAspect : img.aspect;
     TransitionLayout<OldLayout, NewLayout>(cmd, img.handle, aspect);
-    return TypedImage<NewLayout> {.handle = img.handle, .view = img.view, .extent = img.extent, .aspect = img.aspect, .format = img.format};
+    return TypedImage<NewLayout> {.handle = img.handle, .view = img.view, .extent = img.extent, .aspect = img.aspect, .format = img.format, .info = img.info};
 }
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout>

@@ -286,7 +286,24 @@ class HeapManager {
     }
 
     void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        WriteImage(handle, view.Info(), layout);
+    }
+    template <typename Resource>
+        requires requires(const Resource& resource) { resource.view.Info(); }
+    void WriteImage(TextureHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
+        WriteImage(handle, resource.view, layout);
+    }
+
     void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        WriteStorageImage(handle, view.Info(), layout);
+    }
+    template <typename Resource>
+        requires requires(const Resource& resource) { resource.view.Info(); }
+    void WriteStorageImage(StorageImageHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
+        WriteStorageImage(handle, resource.view, layout);
+    }
     void WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
     void WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;

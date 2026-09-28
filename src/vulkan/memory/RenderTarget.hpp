@@ -14,7 +14,6 @@ struct RenderTarget {
     Image      image;
     ImageView  view;
     VkExtent2D extent {};
-    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget() = default;
 
@@ -44,18 +43,24 @@ struct RenderTarget {
 
 template <VkFormat F>
 struct RenderTarget3D {
-    Image                 image;
-    ImageView             view;
-    VkExtent3D            extent {};
-    VkImageViewCreateInfo viewInfo {};
+    Image      image;
+    ImageView  view;
+    VkExtent3D extent {};
 
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
 
     RenderTarget3D(const RenderTarget3D&)                = delete;
     RenderTarget3D& operator=(const RenderTarget3D&)     = delete;
-    RenderTarget3D(RenderTarget3D&&) noexcept            = default;
-    RenderTarget3D& operator=(RenderTarget3D&&) noexcept = default;
+    RenderTarget3D(RenderTarget3D&&) noexcept = default;
+    auto operator=(RenderTarget3D&& other) noexcept -> RenderTarget3D& {
+        if (this != &other) {
+            view   = std::move(other.view);
+            image  = std::move(other.image);
+            extent = other.extent;
+        }
+        return *this;
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && view.Valid();
@@ -70,21 +75,28 @@ struct RenderTarget3D {
 
 template <VkFormat F>
 struct MipmappedRenderTarget {
-    Image                              image;
-    ImageView                          fullView;
-    std::vector<ImageView>             mipViews;
-    VkExtent2D                         extent {};
-    uint32_t                           mipLevels = 1;
-    VkImageViewCreateInfo              fullViewInfo {};
-    std::vector<VkImageViewCreateInfo> mipViewInfos;
+    Image                  image;
+    ImageView              fullView;
+    std::vector<ImageView> mipViews;
+    VkExtent2D             extent {};
+    uint32_t               mipLevels = 1;
 
     MipmappedRenderTarget() = default;
 
     MipmappedRenderTarget(const MipmappedRenderTarget&)                    = delete;
     auto operator=(const MipmappedRenderTarget&) -> MipmappedRenderTarget& = delete;
 
-    MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept                    = default;
-    auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& = default;
+    MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept = default;
+    auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& {
+        if (this != &other) {
+            mipViews  = std::move(other.mipViews);
+            fullView  = std::move(other.fullView);
+            image     = std::move(other.image);
+            extent    = other.extent;
+            mipLevels = other.mipLevels;
+        }
+        return *this;
+    }
 
     ~MipmappedRenderTarget() = default;
 
@@ -119,22 +131,18 @@ struct MipmappedRenderTarget {
         target.image = std::move(img_res.value());
 
         const VkImageAspectFlags aspect = GetFormatAspect(F);
-        target.fullViewInfo             = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect);
-        auto view_res                   = CreateView(ctx.Device(), target.fullViewInfo);
+        auto view_res = CreateView(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
         target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
-        target.mipViewInfos.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            const VkImageViewCreateInfo mipInfo = MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m);
-            auto                        mip_res = CreateView(ctx.Device(), mipInfo);
+            auto mip_res = CreateView(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m));
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }
             target.mipViews.push_back(std::move(*mip_res));
-            target.mipViewInfos.push_back(mipInfo);
         }
         return target;
     }
@@ -176,17 +184,17 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.viewInfo};
+    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, rt.view.Info()};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.viewInfo};
+    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, rt.view.Info()};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullViewInfo};
+    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, rt.fullView.Info()};
 }
 
 template <typename Usage>

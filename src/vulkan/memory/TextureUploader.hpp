@@ -87,8 +87,7 @@ class TextureUploader {
             }
         });
 
-        auto viewInfo = MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -97,12 +96,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.width, desc.height, 1},
-            .format    = desc.format,
-            .mipLevels = mips,
-            .isCube    = false
+            .view   = std::move(*viewRes),
+            .extent = {desc.width, desc.height, 1}
         };
     }
 
@@ -141,8 +136,7 @@ class TextureUploader {
             );
         });
 
-        auto viewInfo = MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -151,12 +145,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.width, desc.height, desc.depth},
-            .format    = desc.format,
-            .mipLevels = 1,
-            .isCube    = false
+            .view   = std::move(*viewRes),
+            .extent = {desc.width, desc.height, desc.depth}
         };
     }
 
@@ -187,8 +177,7 @@ class TextureUploader {
             );
         });
 
-        auto viewInfo = MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -197,12 +186,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.size, desc.size, 1},
-            .format    = desc.format,
-            .mipLevels = 1,
-            .isCube    = true
+            .view   = std::move(*viewRes),
+            .extent = {desc.size, desc.size, 1}
         };
     }
 

@@ -63,8 +63,7 @@ class TextureManager {
 
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto Adopt(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;
 
@@ -90,7 +89,7 @@ class TextureManager {
         Vk::ImageView view;
     };
 
-    void WriteSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
+    void WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;

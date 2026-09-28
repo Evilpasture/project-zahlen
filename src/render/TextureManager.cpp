@@ -49,7 +49,7 @@ auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height,
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
         .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = Adopt(std::move(tex.image), std::move(tex.view), format, tex.mipLevels, false);
+            const auto index = Adopt(std::move(tex.image), std::move(tex.view));
             if (index) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
             }
@@ -63,7 +63,7 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
         .UploadCube({.faceData = faces, .size = size, .format = VK_FORMAT_R8G8B8A8_UNORM})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = Adopt(std::move(tex.image), std::move(tex.view), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
+            const auto index = Adopt(std::move(tex.image), std::move(tex.view));
             if (index) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[*index].Handle(), std::format("BindlessCubeTexture{:03}", *index));
             }
@@ -215,11 +215,9 @@ void TextureManager::Clear() {
 }
 
 void TextureManager::OnDeviceLost() {
-    for (auto& image: _slotImages) {
-        image = Vk::Image {};
-    }
-    _slotImages.clear();
+    // Views must be released before their images, including pending slot frees.
     _slotViews.clear();
+    _slotImages.clear();
     _nextSlotIndex    = 0;
     _bindlessBaseSlot = 0;
     _freeSlots.clear();
@@ -234,7 +232,7 @@ void TextureManager::OnDeviceLost() {
     });
 }
 
-auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expected<uint32_t, ErrorCode> {
     uint32_t index = 0;
     if (!_freeSlots.empty()) {
         index = _freeSlots.back();
@@ -252,9 +250,9 @@ auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view, VkFormat for
         _slotViews.resize(static_cast<size_t>(index) + 1);
     }
 
-    WriteSlotToHeap(index, image.Handle(), format, mipLevels, cube);
-    _slotImages[index] = std::move(image);
+    WriteSlotToHeap(index, view);
     _slotViews[index]  = std::move(view);
+    _slotImages[index] = std::move(image);
     return index;
 }
 
@@ -263,7 +261,7 @@ void TextureManager::BeginFrame(uint32_t frameIndex) noexcept {
 
     auto& pending = _pendingFrees[frameIndex];
     for (auto& released: pending) {
-        WriteSlotToHeap(released.index, _slotImages[kFallbackWhiteTextureIndex].Handle(), VK_FORMAT_R8G8B8A8_SRGB, 1, false);
+        WriteSlotToHeap(released.index, _slotViews[kFallbackWhiteTextureIndex]);
         _freeSlots.push_back(released.index);
     }
     pending.clear();
@@ -291,11 +289,9 @@ void TextureManager::NameSlots() noexcept {
     }
 }
 
-void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
-    const Vk::TextureHandle   slot {_bindlessBaseSlot + bindlessIndex};
-    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
-                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
-    _heaps.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept {
+    const Vk::TextureHandle slot {_bindlessBaseSlot + bindlessIndex};
+    _heaps.WriteImage(slot, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 }
