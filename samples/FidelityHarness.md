@@ -45,9 +45,13 @@ this harness builds none of them. Specifically:
   baked SH diffuse irradiance plus the pre-filtered specular environment, which
   is what the split-sum model the contract exercises.
 * **Camera from the scenario**: Khronos `{theta, phi, radius}` around
-  `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFov`,
-  near 0.01 / far 100. The harness renders at `DEVICE_PIXEL_RATIO = 2` of
-  `SetResolution(width, height)` with `fov = verticalFov` (both axes scale,
+  `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFoV`,
+  near 0.01 / far 100. Radius **0 is valid**: upstream uses it for
+  `khronos-Sponza` and `khronos-MetalRoughSpheresNoTextures` to put the eye at
+  the target. The view still faces *opposite the orbit direction*, rather than
+  normalizing the zero eye-to-target vector. Nonfinite cameras fail before
+  capture. The harness renders at `DEVICE_PIXEL_RATIO = 2` of
+  `SetResolution(width, height)` with the scenario FOV (both axes scale,
   so the composition matches), matching the goldens' native 2x capture.
 
 ## CLIs
@@ -120,6 +124,13 @@ For `TextureSettingsTest`, compare the clamp S/T rows (solid green) and
 mirror S/T rows (checkmarks) against the golden; repeat S/T should remain
 checkmarks. This requires a new GPU capture—successful shader compilation and
 an importer fixture alone cannot verify the image.
+
+For the zero-radius camera regression, run
+`SCENARIO=khronos-Sponza ./scripts/run_fidelity.sh -j1` and check that the
+candidate PNG contains opaque scene pixels rather than an all-transparent
+capture. The same check applies to `khronos-MetalRoughSpheresNoTextures`.
+The upstream Blender reference parents an oriented camera to the target; it
+does **not** calculate its direction by looking at a distinct target point.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

@@ -157,7 +157,9 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
             }
         }
 
-        s.verticalFov = GetFloat(*raw, "verticalFov", 45.0f);
+        // Khronos calls the field verticalFoV. Accept our earlier local
+        // spelling too; keep writing the same handoff JSON for stable mtimes.
+        s.verticalFov = GetFloat(*raw, "verticalFoV", GetFloat(*raw, "verticalFov", 45.0f));
 
         if (const auto dims = raw->GetKey("dimensions"); dims) {
             s.dimensions.width  = GetUInt(*dims, "width", 768);

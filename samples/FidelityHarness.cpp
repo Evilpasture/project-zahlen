@@ -191,7 +191,9 @@ auto ParseScenario(std::string_view jsonText) -> std::optional<FidelityScenario>
         scenario.orbit.radius = GetFloat(*orbit, "radius", 2.5f);
     }
 
-    scenario.verticalFov = GetFloat(root, "verticalFov", 45.0f);
+    // The generator spells this verticalFoV; retain the earlier local spelling
+    // for hand-written scenarios and existing runner output.
+    scenario.verticalFov = GetFloat(root, "verticalFoV", GetFloat(root, "verticalFov", 45.0f));
     return scenario;
 }
 
@@ -253,11 +255,10 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
 //   radius  distance from the target in metres.
 // The engine's camera convention (Camera::GetViewMatrix) is yaw/pitch: the view
 // direction is `(cos(yaw)*cos(pitch), sin(pitch), sin(yaw)*cos(pitch))`, with
-// yaw = 0 looking down +X and yaw = -90 looking down +Z. Both conventions
-// describe the same direction vector, so this converts the spherical angles to
-// a direction, positions the eye, and only then decomposes back to yaw/pitch so
-// every engine system that reads yaw/pitch stays consistent with the view it
-// actually renders.
+// yaw = 0 looking down +X and yaw = -90 looking down -Z. The orbit angles
+// determine orientation independently of radius: Khronos deliberately puts
+// Sponza's eye *at* its target (radius 0), still looking into the scene.
+// Deriving the forward vector from target - eye would normalize zero there.
 void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     const float thetaRad = JPH::DegreesToRadians(scenario.orbit.theta);
     const float phiRad   = JPH::DegreesToRadians(scenario.orbit.phi);
@@ -274,10 +275,9 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     camera.nearZ    = 0.01f;
     camera.farZ     = 100.0f;
 
-    // The view frame the engine's free-cam reads: decompose the authored offset
-    // back into the yaw/pitch pair that reproduces it, so a system reading
-    // yaw/pitch independently of `position` still sees the same frame.
-    const JPH::Vec3 forward = (target - camera.position).Normalized();
+    // The view frame is -direction even when radius is zero and eye == target.
+    // Decompose the orbit angles, not the eye-to-target displacement.
+    const JPH::Vec3 forward = -direction;
     camera.pitch            = JPH::RadiansToDegrees(std::asin(forward.GetY()));
     camera.yaw              = JPH::RadiansToDegrees(std::atan2(forward.GetZ(), forward.GetX()));
 }
@@ -629,6 +629,12 @@ auto main(int argc, char* argv[]) -> int {
 
     ZHLN::Camera& camera = engine->GetCamera();
     SetFidelityCamera(camera, scenario);
+    if (!std::isfinite(camera.position.GetX()) || !std::isfinite(camera.position.GetY()) || !std::isfinite(camera.position.GetZ()) ||
+        !std::isfinite(camera.yaw) || !std::isfinite(camera.pitch)) {
+        ZHLN::Log("[Fidelity] Invalid camera for '{}'; refusing an empty capture.", scenario.name);
+        ZHLN::TaskSystem::Shutdown();
+        return EXIT_FAILURE;
+    }
 
     engine->GetRenderContext().SetResolution(
         ZHLN::Extent2D {

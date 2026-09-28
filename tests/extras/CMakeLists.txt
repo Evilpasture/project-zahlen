@@ -88,6 +88,14 @@ add_test(NAME TestProceduralSampleWiring
 )
 set_tests_properties(TestProceduralSampleWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
 
+# The Khronos scenarios include radius=0 camera orbits. This sample-level
+# check catches accidentally reintroducing an eye-to-target zero normalization
+# even on machines without the GPU or the large Sponza asset.
+add_test(NAME TestFidelityCameraWiring
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_fidelity_camera_wiring.py"
+)
+set_tests_properties(TestFidelityCameraWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a
