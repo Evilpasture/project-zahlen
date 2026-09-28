@@ -8,18 +8,12 @@
 
 namespace ZHLN::Vk {
 
-
 auto SwapchainSupport::Formats() const noexcept -> std::span<const VkSurfaceFormatKHR> {
     return {raw.formats, raw.format_count};
 }
 
 auto SwapchainSupport::PresentModes() const noexcept -> std::span<const VkPresentModeKHR> {
     return {raw.present_modes, raw.present_mode_count};
-}
-
-SwapchainSupport QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept {
-    const ZHLN_SwapchainSupportDesc desc = {.physical = physical, .surface = surface};
-    return {ZHLN_QuerySwapchainSupport(&desc)};
 }
 
 Swapchain::Swapchain(const VkDevice device, const ZHLN_Swapchain raw) noexcept: _device(device), _raw(raw) {
@@ -71,4 +65,4 @@ void Swapchain::Destroy() noexcept {
         ZHLN_DestroySwapchain(_device, &_raw);
     }
 }
-}
+} // namespace ZHLN::Vk
