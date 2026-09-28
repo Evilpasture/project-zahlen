@@ -8,6 +8,9 @@
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <memory_resource>
 #include <utility>
 #include <vector>
 
@@ -15,8 +18,8 @@ namespace ZHLN::Vk {
 
 namespace {
 
-[[nodiscard]] auto BatchFitsHeap(const uint32_t* slots, uint32_t count, uint32_t maxSlot, uint32_t capacity, const char* heapName) noexcept -> bool {
-    if (count == 0 || slots == nullptr || maxSlot < capacity) {
+[[nodiscard]] auto BatchFitsHeap(uint32_t maxSlot, uint32_t capacity, uint32_t count, const char* heapName) noexcept -> bool {
+    if (maxSlot < capacity) {
         return true;
     }
     ZHLN::Log("[DescriptorHeap] {} heap write out of range: slot {} >= capacity {}. Dropping {} descriptor write(s).", heapName, maxSlot, capacity, count);
@@ -185,17 +188,16 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resources)
 {
     if (Valid() && vkWriteResourceDescriptorsEXT != nullptr) {
-        const auto  count = batch.SlotCount();
-        const auto* slots = batch.SlotsData();
+        const auto count = batch.SlotCount();
         VkDeviceSize flushOffset = 0;
         VkDeviceSize flushSize   = 0;
-        if (count > 0 && slots != nullptr && _stride > 0) {
-            const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
-            if (!BatchFitsHeap(slots, count, *maxIt, _capacity, "Resource")) {
+        if (count > 0 && _stride > 0) {
+            const auto [minSlot, maxSlot] = batch.SlotBounds();
+            if (!BatchFitsHeap(maxSlot, _capacity, count, "Resource")) {
                 return;
             }
-            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
-            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            flushOffset               = static_cast<VkDeviceSize>(minSlot) * _stride;
+            flushSize                 = (static_cast<VkDeviceSize>(maxSlot) + 1U) * _stride - flushOffset;
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
@@ -217,7 +219,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
         VkDeviceSize flushSize   = 0;
         if (count > 0 && slots != nullptr && _stride > 0) {
             const auto [minIt, maxIt] = std::minmax_element(slots, slots + count);
-            if (!BatchFitsHeap(slots, count, *maxIt, _capacity, "Sampler")) {
+            if (!BatchFitsHeap(*maxIt, _capacity, count, "Sampler")) {
                 return;
             }
             flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
@@ -234,11 +236,51 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
 
 
 struct ResourceWriteBatch::Impl {
-    std::vector<VkImageDescriptorInfoEXT> imageInfos;
-    std::vector<VkImageViewCreateInfo>    viewInfos;
-    std::vector<VkDeviceAddressRangeEXT>  addressRanges;
-    std::vector<uint32_t>                 slots;
-    std::vector<VkDescriptorType>         types;
+    // pView points into this payload, which lives at a fixed address in the
+    // batch arena until the synchronous vkWriteResourceDescriptorsEXT call.
+    struct ImagePayload {
+        VkImageViewCreateInfo   viewInfo {};
+        VkImageDescriptorInfoEXT descriptor {};
+
+        ImagePayload(const VkImageViewCreateInfo& info, VkImageLayout layout) noexcept:
+            viewInfo(info), descriptor {.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = &viewInfo, .layout = layout} {
+        }
+        ImagePayload(const ImagePayload&) = delete;
+        auto operator=(const ImagePayload&) -> ImagePayload& = delete;
+        ImagePayload(ImagePayload&&) = delete;
+        auto operator=(ImagePayload&&) -> ImagePayload& = delete;
+    };
+
+    struct Write {
+        uint32_t                    slot = 0;
+        VkResourceDescriptorInfoEXT descriptor {};
+    };
+
+    alignas(std::max_align_t) std::array<std::byte, 1024> storage {};
+    std::pmr::monotonic_buffer_resource arena {storage.data(), storage.size()};
+    std::vector<Write> writes;
+
+    void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
+        std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
+        auto* image = alloc.new_object<ImagePayload>(viewInfo, layout);
+
+        VkResourceDescriptorInfoEXT descriptor {
+            .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}
+        };
+        descriptor.data.pImage = &image->descriptor;
+        writes.push_back({.slot = slot, .descriptor = descriptor});
+    }
+
+    void AddAddress(uint32_t slot, VkDescriptorType type, VkDeviceAddressRangeEXT range) {
+        std::pmr::polymorphic_allocator<VkDeviceAddressRangeEXT> alloc {&arena};
+        auto* address = alloc.new_object<VkDeviceAddressRangeEXT>(range);
+
+        VkResourceDescriptorInfoEXT descriptor {
+            .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}
+        };
+        descriptor.data.pAddressRange = address;
+        writes.push_back({.slot = slot, .descriptor = descriptor});
+    }
 };
 
 ResourceWriteBatch::ResourceWriteBatch() noexcept: _impl(std::make_unique<Impl>()) {
@@ -249,88 +291,68 @@ ResourceWriteBatch::ResourceWriteBatch(ResourceWriteBatch&& other) noexcept     
 auto ResourceWriteBatch::operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch& = default;
 
 auto ResourceWriteBatch::Empty() const noexcept -> bool {
-    return _impl->slots.empty();
+    return _impl->writes.empty();
 }
 
 auto ResourceWriteBatch::SlotCount() const noexcept -> uint32_t {
-    return static_cast<uint32_t>(_impl->slots.size());
+    return static_cast<uint32_t>(_impl->writes.size());
 }
 
-auto ResourceWriteBatch::SlotsData() const noexcept -> const uint32_t* {
-    return _impl->slots.data();
+auto ResourceWriteBatch::SlotBounds() const noexcept -> std::pair<uint32_t, uint32_t> {
+    if (_impl->writes.empty()) {
+        return {0, 0};
+    }
+    uint32_t minSlot = _impl->writes.front().slot;
+    uint32_t maxSlot = minSlot;
+    for (const auto& write: _impl->writes) {
+        minSlot = std::min(minSlot, write.slot);
+        maxSlot = std::max(maxSlot, write.slot);
+    }
+    return {minSlot, maxSlot};
 }
 
 void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    _impl->viewInfos.push_back(viewInfo);
-
-    _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
-    _impl->slots.push_back(handle.index);
-    _impl->types.push_back(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, viewInfo, layout);
 }
 
 void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    _impl->viewInfos.push_back(viewInfo);
-
-    _impl->imageInfos.push_back({.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = nullptr, .layout = layout});
-    _impl->slots.push_back(handle.index);
-    _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, viewInfo, layout);
 }
 
 void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
-    _impl->addressRanges.push_back({.address = slice.Address(), .size = slice.Size()});
-    _impl->slots.push_back(handle.index);
-    _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {.address = slice.Address(), .size = slice.Size()});
 }
 
 void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
-    _impl->addressRanges.push_back({.address = slice.Address(), .size = slice.Size()});
-    _impl->slots.push_back(handle.index);
-    _impl->types.push_back(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {.address = slice.Address(), .size = slice.Size()});
 }
 
 void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {
-    _impl->addressRanges.push_back({.address = address, .size = 0});
-    _impl->slots.push_back(handle.index);
-    _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
+    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, {.address = address, .size = 0});
 }
 
 void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept {
-    const auto total_count = static_cast<uint32_t>(_impl->slots.size());
+    const auto total_count = static_cast<uint32_t>(_impl->writes.size());
     if (total_count == 0) {
         return;
     }
 
-    std::vector<VkResourceDescriptorInfoEXT> resource_infos(total_count);
-    std::vector<VkHostAddressRangeEXT>       ranges(total_count);
+    // Only the API's two flat arrays are assembled here. Every nested pointer
+    // already targets stable arena storage, regardless of writes vector growth.
+    std::vector<VkResourceDescriptorInfoEXT> resource_infos;
+    std::vector<VkHostAddressRangeEXT>       ranges;
+    resource_infos.reserve(total_count);
+    ranges.reserve(total_count);
 
-    uint32_t img_idx = 0;
-    uint32_t buf_idx = 0;
-
-    for (uint32_t i = 0; i < total_count; ++i) {
-        resource_infos[i] = {
-            .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
-            .pNext = nullptr,
-            .type  = _impl->types[i],
-            .data  = {},
-        };
-
-        if (_impl->types[i] == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || _impl->types[i] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-            _impl->imageInfos[img_idx].pView = &_impl->viewInfos[img_idx];
-            resource_infos[i].data.pImage    = &_impl->imageInfos[img_idx++];
-        } else {
-            resource_infos[i].data.pAddressRange = &_impl->addressRanges[buf_idx++];
-        }
-
-        ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
+    for (const auto& write: _impl->writes) {
+        resource_infos.push_back(write.descriptor);
+        ranges.push_back({.address = static_cast<uint8_t*>(mappedPtr) + (write.slot * stride), .size = stride});
     }
 
     vkWriteResourceDescriptorsEXT(device, total_count, resource_infos.data(), ranges.data());
 
-    _impl->imageInfos.clear();
-    _impl->viewInfos.clear();
-    _impl->addressRanges.clear();
-    _impl->slots.clear();
-    _impl->types.clear();
+    _impl->writes.clear();
+    _impl->arena.release();
 }
 
 

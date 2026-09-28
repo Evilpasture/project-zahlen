@@ -35,7 +35,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
 
     const auto handle = destinations.Register(DestinationRegistry::Record {
         .bindlessIndex = *bindless,
-        .image         = textureManager.Slice(*bindless, {width, height}, format),
+        .image         = textureManager.Slice(*bindless, {width, height}),
         .presentable   = false,
         .target        = nullptr,
     });

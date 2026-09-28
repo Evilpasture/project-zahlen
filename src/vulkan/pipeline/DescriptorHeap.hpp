@@ -6,6 +6,7 @@
 #include "memory/Allocator.hpp"
 
 #include <Zahlen/Threading/Mutex.hpp>
+#include <utility>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -176,7 +177,8 @@ class ResourceWriteBatch {
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
     [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
-    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
+    // The slot ids live alongside their payloads, not in a parallel vector.
+    [[nodiscard]] auto SlotBounds() const noexcept -> std::pair<uint32_t, uint32_t>;
 
   private:
     struct Impl;

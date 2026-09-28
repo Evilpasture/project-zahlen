@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <optional>
 #include <string_view>
@@ -70,10 +71,12 @@ class TextureManager {
     [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
     [[nodiscard]] const Vk::Image&     Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
     [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept { return _slotViews[slot]; }
-    // A retained slice must not borrow View(slot).Info(): _slotViews may relocate
-    // when new textures are adopted. The manager supplies rich view info on demand.
-    [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent, VkFormat format) const noexcept -> Vk::ImageSlice {
-        return Vk::ImageSlice {_slotImages[slot].Handle(), _slotViews[slot].Get(), extent, format};
+    // A slice borrows the exact view metadata, including cube/array/3D shape
+    // and mip/layer range. Appending slots cannot relocate a deque element;
+    // slot release/replacement, device loss, or manager destruction ends the borrow.
+    [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
+        const Vk::ImageView& view = _slotViews[slot];
+        return Vk::ImageSlice {_slotImages[slot].Handle(), view, extent, view.Info().format};
     }
     void NameSlots() noexcept;
 
@@ -105,10 +108,10 @@ class TextureManager {
     uint32_t _bindlessBaseSlot = 0;
     uint32_t _frameIndex = 0;
 
-    ZHLN::Array<Vk::Image>     _slotImages;
-    ZHLN::Array<Vk::ImageView> _slotViews;
-    uint32_t                                 _nextSlotIndex = 0;
-    ZHLN::Array<uint32_t>                    _freeSlots;
+    ZHLN::Array<Vk::Image> _slotImages;
+    std::deque<Vk::ImageView> _slotViews;
+    uint32_t _nextSlotIndex = 0;
+    ZHLN::Array<uint32_t> _freeSlots;
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;

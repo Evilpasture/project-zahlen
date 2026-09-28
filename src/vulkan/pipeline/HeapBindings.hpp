@@ -265,20 +265,22 @@ struct AsAddressWrite {
 namespace TemplatedDetail {
 
 // Return a value, never forward a borrowed pointer into a heap write.
-// Views created by the engine carry their exact shape (cube/array/3D/mip).
-// Raw slices without view metadata retain the single-mip 2D fallback.
+// A raw slice without view metadata cannot describe its shape: guessing a 2D
+// single-mip view here would be invalid for cube, array and 3D images.
+template <typename T>
+[[nodiscard]] constexpr auto BorrowedSliceOf(const T& img) noexcept -> const ImageSlice& {
+    if constexpr (IsTypedImage<T>::value) {
+        return img.Raw();
+    } else {
+        return img;
+    }
+}
+
 template <typename T>
 [[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
     if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
-        const ImageSlice& slice = [&]() -> const ImageSlice& {
-            if constexpr (IsTypedImage<T>::value) {
-                return img.Raw();
-            } else {
-                return img;
-            }
-        }();
-        return slice.info != nullptr && slice.info->image != VK_NULL_HANDLE ? *slice.info :
-            MakeViewCreateInfo2D(slice.image, slice.format, 1, slice.aspect);
+        const ImageSlice& slice = BorrowedSliceOf(img);
+        return slice.info != nullptr ? *slice.info : VkImageViewCreateInfo {};
     } else if constexpr (std::is_same_v<T, ImageWrite>) {
         return img.info;
     } else if constexpr (std::is_same_v<T, ImageView>) {
@@ -348,6 +350,19 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
+            if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
+                const ImageSlice& slice = BorrowedSliceOf(arg);
+                // A live slice needs its owner's exact create info. Reject
+                // missing or mismatched metadata rather than invent a 2D view;
+                // callers still must not retain slices across owner replacement.
+                if (slice.info == nullptr) {
+                    if (slice.image != VK_NULL_HANDLE) {
+                        return false;
+                    }
+                } else if (slice.info->image != slice.image || slice.info->format != slice.format) {
+                    return false;
+                }
+            }
             const VkImageViewCreateInfo info = ViewInfoOf(arg);
             if (info.image == VK_NULL_HANDLE) {
                 return true;
@@ -462,7 +477,7 @@ template <typename Declared, typename... Slots>
         const auto& binding = b.resources[*ordinal];
         if (!TemplatedDetail::WriteHeapBinding(*this, ctx, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
-                false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); the value is of the wrong kind", SlotT::name,
+                false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); wrong kind or missing/mismatched image view metadata", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
             );
         }

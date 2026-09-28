@@ -13,7 +13,7 @@
 namespace ZHLN::Vk {
 
 // Descriptor writes own the view description: ResourceWriteBatch copies it
-// again before vkWriteResourceDescriptorsEXT, so no borrowed pointer survives.
+// into its transient arena, so no caller-owned pointer survives the write.
 struct ImageWrite {
     VkImageViewCreateInfo info {};
     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
