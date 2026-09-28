@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // --- Global Module Fragment: Implementation Dependencies ---
 // clang-format off
 #include <Jolt/Jolt.h>

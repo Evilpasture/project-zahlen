@@ -1,14 +1,17 @@
 module;
 
+#if defined(_WIN32)
+// Match the Windows-first intrinsic declarations used by header consumers.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <emmintrin.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
 #endif
 
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>

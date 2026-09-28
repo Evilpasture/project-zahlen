@@ -16,6 +16,8 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 
+// MinGW's winnt.h reaches GCC intrinsics with C linkage; this must precede
+// standalone immintrin.h (including Jolt's use in module global fragments).
 #include <windows.h>
 
 #pragma comment(lib, "User32.lib")
