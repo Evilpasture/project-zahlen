@@ -116,7 +116,7 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const ZHLN::Array<GroupRange> groups = BuildGroupRanges(impl);
 
-    const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+    const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers[impl.presenter.frameIndex].Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
 
     const GBufferTargets in = GBufferSceneTargets(impl);

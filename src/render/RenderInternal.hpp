@@ -331,33 +331,31 @@ struct RenderContext::Impl {
     }
 
     struct PerFrameResources {
-        DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
-        DoubleBuffered<Vk::Buffer>                                      lineVbos;
-        DoubleBuffered<VkDeviceAddress>                                 lineVboAddresses;
-        DoubleBuffered<Vk::Buffer>                                      clusterGridBuffers;
-        DoubleBuffered<Vk::Buffer>                                      lightIndexListBuffers;
-        DoubleBuffered<Vk::Buffer>                                      globalCounterBuffers;
-        DoubleBuffered<Vk::Buffer>                                      frameUniformBuffers;
-        DoubleBuffered<Vk::Buffer>                                      lightStorageBuffers;
-        DoubleBuffered<Vk::Buffer>                                      instanceDataBuffers;
-        DoubleBuffered<Vk::Buffer>                                      indirectCommandsBuffers;
-        DoubleBuffered<Vk::Buffer>                                      indirectCommandsBuffersPass2;
-        DoubleBuffered<Vk::Buffer>                                      secondPassCandidatesBuffers;
-        DoubleBuffered<Vk::Buffer>                                      secondPassCountBuffers;
-        DoubleBuffered<Vk::Buffer>                                      jointBuffers;
-        DoubleBuffered<Vk::AccelerationStructure>                       tlas;
-        DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
-        DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
-        DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
-        DoubleBuffered<BufferHandle>                                    debugMeshHandles;
-        DoubleBuffered<Vk::Buffer>                                      fogVolumesBuffer;
-
-        void FlipAll() noexcept {
-            ZHLN::Reflect::ForEachField(*this, [](auto& field) { FlipObject(field); });
-        }
+        PerFrame<Vk::Buffer>      lineVbos;
+        PerFrame<VkDeviceAddress> lineVboAddresses;
+        PerFrame<Vk::Buffer>      clusterGridBuffers;
+        PerFrame<Vk::Buffer>      lightIndexListBuffers;
+        PerFrame<Vk::Buffer>      globalCounterBuffers;
+        PerFrame<Vk::Buffer>      frameUniformBuffers;
+        PerFrame<Vk::Buffer>      lightStorageBuffers;
+        PerFrame<Vk::Buffer>      instanceDataBuffers;
+        PerFrame<Vk::Buffer>      indirectCommandsBuffers;
+        PerFrame<Vk::Buffer>      indirectCommandsBuffersPass2;
+        PerFrame<Vk::Buffer>      secondPassCandidatesBuffers;
+        PerFrame<Vk::Buffer>      secondPassCountBuffers;
+        // Joint data is addressed by both the current and previous frame slot.
+        // Its physical lifetime follows the N-slot frame ring, not PingPong.
+        PerFrame<Vk::Buffer>                jointBuffers;
+        PerFrame<Vk::AccelerationStructure> tlas;
+        PerFrame<Vk::Buffer>                tlasBuffer;
+        PerFrame<Vk::Buffer>                tlasScratchBuffer;
+        PerFrame<Vk::Buffer>                tlasInstanceBuffers;
+        PerFrame<BufferHandle>              debugMeshHandles;
+        PerFrame<Vk::Buffer>                fogVolumesBuffer;
     };
 
     PerFrameResources frames;
+    PingPong<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumulationHistory;
 
     Vk::Buffer clusterBoundsBuffer;
     Vk::Buffer morphDeltasBuffer;
@@ -456,8 +454,8 @@ struct RenderContext::Impl {
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
     std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
         size_t                           maxVertices,
-        DoubleBuffered<Vk::Buffer>&      bufs,
-        DoubleBuffered<VkDeviceAddress>& addrs,
+        PerFrame<Vk::Buffer>&            bufs,
+        PerFrame<VkDeviceAddress>&       addrs,
         const char*                      label,
         Vk::BufferUsage                  extraFlags = Vk::BufferUsage::None
     ) noexcept;
@@ -646,7 +644,7 @@ struct RenderContext::Impl {
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
         if (ctx.Device() != VK_NULL_HANDLE) {
-            for (auto& tlas: frames.tlas.data) {
+            for (auto& tlas: frames.tlas) {
                 tlas = Vk::AccelerationStructure {};
             }
         }
@@ -925,12 +923,16 @@ inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& out
 }
 
 template <typename T = Vk::Buffer, typename... Args>
-auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, ErrorCode> {
-    return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> auto {
-        return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) -> auto {
-            return DoubleBuffered<T> {std::forward<decltype(first)>(first), std::forward<decltype(second)>(second)};
-        });
-    });
+[[nodiscard]] auto CreatePerFrame(Vk::Allocator& alloc, const Args&... args) -> std::expected<PerFrame<T>, ErrorCode> {
+    PerFrame<T> resources;
+    for (auto& resource: resources) {
+        auto created = T::Create(alloc.Get(), args...);
+        if (!created) {
+            return std::unexpected(created.error());
+        }
+        resource = std::move(*created);
+    }
+    return std::expected<PerFrame<T>, ErrorCode> {std::move(resources)};
 }
 
 }

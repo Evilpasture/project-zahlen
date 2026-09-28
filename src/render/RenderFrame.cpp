@@ -96,7 +96,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
                 .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
                 .outPosAddr       = scratchMesh->vboAddress,
                 .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers->Handle()),
+                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
@@ -334,6 +334,10 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
+    // The two-state accumulation, shadow-map and voxel histories can be reused
+    // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
+    // independently indexed, but increasing N alone does not permit additional
+    // overlapping GPU frames while these history targets remain shared.
     if (const VkResult waited = _impl->presenter.sync.Wait(Vk::PreviousFrameSlot(_impl->presenter.frameIndex)); waited != VK_SUCCESS) {
         return std::unexpected(Vk::ToFrameError(waited));
     }
@@ -445,9 +449,10 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         _impl->stagingContext.reset();
     }
 
-    _impl->frames.FlipAll();
-    _impl->shadows.Flip();
+    _impl->accumulationHistory.Swap();
 
+    // These histories remain named graph resources, so exchange their roles
+    // explicitly. BeginFrame's preceding-frame waits protect their reuse.
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);

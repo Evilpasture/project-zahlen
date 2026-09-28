@@ -3,7 +3,6 @@
 
 #include "../RenderInternal.hpp"
 #include <Zahlen/Error.hpp>
-#include <array>
 
 namespace ZHLN {
 
@@ -12,8 +11,9 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
 
     impl.targets.NameGraphTargets();
 
-    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
-    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
+    auto history = impl.accumulationHistory.begin();
+    Vk::Debug::SetImageName(ctx, history[0].image.Handle(), "AccumHistory0");
+    Vk::Debug::SetImageName(ctx, history[1].image.Handle(), "AccumHistory1");
     Vk::Debug::SetImageName(ctx, impl.presenter.depthTarget.image.Handle(), "DepthTarget");
     Vk::Debug::SetImageName(ctx, impl.targets.ShadowMapPrev().image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
@@ -47,13 +47,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         return {};
     };
 
-    std::expected<void, ErrorCode> result {};
-    result = assign(frames.accumBuffers[0], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
-    if (result) {
-        result = assign(frames.accumBuffers[1], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
-    }
-    if (!result) {
-        return result;
+    for (auto& history: accumulationHistory) {
+        auto result = assign(history, CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
+        if (!result) {
+            return result;
+        }
     }
 
     if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
@@ -71,8 +69,8 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             .baseArrayLayer = 0,
             .layerCount     = VK_REMAINING_ARRAY_LAYERS
         };
-        const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
-        for (const auto img: accumImages) {
+        for (const auto& history: accumulationHistory) {
+            const auto img = history.image.Handle();
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);

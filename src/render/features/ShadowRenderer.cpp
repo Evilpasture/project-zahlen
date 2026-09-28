@@ -13,15 +13,11 @@
 namespace ZHLN {
 
 auto ShadowRenderer::InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    return CreateDoubleBuffered(
+    return CreatePerFrame(
                impl.allocator, sizeof(VkDrawIndirectCommand) * RenderContext::Impl::kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect,
                Vk::MemoryUsage::CPUToGPU
     )
         .transform([this](auto&& buffers) -> void { _indirectCommands = std::forward<decltype(buffers)>(buffers); });
-}
-
-void ShadowRenderer::Flip() noexcept {
-    _indirectCommands.Flip();
 }
 
 auto ShadowRenderer::CascadePipeline() const noexcept -> VkPipeline {
@@ -44,12 +40,12 @@ auto ShadowRenderer::PunctualLayout() const noexcept -> VkPipelineLayout {
     return _punctualLayout;
 }
 
-auto ShadowRenderer::IndirectCommands() noexcept -> Vk::Buffer& {
-    return *_indirectCommands;
+auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer& {
+    return _indirectCommands[frameIndex];
 }
 
-auto ShadowRenderer::IndirectCommands() const noexcept -> const Vk::Buffer& {
-    return *_indirectCommands;
+auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) const noexcept -> const Vk::Buffer& {
+    return _indirectCommands[frameIndex];
 }
 
 auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)

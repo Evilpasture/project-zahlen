@@ -31,7 +31,7 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.farZ               = cam.farZ;
     std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
 
-    auto        mapped = _impl->frames.frameUniformBuffers->Map();
+    auto        mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map();
     auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
     gpu->viewProj           = unjittered;
     gpu->unjitteredViewProj = unjittered;
@@ -95,7 +95,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     gpuUniforms.nearZ = cam.nearZ;
     gpuUniforms.farZ  = cam.farZ;
 
-    std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
+    std::memcpy(_impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
     if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov || cam.nearZ != _impl->lastNearZ || cam.farZ != _impl->lastFarZ) {
         _impl->lastAspectRatio               = vpAspect;
@@ -113,7 +113,7 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
 void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {
     uint32_t safeCount = std::min(count, 128u);
     if (safeCount > 0 && lights != nullptr) {
-        std::memcpy(_impl->frames.lightStorageBuffers->Map().data, lights, sizeof(Light) * safeCount);
+        std::memcpy(_impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map().data, lights, sizeof(Light) * safeCount);
         _impl->mappedLights.assign(lights, lights + safeCount);
     } else {
         _impl->mappedLights.clear();

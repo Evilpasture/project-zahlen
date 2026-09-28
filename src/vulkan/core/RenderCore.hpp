@@ -12,6 +12,7 @@
 #include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 
+#include "FrameStorage.hpp"
 #include "RenderCore.h"
 
 #include "../VkError.hpp"
@@ -22,94 +23,9 @@ struct Color4 {
     float r, g, b, a;
 };
 
+}
+
 // NOLINTBEGIN(misc-misplaced-const, readability-avoid-const-params-in-decls)
-
-// Per-frame resources also serve as two-slot temporal history (Next()).
-// Their two-resource constructors must be generalized before increasing the frame ring depth.
-static_assert(Vk::kFramesInFlight == 2, "PerFrame/DoubleBuffered history and resource creation still require two frame slots");
-
-template <typename T>
-struct PerFrame {
-    std::array<T, Vk::kFramesInFlight> data {};
-    uint32_t                          idx = 0;
-
-    PerFrame() = default;
-
-    constexpr PerFrame(T first, T second) noexcept: data {{std::move(first), std::move(second)}} {
-    }
-
-    [[nodiscard]] constexpr T& operator[]() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& operator[]() const noexcept {
-        return data[idx];
-    }
-
-    [[nodiscard]] constexpr T& operator[](uint32_t i) noexcept {
-        return data[Vk::FrameSlot(i)];
-    }
-    [[nodiscard]] constexpr const T& operator[](uint32_t i) const noexcept {
-        return data[Vk::FrameSlot(i)];
-    }
-
-    [[nodiscard]] constexpr T& operator*() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& operator*() const noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr T* operator->() noexcept {
-        return &data[idx];
-    }
-    [[nodiscard]] constexpr const T* operator->() const noexcept {
-        return &data[idx];
-    }
-    [[nodiscard]] constexpr T& Current() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& Current() const noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr T& Next() noexcept {
-        return data[Vk::NextFrameSlot(idx)];
-    }
-    [[nodiscard]] constexpr const T& Next() const noexcept {
-        return data[Vk::NextFrameSlot(idx)];
-    }
-
-    void Advance() noexcept {
-        idx = Vk::NextFrameSlot(idx);
-    }
-    void Flip() noexcept {
-        Advance();
-    }
-};
-
-template <typename T>
-using DoubleBuffered = PerFrame<T>;
-
-template <typename T>
-concept CanFlipDirect = requires(T& t) { t.Flip(); };
-
-template <typename T>
-concept CanFlipIterable = requires(T& t) {
-    requires !CanFlipDirect<T>;
-    t.begin();
-    t.end();
-    requires requires(typename T::value_type& item) { item.Flip(); };
-};
-
-inline void FlipObject(auto& obj) noexcept {
-    if constexpr (CanFlipDirect<decltype(obj)>) {
-        obj.Flip();
-    } else if constexpr (CanFlipIterable<decltype(obj)>) {
-        for (auto& item: obj) {
-            item.Flip();
-        }
-    }
-}
-
-}
 
 namespace ZHLN::Vk {
 

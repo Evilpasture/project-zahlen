@@ -23,7 +23,7 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
     const Vk::AsAddressWrite tlas {
-        .address = impl.frames.tlas.Current() ? Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas.Current().Get()) : 0
+        .address = impl.frames.tlas[fIdx] ? Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get()) : 0
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtrHalf>(
         impl.ctx, impl.postProcess.RtrHalfHeapBindings(),

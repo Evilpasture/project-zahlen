@@ -124,8 +124,8 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     size_t                           maxVertices,
-    DoubleBuffered<Vk::Buffer>&      bufs,
-    DoubleBuffered<VkDeviceAddress>& addrs,
+    PerFrame<Vk::Buffer>&            bufs,
+    PerFrame<VkDeviceAddress>&       addrs,
     const char*                      label,
     Vk::BufferUsage                  extraFlags
 ) noexcept -> std::expected<void, ErrorCode> {
@@ -194,7 +194,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 
         .and_then([&]() -> auto {
-            return CreateDoubleBuffered(
+            return CreatePerFrame(
                        allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
                        Vk::MemoryUsage::CPUToGPU
             )
@@ -203,7 +203,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreateDoubleBuffered(
+            return CreatePerFrame(
                        allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                        Vk::MemoryUsage::CPUToGPU
             )
@@ -406,22 +406,22 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
 
     return std::expected<void, ErrorCode> {}
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
+            return CreatePerFrame(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
                 .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb1) {
                     frames.indirectCommandsBuffers = std::forward<decltype(icb1)>(icb1);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb2) {
                     frames.indirectCommandsBuffersPass2 = std::forward<decltype(icb2)>(icb2);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& spcb) {
                     frames.secondPassCandidatesBuffers = std::forward<decltype(spcb)>(spcb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kCountUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(uint32_t), kCountUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
@@ -476,30 +476,18 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                                                                Vk::BufferUsage::ShaderDeviceAddress;
 
 
-            auto createClusterDoubleBuffered = [&](size_t size, Vk::BufferUsage usage) -> std::expected<DoubleBuffered<Vk::Buffer>, ErrorCode> {
-                auto first = Vk::Buffer::Create(
-                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
-                );
-                if (!first) {
-                    return std::unexpected(first.error());
-                }
-                auto second = Vk::Buffer::Create(
-                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
-                );
-                if (!second) {
-                    return std::unexpected(second.error());
-                }
-                return DoubleBuffered<Vk::Buffer> {std::move(*first), std::move(*second)};
+            auto createClusterPerFrame = [&](size_t size, Vk::BufferUsage usage) {
+                return CreatePerFrame(allocator, size, usage, Vk::MemoryUsage::GPUOnly, VkDeviceSize {0}, clusterSharing, clusterFamilySpan);
             };
 
-            return createClusterDoubleBuffered(sizeof(ClusterVolume) * numClusters, kClusterGridUsage)
+            return createClusterPerFrame(sizeof(ClusterVolume) * numClusters, kClusterGridUsage)
                 .and_then([&](auto&& cgb) {
                     frames.clusterGridBuffers = std::forward<decltype(cgb)>(cgb);
-                    return createClusterDoubleBuffered(sizeof(uint32_t) * numClusters * 64, kLightIndexUsage);
+                    return createClusterPerFrame(sizeof(uint32_t) * numClusters * 64, kLightIndexUsage);
                 })
                 .and_then([&](auto&& lsb) {
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
-                    return createClusterDoubleBuffered(sizeof(uint32_t), kGlobalCounterUsage);
+                    return createClusterPerFrame(sizeof(uint32_t), kGlobalCounterUsage);
                 })
                 .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
@@ -540,20 +528,20 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             ZHLN_AccelerationStructureSizes tlasSizes;
             Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances, tlasSizes);
 
-            return CreateDoubleBuffered(
+            return CreatePerFrame(
                        allocator, tlasSizes.acceleration_structure_size,
                        Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             )
                 .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
-                    return CreateDoubleBuffered(
+                    return CreatePerFrame(
                         allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                         Vk::MemoryUsage::GPUOnly
                     );
                 })
                 .and_then([&](auto&& tsb) {
                     frames.tlasScratchBuffer = std::forward<decltype(tsb)>(tsb);
-                    return CreateDoubleBuffered(
+                    return CreatePerFrame(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
                         Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::AccelerationStructureBuildInput,
                         Vk::MemoryUsage::CPUToGPU

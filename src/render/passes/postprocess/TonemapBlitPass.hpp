@@ -15,7 +15,7 @@ namespace ZHLN::Passes {
 // the AA mode the graph was compiled for, so it is resolved here at compile
 // time rather than carried as a runtime flag.
 template <AAMode Mode>
-using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumNext, Res_HdrSceneColor>;
+using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
 // The whole display transform, in one payload. It has to mirror blit.slang
 // field for field, which the two static_asserts below hold it to.
@@ -57,7 +57,7 @@ struct TonemapBlitPass: Vk::RenderPass<
     void operator()(VkCommandBuffer cmd) const noexcept {
         auto& blitInputImage = [&]() -> auto& {
             if constexpr (Mode != AAMode::None) {
-                return impl.frames.accumBuffers.Next();
+                return impl.accumulationHistory.Current();
             } else {
                 return impl.graphResources.hdrSceneColor;
             }

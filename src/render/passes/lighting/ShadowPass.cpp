@@ -37,7 +37,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
-    auto  mapped           = ctx.shadows.IndirectCommands().Map();
+    auto  mapped           = ctx.shadows.IndirectCommands(recorder.frameIndex).Map();
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, kSlotCount> passWriteOffsets {};
@@ -164,7 +164,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         {.pipeline       = ctx.shadows.CascadePipeline(),
                          .layout         = ctx.shadows.CascadeLayout(),
                          .heap           = true,
-                         .argumentBuffer = ctx.shadows.IndirectCommands().Handle(),
+                         .argumentBuffer = ctx.shadows.IndirectCommands(recorder.frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
                          .drawCount      = csmDrawCount},
                         RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
@@ -216,7 +216,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             .pipeline       = ctx.shadows.PunctualPipeline(),
                             .layout         = ctx.shadows.PunctualLayout(),
                             .heap           = true,
-                            .argumentBuffer = ctx.shadows.IndirectCommands().Handle(),
+                            .argumentBuffer = ctx.shadows.IndirectCommands(recorder.frameIndex).Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
                             .drawCount      = drawCount,
                         },

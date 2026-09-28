@@ -16,8 +16,8 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     const uint32_t lightVariant = rtrActive ? 1 : 0;
 
     const Vk::AsAddressWrite tlas {
-        .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas.Current()) ?
-                       Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas.Current().Get()) :
+        .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas[fIdx]) ?
+                       Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get()) :
                        0
     };
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(

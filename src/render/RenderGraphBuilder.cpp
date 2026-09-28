@@ -60,16 +60,16 @@ struct ResourceResolver<Res_ShadowMap> {
 };
 
 template <>
-struct ResourceResolver<Res_AccumCurr> {
+struct ResourceResolver<Res_AccumPrevious> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
-        return MakeRef<Res_AccumCurr>(impl.frames.accumBuffers.Current());
+        return MakeRef<Res_AccumPrevious>(impl.accumulationHistory.Previous());
     }
 };
 
 template <>
-struct ResourceResolver<Res_AccumNext> {
+struct ResourceResolver<Res_AccumCurrent> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
-        return MakeRef<Res_AccumNext>(impl.frames.accumBuffers.Next());
+        return MakeRef<Res_AccumCurrent>(impl.accumulationHistory.Current());
     }
 };
 
@@ -116,7 +116,7 @@ using ScenePushConstants = GeneratedGpu::ScenePassPushConstants;
         .giIntensity = settings.post.giIntensity,
         .giSamples   = settings.post.giSamples,
         .enableSSR   = settings.post.enableSSR,
-        .enableRTR   = (impl.frames.tlas.Current() && settings.rayTracing.enableReflections) ? settings.post.enableRTR : 0,
+        .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && settings.rayTracing.enableReflections) ? settings.post.enableRTR : 0,
         ._pad        = {},
     };
 }
@@ -195,8 +195,8 @@ void ExecuteSceneGraph(
 
     // Every resource a pass named is resolved once, here: through an explicit
     // resolver where the resource is not a member of the reflected target
-    // bundle (the swapchain, the accumulation ring) and through the reflection
-    // metadata where it is.
+    // bundle (the swapchain, the two-state accumulation history) and through
+    // the reflection metadata where it is.
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);
 

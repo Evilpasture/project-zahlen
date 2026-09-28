@@ -115,7 +115,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
         }
     }
 
-    for (auto& recorder: parallelRecorders.data) {
+    for (auto& recorder: parallelRecorders) {
         if (auto initialized = recorder.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); !initialized) {
             return std::unexpected(initialized.error());
         }
@@ -155,7 +155,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
-            auto fvb_res = CreateDoubleBuffered(
+            auto fvb_res = CreatePerFrame(
                 allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                 Vk::MemoryUsage::CPUToGPU
             );
