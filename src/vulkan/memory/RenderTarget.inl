@@ -29,7 +29,7 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
         .extent = {.width = extent.width, .height = extent.height, .depth = 1}, // Explicit 2D -> 3D conversion
         .aspect = GetFormatAspect(F),
         .format = F,
-        .info   = view.Info()
+        .info   = &view.Info()
     };
 }
 
@@ -149,7 +149,7 @@ struct ResourceTraits<TypedImage<Layout, Format>> {
     static constexpr auto GetFormat(const TypedImage<Layout, Format>& res) noexcept {
         return res.format;
     }
-    static constexpr auto GetViewInfo(const TypedImage<Layout, Format>& res) noexcept -> VkImageViewCreateInfo {
+    static constexpr auto GetViewInfoPtr(const TypedImage<Layout, Format>& res) noexcept -> const VkImageViewCreateInfo* {
         return res.info;
     }
 };
@@ -172,8 +172,8 @@ struct ResourceTraits<RenderTarget<F>> {
     static constexpr auto GetFormat(const RenderTarget<F>& /*unused*/) noexcept {
         return F;
     }
-    static auto GetViewInfo(const RenderTarget<F>& res) noexcept -> VkImageViewCreateInfo {
-        return res.view.Info();
+    static auto GetViewInfoPtr(const RenderTarget<F>& res) noexcept -> const VkImageViewCreateInfo* {
+        return &res.view.Info();
     }
 };
 
@@ -216,7 +216,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
                 .extent = Traits::GetExtent(res),
                 .aspect = Traits::GetAspect(res),
                 .format = Traits::GetFormat(res),
-                .info   = Traits::GetViewInfo(res)
+                .info   = Traits::GetViewInfoPtr(res)
             };
         };
 

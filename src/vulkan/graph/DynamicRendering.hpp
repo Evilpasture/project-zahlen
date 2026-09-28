@@ -30,12 +30,14 @@ template <VkImageLayout Layout, VkFormat Format = VK_FORMAT_UNDEFINED>
 struct TypedImage {
     static constexpr VkImageLayout layout       = Layout;
     static constexpr VkFormat      known_format = Format;
-    VkImage               handle = VK_NULL_HANDLE;
-    VkImageView           view   = VK_NULL_HANDLE;
-    VkExtent3D            extent {};
-    VkImageAspectFlags    aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    VkFormat              format = Format;
-    VkImageViewCreateInfo info {};
+    VkImage            handle = VK_NULL_HANDLE;
+    VkImageView        view   = VK_NULL_HANDLE;
+    VkExtent3D         extent {};
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkFormat           format = Format;
+    // Borrows ImageView::Info(); the owning view must outlive this copy.
+    // Null for raw slices, which synthesize a single-mip 2D description on use.
+    const VkImageViewCreateInfo* info = nullptr;
 };
 
 // A known-format image is immutable and cannot be assembled from unchecked
@@ -46,16 +48,16 @@ struct TypedImage<Layout, Format> {
     static constexpr VkImageLayout layout       = Layout;
     static constexpr VkFormat      known_format = Format;
     static constexpr VkFormat      format       = Format;
-    const VkImage               handle;
-    const VkImageView           view;
-    const VkExtent3D            extent;
-    const VkImageAspectFlags    aspect;
-    const VkImageViewCreateInfo info;
+    const VkImage                      handle;
+    const VkImageView                  view;
+    const VkExtent3D                   extent;
+    const VkImageAspectFlags           aspect;
+    const VkImageViewCreateInfo* const info;
 
   private:
     friend struct ImageSlice;
     constexpr TypedImage(VkImage image, VkImageView imageView, VkExtent3D size, VkImageAspectFlags imageAspect,
-                         const VkImageViewCreateInfo& createInfo) noexcept:
+                         const VkImageViewCreateInfo* createInfo) noexcept:
         handle(image), view(imageView), extent(size), aspect(imageAspect), info(createInfo) {
     }
 };
@@ -74,12 +76,11 @@ struct ImageSlice {
         return {.width = extent.width, .height = extent.height};
     }
 
-    // Raw slices (swapchain, headless and render textures) use single-mip 2D views.
-    // Engine-owned cube, array, 3D and mip views instead carry ImageView::Info().
+    // Raw slices (swapchain, headless and render textures) have no owned view
+    // metadata. A single-mip 2D description is synthesized when needed.
     template <VkImageLayout Layout>
     [[nodiscard]] constexpr auto Assume(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept -> TypedImage<Layout> {
-        return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format,
-                .info = Valid() ? MakeViewCreateInfo2D(handle, format, 1, aspect) : VkImageViewCreateInfo {}};
+        return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format, .info = nullptr};
     }
 
     // Runtime Vulkan images cross into the format-typed API only after their
@@ -92,7 +93,7 @@ struct ImageSlice {
         if (!Valid() || format != Format) {
             return std::nullopt;
         }
-        return TypedImage<Layout, Format> {handle, view, extent, aspect, MakeViewCreateInfo2D(handle, Format, 1, aspect)};
+        return TypedImage<Layout, Format> {handle, view, extent, aspect, nullptr};
     }
 };
 

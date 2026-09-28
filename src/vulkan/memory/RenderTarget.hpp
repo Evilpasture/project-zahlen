@@ -184,17 +184,17 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, rt.view.Info()};
+    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.view.Info()};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, rt.view.Info()};
+    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.view.Info()};
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, rt.fullView.Info()};
+    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullView.Info()};
 }
 
 template <typename Usage>

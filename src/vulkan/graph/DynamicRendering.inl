@@ -213,12 +213,12 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
     constexpr VkImageLayout in_layout  = LayoutMap<InState>::value;
     constexpr VkImageLayout out_layout = LayoutMap<OutState>::value;
 
-    VkImage                image = VK_NULL_HANDLE;
-    VkImageView            view  = VK_NULL_HANDLE;
-    VkExtent3D             extent {};
-    VkImageAspectFlags     aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    VkFormat               format = VK_FORMAT_UNDEFINED;
-    VkImageViewCreateInfo  info {};
+    VkImage                      image = VK_NULL_HANDLE;
+    VkImageView                  view  = VK_NULL_HANDLE;
+    VkExtent3D                   extent {};
+    VkImageAspectFlags           aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    VkFormat                     format = VK_FORMAT_UNDEFINED;
+    const VkImageViewCreateInfo* info   = nullptr;
 
     if constexpr (requires { resource.handle; }) {
         image  = resource.handle;
@@ -236,7 +236,7 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
             extent = {.width = resource.extent.width, .height = resource.extent.height, .depth = 1};
         }
         aspect     = resource.State().aspect;
-        info       = resource.view.Info();
+        info       = &resource.view.Info();
         using RawT = std::decay_t<T>;
         if constexpr (requires { TargetFormat<RawT>::value; }) {
             format = TargetFormat<RawT>::value;

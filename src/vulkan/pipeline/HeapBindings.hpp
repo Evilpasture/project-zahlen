@@ -264,13 +264,13 @@ struct AsAddressWrite {
 
 namespace TemplatedDetail {
 
-// Return a value, never a pointer into a pass-local or a moved resource.
+// Return a value, never forward a borrowed pointer into a heap write.
 // Views created by the engine carry their exact shape (cube/array/3D/mip).
-// Manually assembled TypedImages without view metadata retain the 2D fallback.
+// Raw slices without view metadata retain the single-mip 2D fallback.
 template <typename T>
 [[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
     if constexpr (IsTypedImage<T>::value) {
-        return img.info.image != VK_NULL_HANDLE ? img.info : MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
+        return img.info != nullptr && img.info->image != VK_NULL_HANDLE ? *img.info : MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
     } else if constexpr (std::is_same_v<T, ImageWrite>) {
         return img.info;
     } else if constexpr (std::is_same_v<T, ImageView>) {
