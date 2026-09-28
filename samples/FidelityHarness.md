@@ -84,9 +84,26 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    transmission texture, or a second glass layer. `KHR_materials_iridescence`
    samples the factor and thickness textures. `KHR_materials_clearcoat` is a
    second dielectric GGX lobe (F0 0.04) with its own normal, in direct light
-   and image-based lighting. The base is attenuated by one `(1 - Fc)`. Sheen,
-   anisotropy and specular are still unsupported, so those scenarios still
-   diff by feature support rather than by BRDF error.
+   and image-based lighting. The base is attenuated by one `(1 - Fc)`.
+   `KHR_materials_anisotropy` now imports strength, rotation and the linear RG/B
+   direction/strength texture. The deferred direct BRDF uses the extension's
+   anisotropic GGX; the split-sum cubemap uses a bent reflection and five
+   samples along its wide axis (an approximation, not a reference integrator).
+   The area-light LTC and split-sum BRDF LUT remain isotropic approximations.
+   The baseline diffuse SH/GI is gated by `(1 - F) * (1 - metallic)`, so metal
+   no longer receives diffuse IBL on top of its specular term. Sheen and
+   specular remain unsupported. Other differences (for example texture
+   coordinate sets and texture transforms) still contribute to the metric.
+
+To check the reported mismatch visually, render the Khronos
+`AnisotropyStrengthTest` scenario with this harness and the matching HDR map.
+Compare its strength rows and roughness columns against the generator's golden:
+the rows must no longer be identical, and increasing roughness should widen
+rather than whiten the highlight. The importer regression in
+`tests/render/TestGLTFImport.cpp` checks strength, rotation and the optional
+texture path; it is not a substitute for this GPU image comparison. The IBL
+uses an isotropic BRDF LUT and a five-tap directional cubemap approximation,
+so exact pixel agreement with a reference path tracer is not expected.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

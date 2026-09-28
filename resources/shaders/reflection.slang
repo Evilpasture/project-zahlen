@@ -66,11 +66,13 @@ SamplerState blueNoiseSampler;
 Texture2D<float4> texRtrHalf;
 
 Texture2D<float4> texClearcoat;
+Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
-float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out float confidence, out float3 fallbackColor, uint2 pixelPos) {
+float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 anisT, float3 anisB, float strength,
+                   out float confidence, out float3 fallbackColor, uint2 pixelPos) {
     confidence    = 0.0f;
     fallbackColor = float3(0.0f, 0.0f, 0.0f);
 
@@ -80,18 +82,18 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     }
 
     float3 R;
-    if (roughness < 0.04f) {
+    if (roughness < 0.04f && strength <= 1.0f / 255.0f) {
         R = reflect(-V, N);
     } else {
         float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-        float3 tangentX  = normalize(cross(up, N));
-        float3 tangentY  = cross(N, tangentX);
+        float3 tangentX  = strength > 1.0f / 255.0f ? anisT : normalize(cross(up, N));
+        float3 tangentY  = strength > 1.0f / 255.0f ? anisB : cross(N, tangentX);
         float3x3 toLocal = float3x3(tangentX, tangentY, N);
         float3x3 toWorld = transpose(toLocal);
 
         float3 V_local = mul(toLocal, V);
         float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-        float alpha    = max(roughness * roughness, 1e-5f);
+        float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
 
@@ -265,7 +267,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
         float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        float3 R = reflect(-V, N);
+        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
+        float strength = anisoRaw.z;
+        float3 T = strength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
+        float3 B = cross(N, T);
+        float3 R = AnisotropicReflection(N, V, B, roughness, strength);
 
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
         float NdotV    = saturate(dot(N, V));
@@ -291,7 +297,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         float ao = litColorRaw.a;
 
-        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
+        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, N, T, roughness, strength) * frame.ambientExposure;
         float3 specularIBL = prefilteredColor * FssEss * ao;
         float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
         if (coatRaw.a > 1.0f / 255.0f) {
@@ -316,7 +322,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 #ifndef DISABLE_RTR
             if (wantRTR && roughness < 0.04f) {
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
-                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
+                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, strength, confidence, rtrFallback, uint2(input.pos.xy));
 
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;

@@ -98,6 +98,9 @@ struct CPUPrimitiveJob {
     cgltf_image* clearcoatImage           = nullptr;
     cgltf_image* clearcoatRoughnessImage  = nullptr;
     cgltf_image* clearcoatNormalImage     = nullptr;
+    float        anisotropyStrength       = 0.0f;
+    float        anisotropyRotation       = 0.0f;
+    cgltf_image* anisotropyImage          = nullptr;
     float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
@@ -492,6 +495,13 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
                 }
             }
         }
+        if (prim.material->has_anisotropy) {
+            job.anisotropyStrength = prim.material->anisotropy.anisotropy_strength;
+            job.anisotropyRotation = prim.material->anisotropy.anisotropy_rotation;
+            if (prim.material->anisotropy.anisotropy_texture.texture != nullptr) {
+                job.anisotropyImage = prim.material->anisotropy.anisotropy_texture.texture->image;
+            }
+        }
     }
 
     const size_t vertexCount = posAcc->count;
@@ -685,6 +695,10 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_imag
                         RegisterImage(job.clearcoatNormalImage);
                     }
                 }
+                if (prim.material->has_anisotropy && prim.material->anisotropy.anisotropy_texture.texture != nullptr) {
+                    job.anisotropyImage = prim.material->anisotropy.anisotropy_texture.texture->image;
+                    RegisterImage(job.anisotropyImage);
+                }
             }
             outPrimitiveJobs.push_back(std::move(job));
         }
@@ -705,7 +719,8 @@ void ProcessCPUTasks(
             if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i] || primJob.filmThicknessImage == uniqueImages[i] ||
                 primJob.iridescenceImage == uniqueImages[i] || primJob.volumeThicknessImage == uniqueImages[i] ||
                 primJob.clearcoatImage == uniqueImages[i] || primJob.clearcoatRoughnessImage == uniqueImages[i] ||
-                primJob.clearcoatNormalImage == uniqueImages[i]) {
+                primJob.clearcoatNormalImage == uniqueImages[i] || primJob.anisotropyImage == uniqueImages[i]) {
+                // glTF anisotropy RG direction and B strength are linear data.
                 outTextureJobs[i].isSRGB = false;
                 break;
             }
@@ -847,7 +862,10 @@ auto GetOrCreateCompiledPrimitive(
                             .clearcoatNormalScale     = primJob.clearcoatNormalScale,
                             .clearcoatMap             = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatImage, TextureHandle::Invalid),
                             .clearcoatRoughnessMap    = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatRoughnessImage, TextureHandle::Invalid),
-                            .clearcoatNormalMap       = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatNormalImage, TextureHandle::Invalid)})
+                            .clearcoatNormalMap       = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatNormalImage, TextureHandle::Invalid),
+                            .anisotropyStrength      = primJob.anisotropyStrength,
+                            .anisotropyRotation      = primJob.anisotropyRotation,
+                            .anisotropyMap           = imageToHandle | ZHLN::Ranges::FindOr(primJob.anisotropyImage, TextureHandle::Invalid)})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {

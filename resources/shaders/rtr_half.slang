@@ -32,6 +32,7 @@ RtrHalfPushConstants pc;
 
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
+Texture2D<float4> texAnisotropy;
 Texture2D<float4> texLighting;
 SamplerState smp;
 SamplerState pointSampler;
@@ -72,15 +73,17 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
+    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
+    float strength = anisoRaw.z;
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 tangentX  = normalize(cross(up, N));
+    float3 tangentX  = strength > 1.0f / 255.0f ? UnpackAnisotropy(anisoRaw.xy, N) : normalize(cross(up, N));
     float3 tangentY  = cross(N, tangentX);
     float3x3 toLocal = float3x3(tangentX, tangentY, N);
     float3x3 toWorld = transpose(toLocal);
 
     float3 V_local = mul(toLocal, V);
     float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, fullPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-    float  alpha   = max(roughness * roughness, 1e-5f);
+    float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
     float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
     float3 H       = normalize(mul(toWorld, H_local));
 

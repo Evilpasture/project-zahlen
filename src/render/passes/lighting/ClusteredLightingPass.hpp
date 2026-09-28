@@ -15,7 +15,7 @@ namespace ZHLN::Passes {
 // reads, each with its own barrier, before a single draw.
 struct ClusteredLightingPass: Vk::RenderPass<
                                   "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>,
-                                  Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
+                                  Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Anisotropy>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
                                   Vk::ShaderRead<Res_Ao>, Vk::ColorWrite<Res_Lighting>> {
     RenderContext::Impl&                 impl;
     GeneratedGpu::ScenePassPushConstants pc {};

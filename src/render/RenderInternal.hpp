@@ -109,6 +109,7 @@ static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr Color4 kClearColorClearcoat = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr Color4 kClearColorAnisotropy = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
 static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
@@ -212,6 +213,7 @@ struct SceneResources {
     Vk::TypedImage<ColorL> normRough;
     Vk::TypedImage<ColorL> emissive;
     Vk::TypedImage<ColorL> clearcoat;
+    Vk::TypedImage<ColorL> anisotropy;
     Vk::TypedImage<DepthL> depth;
 };
 

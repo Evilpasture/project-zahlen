@@ -214,6 +214,104 @@ public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
+// KHR_materials_anisotropy: the authored direction is the axis of *increased*
+// alpha roughness. The perpendicular axis keeps the material's base roughness.
+// This is not the symmetric (1 +/- strength) approximation: at full strength
+// alphaT becomes 1 even when the material roughness is zero.
+public float2 AnisotropicAlphas(float roughness, float strength) {
+    float alpha = max(roughness * roughness, 0.001f);
+    return float2(lerp(alpha, 1.0f, saturate(strength) * saturate(strength)), alpha);
+}
+
+public float3 OrthogonalTangent(float3 N, float3 T) {
+    float3 up = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+    float3 fallback = SafeNormalize(cross(up, N), float3(1.0f, 0.0f, 0.0f));
+    return SafeNormalize(T - dot(T, N) * N, fallback);
+}
+
+// RG: octahedral world-space direction; B: strength. Zero strength is all
+// zeroes, so cleared pixels and non-anisotropic materials never need a tangent.
+public float4 PackAnisotropy(float3 N, float3 direction, float strength) {
+    if (strength <= 0.0f) {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    float3 T = OrthogonalTangent(N, direction);
+    return float4(PackNormalOctahedron(T) * 0.5f + 0.5f, saturate(strength), 0.0f);
+}
+
+public float3 UnpackAnisotropy(float2 packedDirection, float3 N) {
+    return OrthogonalTangent(N, UnpackNormalOctahedron(packedDirection * 2.0f - 1.0f));
+}
+
+// Burley/Heitz anisotropic GGX and height-correlated Smith visibility.
+public float DistributionGGXAnisotropic(float3 N, float3 H, float3 T, float3 B, float2 alpha) {
+    float3 h = float3(dot(T, H) / alpha.x, dot(B, H) / alpha.y, saturate(dot(N, H)));
+    float d = max(dot(h, h), 1e-8f);
+    return 1.0f / (3.14159265f * alpha.x * alpha.y * d * d);
+}
+
+public float VisibilityGGXAnisotropic(float3 N, float3 V, float3 L, float3 T, float3 B, float2 alpha) {
+    float NdotV = saturate(dot(N, V));
+    float NdotL = saturate(dot(N, L));
+    if (NdotV <= 0.0f || NdotL <= 0.0f) {
+        return 0.0f;
+    }
+    float lambdaV = NdotL * length(float3(alpha.x * dot(T, V), alpha.y * dot(B, V), NdotV));
+    float lambdaL = NdotV * length(float3(alpha.x * dot(T, L), alpha.y * dot(B, L), NdotL));
+    return 0.5f / max(lambdaV + lambdaL, 1e-6f);
+}
+
+public float3 SpecularGGX(float3 N, float3 V, float3 L, float3 H, float roughness, float3 F, float3 T, float3 B, float strength) {
+    if (strength > 1.0f / 255.0f) {
+        float2 alpha = AnisotropicAlphas(roughness, strength);
+        return F * DistributionGGXAnisotropic(N, H, T, B, alpha) * VisibilityGGXAnisotropic(N, V, L, T, B, alpha);
+    }
+    float D = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    return (D * G * F) / max(4.0f * saturate(dot(N, V)) * saturate(dot(N, L)), 0.001f);
+}
+
+// A split-sum cubemap is isotropic. Bend its central ray as in the extension's
+// IBL guidance, then integrate a few symmetric samples along the wide axis.
+// Weights sum to one, so strength changes the lobe, not the environment energy.
+public float3 AnisotropicReflection(float3 N, float3 V, float3 B, float roughness, float strength) {
+    float3 R = reflect(-V, N);
+    if (strength <= 1.0f / 255.0f) {
+        return R;
+    }
+    float3 bent = SafeNormalize(cross(cross(B, V), B), N);
+    float a = 1.0f - saturate(strength) * (1.0f - roughness);
+    a *= a;
+    a *= a;
+    bent = SafeNormalize(lerp(bent, N, a), N);
+    R = reflect(-V, bent);
+    return SafeNormalize(lerp(R, bent, roughness * roughness), reflect(-V, N));
+}
+
+public float3 SampleAnisotropicEnvironment(TextureCube<float4> environment, SamplerState sampler, float3 R, float3 N, float3 T,
+                                            float roughness, float strength) {
+    float lod = roughness * 5.0f;
+    float3 center = environment.SampleLevel(sampler, R, lod).rgb;
+    if (strength <= 1.0f / 255.0f) {
+        return center;
+    }
+
+    float2 alpha = AnisotropicAlphas(roughness, strength);
+    float spread = max(sqrt(alpha.x) - sqrt(alpha.y), 0.0f) * 0.9f;
+    float3 axis = OrthogonalTangent(R, T);
+    float3 nearPlus = SafeNormalize(R + axis * (spread * 0.5f), R);
+    float3 nearMinus = SafeNormalize(R - axis * (spread * 0.5f), R);
+    float3 farPlus = SafeNormalize(R + axis * spread, R);
+    float3 farMinus = SafeNormalize(R - axis * spread, R);
+    nearPlus = dot(nearPlus, N) > 0.0f ? nearPlus : R;
+    nearMinus = dot(nearMinus, N) > 0.0f ? nearMinus : R;
+    farPlus = dot(farPlus, N) > 0.0f ? farPlus : R;
+    farMinus = dot(farMinus, N) > 0.0f ? farMinus : R;
+    return center * 0.25f +
+           (environment.SampleLevel(sampler, nearPlus, lod).rgb + environment.SampleLevel(sampler, nearMinus, lod).rgb) * 0.25f +
+           (environment.SampleLevel(sampler, farPlus, lod).rgb + environment.SampleLevel(sampler, farMinus, lod).rgb) * 0.125f;
+}
+
 public float ClearcoatFresnel(float NdotV) {
     float f  = saturate(1.0f - NdotV);
     float f2 = f * f;
@@ -541,8 +639,8 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
 }
 
 
-public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
-    float3 Vh = normalize(float3(alpha * V_local.x, alpha * V_local.y, max(V_local.z, 0.001f)));
+public float3 SampleGGX_VNDF(float3 V_local, float2 alpha, float2 u) {
+    float3 Vh = normalize(float3(alpha.x * V_local.x, alpha.y * V_local.y, max(V_local.z, 0.001f)));
 
     float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
     float3 T1   = (lensq > 1e-7f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
@@ -557,7 +655,11 @@ public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
 
     float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
 
-    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(Nh.z, 0.0f)));
+    return normalize(float3(alpha.x * Nh.x, alpha.y * Nh.y, max(Nh.z, 0.0f)));
+}
+
+public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
+    return SampleGGX_VNDF(V_local, float2(alpha), u);
 }
 
 public float3 EvaluateVNDFWeight(float NdotV, float NdotL, float VdotH, float roughness, float3 F0) {

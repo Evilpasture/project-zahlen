@@ -11,7 +11,7 @@ namespace ZHLN::Passes {
 // of its own so the composite pass can resolve refractions against what is
 // behind a surface. It runs before the translucent lighting resolve and clears
 // both of its targets.
-struct TranslucentPrePass: Vk::RenderPass<"TransPrePass", Vk::ColorWrite<Res_TransNorm>, Vk::DepthStencilWrite<Res_TransDepth>> {
+struct TranslucentPrePass: Vk::RenderPass<"TransPrePass", Vk::ColorWrite<Res_TransNorm>, Vk::ColorWrite<Res_TransAnisotropy>, Vk::DepthStencilWrite<Res_TransDepth>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

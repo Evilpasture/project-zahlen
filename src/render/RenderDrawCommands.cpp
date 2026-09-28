@@ -107,6 +107,9 @@ struct InstanceDataDesc {
     uint32_t clearcoatTex             = kNoFilmTexture;
     uint32_t clearcoatRoughnessTex    = kNoFilmTexture;
     uint32_t clearcoatNormalTex       = kNoFilmTexture;
+    float    anisotropyStrength      = 0.0f;
+    float    anisotropyRotation      = 0.0f;
+    uint32_t anisotropyTex           = kNoFilmTexture;
 };
 
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
@@ -171,6 +174,10 @@ struct InstanceDataDesc {
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
         ._paddingMeshlet      = paddingMeshlet,
+        .anisotropyStrength   = std::clamp(desc.anisotropyStrength, 0.0f, 1.0f),
+        .anisotropyRotation   = desc.anisotropyRotation,
+        .anisotropyTexIndex   = desc.anisotropyTex,
+        ._paddingAnisotropy   = 0u,
     };
 }
 
@@ -370,6 +377,9 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
                  .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
                  .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                 .anisotropyStrength      = material.anisotropyStrength,
+                 .anisotropyRotation      = material.anisotropyRotation,
+                 .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
              }
          ),
          .material            = resolved->material,
@@ -435,6 +445,9 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
                     .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
                     .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                    .anisotropyStrength      = material.anisotropyStrength,
+                    .anisotropyRotation      = material.anisotropyRotation,
+                    .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
                 }
             ),
             .material            = resolved->material,

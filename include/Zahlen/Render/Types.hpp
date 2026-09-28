@@ -64,6 +64,9 @@ struct Material {
     TextureHandle       clearcoatMap             = TextureHandle::Invalid;
     TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
     TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
+    float               anisotropyStrength      = 0.0f;
+    float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
+    TextureHandle       anisotropyMap           = TextureHandle::Invalid;
 };
 
 static_assert(
@@ -129,6 +132,9 @@ struct MaterialDesc {
     TextureHandle clearcoatMap          = TextureHandle::Invalid;
     TextureHandle clearcoatRoughnessMap = TextureHandle::Invalid;
     TextureHandle clearcoatNormalMap    = TextureHandle::Invalid;
+    float         anisotropyStrength    = 0.0f;
+    float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
+    TextureHandle anisotropyMap         = TextureHandle::Invalid;
 };
 
 struct DrawParams {

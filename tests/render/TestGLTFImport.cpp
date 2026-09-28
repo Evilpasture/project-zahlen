@@ -134,6 +134,26 @@ struct GltfMesh {
     std::vector<GltfPrimitive> primitives;
 };
 
+// The anisotropy fixture supplies a real tangent space (POSITION, NORMAL,
+// TANGENT and TEXCOORD_0), as required by KHR_materials_anisotropy.
+struct GltfAnisotropyAttributes {
+    int32_t POSITION   = 0;
+    int32_t NORMAL     = 1;
+    int32_t TANGENT    = 2;
+    int32_t TEXCOORD_0 = 3;
+};
+
+struct GltfAnisotropyPrimitive {
+    GltfAnisotropyAttributes attributes;
+    int32_t                  indices  = 4;
+    int32_t                  material = 0;
+};
+
+struct GltfAnisotropyMesh {
+    std::string_view                     name;
+    std::vector<GltfAnisotropyPrimitive> primitives;
+};
+
 struct GltfPbrMetallicRoughness {
     std::array<float, 4> baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
     float                metallicFactor  = 0.0f;
@@ -161,6 +181,35 @@ struct GltfEmissiveStrengthMaterial {
     GltfMaterialExtensions   extensions;
 };
 
+struct GltfAnisotropyTextureInfo {
+    int32_t index = 0;
+};
+
+struct KhrMaterialsAnisotropy {
+    float                     anisotropyStrength = 0.75f;
+    float                     anisotropyRotation = 1.5707963f;
+    GltfAnisotropyTextureInfo anisotropyTexture;
+};
+
+struct GltfAnisotropyExtensions {
+    KhrMaterialsAnisotropy KHR_materials_anisotropy;
+};
+
+struct GltfAnisotropyMaterial {
+    std::string_view         name;
+    GltfPbrMetallicRoughness pbrMetallicRoughness;
+    GltfAnisotropyExtensions extensions;
+};
+
+struct GltfAnisotropyImage {
+    int32_t          bufferView = 5;
+    std::string_view mimeType   = "image/png";
+};
+
+struct GltfAnisotropyTexture {
+    int32_t source = 0;
+};
+
 // min/max are carried on both accessors so one type covers the position and
 // the index accessor; the spec allows them on either.
 struct GltfAccessor {
@@ -177,6 +226,14 @@ struct GltfBufferView {
     int32_t byteOffset = 0;
     int32_t byteLength = 0;
     int32_t target     = 34962;
+};
+
+// The image buffer view has no vertex/index target; the optional target may
+// also be omitted for geometry views, so one shape covers all of them.
+struct GltfAnisotropyBufferView {
+    int32_t buffer     = 0;
+    int32_t byteOffset = 0;
+    int32_t byteLength = 0;
 };
 
 struct GltfBuffer {
@@ -237,6 +294,21 @@ struct GltfDocument {
     std::vector<GltfAccessor>     accessors;
     std::vector<GltfBufferView>   bufferViews;
     std::vector<GltfBuffer>       buffers;
+};
+
+struct GltfAnisotropyDocument {
+    GltfAsset                             asset;
+    std::vector<std::string_view>         extensionsUsed;
+    int32_t                               scene = 0;
+    std::vector<GltfScene>                scenes;
+    std::vector<GltfMeshNode>             nodes;
+    std::vector<GltfAnisotropyMesh>       meshes;
+    std::vector<GltfAnisotropyMaterial>   materials;
+    std::vector<GltfAccessor>             accessors;
+    std::vector<GltfAnisotropyBufferView> bufferViews;
+    std::vector<GltfBuffer>               buffers;
+    std::vector<GltfAnisotropyImage>      images;
+    std::vector<GltfAnisotropyTexture>    textures;
 };
 
 // Same document with a root `extensions` object. A separate type rather than
@@ -369,6 +441,65 @@ constexpr float                kEmissiveStrength = 4.0f;
         .buffers     = TriangleBuffers(),
     };
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
+}
+
+// A tangent-space triangle with a 1x1 *linear* anisotropy map (R=1, G=.5,
+// B=.25). It checks that the importer keeps the extension's factors, angle
+// and image rather than silently falling back to isotropic shading.
+[[nodiscard]] auto MakeAnisotropyFixture() -> std::vector<uint8_t> {
+    constexpr std::array<float, 9> normals {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 12> tangents {1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6> uvs {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<uint8_t, 70> png {
+        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
+        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
+        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
+        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
+        0x60u, 0x82u
+    };
+    constexpr int32_t normalBytes  = static_cast<int32_t>(sizeof(normals));
+    constexpr int32_t tangentBytes = static_cast<int32_t>(sizeof(tangents));
+    constexpr int32_t uvBytes      = static_cast<int32_t>(sizeof(uvs));
+    constexpr int32_t imageOffset  = kPositionBytes + normalBytes + tangentBytes + uvBytes + kIndexBytes;
+
+    std::vector<uint8_t> bin(static_cast<size_t>(imageOffset) + png.size());
+    std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
+    std::memcpy(bin.data() + kPositionBytes, normals.data(), normalBytes);
+    std::memcpy(bin.data() + kPositionBytes + normalBytes, tangents.data(), tangentBytes);
+    std::memcpy(bin.data() + kPositionBytes + normalBytes + tangentBytes, uvs.data(), uvBytes);
+    std::memcpy(bin.data() + imageOffset - kIndexBytes, kTriangleIndices, kIndexBytes);
+    std::memcpy(bin.data() + imageOffset, png.data(), png.size());
+
+    const GltfAnisotropyDocument document {
+        .extensionsUsed = {"KHR_materials_anisotropy"},
+        .scenes = {GltfScene {.nodes = {0}}},
+        .nodes = {GltfMeshNode {.name = "AnisotropicTriangle"}},
+        .meshes = {GltfAnisotropyMesh {.name = "Tri", .primitives = {GltfAnisotropyPrimitive {}}}},
+        .materials = {GltfAnisotropyMaterial {
+            .name = "Anisotropic",
+            .pbrMetallicRoughness = {.metallicFactor = 1.0f, .roughnessFactor = 0.15f},
+            .extensions = {.KHR_materials_anisotropy = {}}
+        }},
+        .accessors = {
+            GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
+            GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 1.0f}, .max = {0.0f, 0.0f, 1.0f}},
+            GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC4", .min = {1.0f, 0.0f, 0.0f, 1.0f}, .max = {1.0f, 0.0f, 0.0f, 1.0f}},
+            GltfAccessor {.bufferView = 3, .count = 3, .type = "VEC2", .min = {0.0f, 0.0f}, .max = {1.0f, 1.0f}},
+            GltfAccessor {.bufferView = 4, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
+        },
+        .bufferViews = {
+            {.byteOffset = 0, .byteLength = kPositionBytes},
+            {.byteOffset = kPositionBytes, .byteLength = normalBytes},
+            {.byteOffset = kPositionBytes + normalBytes, .byteLength = tangentBytes},
+            {.byteOffset = kPositionBytes + normalBytes + tangentBytes, .byteLength = uvBytes},
+            {.byteOffset = imageOffset - kIndexBytes, .byteLength = kIndexBytes},
+            {.byteOffset = imageOffset, .byteLength = static_cast<int32_t>(png.size())}
+        },
+        .buffers = {{.byteLength = static_cast<int32_t>(bin.size())}},
+        .images = {GltfAnisotropyImage {}},
+        .textures = {GltfAnisotropyTexture {}}
+    };
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), bin);
 }
 
 // A mesh node that also carries a punctual light, alongside the emissive
@@ -709,10 +840,10 @@ struct GLTFImportTestSuite {
         }
 
         /**
-         * Khronos extensions. The importer consumes exactly one today --
-         * KHR_materials_emissive_strength (GLTFImporter.cpp:291) -- so that one
-         * is asserted properly, and the rest are pinned as the behaviour they
-         * actually have rather than the behaviour a reader might assume.
+         * Khronos extensions. Emissive strength is tested here against the
+         * authored factor; anisotropy has its own fixture below. Unread light
+         * extensions are pinned as the behaviour they actually have rather
+         * than the behaviour a reader might assume.
          *
          * Every imported emissive factor also carries kGLTFEmissiveDisplayScale,
          * the glTF [0,1] -> engine HDR unit conversion. The extension is a
@@ -804,6 +935,42 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             if (!lightOnly->parts.empty() || !lightOnly->skeletons.empty() || !lightOnly->animations.empty()) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            return {};
+        }
+
+        /**
+         * The KHR_materials_anisotropy direction and strength survive the
+         * cgltf -> prefab -> Material path, including its uploaded texture.
+         */
+        std::expected<void, ZHLN::ErrorCode> importer_preserves_anisotropy_material() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Anisotropy");
+            if (engine == nullptr) {
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            }
+            const auto bytes = MakeAnisotropyFixture();
+            SourceDocument source;
+            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_anisotropy) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+
+            auto& rc = engine->GetRenderContext();
+            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, engine->GetAssetManager(), bytes, "ext_anisotropy.glb");
+            if (prefab == nullptr || prefab->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            const auto& expected = source.data->materials[0].anisotropy;
+            const auto& material = prefab->parts[0].defaultMaterial;
+            if (std::abs(material.anisotropyStrength - expected.anisotropy_strength) > 1e-5f ||
+                std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f ||
+                material.anisotropyMap == ZHLN::TextureHandle::Invalid || rc.GetBindlessIndex(material.anisotropyMap) <= 2u ||
+                material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f || material.clearcoatFactor != 0.0f) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            const ZHLN::Material defaults {};
+            if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
+                defaults.anisotropyMap != ZHLN::TextureHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};

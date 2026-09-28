@@ -13,7 +13,7 @@ namespace ZHLN::Passes {
 // `OpaqueSceneCopyPass`/`ForwardPass` pair composites over.
 struct TranslucentReflectionPass: Vk::RenderPass<
                                       "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>,
-                                      Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Lighting>, Vk::ShaderRead<Res_ShadowMap>,
+                                      Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_TransAnisotropy>, Vk::ShaderRead<Res_Lighting>, Vk::ShaderRead<Res_ShadowMap>,
                                       Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
                                       Vk::ColorWrite<Res_TransLighting>> {
     RenderContext::Impl&                 impl;

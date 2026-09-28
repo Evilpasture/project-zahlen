@@ -45,6 +45,13 @@ public struct InstanceData {
     public uint64_t meshletTriAddress;
     public uint meshletCount;
     public uint _paddingMeshlet;
+
+    // Separate from the film/clearcoat union above: anisotropy can coexist
+    // with either extension. The texture index is 0xFFFF when absent.
+    public float anisotropyStrength;
+    public float anisotropyRotation;
+    public uint anisotropyTexIndex;
+    public uint _paddingAnisotropy;
 };
 
 [CxxSkip]

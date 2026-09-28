@@ -391,6 +391,9 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.clearcoatMap             = desc.clearcoatMap;
     mat.clearcoatRoughnessMap    = desc.clearcoatRoughnessMap;
     mat.clearcoatNormalMap       = desc.clearcoatNormalMap;
+    mat.anisotropyStrength       = desc.anisotropyStrength;
+    mat.anisotropyRotation       = desc.anisotropyRotation;
+    mat.anisotropyMap            = desc.anisotropyMap;
 
     mat.baseColorFactor = desc.baseColor;
     mat.emissiveFactor  = desc.emissive;

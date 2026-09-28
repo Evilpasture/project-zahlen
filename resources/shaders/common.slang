@@ -224,6 +224,8 @@ public struct SceneGeometryVertex {
     public uint4 transmissionTextures;
     public float4 coatParams;
     public uint4 coatTextures;
+    public float2 anisotropyParams; // Strength, rotation (radians).
+    public uint anisotropyTexIndex;
 };
 
 
@@ -252,6 +254,8 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
     public nointerpolation float4 coatParams : TEXCOORD12;
     public nointerpolation uint4 coatTextures : TEXCOORD13;
+    public nointerpolation float2 anisotropyParams : TEXCOORD14;
+    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
 }
 
 public struct ForwardGeometryOutput {
@@ -266,6 +270,9 @@ public struct ForwardGeometryOutput {
     public nointerpolation float4 transmissionParams : TEXCOORD9;
     public nointerpolation float4 volumeParams : TEXCOORD10;
     public nointerpolation uint4 transmissionTextures : TEXCOORD11;
+    public float4 tangent : TANGENT;
+    public nointerpolation float2 anisotropyParams : TEXCOORD14;
+    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
 }
 
 public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
@@ -293,9 +300,11 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.baseColorFactor  = v.baseColorFactor;
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
-    o.emissiveFactor   = v.emissiveFactor;
-    o.coatParams       = v.coatParams;
-    o.coatTextures     = v.coatTextures;
+    o.emissiveFactor      = v.emissiveFactor;
+    o.coatParams          = v.coatParams;
+    o.coatTextures        = v.coatTextures;
+    o.anisotropyParams    = v.anisotropyParams;
+    o.anisotropyTexIndex  = v.anisotropyTexIndex;
     return o;
 }
 
@@ -312,6 +321,9 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.transmissionParams     = v.transmissionParams;
     o.volumeParams           = v.volumeParams;
     o.transmissionTextures   = v.transmissionTextures;
+    o.tangent                = v.tangent;
+    o.anisotropyParams       = v.anisotropyParams;
+    o.anisotropyTexIndex     = v.anisotropyTexIndex;
     return o;
 }
 

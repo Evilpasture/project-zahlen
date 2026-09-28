@@ -61,6 +61,7 @@ struct PSOutput {
     float4 normalRoughness : SV_Target2;
     float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
+    float4 anisotropy : SV_Target5;
 };
 
 public struct Quaternion {
@@ -215,7 +216,8 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcPrev = input.prevClip.xy / prevW;
 
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
-    output.clearcoat = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    output.clearcoat  = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    output.anisotropy = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     return output;
 }

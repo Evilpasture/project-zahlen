@@ -76,6 +76,8 @@ E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     output.transmissionTextures = inst.transmissionTextures();
     output.coatParams           = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
     output.coatTextures         = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
+    output.anisotropyParams     = float2(inst.anisotropyStrength, inst.anisotropyRotation);
+    output.anisotropyTexIndex   = inst.anisotropyTexIndex;
 
     if (isShadow) {
         output.pos             = mul(scene.frame.lightSpaceMatrices[min(viewId, 3u)], worldPos);
