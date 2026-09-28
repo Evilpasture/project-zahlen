@@ -819,7 +819,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::ShaderStages, ErrorCode> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
@@ -904,20 +904,10 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     return buffer;
 }
 
-// Embedded shaders are byte arrays, not uint32_t objects. Keep a byte span
-// until CreateShaderDesc crosses the C ABI boundary. Compute the view from
-// storage on demand so moving this result cannot leave a cached span dangling.
-struct LoadedShaderSource {
-    std::span<const std::byte> fallback {};
-    std::vector<uint32_t>     storage {};
-
-    [[nodiscard]] auto Code() const noexcept -> std::span<const std::byte> {
-        return storage.empty() ? fallback : std::as_bytes(std::span {storage});
-    }
-};
-
+// Embedded shaders are byte arrays, not uint32_t objects. ShaderBytecode
+// keeps a byte span until CreateShaderDesc crosses the C ABI boundary.
 template <ShaderStage Stage>
-[[nodiscard]] inline auto LoadShaderData(const ShaderStageSource<Stage>& src) -> LoadedShaderSource {
+[[nodiscard]] inline auto LoadShaderData(const ShaderStageSource<Stage>& src) -> Vk::ShaderBytecode {
     if constexpr (isDev) {
         auto disk = LoadShaderSpv(src.path);
         if (!disk.empty()) {

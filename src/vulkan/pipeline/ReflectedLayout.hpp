@@ -18,7 +18,7 @@
 
 namespace ZHLN::Vk {
 
-class ShaderStages;
+class ShaderStagesView;
 
 struct ReflectedBinding {
     uint32_t                 binding         = 0;
@@ -53,7 +53,7 @@ struct ReflectedLayout {
         return false;
     }
 
-    bool Build(VkDevice device, const ShaderStages& shaders) noexcept;
+    bool Build(VkDevice device, ShaderStagesView shaders) noexcept;
 
     bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
 

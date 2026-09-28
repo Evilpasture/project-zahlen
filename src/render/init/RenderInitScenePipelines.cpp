@@ -40,7 +40,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -74,7 +74,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
@@ -94,7 +94,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
-                        .Shaders(shaders)
+                        .Shaders(shaders.View())
                         .Layout(emptyPipelineLayout)
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
@@ -161,7 +161,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -246,7 +246,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&mergedInfo, &mergedInfo)
                 .ColorFormats(decalFormats)
@@ -262,41 +262,36 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 }
 
 auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
+    auto shaders = LoadAndCreateShaders(
+        MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
+    );
+    if (!shaders) {
+        return std::unexpected(shaders.error());
+    }
 
-
-    Vk::ShaderStages shaders;
-
-
-
-    return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
-    )
-        .and_then([&](auto&& compiledShaders) -> auto {
-            shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
-
-            csgPipelineLayout = emptyPipelineLayout;
-
-            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .ColorFormats(ActiveGBuffer::array)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                .DepthTest(true)
-                .DepthWrite(false)
-                .CullNone()
-                .ColorWriteEnable(false)
-                .StencilWriteMask(1)
-                .Cache(pipelineCache.Get())
-                .Build(ctx.Device())
-                .transform_error([](auto e) -> ErrorCode { return e; });
-        })
+    // One owner outlives all three synchronous builds; the view only carries
+    // pointers into its current SPIR-V buffers.
+    const auto stages = shaders->View();
+    csgPipelineLayout = emptyPipelineLayout;
+    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+        .Shaders(stages)
+        .Layout(emptyPipelineLayout)
+        .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+        .ColorFormats(ActiveGBuffer::array)
+        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+        .DepthTest(true)
+        .DepthWrite(false)
+        .CullNone()
+        .ColorWriteEnable(false)
+        .StencilWriteMask(1)
+        .Cache(pipelineCache.Get())
+        .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(stages)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
@@ -313,7 +308,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
             csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(stages)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)

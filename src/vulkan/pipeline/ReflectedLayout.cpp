@@ -135,11 +135,11 @@ auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t co
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
-bool ReflectedLayout::Build(VkDevice , const ShaderStages& shaders) noexcept {
+bool ReflectedLayout::Build(VkDevice , ShaderStagesView shaders) noexcept {
     ReflectedLayoutBuilder builder;
     const auto* const      raw = shaders.Get();
-    // Reflect the same SPIR-V the inline module create infos will use. Stages
-    // backed by disk files are kept alive by ShaderStages; embedded ones are static.
+    // Reflect the same borrowed SPIR-V the inline module create infos will use.
+    // The caller keeps any disk-backed storage alive through this call.
     for (const ZHLN_Shader* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
         if (shader->code != nullptr && shader->size > 0) {
             builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entry_point}, shader->stage);

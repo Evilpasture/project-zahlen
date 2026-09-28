@@ -13,18 +13,15 @@
 
 namespace ZHLN {
 
-std::expected<Vk::ShaderStages, ErrorCode> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
+auto RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept
+    -> std::expected<Vk::OwnedShaderStages, ErrorCode> {
     auto vertex   = LoadShaderData(vs);
     auto fragment = LoadShaderData(ps);
 
-    // Make both descriptors before moving either buffer into ShaderStages:
-    // function arguments need not be evaluated in their written order.
-    const ZHLN_ShaderDesc vertexShader   = Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint);
-    const ZHLN_ShaderDesc fragmentShader = Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint);
-    gpuDiagnostics.RegisterShader(vertexShader, "VSMain");
-    gpuDiagnostics.RegisterShader(fragmentShader, "PSMain");
+    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint), "VSMain");
+    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint), "PSMain");
 
-    return Vk::ShaderStages::CreateLoaded(vertexShader, std::move(vertex.storage), fragmentShader, std::move(fragment.storage));
+    return Vk::OwnedShaderStages::Create(std::move(vertex), std::move(fragment), vs.entryPoint, ps.entryPoint);
 }
 
 std::expected<Vk::Pipeline, ErrorCode>

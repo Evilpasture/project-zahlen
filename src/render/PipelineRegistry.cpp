@@ -15,7 +15,7 @@ auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept
     }
 
     // PipelineDesc remains alive until the synchronous pipeline build returns.
-    auto shaders = Vk::ShaderStages::CreateMeshBorrowed(desc.taskShader, desc.meshShader, desc.fragShader);
+    auto shaders = Vk::ShaderStagesView::CreateMesh(desc.taskShader, desc.meshShader, desc.fragShader);
     if (!shaders) {
         ZHLN::Log("[PipelineRegistry] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
         return {};
@@ -58,7 +58,7 @@ auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept
 }
 
 auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    return Vk::ShaderStages::CreateBorrowed(desc.vertexShader, desc.fragShader)
+    return Vk::ShaderStagesView::Create(desc.vertexShader, desc.fragShader)
         .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
         .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
             _diagnostics.RegisterShader(desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex");

@@ -8,9 +8,12 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <array>
+#include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -31,58 +34,40 @@ template <typename T, size_t Extent>
     return ZHLN_ShaderDesc {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
 }
 
-class ShaderStages {
+// Validated stage metadata and borrowed SPIR-V. Copying this view copies no
+// bytecode. The supplied code must remain alive and unchanged through
+// reflection and the synchronous vkCreateGraphicsPipelines call. Entry-point
+// names live in the view itself; descriptors returned by Vertex/Fragment must
+// not outlive it.
+class ShaderStagesView {
   public:
-    ShaderStages() = default;
-    ~ShaderStages() = default;
-    ShaderStages(const ShaderStages&)                    = delete;
-    auto operator=(const ShaderStages&) -> ShaderStages& = delete;
-    ShaderStages(ShaderStages&& other) noexcept;
-    auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
+    ShaderStagesView() = default;
 
-    // Copies arbitrary caller-provided SPIR-V so the stage metadata stays valid.
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
-
-    // The caller keeps both byte buffers alive through reflection and pipeline
-    // creation. Use this for embedded programs and synchronous material builds.
-    [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateBorrowed(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
-
-    // Adopt owned SPIR-V (disk override or aligned copy) without a second copy.
-    // Empty vectors mean the corresponding descriptor borrows static bytes.
-    [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateLoaded(
-        const ZHLN_ShaderDesc& vert, std::vector<uint32_t> vertDisk, const ZHLN_ShaderDesc& frag, std::vector<uint32_t> fragDisk
-    ) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+    static auto Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
 
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create() -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    static auto Create() -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
         static_assert(StageOf<Vert>() == VK_SHADER_STAGE_VERTEX_BIT, "Create() wants a vertex module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "Create() wants a fragment module second (<ShaderBindings.hpp>)");
-        return CreateBorrowed(CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
+        return Create(CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
     }
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-        -> std::expected<ShaderStages, ZHLN::ErrorCode>;
-
-    // As with CreateBorrowed, all three supplied SPIR-V spans must outlive use.
-    [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMeshBorrowed(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-        -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+        -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
 
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh() -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    static auto CreateMesh() -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
         static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "CreateMesh() wants a task module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "CreateMesh() wants a mesh module second (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "CreateMesh() wants a fragment module third (<ShaderBindings.hpp>)");
-        return CreateMeshBorrowed(CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
+        return CreateMesh(CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
     }
 
-    [[nodiscard]] auto Get() const noexcept -> const ZHLN_ShaderStages* {
+    [[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* {
         return &_raw;
     }
     [[nodiscard]] auto Vertex() const noexcept -> ZHLN_ShaderDesc {
@@ -100,14 +85,70 @@ class ShaderStages {
     }
 
   private:
-    explicit ShaderStages(const ZHLN_ShaderStages& raw) noexcept: _raw(raw) {
+    friend class OwnedShaderStages;
+    explicit ShaderStagesView(ZHLN_ShaderStages raw) noexcept: _raw(raw) {
     }
 
-    void RebindOwned() noexcept;
+    ZHLN_ShaderStages _raw {};
+};
 
-    ZHLN_ShaderStages                    _raw {};
-    // Static shaders leave these empty; disk-loaded stages take ownership.
-    std::array<std::vector<uint32_t>, 4> _ownedSpv {};
+static_assert(std::is_trivially_copyable_v<ShaderStagesView>);
+
+// Disk overrides and alignment copies are owned; generated fallbacks are
+// borrowed. Recompute the span after a move, never cache a pointer into storage.
+struct ShaderBytecode {
+    std::span<const std::byte> fallback {};
+    std::vector<uint32_t>     storage {};
+
+    [[nodiscard]] auto Code() const noexcept -> std::span<const std::byte> {
+        return storage.empty() ? fallback : std::as_bytes(std::span {storage});
+    }
+};
+
+// Owns only bytecode and pointer-free stage metadata. A view is materialized
+// from the current buffers on demand, so moving this owner never needs to
+// repair shader pointers. Borrowed fallbacks must outlive each view's use
+// and remain immutable through the synchronous reflection/build calls.
+class OwnedShaderStages {
+  public:
+    OwnedShaderStages(const OwnedShaderStages&) = delete;
+    auto operator=(const OwnedShaderStages&) -> OwnedShaderStages& = delete;
+    OwnedShaderStages(OwnedShaderStages&&) noexcept = default;
+    auto operator=(OwnedShaderStages&&) noexcept -> OwnedShaderStages& = default;
+
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto Create(ShaderBytecode vert, ShaderBytecode frag, const char* vertEntry = nullptr, const char* fragEntry = nullptr)
+        -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
+
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto CreateMesh(
+        ShaderBytecode task, ShaderBytecode mesh, ShaderBytecode frag,
+        const char* taskEntry = nullptr, const char* meshEntry = nullptr, const char* fragEntry = nullptr
+    ) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
+
+    // Call only on a live (not moved-from) owner. The result borrows this
+    // owner's SPIR-V until reflection/pipeline creation completes.
+    [[nodiscard]] auto View() const noexcept -> ShaderStagesView;
+
+  private:
+    struct StageMetadata {
+        VkShaderStageFlagBits stage {};
+        std::array<char, sizeof(ZHLN_Shader::entry_point)> entryPoint {};
+        uint32_t viewMask = 0;
+    };
+
+    OwnedShaderStages(ShaderBytecode vert, ShaderBytecode frag, ShaderBytecode task, ShaderBytecode mesh, const ShaderStagesView& validated) noexcept;
+    [[nodiscard]] static auto MetadataOf(const ZHLN_Shader& shader) noexcept -> StageMetadata;
+    [[nodiscard]] static auto MakeStage(const ShaderBytecode& source, const StageMetadata& meta) noexcept -> ZHLN_Shader;
+
+    ShaderBytecode _vert;
+    ShaderBytecode _frag;
+    ShaderBytecode _task;
+    ShaderBytecode _mesh;
+    StageMetadata  _vertMeta;
+    StageMetadata  _fragMeta;
+    StageMetadata  _taskMeta;
+    StageMetadata  _meshMeta;
 };
 
 }

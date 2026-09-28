@@ -26,8 +26,10 @@ enum class PipelineBuilderError : uint8_t {
 
 
 struct PipelineConfig {
-    const ZHLN_ShaderStages* stages = nullptr;
-    VkPipelineLayout         layout = VK_NULL_HANDLE;
+    // Keep stage metadata by value: typed builder transitions move this config,
+    // and the C descriptor borrows it only during synchronous pipeline creation.
+    std::optional<ShaderStagesView> stages;
+    VkPipelineLayout                layout = VK_NULL_HANDLE;
 
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
@@ -68,9 +70,10 @@ class PipelineBuilder {
   public:
     PipelineBuilder() requires std::same_as<Formats, RuntimeAttachmentFormats> = default;
 
-    auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
-        _cfg.stages = s.Get();
-        if (s.IsMeshPipeline()) {
+    auto Shaders(ShaderStagesView stages) noexcept -> PipelineBuilder& {
+        const bool meshPipeline = stages.IsMeshPipeline();
+        _cfg.stages = stages;
+        if (meshPipeline) {
             _cfg.bindings       = nullptr;
             _cfg.attributes     = nullptr;
             _cfg.bindingCount   = 0;
@@ -309,13 +312,14 @@ class PipelineBuilder {
 
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode> {
         using enum PipelineBuilderError;
-        if (_cfg.stages == nullptr) {
+        if (!_cfg.stages) {
             return std::unexpected(MissingShaders);
         }
-        if (_cfg.stages->vert.code == nullptr && _cfg.stages->mesh.code == nullptr) {
+        const ZHLN_ShaderStages* stages = _cfg.stages->Get();
+        if (stages->vert.code == nullptr && stages->mesh.code == nullptr) {
             return std::unexpected(MissingShaders);
         }
-        for (const ZHLN_Shader* shader: {&_cfg.stages->vert, &_cfg.stages->task, &_cfg.stages->mesh, &_cfg.stages->frag}) {
+        for (const ZHLN_Shader* shader: {&stages->vert, &stages->task, &stages->mesh, &stages->frag}) {
             if ((shader->code == nullptr) != (shader->size == 0) || shader->size % sizeof(uint32_t) != 0) {
                 return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
             }
@@ -331,7 +335,7 @@ class PipelineBuilder {
 
     [[nodiscard]] constexpr auto GetDesc() const noexcept -> ZHLN_GraphicsPipelineDesc {
         return {
-            .stages               = _cfg.stages,
+            .stages               = _cfg.stages ? _cfg.stages->Get() : nullptr,
             .layout               = _cfg.layout,
             .pipeline_cache       = _cfg.pipeline_cache,
             .descriptor_heap      = _cfg.descriptor_heap,

@@ -98,12 +98,10 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlot())
         .Build();
 
-    Vk::ShaderStages uiShaders;
-    auto             stagesRes = Vk::ShaderStages::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();
-    if (!stagesRes) {
-        return std::unexpected(stagesRes.error());
+    auto uiShaders = Vk::ShaderStagesView::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();
+    if (!uiShaders) {
+        return std::unexpected(uiShaders.error());
     }
-    uiShaders = std::move(*stagesRes);
 
     // A typed builder can produce a typed pipeline only from constant formats.
     // Build just the offscreen variants and the active presentation format; an
@@ -114,7 +112,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     const VkFormat presentFormat = ctx.presenter.GetPresentFormat();
     auto MakeBuilder = [&]() {
         Vk::PipelineBuilder builder;
-        builder.Shaders(uiShaders)
+        builder.Shaders(*uiShaders)
             .Layout(impl.layout)
             .Cache(ctx.pipelineCache.Get())
             .HeapMappings(&impl.mappings.info, &impl.mappings.info)

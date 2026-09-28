@@ -23,9 +23,12 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
     )
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
+            // The descriptors' entry-point pointers refer to this view's
+            // inline names; keep it alive through layout reflection.
+            const auto basicView = basicStages.View();
             const Vk::ReflectedStageInput reflectInputs[6] = {
-                {.shader = basicStages.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-                {.shader = basicStages.Fragment(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = basicView.Fragment(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},

@@ -2,117 +2,92 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShaderStages.hpp"
+#include <algorithm>
 #include <utility>
 
 namespace ZHLN::Vk {
 
-namespace {
-
-constexpr size_t kVert = 0;
-constexpr size_t kFrag = 1;
-constexpr size_t kTask = 2;
-constexpr size_t kMesh = 3;
-
-[[nodiscard]] auto CopyCode(const ZHLN_ShaderDesc& desc) -> std::vector<uint32_t> {
-    if (desc.code == nullptr) {
-        return {};
-    }
-    return {desc.code, desc.code + desc.size / sizeof(uint32_t)};
-}
-
-}
-
-void ShaderStages::RebindOwned() noexcept {
-    const auto rebind = [](ZHLN_Shader& shader, const std::vector<uint32_t>& storage) {
-        if (!storage.empty()) {
-            shader.code = storage.data();
-            shader.size = storage.size() * sizeof(uint32_t);
-        }
-    };
-    rebind(_raw.vert, _ownedSpv[kVert]);
-    rebind(_raw.frag, _ownedSpv[kFrag]);
-    rebind(_raw.task, _ownedSpv[kTask]);
-    rebind(_raw.mesh, _ownedSpv[kMesh]);
-}
-
-ShaderStages::ShaderStages(ShaderStages&& other) noexcept:
-    _raw(std::exchange(other._raw, {})), _ownedSpv(std::move(other._ownedSpv)) {
-    RebindOwned();
-}
-
-auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
-    if (this != &other) {
-        _raw      = std::exchange(other._raw, {});
-        _ownedSpv = std::move(other._ownedSpv);
-        RebindOwned();
-    }
-    return *this;
-}
-
-auto ShaderStages::CreateBorrowed(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
-    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+auto ShaderStagesView::Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
     if (vert.code == nullptr || vert.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-    const ZHLN_ShaderStagesDesc desc = {.vert = vert, .frag = frag};
+    const ZHLN_ShaderStagesDesc desc = {.vert = vert, .frag = frag, .task = {}, .mesh = {}};
     ZHLN_ShaderStages stages {};
     if (!ZHLN_InitShaderStages(&desc, &stages)) {
         return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
-    return ShaderStages {stages};
+    return ShaderStagesView {stages};
 }
 
-auto ShaderStages::Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    auto result = CreateBorrowed(vert, frag);
-    if (result) {
-        result->_ownedSpv[kVert] = CopyCode(vert);
-        result->_ownedSpv[kFrag] = CopyCode(frag);
-        result->RebindOwned();
-    }
-    return result;
-}
-
-auto ShaderStages::CreateLoaded(
-    const ZHLN_ShaderDesc& vert, std::vector<uint32_t> vertDisk, const ZHLN_ShaderDesc& frag, std::vector<uint32_t> fragDisk
-) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    // The non-empty buffers must be the ones backing the provided descriptors;
-    // otherwise rebinding after the move could point into unrelated SPIR-V.
-    if ((!vertDisk.empty() && (vert.code != vertDisk.data() || vert.size != vertDisk.size() * sizeof(uint32_t))) ||
-        (!fragDisk.empty() && (frag.code != fragDisk.data() || frag.size != fragDisk.size() * sizeof(uint32_t)))) {
-        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
-    }
-    auto result = CreateBorrowed(vert, frag);
-    if (result) {
-        result->_ownedSpv[kVert] = std::move(vertDisk);
-        result->_ownedSpv[kFrag] = std::move(fragDisk);
-        result->RebindOwned();
-    }
-    return result;
-}
-
-auto ShaderStages::CreateMeshBorrowed(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+auto ShaderStagesView::CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-    const ZHLN_ShaderStagesDesc desc = {.frag = frag, .task = task, .mesh = mesh};
+    const ZHLN_ShaderStagesDesc desc = {.vert = {}, .frag = frag, .task = task, .mesh = mesh};
     ZHLN_ShaderStages stages {};
     if (!ZHLN_InitShaderStages(&desc, &stages)) {
         return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
-    return ShaderStages {stages};
+    return ShaderStagesView {stages};
 }
 
-auto ShaderStages::CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    auto result = CreateMeshBorrowed(task, mesh, frag);
-    if (result) {
-        result->_ownedSpv[kTask] = CopyCode(task);
-        result->_ownedSpv[kMesh] = CopyCode(mesh);
-        result->_ownedSpv[kFrag] = CopyCode(frag);
-        result->RebindOwned();
+OwnedShaderStages::OwnedShaderStages(
+    ShaderBytecode vert, ShaderBytecode frag, ShaderBytecode task, ShaderBytecode mesh, const ShaderStagesView& validated
+) noexcept:
+    _vert(std::move(vert)), _frag(std::move(frag)), _task(std::move(task)), _mesh(std::move(mesh)),
+    _vertMeta(MetadataOf(validated.Get()->vert)), _fragMeta(MetadataOf(validated.Get()->frag)),
+    _taskMeta(MetadataOf(validated.Get()->task)), _meshMeta(MetadataOf(validated.Get()->mesh)) {
+}
+
+auto OwnedShaderStages::MetadataOf(const ZHLN_Shader& shader) noexcept -> StageMetadata {
+    StageMetadata meta {.stage = shader.stage, .viewMask = shader.view_mask};
+    std::copy_n(shader.entry_point, meta.entryPoint.size(), meta.entryPoint.begin());
+    return meta;
+}
+
+auto OwnedShaderStages::MakeStage(const ShaderBytecode& source, const StageMetadata& meta) noexcept -> ZHLN_Shader {
+    if (meta.stage == VkShaderStageFlagBits {}) {
+        return {};
     }
-    return result;
+    const auto desc = CreateShaderDesc(source.Code());
+    ZHLN_Shader shader {.code = desc.code, .size = desc.size, .stage = meta.stage, .entry_point = {}, .view_mask = meta.viewMask};
+    std::copy(meta.entryPoint.begin(), meta.entryPoint.end(), shader.entry_point);
+    return shader;
+}
+
+auto OwnedShaderStages::Create(ShaderBytecode vert, ShaderBytecode frag, const char* vertEntry, const char* fragEntry)
+    -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+    // Validate while the source spans still refer to their original buffers.
+    // Retain only the C ABI's entry names, stage flags and view masks; never
+    // retain its SPIR-V pointers across a move of these buffers.
+    auto view = ShaderStagesView::Create(CreateShaderDesc(vert.Code(), vertEntry), CreateShaderDesc(frag.Code(), fragEntry));
+    if (!view) {
+        return std::unexpected(view.error());
+    }
+    return OwnedShaderStages {std::move(vert), std::move(frag), {}, {}, *view};
+}
+
+auto OwnedShaderStages::CreateMesh(
+    ShaderBytecode task, ShaderBytecode mesh, ShaderBytecode frag, const char* taskEntry, const char* meshEntry, const char* fragEntry
+) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+    auto view = ShaderStagesView::CreateMesh(
+        CreateShaderDesc(task.Code(), taskEntry), CreateShaderDesc(mesh.Code(), meshEntry), CreateShaderDesc(frag.Code(), fragEntry)
+    );
+    if (!view) {
+        return std::unexpected(view.error());
+    }
+    return OwnedShaderStages {{}, std::move(frag), std::move(task), std::move(mesh), *view};
+}
+
+auto OwnedShaderStages::View() const noexcept -> ShaderStagesView {
+    ZHLN_ShaderStages stages {};
+    stages.vert = MakeStage(_vert, _vertMeta);
+    stages.frag = MakeStage(_frag, _fragMeta);
+    stages.task = MakeStage(_task, _taskMeta);
+    stages.mesh = MakeStage(_mesh, _meshMeta);
+    return ShaderStagesView {stages};
 }
 
 }
