@@ -18,14 +18,15 @@
 // builds no studio at all, neutralizes every artistic grade, and authors the
 // camera directly from the scenario's spherical orbit.
 //
-// Usage:
-//
-//   ./build/samples/FidelityHarness --headless \
-//       --scenario build/fidelity_output/AlphaBlendModeTest.json \
-//       --output   build/fidelity_output/AlphaBlendModeTest.pam
-//
-//   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1).
-//                         Applied at shade time, not baked into the SH or cube.
+/* Usage:
+ *
+ *   ./build/samples/FidelityHarness --headless \
+ *       --scenario build/fidelity_output/AlphaBlendModeTest.json \
+ *       --output   build/fidelity_output/AlphaBlendModeTest.pam
+ *
+ *   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1).
+ *                         Applied at shade time, not baked into the SH or cube.
+ */
 //
 // Exit codes: 0 = rendered and captured; 1 = a usage, scenario or capture
 // error. See scripts/run_fidelity.py for the driver that feeds it the Khronos

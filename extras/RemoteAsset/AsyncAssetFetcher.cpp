@@ -209,7 +209,7 @@ uint32_t AsyncAssetFetcher::Request(std::string_view url, ValidatorFn validator,
         }
 
         {
-            std::lock_guard lock(this->m_mutex);
+            std::lock_guard publishLock(this->m_mutex);
             Slot& slot = this->m_slots[id];
             if (!slot.warning.empty()) {
                 result.errorMessage =
