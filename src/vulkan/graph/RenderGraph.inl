@@ -233,10 +233,13 @@ consteval auto ComputeStateTable() {
 
                             constexpr bool is_write = (U::access & WriteMask) != 0;
 
+                            // The incoming barrier uses U::layout/stage/access;
+                            // track the state in which the pass actually leaves
+                            // the image for the next pass (and the next frame).
                             current_states[r_idx] = ResourceState {
-                                .layout            = U::layout,
-                                .stage             = U::stage,
-                                .access            = U::access,
+                                .layout            = U::final_layout,
+                                .stage             = U::final_stage,
+                                .access            = U::final_access,
                                 .lastWritePass     = is_write ? pass_idx : current_states[r_idx].lastWritePass,
                                 .fromPreviousFrame = is_write ? false : current_states[r_idx].fromPreviousFrame
                             };
@@ -475,8 +478,9 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
         (
             [&]() noexcept {
                 using Tag = Tags;
-                // 1. An explicit resolver supplies tags that the reflected bundle
-                //    does not own (or must not own, as with the shadow map).
+                // 1. An explicit resolver supplies tags the reflected bundle
+                //    does not own, or a different view of an owned image (e.g.
+                //    mip 0 for an attachment whose sampled view spans all mips).
                 if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
                     auto ref = ResourceResolver<Tag>::Resolve(impl);
                     this->template Bind<Tag>(ref);

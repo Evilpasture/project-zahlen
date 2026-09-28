@@ -206,7 +206,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.fullView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {

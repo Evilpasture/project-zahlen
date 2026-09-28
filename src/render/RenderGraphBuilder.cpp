@@ -60,6 +60,16 @@ struct ResourceResolver<Res_ShadowMap> {
 };
 
 template <>
+struct ResourceResolver<Res_TransLighting> {
+    [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> ImageSlice {
+        const auto& target = impl.graphResources.transLightingTarget;
+        // The graph uses mip 0 as a color attachment; the scene descriptor
+        // separately samples the full mip chain (WriteTransLightingToHeap).
+        return ImageSlice {target.image.Handle(), target.mipViews[0], target.extent, Res_TransLighting::format};
+    }
+};
+
+template <>
 struct ResourceResolver<Res_AccumPrevious> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
         return MakeRef<Res_AccumPrevious>(impl.accumulationHistory.Previous());
@@ -181,10 +191,9 @@ void ExecuteSceneGraph(
 ) {
     auto graph = BuildFrameGraph<Mode>(self, AssembleScenePushConstants(self, view, settings), std::forward<GetSwapchainImageT>(getSwapchain));
 
-    // Every resource a pass named is resolved once, here: through an explicit
-    // resolver where the resource is not a member of the reflected target
-    // bundle (the swapchain, the two-state accumulation history) and through
-    // the reflection metadata where it is.
+    // Every resource a pass named is resolved once: explicit resolvers cover
+    // non-bundle resources (swapchain and history) and the transmission
+    // attachment's mip-0 view; the rest use reflected target metadata.
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);
 

@@ -51,13 +51,13 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                                  rt.mipLevels;
                                  rt.mipViews;
                              }) {
-            result = assign(
-                rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
-                        _allocator, _ctx, ext,
-                        Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::Storage | Vk::ImageUsage::TransferSrc |
-                            Vk::ImageUsage::TransferDst
-                    )
-            );
+            // HiZ is compute-writable; transmission is a color attachment at
+            // mip 0, with the complete chain sampled by the forward shader.
+            Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst;
+            if constexpr (std::is_same_v<Tag, Res_HiZ>) {
+                usage |= Vk::ImageUsage::Storage;
+            }
+            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx, ext, usage));
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt,
@@ -67,9 +67,6 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             Vk::ImageUsage extra = Vk::ImageUsage::None;
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = Vk::ImageUsage::TransferSrc;
-            }
-            if constexpr (std::is_same_v<Tag, Res_TransLighting>) {
-                extra = Vk::ImageUsage::TransferDst;
             }
             if constexpr (Tag::scale_divisor > 1) {
                 extra |= Vk::ImageUsage::Storage;

@@ -96,6 +96,14 @@ add_test(NAME TestFidelityCameraWiring
 )
 set_tests_properties(TestFidelityCameraWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
 
+# TransmissionRoughnessTest must use a full-mip sampled view but a mip-0
+# attachment, and leave the graph's state in the mip generator's exit layout.
+# This catches wiring regressions without pretending to validate GPU images.
+add_test(NAME TestFidelityTransmissionWiring
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_fidelity_transmission_wiring.py"
+)
+set_tests_properties(TestFidelityTransmissionWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a

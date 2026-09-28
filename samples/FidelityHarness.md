@@ -80,15 +80,18 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    skips those pixels. `renderSkybox` true samples cube mip 0, without the
    procedural `lightDir` rotation. The procedural gradient remains the
    background when no environment component is set.
-4. **Extensions.** `KHR_materials_transmission` samples a copy of the lit
-   opaque scene, refracts by `KHR_materials_volume` thickness and IOR, and
-   mixes that with the prefiltered specular by the thin-film fresnel. It
-   writes the composite with depth, so only the nearest surface shows (the
-   sample viewer's single layer). It does not apply volume attenuation, a
-   transmission texture, or a second glass layer. `KHR_materials_iridescence`
-   samples the factor and thickness textures. `KHR_materials_clearcoat` is a
-   second dielectric GGX lobe (F0 0.04) with its own normal, in direct light
-   and image-based lighting. The base is attenuated by one `(1 - Fc)`.
+4. **Extensions.** `KHR_materials_transmission` samples a mipmapped copy of the
+   lit opaque scene: roughness and IOR select its blur even for thin-walled
+   (zero-thickness) surfaces, while `KHR_materials_volume` thickness also
+   offsets the refraction UV. Reflection strength comes from IOR-dependent
+   dielectric F0; without iridescence, IOR 1 has neither refraction blur nor
+   Fresnel reflection. The composite writes depth, so only the nearest
+   surface shows (the sample viewer's single layer). It does not apply volume
+   attenuation, a transmission texture, or a second glass layer.
+   `KHR_materials_iridescence` samples the factor and thickness textures.
+   `KHR_materials_clearcoat` is a second dielectric GGX lobe (F0 0.04) with
+   its own normal, in direct light and image-based lighting. The base is
+   attenuated by one `(1 - Fc)`.
    `KHR_materials_anisotropy` now imports strength, rotation and the linear RG/B
    direction/strength texture. The deferred direct BRDF uses the extension's
    anisotropic GGX; the split-sum cubemap uses one lookup along a bent
@@ -119,6 +122,15 @@ texture path; it is not a substitute for this GPU image comparison. The IBL
 uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
 anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
 is not expected.
+
+For `TransmissionRoughnessTest`, run
+`SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.
+Compare against its golden: higher roughness columns should increasingly blur
+the opaque scene; higher IOR rows should reflect more strongly, while the IOR 1
+row remains clear regardless of roughness. The GPU-free wiring regression in
+`tests/extras/test_fidelity_transmission_wiring.py` checks the resource, graph,
+and shader contract but **does not** establish visual fidelity; a new GPU
+capture and golden comparison are still required.
 
 For `TextureSettingsTest`, compare the clamp S/T rows (solid green) and
 mirror S/T rows (checkmarks) against the golden; repeat S/T should remain

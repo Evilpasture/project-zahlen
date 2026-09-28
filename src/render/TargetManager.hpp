@@ -109,8 +109,9 @@ class TargetManager {
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transAnisotropyBuffer;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
-        Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>     hizMap;
+
+        Vk::MipmappedRenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> transLightingTarget;
+        Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>          hizMap;
 
         struct ReflectMetadata {
             Res_SceneColor    sceneColor;

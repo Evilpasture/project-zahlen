@@ -315,15 +315,18 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         thicknessNm = lerp(params.w, params.z, g);
     }
 
-    float3 F0 = float3(0.04f, 0.04f, 0.04f);
-    float3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float ior = max(input.volumeParams.y, 1.0f);
+    float eta = (ior - 1.0f) / (ior + 1.0f);
+    float3 F0 = float3(eta * eta);
+    // At IOR 1 there is no index boundary. Schlick's grazing term must not
+    // manufacture reflection on air, even when its surface is rough.
+    float3 F = ior > 1.0f ? FresnelSchlickRoughness(NdotV, F0, roughness) : float3(0.0f);
     if (iridescence > 0.0f && thicknessNm > 0.0f) {
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
     }
     F = max(F, 0.0f);
 
-    float ior = max(input.volumeParams.y, 1.0001f);
     float thickness = input.volumeParams.x * input.volumeParams.z;
     if (tex.z != 0xFFFFu) {
         thickness *= SampleMaterialTexture(tex.z, input.uv, input.samplerCodes, kSamplerVolumeThickness).g;
@@ -340,7 +343,14 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         }
     }
 
-    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, 0.0f).rgb * albedo;
+    // A zero-thickness (thin-walled) surface still scatters transmitted light.
+    // No index boundary at IOR 1 means no microfacet refraction, at any roughness.
+    float transRoughness = roughness * saturate(2.0f * (ior - 1.0f));
+    // The frame and transmission target share an extent. The sampler clamps
+    // the fractional max LOD to the last mip for non-power-of-two targets.
+    float maxLod = log2(max(scene.frame.screenResolution.x, scene.frame.screenResolution.y));
+    float lod = transRoughness * maxLod;
+    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, lod).rgb * albedo;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
     float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);

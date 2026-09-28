@@ -84,12 +84,21 @@ struct GraphImage {
     static constexpr bool               is_3d         = Is3D;
 };
 
-template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
+// The entry state drives the graph's barrier into a pass. Most passes leave an
+// image in that state; a pass that transitions it internally (e.g. generating
+// mips after a transfer copy) also declares its exit state so the next pass
+// does not issue a barrier from a layout the image no longer has.
+template <
+    typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access>
 struct Usage {
-    using Resource                                = Image;
-    static constexpr VkImageLayout         layout = Layout;
-    static constexpr VkPipelineStageFlags2 stage  = Stage;
-    static constexpr VkAccessFlags2        access = Access;
+    using Resource                                      = Image;
+    static constexpr VkImageLayout         layout       = Layout;
+    static constexpr VkPipelineStageFlags2 stage        = Stage;
+    static constexpr VkAccessFlags2        access       = Access;
+    static constexpr VkImageLayout         final_layout = FinalLayout;
+    static constexpr VkPipelineStageFlags2 final_stage  = FinalStage;
+    static constexpr VkAccessFlags2        final_access = FinalAccess;
 };
 
 template <typename Image>
@@ -130,6 +139,13 @@ using TransferSrcRead = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PI
 
 template <typename Image>
 using TransferDstWrite = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT>;
+
+// The pass copies into mip 0, blits down the chain and transitions every mip
+// to fragment-readable layout before it returns.
+template <typename Image>
+using TransferDstWriteThenShaderRead = Usage<
+    Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
 template <typename Image>
 using ShaderReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
@@ -231,14 +247,18 @@ namespace TemplatedDetail {
 template <typename U>
 struct IsColorAttachment: std::false_type {};
 
-template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
-struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access>>: std::true_type {};
+template <
+    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
+struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
 
 template <typename U>
 struct IsDepthAttachment: std::false_type {};
 
-template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
-struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access>>: std::true_type {};
+template <
+    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
+struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
 
 template <typename InList, typename OutList, template <typename> class Predicate>
 struct FilterImpl;
