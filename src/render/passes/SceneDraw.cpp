@@ -3,7 +3,6 @@
 
 #include "passes/SceneDraw.hpp"
 #include <Zahlen/Profiler.hpp>
-#include <cstring>
 
 namespace ZHLN::Passes {
 
@@ -80,8 +79,8 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
             .attrAddress        = (attrMesh != nullptr) ? attrMesh->vboAddress : 0,
             .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
-            .baseColorFactor    = {},
-            .emissiveFactor     = {},
+            .baseColorFactor    = gpuMat->baseColorFactor,
+            .emissiveFactor     = gpuMat->emissiveFactor,
             .indexCount         = gpuMesh->indexCount,
             .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
@@ -93,8 +92,6 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             .alphaMode          = gpuMat->alphaMode,
             ._padding           = 0
         };
-        std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
-        std::memcpy(rpc.emissiveFactor, gpuMat->emissiveFactor, sizeof(float) * 4);
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
@@ -134,7 +131,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
             .attrAddress        = 0,
             .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
-            .baseColorFactor    = {},
+            .baseColorFactor    = gpuMat->baseColorFactor,
             .emissiveFactor     = {},
             .indexCount         = gpuMesh->indexCount,
             .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
@@ -147,7 +144,6 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             .alphaMode          = gpuMat->alphaMode,
             ._padding           = 0
         };
-        std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 

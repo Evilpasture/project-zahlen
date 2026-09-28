@@ -352,15 +352,8 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .alphaCutoff      = material.alphaCutoff,
                  .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
                  .morphWeights     = morphWeights,
-                 .baseColorFactor  = (params.colorOverride[3] >= 0.0f) ?
-                                         params.colorOverride :
-                                         std::array<float, 4> {
-                                             material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]
-                                         },
-                 .emissiveFactor =
-                     (params.emissiveOverride[3] >= 0.0f) ?
-                         params.emissiveOverride :
-                         std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                 .baseColorFactor = (params.colorOverride[3] >= 0.0f) ? params.colorOverride : material.baseColorFactor,
+                 .emissiveFactor  = (params.emissiveOverride[3] >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
                  .transmissionFactor = material.transmissionFactor,
                  .iridescenceFactor  = material.iridescenceFactor,
                  .filmThicknessNm    = material.filmThicknessNm,
@@ -424,8 +417,8 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .metallicFactor  = material.metallicFactor,
                     .roughnessFactor = material.roughnessFactor,
                     .alphaCutoff     = material.alphaCutoff,
-                    .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
-                    .emissiveFactor  = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                    .baseColorFactor = material.baseColorFactor,
+                    .emissiveFactor  = material.emissiveFactor,
                     .transmissionFactor = material.transmissionFactor,
                     .iridescenceFactor  = material.iridescenceFactor,
                     .filmThicknessNm    = material.filmThicknessNm,

@@ -42,8 +42,8 @@ struct Material {
     TextureHandle       normalMap          = TextureHandle::Invalid;
     TextureHandle       pbrMap             = TextureHandle::Invalid;
     TextureHandle       emissiveMap        = TextureHandle::Invalid;
-    float               baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float               emissiveFactor[4]  = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 4> baseColorFactor    = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissiveFactor     = {0.0f, 0.0f, 0.0f, 1.0f};
     float               metallicFactor     = 1.0f;
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
@@ -65,6 +65,11 @@ struct Material {
     TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
     TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
 };
+
+static_assert(
+    sizeof(std::array<float, 4>) == sizeof(float[4]) && alignof(std::array<float, 4>) == alignof(float[4]),
+    "material factors must preserve their four-float ABI"
+);
 
 enum class DrawFlags : uint32_t {
     None            = 0,

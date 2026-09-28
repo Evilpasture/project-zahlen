@@ -374,7 +374,7 @@ auto InstantiateMeshPart(
 auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
     static constexpr float kInvDisplayScale = 1.0f / kGLTFEmissiveDisplayScale;
 
-    const float* raw = part.defaultMaterial.emissiveFactor;
+    const float* raw = part.defaultMaterial.emissiveFactor.data();
     const float  ef[3] {raw[0] * kInvDisplayScale, raw[1] * kInvDisplayScale, raw[2] * kInvDisplayScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;

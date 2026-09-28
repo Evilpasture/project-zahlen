@@ -285,8 +285,8 @@ namespace {
     if (materials.find != nullptr) {
         gpu = materials.find(materials.userdata, mesh.materialAsset);
     }
-    const float* base = gpu.has_value() ? gpu->baseColorFactor : nullptr;
-    const float* glow = gpu.has_value() ? gpu->emissiveFactor : nullptr;
+    const float* base = gpu.has_value() ? gpu->baseColorFactor.data() : nullptr;
+    const float* glow = gpu.has_value() ? gpu->emissiveFactor.data() : nullptr;
 
     const SceneMaterial defaults {};
     return SceneMaterial {

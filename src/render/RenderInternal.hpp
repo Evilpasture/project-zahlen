@@ -691,8 +691,8 @@ struct RenderContext::Impl {
         VkDeviceAddress attrAddress;
         VkDeviceAddress iboAddress;
 
-        float baseColorFactor[4];
-        float emissiveFactor[4];
+        std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
+        std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
 
         uint32_t indexCount;
         uint32_t albedoIdx;
@@ -707,6 +707,9 @@ struct RenderContext::Impl {
         uint32_t _padding;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
+    static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 32);
+    static_assert(offsetof(MeshParticleRenderPush, emissiveFactor) == 48);
+    static_assert(offsetof(MeshParticleRenderPush, indexCount) == 64);
 
 
     struct ObjectConstants {

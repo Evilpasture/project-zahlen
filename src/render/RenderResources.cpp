@@ -383,8 +383,8 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.clearcoatRoughnessMap    = desc.clearcoatRoughnessMap;
     mat.clearcoatNormalMap       = desc.clearcoatNormalMap;
 
-    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
-    std::ranges::copy(desc.emissive, mat.emissiveFactor);
+    mat.baseColorFactor = desc.baseColor;
+    mat.emissiveFactor  = desc.emissive;
 
     return mat;
 }
