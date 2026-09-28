@@ -394,6 +394,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.anisotropyStrength       = desc.anisotropyStrength;
     mat.anisotropyRotation       = desc.anisotropyRotation;
     mat.anisotropyMap            = desc.anisotropyMap;
+    mat.textureSamplers          = desc.textureSamplers;
 
     mat.baseColorFactor = desc.baseColor;
     mat.emissiveFactor  = desc.emissive;

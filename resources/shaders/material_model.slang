@@ -23,6 +23,7 @@ public struct MaterialSampleInputs {
     public uint normalIndex;
     public uint pbrIndex;
     public uint emissiveIndex;
+    public uint2 samplerCodes;
     public float4 baseColorFactor;
     public float4 emissiveFactor;
     public float metallicFactor;
@@ -40,12 +41,12 @@ public interface IMaterial {
 public struct StandardPBRMaterial : IMaterial {
     public SurfaceInteraction evaluate(MaterialSampleInputs i) {
         SurfaceInteraction s;
-        float4 albedoSample = scene.globalTextures[i.albedoIndex].Sample(scene.defaultSampler, i.uv) * i.baseColorFactor * i.vertexColor;
+        float4 albedoSample = SampleMaterialTexture(i.albedoIndex, i.uv, i.samplerCodes, kSamplerAlbedo) * i.baseColorFactor * i.vertexColor;
         s.albedo            = albedoSample.rgb;
         s.alpha             = albedoSample.a;
-        s.emissive          = scene.globalTextures[i.emissiveIndex].Sample(scene.defaultSampler, i.uv).rgb * i.emissiveFactor.rgb;
+        s.emissive          = SampleMaterialTexture(i.emissiveIndex, i.uv, i.samplerCodes, kSamplerEmissive).rgb * i.emissiveFactor.rgb;
 
-        float4 pbr  = scene.globalTextures[i.pbrIndex].Sample(scene.defaultSampler, i.uv);
+        float4 pbr  = SampleMaterialTexture(i.pbrIndex, i.uv, i.samplerCodes, kSamplerPbr);
         s.roughness = max((i.pbrIndex == 0 ? 1.0f : pbr.g) * i.roughnessFactor, 0.045f);
         s.metallic  = (i.pbrIndex == 0 ? 1.0f : pbr.b) * i.metallicFactor;
         s.occlusion = i.pbrIndex == 0 ? 1.0f : pbr.r;
@@ -64,7 +65,7 @@ public struct StandardPBRMaterial : IMaterial {
             float3 T          = normalize(T_unnorm);
             float tangentSign = i.tangent.w;
             float3 B          = normalize(cross(N, T) * tangentSign);
-            float3 normalMap  = scene.globalTextures[i.normalIndex].Sample(scene.defaultSampler, i.uv).rgb * 2.0f - 1.0f;
+            float3 normalMap  = SampleMaterialTexture(i.normalIndex, i.uv, i.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
             worldNormal       = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
         }
         s.normal = worldNormal;

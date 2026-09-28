@@ -12,11 +12,51 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec4.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace ZHLN {
 
+// glTF sampler wrapping is attached to a texture *reference*, not its image:
+// multiple texture objects may share the same image with different S/T modes.
+enum class TextureWrap : uint8_t { Repeat = 0, ClampToEdge = 1, MirroredRepeat = 2 };
+struct TextureSamplerAddress {
+    TextureWrap s = TextureWrap::Repeat;
+    TextureWrap t = TextureWrap::Repeat;
+    constexpr bool operator==(const TextureSamplerAddress&) const noexcept = default;
+};
+
+// Must agree with the packed sampler slots in common.slang. Eight four-bit
+// indices fit in one uint; the remaining three fit in a second uint.
+enum class MaterialTextureSlot : uint8_t {
+    Albedo,
+    Normal,
+    Pbr,
+    Emissive,
+    Clearcoat,
+    ClearcoatRoughness,
+    ClearcoatNormal,
+    Anisotropy,
+    Iridescence,
+    FilmThickness,
+    VolumeThickness,
+    Count
+};
+inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
+using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+
+[[nodiscard]] constexpr uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept {
+    uint32_t packed = 0;
+    for (size_t i = 0; i < 8 && first + i < addresses.size(); ++i) {
+        const auto s = static_cast<uint32_t>(addresses[first + i].s);
+        const auto t = static_cast<uint32_t>(addresses[first + i].t);
+        const uint32_t code = (s < 3 && t < 3) ? s * 3 + t : 0;
+        packed |= code << (i * 4);
+    }
+    return packed;
+}
+static_assert(static_cast<size_t>(MaterialTextureSlot::Count) <= 16);
 
 struct Mesh {
     using enum BufferHandle;
@@ -67,6 +107,7 @@ struct Material {
     float               anisotropyStrength      = 0.0f;
     float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
     TextureHandle       anisotropyMap           = TextureHandle::Invalid;
+    MaterialSamplerAddresses textureSamplers {}; // Repeat/Repeat for non-glTF materials.
 };
 
 static_assert(
@@ -135,6 +176,7 @@ struct MaterialDesc {
     float         anisotropyStrength    = 0.0f;
     float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
     TextureHandle anisotropyMap         = TextureHandle::Invalid;
+    MaterialSamplerAddresses textureSamplers {};
 };
 
 struct DrawParams {

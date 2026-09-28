@@ -31,6 +31,8 @@ struct MeshParticleRenderPushConstants {
     float alphaCutoff;
     uint alphaMode;
 
+    uint samplerCodes0;
+    uint samplerCodes1;
     uint _padding;
 };
 
@@ -53,6 +55,7 @@ struct VSOutput {
     nointerpolation float3 pbrFactors : TEXCOORD6;
     nointerpolation uint alphaMode : TEXCOORD7;
     nointerpolation float4 emissiveFactor : TEXCOORD8;
+    nointerpolation uint2 samplerCodes : TEXCOORD16;
 };
 
 struct PSOutput {
@@ -98,6 +101,7 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
         output.pbrFactors      = float3(0.0f, 0.0f, 0.0f);
         output.alphaMode       = 0;
         output.emissiveFactor  = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        output.samplerCodes    = uint2(0u, 0u);
         return output;
     }
 
@@ -150,6 +154,7 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.emissiveFactor  = mp_pc.emissiveFactor;
     output.pbrFactors      = float3(mp_pc.metallic, mp_pc.roughness, mp_pc.alphaCutoff);
     output.alphaMode       = mp_pc.alphaMode;
+    output.samplerCodes    = uint2(mp_pc.samplerCodes0, mp_pc.samplerCodes1);
 
     return output;
 }
@@ -160,7 +165,7 @@ void PSShadow(VSOutput input) {
     float alphaCutoff      = input.pbrFactors.z;
     uint alphaMode         = input.alphaMode;
 
-    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
+    float4 albedo = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
@@ -177,15 +182,15 @@ PSOutput PSMain(VSOutput input) {
     float alphaCutoff      = input.pbrFactors.z;
     uint alphaMode         = input.alphaMode;
 
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
+    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
+    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
     float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
     }
 
-    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float4 pbr      = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
@@ -201,7 +206,7 @@ PSOutput PSMain(VSOutput input) {
         float tangentSign = input.tangent.w * 2.0f - 1.0f;
         float3 B          = normalize(cross(N, T) * tangentSign);
 
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 normalMap = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
     }
 

@@ -91,6 +91,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     output.coatTextures          = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
     output.anisotropyParams      = float2(inst.anisotropyStrength, inst.anisotropyRotation);
     output.anisotropyTexIndex    = inst.anisotropyTexIndex;
+    output.samplerCodes          = uint2(inst.samplerCodes0, inst.samplerCodes1);
 
     if (withMotion) {
         float4 prevWorldPos;
@@ -137,7 +138,7 @@ void PSShadow(ShadowGeometryOutput input) {
     float alphaCutoff      = input.pbrFactors.z;
     uint alphaMode         = input.alphaMode;
 
-    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
+    float4 albedo = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
@@ -146,14 +147,14 @@ void PSShadow(ShadowGeometryOutput input) {
 
 // glTF's optional RG channels are a direction in tangent space and B masks
 // strength. Rotation is in radians; the no-texture direction is (1, 0).
-float4 SampleMaterialAnisotropy(float3 N, float3 T, float3 B, float2 uv, float2 params, uint texIndex) {
+float4 SampleMaterialAnisotropy(float3 N, float3 T, float3 B, float2 uv, float2 params, uint texIndex, uint2 samplerCodes) {
     float strength = saturate(params.x);
     if (strength <= 0.0f) {
         return float4(0.0f, 0.0f, 0.0f, 0.0f);
     }
     float2 direction = float2(1.0f, 0.0f);
     if (texIndex != 0xFFFFu) {
-        float3 sample = scene.globalTextures[texIndex].Sample(scene.defaultSampler, uv).rgb;
+        float3 sample = SampleMaterialTexture(texIndex, uv, samplerCodes, kSamplerAnisotropy).rgb;
         direction = sample.rg * 2.0f - 1.0f;
         float lenSq = dot(direction, direction);
         direction = lenSq > 1e-6f ? direction * rsqrt(lenSq) : float2(1.0f, 0.0f);
@@ -175,15 +176,15 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     float alphaCutoff      = input.pbrFactors.z;
     uint alphaMode         = input.alphaMode;
 
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
+    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
+    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
     float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
 
     if (alphaMode == 1 && albedo.a < alphaCutoff) {
         discard;
     }
 
-    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float4 pbr = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
 
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
@@ -200,22 +201,22 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     float3 B = cross(geometric, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
 
     if (indices.y != 2 && hasTangent) {
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 normalMap = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
         worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
     }
 
     float coatFactor = input.coatParams.x;
     float coatRough  = input.coatParams.y;
     if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
-        coatFactor *= scene.globalTextures[input.coatTextures.x].Sample(scene.defaultSampler, input.uv).r;
+        coatFactor *= SampleMaterialTexture(input.coatTextures.x, input.uv, input.samplerCodes, kSamplerClearcoat).r;
     }
     if (coatFactor > 0.0f && input.coatTextures.y != 0xFFFFu) {
-        coatRough *= scene.globalTextures[input.coatTextures.y].Sample(scene.defaultSampler, input.uv).g;
+        coatRough *= SampleMaterialTexture(input.coatTextures.y, input.uv, input.samplerCodes, kSamplerClearcoatRoughness).g;
     }
     coatFactor = saturate(coatFactor);
     coatRough  = saturate(coatRough);
     if (coatFactor > 1.0f / 255.0f && input.coatTextures.z != 0xFFFFu && hasTangent) {
-        float3 mapN = scene.globalTextures[input.coatTextures.z].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 mapN = SampleMaterialTexture(input.coatTextures.z, input.uv, input.samplerCodes, kSamplerClearcoatNormal).rgb * 2.0f - 1.0f;
         mapN.xy *= input.coatParams.z;
         coatNormal = normalize(mapN.x * T + mapN.y * B + mapN.z * geometric);
     }
@@ -226,7 +227,7 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     output.emissive        = float4(emissive, 1.0f);
     float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
     output.normalRoughness = float4(packedNormal, roughness, metallic);
-    output.anisotropy = SampleMaterialAnisotropy(worldNormal, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex);
+    output.anisotropy = SampleMaterialAnisotropy(worldNormal, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -292,25 +293,25 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     uint4 indices = input.materialIndices;
     if (indices.y != 2u) {
-        float3 mapN = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        float3 mapN = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
         N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos, input.uv);
     }
 
     float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float4 pbr = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
     float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
 
     float4 params = input.transmissionParams;
     uint4 tex = input.transmissionTextures;
     float iridescence = saturate(params.y);
     if (tex.y != 0xFFFFu) {
-        iridescence *= scene.globalTextures[tex.y].Sample(scene.defaultSampler, input.uv).r;
+        iridescence *= SampleMaterialTexture(tex.y, input.uv, input.samplerCodes, kSamplerIridescence).r;
     }
     float thicknessNm = params.z;
     if (tex.x != 0xFFFFu) {
-        float g = scene.globalTextures[tex.x].Sample(scene.defaultSampler, input.uv).g;
+        float g = SampleMaterialTexture(tex.x, input.uv, input.samplerCodes, kSamplerFilmThickness).g;
         thicknessNm = lerp(params.w, params.z, g);
     }
 
@@ -325,7 +326,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float ior = max(input.volumeParams.y, 1.0001f);
     float thickness = input.volumeParams.x * input.volumeParams.z;
     if (tex.z != 0xFFFFu) {
-        thickness *= scene.globalTextures[tex.z].Sample(scene.defaultSampler, input.uv).g;
+        thickness *= SampleMaterialTexture(tex.z, input.uv, input.samplerCodes, kSamplerVolumeThickness).g;
     }
     float2 refractUV = screenUV;
     if (thickness > 1.0e-5f) {
@@ -342,7 +343,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, 0.0f).rgb * albedo;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex);
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 R = AnisotropicReflection(N, V, cross(N, anisotropicT), roughness, aniso.z);
     float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z) *
@@ -358,8 +359,8 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float4 baseColorFactor = input.baseColorFactor;
     float roughnessFactor  = input.pbrFactors.y;
 
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
+    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
+    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
 
     float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
 
@@ -377,12 +378,12 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
     float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV     = saturate(dot(N, V));
-    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float4 pbr      = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
     float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * input.pbrFactors.x;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex);
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
     float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);

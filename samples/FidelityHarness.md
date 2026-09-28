@@ -98,6 +98,12 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    no longer receives diffuse IBL on top of its specular term. Sheen and
    specular remain unsupported. Other differences (for example texture
    coordinate sets and texture transforms) still contribute to the metric.
+5. **Texture addressing.** The importer carries each glTF texture reference's
+   independent `wrapS`/`wrapT` (repeat, clamp-to-edge, mirrored-repeat) through
+   its material to one of nine preallocated GPU samplers. Images remain shared
+   even if their texture objects specify different samplers. glTF's
+   `minFilter`/`magFilter` are not imported yet: the bank retains the renderer's
+   existing linear, mip-0-only material filtering.
 
 To check the reported mismatch visually, render the Khronos
 `AnisotropyStrengthTest` scenario with this harness and the matching HDR map.
@@ -109,6 +115,11 @@ texture path; it is not a substitute for this GPU image comparison. The IBL
 uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
 anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
 is not expected.
+
+For `TextureSettingsTest`, compare the clamp S/T rows (solid green) and
+mirror S/T rows (checkmarks) against the golden; repeat S/T should remain
+checkmarks. This requires a new GPU capture—successful shader compilation and
+an importer fixture alone cannot verify the image.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

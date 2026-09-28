@@ -263,6 +263,7 @@ class HeapManager {
     }
 
     [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
 
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>

@@ -39,6 +39,7 @@
 #include <iterator>
 #include <json/JSONSchema.hpp>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -61,6 +62,18 @@ enum class GLTFImportError : uint8_t {
 namespace {
 
 constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
+
+// Nine (S,T) combinations, including both independent mixed axes, must pack
+// to the same nibble indices as the GPU sampler bank. Slot 8 starts word 1.
+constexpr ZHLN::MaterialSamplerAddresses kAllAddressModes = [] {
+    ZHLN::MaterialSamplerAddresses modes {};
+    for (uint32_t i = 0; i < ZHLN::kMaterialSamplerVariantCount; ++i) {
+        modes[i] = {static_cast<ZHLN::TextureWrap>(i / 3), static_cast<ZHLN::TextureWrap>(i % 3)};
+    }
+    return modes;
+}();
+static_assert(ZHLN::PackMaterialSamplerAddresses(kAllAddressModes, 0) == 0x76543210u);
+static_assert(ZHLN::PackMaterialSamplerAddresses(kAllAddressModes, 8) == 0x8u);
 
 [[nodiscard]] auto ReadAssetBytes() -> std::vector<uint8_t> {
     const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/ProceduralAnimationBaseRig.glb";
@@ -105,10 +118,10 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 //
 // glTF is optional-by-omission, and SerializeJSON emits an empty std::optional
 // as null rather than dropping the key -- which cgltf would then read as
-// "mesh": 0 rather than "no mesh". So each shape a fixture needs is its own
-// type (a node with a mesh, a node with only a light) and the document is
-// templated over them. Empty structs are not an option either: the serializer
-// static_asserts on FieldCount<T>() == 0.
+// "mesh": 0 rather than "no mesh". So most shapes are separate types, and the
+// document is templated over them. The anisotropy fixture opts into omitEmpty
+// for one texture that has no sampler. Empty structs are not an option either:
+// the serializer static_asserts on FieldCount<T>() == 0.
 // ---------------------------------------------------------------------------
 
 struct GltfAsset {
@@ -195,9 +208,17 @@ struct GltfAnisotropyExtensions {
     KhrMaterialsAnisotropy KHR_materials_anisotropy;
 };
 
+struct GltfAnisotropyPbr {
+    std::array<float, 4>     baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    float                    metallicFactor  = 0.0f;
+    float                    roughnessFactor = 1.0f;
+    GltfAnisotropyTextureInfo baseColorTexture {.index = 1};
+    GltfAnisotropyTextureInfo metallicRoughnessTexture {.index = 2};
+};
+
 struct GltfAnisotropyMaterial {
     std::string_view         name;
-    GltfPbrMetallicRoughness pbrMetallicRoughness;
+    GltfAnisotropyPbr        pbrMetallicRoughness;
     GltfAnisotropyExtensions extensions;
 };
 
@@ -207,7 +228,13 @@ struct GltfAnisotropyImage {
 };
 
 struct GltfAnisotropyTexture {
-    int32_t source = 0;
+    std::optional<int32_t> sampler;
+    int32_t                source = 0;
+};
+
+struct GltfSamplerWrap {
+    int32_t wrapS = 10497; // REPEAT
+    int32_t wrapT = 10497;
 };
 
 // min/max are carried on both accessors so one type covers the position and
@@ -309,6 +336,7 @@ struct GltfAnisotropyDocument {
     std::vector<GltfBuffer>               buffers;
     std::vector<GltfAnisotropyImage>      images;
     std::vector<GltfAnisotropyTexture>    textures;
+    std::vector<GltfSamplerWrap>          samplers;
 };
 
 // Same document with a root `extensions` object. A separate type rather than
@@ -444,8 +472,8 @@ constexpr float                kEmissiveStrength = 4.0f;
 }
 
 // A tangent-space triangle with a 1x1 *linear* anisotropy map (R=1, G=.5,
-// B=.25). It checks that the importer keeps the extension's factors, angle
-// and image rather than silently falling back to isotropic shading.
+// B=.25). Its base, PBR and anisotropy textures share the same image but have
+// different S/T sampler modes, so image-level sampler storage cannot pass.
 [[nodiscard]] auto MakeAnisotropyFixture() -> std::vector<uint8_t> {
     constexpr std::array<float, 9> normals {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
     constexpr std::array<float, 12> tangents {1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f};
@@ -497,9 +525,11 @@ constexpr float                kEmissiveStrength = 4.0f;
         },
         .buffers = {{.byteLength = static_cast<int32_t>(bin.size())}},
         .images = {GltfAnisotropyImage {}},
-        .textures = {GltfAnisotropyTexture {}}
+        .textures = {GltfAnisotropyTexture {}, GltfAnisotropyTexture {.sampler = 0}, GltfAnisotropyTexture {.sampler = 1}},
+        .samplers = {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648}, GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}}
     };
-    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), bin);
+    // Texture 0 has no sampler at all, not a sampler explicitly set to repeat.
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
 }
 
 // A mesh node that also carries a punctual light, alongside the emissive
@@ -941,8 +971,10 @@ struct GLTFImportTestSuite {
         }
 
         /**
-         * The KHR_materials_anisotropy direction and strength survive the
-         * cgltf -> prefab -> Material path, including its uploaded texture.
+         * KHR_materials_anisotropy and per-texture sampler wrapping survive
+         * cgltf -> prefab -> Material. Three texture objects share one image:
+         * base color clamps S / mirrors T, PBR mirrors S / clamps T, and the
+         * anisotropy texture repeats both. Their image handle stays shared.
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_anisotropy_material() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Anisotropy");
@@ -951,7 +983,11 @@ struct GLTFImportTestSuite {
             }
             const auto bytes = MakeAnisotropyFixture();
             SourceDocument source;
-            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_anisotropy) {
+            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_anisotropy ||
+                source.data->textures_count != 3 || source.data->samplers_count != 2 || source.data->textures[0].sampler != nullptr ||
+                source.data->textures[1].sampler == nullptr || source.data->textures[2].sampler == nullptr ||
+                source.data->textures[0].image == nullptr || source.data->textures[0].image != source.data->textures[1].image ||
+                source.data->textures[0].image != source.data->textures[2].image) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
@@ -968,9 +1004,21 @@ struct GLTFImportTestSuite {
                 material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f || material.clearcoatFactor != 0.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
+            using ZHLN::MaterialTextureSlot;
+            using ZHLN::TextureSamplerAddress;
+            using ZHLN::TextureWrap;
+            const auto mode = [&](MaterialTextureSlot slot) { return material.textureSamplers[static_cast<size_t>(slot)]; };
+            if (material.albedoMap != material.pbrMap || material.pbrMap != material.anisotropyMap ||
+                mode(MaterialTextureSlot::Albedo) != TextureSamplerAddress {TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat} ||
+                mode(MaterialTextureSlot::Pbr) != TextureSamplerAddress {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge} ||
+                mode(MaterialTextureSlot::Anisotropy) != TextureSamplerAddress {} ||
+                ZHLN::PackMaterialSamplerAddresses(material.textureSamplers, 0) != (5u | (7u << 8)) ||
+                ZHLN::PackMaterialSamplerAddresses(material.textureSamplers, 8) != 0u) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
             const ZHLN::Material defaults {};
             if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
-                defaults.anisotropyMap != ZHLN::TextureHandle::Invalid) {
+                defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};

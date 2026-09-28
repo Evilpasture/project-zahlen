@@ -90,6 +90,8 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
             .metallic           = gpuMat->metallicFactor,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
+            .samplerCodes0      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
+            .samplerCodes1      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
             ._padding           = 0
         };
 
@@ -142,6 +144,8 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
             .metallic           = 0.0f,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
+            .samplerCodes0      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
+            .samplerCodes1      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
             ._padding           = 0
         };
 

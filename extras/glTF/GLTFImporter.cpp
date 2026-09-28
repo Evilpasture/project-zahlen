@@ -44,6 +44,21 @@ struct NodeExtras {
     std::string csg_data;
 };
 
+[[nodiscard]] TextureWrap DecodeWrap(cgltf_wrap_mode mode) noexcept {
+    switch (mode) {
+        case cgltf_wrap_mode_clamp_to_edge: return TextureWrap::ClampToEdge;
+        case cgltf_wrap_mode_mirrored_repeat: return TextureWrap::MirroredRepeat;
+        default: return TextureWrap::Repeat; // glTF default (also for an absent sampler).
+    }
+}
+
+[[nodiscard]] TextureSamplerAddress SamplerAddress(const cgltf_texture* texture) noexcept {
+    if (texture == nullptr || texture->sampler == nullptr) {
+        return {};
+    }
+    return {.s = DecodeWrap(texture->sampler->wrap_s), .t = DecodeWrap(texture->sampler->wrap_t)};
+}
+
 struct CPUTextureJob {
     cgltf_image*   image = nullptr;
     std::string    glbPath;
@@ -101,6 +116,7 @@ struct CPUPrimitiveJob {
     float        anisotropyStrength       = 0.0f;
     float        anisotropyRotation       = 0.0f;
     cgltf_image* anisotropyImage          = nullptr;
+    MaterialSamplerAddresses textureSamplers {};
     float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
@@ -623,9 +639,14 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
 }
 
 void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_image*>& outUniqueImages, std::vector<CPUPrimitiveJob>& outPrimitiveJobs) {
-    auto RegisterImage = [&](cgltf_image* img) -> void {
-        if (img != nullptr && std::ranges::find(outUniqueImages, img) == outUniqueImages.end()) {
-            outUniqueImages.push_back(img);
+    auto RegisterTexture = [&](CPUPrimitiveJob& job, cgltf_texture* texture, cgltf_image*& image, MaterialTextureSlot slot) -> void {
+        if (texture == nullptr) {
+            return;
+        }
+        image = texture->image;
+        job.textureSamplers[static_cast<size_t>(slot)] = SamplerAddress(texture);
+        if (image != nullptr && std::ranges::find(outUniqueImages, image) == outUniqueImages.end()) {
+            outUniqueImages.push_back(image);
         }
     };
 
@@ -649,55 +670,32 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_imag
             const auto& prim = mesh->primitives[p];
             if (prim.material != nullptr) {
                 if (prim.material->has_pbr_metallic_roughness) {
-                    auto& pbr = prim.material->pbr_metallic_roughness;
-                    if (pbr.base_color_texture.texture != nullptr) {
-                        job.albedoImage = pbr.base_color_texture.texture->image;
-                        RegisterImage(job.albedoImage);
-                    }
-                    if (pbr.metallic_roughness_texture.texture != nullptr) {
-                        job.pbrImage = pbr.metallic_roughness_texture.texture->image;
-                        RegisterImage(job.pbrImage);
-                    }
+                    const auto& pbr = prim.material->pbr_metallic_roughness;
+                    RegisterTexture(job, pbr.base_color_texture.texture, job.albedoImage, MaterialTextureSlot::Albedo);
+                    RegisterTexture(job, pbr.metallic_roughness_texture.texture, job.pbrImage, MaterialTextureSlot::Pbr);
                 }
-                if (prim.material->normal_texture.texture != nullptr) {
-                    job.normalImage = prim.material->normal_texture.texture->image;
-                    RegisterImage(job.normalImage);
-                }
-                if (prim.material->emissive_texture.texture != nullptr) {
-                    job.emissiveImage = prim.material->emissive_texture.texture->image;
-                    RegisterImage(job.emissiveImage);
-                }
+                RegisterTexture(job, prim.material->normal_texture.texture, job.normalImage, MaterialTextureSlot::Normal);
+                RegisterTexture(job, prim.material->emissive_texture.texture, job.emissiveImage, MaterialTextureSlot::Emissive);
                 if (prim.material->has_iridescence) {
-                    if (prim.material->iridescence.iridescence_texture.texture != nullptr) {
-                        job.iridescenceImage = prim.material->iridescence.iridescence_texture.texture->image;
-                        RegisterImage(job.iridescenceImage);
-                    }
-                    if (prim.material->iridescence.iridescence_thickness_texture.texture != nullptr) {
-                        job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
-                        RegisterImage(job.filmThicknessImage);
-                    }
+                    RegisterTexture(job, prim.material->iridescence.iridescence_texture.texture, job.iridescenceImage, MaterialTextureSlot::Iridescence);
+                    RegisterTexture(
+                        job, prim.material->iridescence.iridescence_thickness_texture.texture, job.filmThicknessImage,
+                        MaterialTextureSlot::FilmThickness
+                    );
                 }
-                if (prim.material->has_volume && prim.material->volume.thickness_texture.texture != nullptr) {
-                    job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
-                    RegisterImage(job.volumeThicknessImage);
+                if (prim.material->has_volume) {
+                    RegisterTexture(job, prim.material->volume.thickness_texture.texture, job.volumeThicknessImage, MaterialTextureSlot::VolumeThickness);
                 }
                 if (prim.material->has_clearcoat) {
-                    if (prim.material->clearcoat.clearcoat_texture.texture != nullptr) {
-                        job.clearcoatImage = prim.material->clearcoat.clearcoat_texture.texture->image;
-                        RegisterImage(job.clearcoatImage);
-                    }
-                    if (prim.material->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
-                        job.clearcoatRoughnessImage = prim.material->clearcoat.clearcoat_roughness_texture.texture->image;
-                        RegisterImage(job.clearcoatRoughnessImage);
-                    }
-                    if (prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
-                        job.clearcoatNormalImage = prim.material->clearcoat.clearcoat_normal_texture.texture->image;
-                        RegisterImage(job.clearcoatNormalImage);
-                    }
+                    RegisterTexture(job, prim.material->clearcoat.clearcoat_texture.texture, job.clearcoatImage, MaterialTextureSlot::Clearcoat);
+                    RegisterTexture(
+                        job, prim.material->clearcoat.clearcoat_roughness_texture.texture, job.clearcoatRoughnessImage,
+                        MaterialTextureSlot::ClearcoatRoughness
+                    );
+                    RegisterTexture(job, prim.material->clearcoat.clearcoat_normal_texture.texture, job.clearcoatNormalImage, MaterialTextureSlot::ClearcoatNormal);
                 }
-                if (prim.material->has_anisotropy && prim.material->anisotropy.anisotropy_texture.texture != nullptr) {
-                    job.anisotropyImage = prim.material->anisotropy.anisotropy_texture.texture->image;
-                    RegisterImage(job.anisotropyImage);
+                if (prim.material->has_anisotropy) {
+                    RegisterTexture(job, prim.material->anisotropy.anisotropy_texture.texture, job.anisotropyImage, MaterialTextureSlot::Anisotropy);
                 }
             }
             outPrimitiveJobs.push_back(std::move(job));
@@ -865,7 +863,8 @@ auto GetOrCreateCompiledPrimitive(
                             .clearcoatNormalMap       = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatNormalImage, TextureHandle::Invalid),
                             .anisotropyStrength      = primJob.anisotropyStrength,
                             .anisotropyRotation      = primJob.anisotropyRotation,
-                            .anisotropyMap           = imageToHandle | ZHLN::Ranges::FindOr(primJob.anisotropyImage, TextureHandle::Invalid)})
+                            .anisotropyMap           = imageToHandle | ZHLN::Ranges::FindOr(primJob.anisotropyImage, TextureHandle::Invalid),
+                            .textureSamplers         = primJob.textureSamplers})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {

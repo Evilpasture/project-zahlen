@@ -572,13 +572,21 @@ void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
 
 auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
     const uint32_t base = _staticResourceAlloc.Cursor();
-    if (base + count > _staticResourceCount) [[unlikely]] {
+    if (count > _staticResourceCount - base) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::ResourceSlotsExhausted);
     }
     _staticResourceAlloc.Skip(count);
     return base;
 }
 
+auto HeapManager::ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
+    const uint32_t base = _staticSamplerAlloc.Cursor();
+    if (count > _staticSamplerCount - base) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::SamplerSlotsExhausted);
+    }
+    _staticSamplerAlloc.Skip(count);
+    return base;
+}
 
 void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     if (!handle.Valid()) {

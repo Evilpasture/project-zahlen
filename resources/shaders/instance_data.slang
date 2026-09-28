@@ -51,7 +51,8 @@ public struct InstanceData {
     public float anisotropyStrength;
     public float anisotropyRotation;
     public uint anisotropyTexIndex;
-    public uint _paddingAnisotropy;
+    public uint samplerCodes0; // Slots 0..7, four bits each; reuses anisotropy padding.
+    public uint samplerCodes1; // Slots 8..10.
 };
 
 [CxxSkip]

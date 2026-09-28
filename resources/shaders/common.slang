@@ -41,10 +41,35 @@ public struct GlobalSceneRegistry {
     public Texture2D brdfLUT;
     public SamplerState clampSampler;
     public Texture2D<float4> texTransLighting;
+    public SamplerState materialSamplers[9]; // Three wrap modes on S x three on T.
     public Texture2D globalTextures[];
 };
 
 public ParameterBlock<GlobalSceneRegistry> scene;
+
+// MaterialTextureSlot in Render/Types.hpp uses this exact order. The first
+// eight four-bit sampler codes are packed in x and the final three in y.
+public static const uint kSamplerAlbedo             = 0u;
+public static const uint kSamplerNormal             = 1u;
+public static const uint kSamplerPbr                = 2u;
+public static const uint kSamplerEmissive           = 3u;
+public static const uint kSamplerClearcoat          = 4u;
+public static const uint kSamplerClearcoatRoughness = 5u;
+public static const uint kSamplerClearcoatNormal    = 6u;
+public static const uint kSamplerAnisotropy         = 7u;
+public static const uint kSamplerIridescence        = 8u;
+public static const uint kSamplerFilmThickness      = 9u;
+public static const uint kSamplerVolumeThickness    = 10u;
+
+[ForceInline]
+public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
+    uint packed = slot < 8u ? codes.x : codes.y;
+    uint code = (packed >> ((slot & 7u) * 4u)) & 0xFu;
+    // An absent sampler encodes Repeat/Repeat (0). Both image and sampler
+    // indices may differ across materials in the same wavefront.
+    return scene.globalTextures[NonUniformResourceIndex(index)]
+        .Sample(scene.materialSamplers[NonUniformResourceIndex(min(code, 8u))], uv);
+}
 
 [vk::push_constant]
 public ObjectConstants obj;
@@ -226,6 +251,7 @@ public struct SceneGeometryVertex {
     public uint4 coatTextures;
     public float2 anisotropyParams; // Strength, rotation (radians).
     public uint anisotropyTexIndex;
+    public uint2 samplerCodes;
 };
 
 
@@ -237,6 +263,7 @@ public struct ShadowGeometryOutput {
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public struct GBufferGeometryOutput {
@@ -256,6 +283,7 @@ public struct GBufferGeometryOutput {
     public nointerpolation uint4 coatTextures : TEXCOORD13;
     public nointerpolation float2 anisotropyParams : TEXCOORD14;
     public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public struct ForwardGeometryOutput {
@@ -273,6 +301,7 @@ public struct ForwardGeometryOutput {
     public float4 tangent : TANGENT;
     public nointerpolation float2 anisotropyParams : TEXCOORD14;
     public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
@@ -284,6 +313,7 @@ public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
     o.baseColorFactor  = v.baseColorFactor;
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
+    o.samplerCodes     = v.samplerCodes;
     return o;
 }
 
@@ -305,6 +335,7 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.coatTextures        = v.coatTextures;
     o.anisotropyParams    = v.anisotropyParams;
     o.anisotropyTexIndex  = v.anisotropyTexIndex;
+    o.samplerCodes        = v.samplerCodes;
     return o;
 }
 
@@ -324,6 +355,7 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.tangent                = v.tangent;
     o.anisotropyParams       = v.anisotropyParams;
     o.anisotropyTexIndex     = v.anisotropyTexIndex;
+    o.samplerCodes           = v.samplerCodes;
     return o;
 }
 

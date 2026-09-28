@@ -101,6 +101,7 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
+static_assert(kSceneStaticSamplerSlots >= 3 + kMaterialSamplerVariantCount);
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
 static constexpr uint32_t kPassStaticSamplerSlots = 64;
@@ -367,6 +368,7 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
     Vk::SamplerHandle globalSamplerSlot;
+    Vk::SamplerHandle materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
     Vk::SamplerHandle clampSamplerSlot;
     Vk::SamplerHandle pointSamplerSlot;
     Vk::TextureHandle iblPrefilteredSlot;
@@ -703,9 +705,11 @@ struct RenderContext::Impl {
         float    alphaCutoff;
         uint32_t alphaMode;
 
+        uint32_t samplerCodes0;
+        uint32_t samplerCodes1;
         uint32_t _padding;
     };
-    static_assert(sizeof(MeshParticleRenderPush) == 104);
+    static_assert(sizeof(MeshParticleRenderPush) == 112);
     static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 32);
     static_assert(offsetof(MeshParticleRenderPush, emissiveFactor) == 48);
     static_assert(offsetof(MeshParticleRenderPush, indexCount) == 64);

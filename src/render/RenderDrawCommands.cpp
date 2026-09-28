@@ -110,6 +110,7 @@ struct InstanceDataDesc {
     float    anisotropyStrength      = 0.0f;
     float    anisotropyRotation      = 0.0f;
     uint32_t anisotropyTex           = kNoFilmTexture;
+    MaterialSamplerAddresses textureSamplers {};
 };
 
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
@@ -177,7 +178,8 @@ struct InstanceDataDesc {
         .anisotropyStrength   = std::clamp(desc.anisotropyStrength, 0.0f, 1.0f),
         .anisotropyRotation   = desc.anisotropyRotation,
         .anisotropyTexIndex   = desc.anisotropyTex,
-        ._paddingAnisotropy   = 0u,
+        .samplerCodes0        = PackMaterialSamplerAddresses(desc.textureSamplers, 0),
+        .samplerCodes1        = PackMaterialSamplerAddresses(desc.textureSamplers, 8),
     };
 }
 
@@ -380,6 +382,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .anisotropyStrength      = material.anisotropyStrength,
                  .anisotropyRotation      = material.anisotropyRotation,
                  .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                 .textureSamplers          = material.textureSamplers,
              }
          ),
          .material            = resolved->material,
@@ -448,6 +451,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .anisotropyStrength      = material.anisotropyStrength,
                     .anisotropyRotation      = material.anisotropyRotation,
                     .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                    .textureSamplers          = material.textureSamplers,
                 }
             ),
             .material            = resolved->material,

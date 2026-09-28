@@ -112,6 +112,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     globalSamplerSlot = *globalSlot;
     clampSamplerSlot  = *clampSlot;
     pointSamplerSlot  = *pointSlot;
+    auto materialBase = heapManager.ReserveOffsetAddressedSamplerRegion(kMaterialSamplerVariantCount);
+    if (!materialBase) {
+        return std::unexpected(materialBase.error());
+    }
+    materialSamplerBaseSlot = Vk::SamplerHandle {*materialBase};
 
     auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
@@ -132,6 +137,19 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
     heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
 
+    constexpr std::array<VkSamplerAddressMode, 3> modes = {
+        VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+    };
+    static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
+    for (uint32_t s = 0; s < modes.size(); ++s) {
+        for (uint32_t t = 0; t < modes.size(); ++t) {
+            auto info = globalSamplerInfo; // Preserve existing material filtering and LOD.
+            info.addressModeU = modes[s];
+            info.addressModeV = modes[t];
+            heapManager.WriteSampler(Vk::SamplerHandle {*materialBase + s * 3u + t}, info);
+        }
+    }
+
     BuildSceneHeapMappings();
 
     return {};
@@ -150,13 +168,15 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
         .SampledImage(0, 8, iblBrdfLutSlot)
         .Sampler(0, 9, clampSamplerSlot)
         .SampledImage(0, 10, transLightingSlot)
-        .BindlessTextureArray(0, 11, textureManager.BindlessBaseSlot())
+        .SamplerArray(0, 11, materialSamplerBaseSlot)
+        .BindlessTextureArray(0, 12, textureManager.BindlessBaseSlot())
         .Build();
 
     decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(1, 0, globalSamplerSlot)
         .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-        .BindlessTextureArray(1, 11, textureManager.BindlessBaseSlot())
+        .SamplerArray(1, 11, materialSamplerBaseSlot)
+        .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
         .Build();
 }
 
