@@ -15,6 +15,10 @@ struct TextureResource {
     ImageView  view;
     VkExtent3D extent {};
 
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, view.Info().format};
+    }
+
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && view.Valid();
     }

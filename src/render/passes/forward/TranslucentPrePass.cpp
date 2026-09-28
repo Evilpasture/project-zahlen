@@ -16,7 +16,7 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(impl.graphResources.transNormalBuffer);
     const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(impl.graphResources.transDepthBuffer);
 
-    Vk::DynamicPass(norm_att.extent)
+    Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)

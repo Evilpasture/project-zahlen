@@ -16,10 +16,14 @@ namespace {
 // secondary must inherit the formats AddColor/AddDepth actually recorded.
 // Exercise both a combined stencil attachment and a depth-only attachment.
 static_assert([] {
-    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> colorA {.format = VK_FORMAT_R8G8B8A8_UNORM};
-    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> colorB {.format = VK_FORMAT_B8G8R8A8_SRGB};
-    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depthStencil {.format = VK_FORMAT_D32_SFLOAT_S8_UINT};
-    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depthOnly {.format = VK_FORMAT_D32_SFLOAT};
+    constexpr auto colorA = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_R8G8B8A8_UNORM}
+                                .Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    constexpr auto colorB = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_B8G8R8A8_SRGB}
+                                .Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    constexpr auto depthStencil = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT_S8_UINT}
+                                      .Assume<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>();
+    constexpr auto depthOnly = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT}
+                                   .Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
     const auto pass = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
         .Viewport(2.0F, 3.0F, 30.0F, 20.0F)
@@ -35,10 +39,10 @@ static_assert([] {
         .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
         .GetSecondaryInheritance();
 
-    return colors.size() == 2 && colors[0] == colorA.format && colors[1] == colorB.format &&
-           inherit.depthFormat == depthStencil.format && inherit.stencilFormat == depthStencil.format && inherit.viewMask == 3 &&
+    return colors.size() == 2 && colors[0] == colorA.GetFormat() && colors[1] == colorB.GetFormat() &&
+           inherit.depthFormat == depthStencil.GetFormat() && inherit.stencilFormat == depthStencil.GetFormat() && inherit.viewMask == 3 &&
            inherit.viewport.x == 2.0F && inherit.viewport.width == 30.0F &&
-           noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.format && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
+           noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.GetFormat() && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
 }(), "Secondary inheritance must match the DynamicPass's bound runtime attachments.");
 
 struct TaskSystemSchedulerAdapter {
@@ -92,7 +96,7 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
     using enum Vk::BarrierAccess;
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -131,7 +135,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
     const uint32_t  frameIndex = ctx.presenter.frameIndex;
     const auto      sceneVp    = ctx.EffectiveViewport();
 
-    const auto pass = Vk::DynamicPass(in.sceneColor.extent)
+    const auto pass = Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -183,7 +187,7 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
         // Nothing to draw, but the GBuffer still has to be in a defined state:
         // clear it rather than leave last frame's contents in the targets.
         const GBufferTargets in = GBufferSceneTargets(impl);
-        Vk::DynamicPass(in.sceneColor.extent)
+        Vk::DynamicPass(in.sceneColor.Extent())
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)

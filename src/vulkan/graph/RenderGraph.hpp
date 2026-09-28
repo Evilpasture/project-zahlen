@@ -496,12 +496,6 @@ constexpr auto MakePassPack(Passes&&... passes) {
     return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
 }
 
-struct GraphResource {
-    VkImage     handle = VK_NULL_HANDLE;
-    VkImageView view   = VK_NULL_HANDLE;
-    VkExtent3D  extent {};
-};
-
 template <typename Tag>
 struct ResourceResolver;
 
@@ -512,12 +506,12 @@ class ResourceBinder {
     constexpr void AutoBind(ContextImpl& impl) noexcept;
 
     template <typename Image>
-    constexpr void Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept;
+    constexpr void Bind(ImageSlice slice) noexcept;
 
-    constexpr auto GetBindings() const noexcept -> const std::array<GraphResource, ResourceList::size>&;
+    constexpr auto GetBindings() const noexcept -> const std::array<ImageSlice, ResourceList::size>&;
 
   private:
-    std::array<GraphResource, ResourceList::size> _resources {};
+    std::array<ImageSlice, ResourceList::size> _resources {};
 };
 
 // The part of a rendered pass's context that does not depend on which
@@ -636,7 +630,7 @@ class CompileTimeFrameGraph {
     template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
     void ExecutePass(
         VkCommandBuffer                                cmd,
-        const std::array<GraphResource, NumResources>& bindings,
+        const std::array<ImageSlice, NumResources>& bindings,
         const PassType&                                pass,
         uint32_t                                       frameIndex,
         ProfilerT*                                     profiler,
@@ -662,7 +656,7 @@ struct ClearColorOf {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 class RasterPassContext: public RasterPassContextBase {
   public:
-    RasterPassContext(VkCommandBuffer cmd, const std::array<GraphResource, ResourceList::size>& bindings) noexcept;
+    RasterPassContext(VkCommandBuffer cmd, const std::array<ImageSlice, ResourceList::size>& bindings) noexcept;
 
     ~RasterPassContext() noexcept;
 
@@ -671,40 +665,34 @@ class RasterPassContext: public RasterPassContextBase {
 
     template <typename... Imgs, typename... DImgs>
     void ResolveExtent(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         TypeList<Imgs...> ,
         TypeList<DImgs...>
     ) noexcept;
 
     template <typename... Imgs>
     void BuildColorAttachments(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         uint32_t&                                            colorCount,
         TypeList<Imgs...>
     ) noexcept;
 
     template <typename... DImgs>
     bool BuildDepthAttachment(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         VkRenderingAttachmentInfo&                           outDepth,
         TypeList<DImgs...>
     ) noexcept;
 };
 
-template <typename Tag>
-struct GraphImageRef {
-    using TagType      = Tag;
-    VkImage     handle = VK_NULL_HANDLE;
-    VkImageView view   = VK_NULL_HANDLE;
-    VkExtent3D  extent {};
-};
-
 template <typename Tag, typename T>
-constexpr auto MakeRef(const T& resource) noexcept;
+constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format = Tag::format) noexcept;
+template <typename Tag>
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format = Tag::format) noexcept;
 
 }
 

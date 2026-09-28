@@ -23,14 +23,7 @@ inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderT
 
 template <VkFormat F>
 inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
-    return {
-        .handle = image.Handle(),
-        .view   = view.Get(),
-        .extent = {.width = extent.width, .height = extent.height, .depth = 1}, // Explicit 2D -> 3D conversion
-        .aspect = GetFormatAspect(F),
-        .format = F,
-        .info   = &view.Info()
-    };
+    return AsSlice().template Assume<VK_IMAGE_LAYOUT_UNDEFINED>();
 }
 
 template <VkFormat F>
@@ -127,53 +120,22 @@ inline auto
 
 namespace TemplatedDetail {
 
-// Uniformly unpacks RenderTarget<F> or TypedImage<Layout, Format> configurations
 template <typename T>
 struct ResourceTraits;
 
 template <VkImageLayout Layout, VkFormat Format>
 struct ResourceTraits<TypedImage<Layout, Format>> {
     static constexpr VkImageLayout old_layout = Layout;
-    static constexpr auto          GetImage(const TypedImage<Layout, Format>& res) noexcept {
-        return res.handle;
-    }
-    static constexpr auto GetView(const TypedImage<Layout, Format>& res) noexcept {
-        return res.view;
-    }
-    static constexpr auto GetExtent(const TypedImage<Layout, Format>& res) noexcept {
-        return res.extent;
-    }
-    static constexpr auto GetAspect(const TypedImage<Layout, Format>& res) noexcept {
-        return res.aspect;
-    }
-    static constexpr auto GetFormat(const TypedImage<Layout, Format>& res) noexcept {
-        return res.format;
-    }
-    static constexpr auto GetViewInfoPtr(const TypedImage<Layout, Format>& res) noexcept -> const VkImageViewCreateInfo* {
-        return res.info;
+    static constexpr auto GetSlice(const TypedImage<Layout, Format>& res) noexcept -> const ImageSlice& {
+        return res.Raw();
     }
 };
 
 template <VkFormat F>
 struct ResourceTraits<RenderTarget<F>> {
     static constexpr VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    static constexpr auto          GetImage(const RenderTarget<F>& res) noexcept {
-        return res.image.Handle();
-    }
-    static constexpr auto GetView(const RenderTarget<F>& res) noexcept {
-        return res.view.Get();
-    }
-    static constexpr auto GetExtent(const RenderTarget<F>& res) noexcept -> VkExtent3D {
-        return {.width = res.extent.width, .height = res.extent.height, .depth = 1};
-    }
-    static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
-        return GetFormatAspect(F);
-    }
-    static constexpr auto GetFormat(const RenderTarget<F>& /*unused*/) noexcept {
-        return F;
-    }
-    static auto GetViewInfoPtr(const RenderTarget<F>& res) noexcept -> const VkImageViewCreateInfo* {
-        return &res.view.Info();
+    static auto GetSlice(const RenderTarget<F>& res) noexcept -> ImageSlice {
+        return res.AsSlice();
     }
 };
 
@@ -199,8 +161,9 @@ template <VkImageLayout TargetLayout, typename... Resources>
         auto populate_barrier = [&](const auto& res) {
             using Traits                       = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
+            const ImageSlice&                   slice = Traits::GetSlice(res);
             barriers[idx++]                    = MakeImageBarrier(
-                MakeLayoutBarrierDesc<old_layout, TargetLayout>(Traits::GetImage(res), Traits::GetAspect(res))
+                MakeLayoutBarrierDesc<old_layout, TargetLayout>(slice.image, slice.aspect)
             );
         };
 
@@ -210,14 +173,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
 
         auto make_typed = [&](const auto& res) {
             using Traits = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
-            return TypedImage<TargetLayout> {
-                .handle = Traits::GetImage(res),
-                .view   = Traits::GetView(res),
-                .extent = Traits::GetExtent(res),
-                .aspect = Traits::GetAspect(res),
-                .format = Traits::GetFormat(res),
-                .info   = Traits::GetViewInfoPtr(res)
-            };
+            return TypedImage<TargetLayout> {Traits::GetSlice(res)};
         };
 
         return std::make_tuple(make_typed(resources)...);

@@ -276,14 +276,14 @@ void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImag
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 }
 
-void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
-    _impl->addressRanges.push_back({.address = address, .size = size});
+void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
+    _impl->addressRanges.push_back({.address = slice.Address(), .size = slice.Size()});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 }
 
-void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
-    _impl->addressRanges.push_back({.address = address, .size = size});
+void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
+    _impl->addressRanges.push_back({.address = slice.Address(), .size = slice.Size()});
     _impl->slots.push_back(handle.index);
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 }
@@ -576,21 +576,21 @@ void HeapManager::WriteStorageImage(StorageImageHandle handle, const VkImageView
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
+void HeapManager::WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
     if (!handle.Valid()) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddBuffer(handle, address, size);
+    batch.AddBuffer(handle, slice);
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept {
+void HeapManager::WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
     if (!handle.Valid()) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddBuffer(handle, address, size);
+    batch.AddBuffer(handle, slice);
     FlushResourceBatch(batch);
 }
 

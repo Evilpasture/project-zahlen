@@ -77,18 +77,15 @@ template <>
 struct ResourceResolver<Res_Swapchain> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
         if (impl.sceneTarget.has_value()) {
-            const ImageSlice& target = impl.sceneTarget->image;
-            return MakeRef<Res_Swapchain>(target.handle, target.view, target.Extent2D());
+            return impl.sceneTarget->image;
         }
         auto& dest = impl.ActivePresentation();
         if (dest.swapchain.Valid()) {
             const auto& sc = dest.swapchain.Get();
             const uint32_t imageIndex = impl.destinations.ActiveImageIndex();
-            return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], impl.graphResources.sceneColor.extent);
+            return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format);
         }
-        return MakeRef<Res_Swapchain>(
-            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
-        );
+        return MakeRef<Res_Swapchain>(dest.headlessColorTarget);
     }
 };
 
@@ -259,7 +256,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         if (dest.swapchain.Valid()) {
             const auto&    sc         = dest.swapchain.Get();
             const uint32_t imageIndex = destinations.ActiveImageIndex();
-            return Vk::MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format).Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+            return Vk::ImageSlice {sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
         return Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
     };

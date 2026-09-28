@@ -25,7 +25,7 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
     PassContext passCtx(cmd, impl);
     const GBufferTargets in = GBufferSceneTargets(impl);
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(impl.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)

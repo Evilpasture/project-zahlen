@@ -36,7 +36,7 @@ auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry&
     const VkClearColorValue clear {
         .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
     };
-    Vk::ClearColorImage(dest.recording.Command(), record.image.handle, clear);
+    Vk::ClearColorImage(dest.recording.Command(), record.image.Handle(), clear);
     record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
     record.content       = DestinationRegistry::Rendered {.by = DestinationRegistry::Rendered::By::FrameFill};
 

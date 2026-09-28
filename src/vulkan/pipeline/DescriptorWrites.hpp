@@ -27,11 +27,6 @@ struct ImageWrite {
     }
 };
 
-struct BufferWrite {
-    VkBuffer     buffer = VK_NULL_HANDLE;
-    VkDeviceSize size   = 0;
-};
-
 struct HeapBlockBase {
     uint32_t slot = 0;
 };
@@ -62,9 +57,7 @@ template <ZHLN::StringLiteral Name, bool Unread, typename T>
                              b.Handle();
                              b.Size();
                          }) {
-        return NamedSlot<Name, BufferWrite, Unread> {
-            .value = {.buffer = value.Handle(), .size = static_cast<VkDeviceSize>(value.Size())}
-        };
+        return NamedSlot<Name, BufferSlice, Unread> {.value = BufferSlice {value}};
     } else {
         return NamedSlot<Name, U, Unread> {.value = std::forward<T>(value)};
     }

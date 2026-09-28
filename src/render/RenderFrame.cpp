@@ -86,7 +86,19 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
             auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
-            if (AnyNull(posMesh, attrMesh, scratchMesh)) {
+            if (AnyNull(posMesh, attrMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
+                continue;
+            }
+
+            // The skinning output is two adjacent regions of one scratch VBO.
+            // Keep the GPU push-constant ABI scalar, but derive its addresses
+            // from bounded, non-owning subspans rather than naked arithmetic.
+            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress};
+            const VkDeviceSize posBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
+            const VkDeviceSize attrBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexAttributes);
+            const auto positions = output.Subspan(0, posBytes);
+            const auto attributes = output.Subspan(posBytes, attrBytes);
+            if (positions.Size() != posBytes || attributes.Size() != attrBytes) {
                 continue;
             }
 
@@ -94,8 +106,8 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
                 .inPosAddr        = posMesh->vboAddress,
                 .inAttrAddr       = attrMesh->vboAddress,
                 .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                .outPosAddr       = scratchMesh->vboAddress,
-                .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
+                .outPosAddr       = positions.Address(),
+                .outAttrAddr      = attributes.Address(),
                 .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
@@ -188,7 +200,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
+    auto& scratch = frames.tlasScratchBuffer[presenter.frameIndex];
+    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())},
+                  tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,

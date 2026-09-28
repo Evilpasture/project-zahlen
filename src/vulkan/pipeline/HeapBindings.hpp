@@ -269,8 +269,16 @@ namespace TemplatedDetail {
 // Raw slices without view metadata retain the single-mip 2D fallback.
 template <typename T>
 [[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
-    if constexpr (IsTypedImage<T>::value) {
-        return img.info != nullptr && img.info->image != VK_NULL_HANDLE ? *img.info : MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
+        const ImageSlice& slice = [&]() -> const ImageSlice& {
+            if constexpr (IsTypedImage<T>::value) {
+                return img.Raw();
+            } else {
+                return img;
+            }
+        }();
+        return slice.info != nullptr && slice.info->image != VK_NULL_HANDLE ? *slice.info :
+            MakeViewCreateInfo2D(slice.image, slice.format, 1, slice.aspect);
     } else if constexpr (std::is_same_v<T, ImageWrite>) {
         return img.info;
     } else if constexpr (std::is_same_v<T, ImageView>) {
@@ -284,12 +292,13 @@ enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown
 
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
-    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite> || std::is_same_v<T, ImageView> ||
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
+                  std::is_same_v<T, ImageView> ||
                   requires(const T& image) { image.view.Info(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
-    } else if constexpr (std::is_same_v<T, BufferWrite> || std::is_same_v<T, VkBuffer> || requires(const T& b) {
+    } else if constexpr (std::is_same_v<T, BufferSlice> || std::is_same_v<T, VkBuffer> || requires(const T& b) {
                              b.Handle();
                              b.Size();
                          }) {
@@ -364,28 +373,29 @@ template <typename Arg>
         if constexpr (source != WriteSource::Buffer) {
             return false;
         } else {
-            VkBuffer     buffer = VK_NULL_HANDLE;
-            VkDeviceSize size   = 0;
-            if constexpr (std::is_same_v<T, BufferWrite>) {
-                buffer = arg.buffer;
-                size   = arg.size;
+            BufferSlice slice;
+            if constexpr (std::is_same_v<T, BufferSlice>) {
+                slice = arg;
             } else if constexpr (requires {
                                      arg.Handle();
                                      arg.Size();
                                  }) {
-                buffer = arg.Handle();
-                size   = static_cast<VkDeviceSize>(arg.Size());
+                slice = BufferSlice {arg};
             } else if constexpr (std::is_same_v<T, VkBuffer>) {
-                buffer = arg;
+                slice.buffer = arg;
             }
-            if (buffer == VK_NULL_HANDLE || size == 0) {
+            if (!slice.Valid() || slice.Size() == 0) {
                 return true;
             }
-            const VkDeviceAddress address = ctx.BufferAddress(buffer);
+            // Resolve a base address only when the slice did not carry one;
+            // Address() adds its relative offset exactly once.
+            if (slice.address == 0) {
+                slice.address = ctx.BufferAddress(slice.buffer);
+            }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                heap.WriteBuffer(UniformBufferHandle {slot}, address, size);
+                heap.WriteBuffer(UniformBufferHandle {slot}, slice);
             } else {
-                heap.WriteBuffer(StorageBufferHandle {slot}, address, size);
+                heap.WriteBuffer(StorageBufferHandle {slot}, slice);
             }
             return true;
         }

@@ -90,7 +90,7 @@ struct TonemapBlitPass: Vk::RenderPass<
             const auto swapchainTarget = getSwapchainImage();
 
             impl.BindHeapsAndPushFrame(cmd);
-            Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
+            Vk::DynamicPass(swapchainTarget.Extent()).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
                 impl.blitPass.ExecuteHeap<Shaders::Modules::BlitPS>(impl.ctx, cmd, pc, block);
             });
         }

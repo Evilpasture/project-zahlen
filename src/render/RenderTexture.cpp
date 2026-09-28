@@ -28,9 +28,6 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     }
     auto view = std::move(*viewRes);
 
-    const VkImage     rawImage = image.Handle();
-    const VkImageView rawView  = view.Get();
-
     auto bindless = textureManager.Adopt(std::move(image), std::move(view));
     if (!bindless) {
         return std::unexpected(bindless.error());
@@ -38,7 +35,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
 
     const auto handle = destinations.Register(DestinationRegistry::Record {
         .bindlessIndex = *bindless,
-        .image         = Vk::MakeSlice(rawImage, rawView, {.width = width, .height = height}, format),
+        .image         = textureManager.Slice(*bindless, {width, height}, format),
         .presentable   = false,
         .target        = nullptr,
     });

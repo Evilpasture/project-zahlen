@@ -70,6 +70,11 @@ class TextureManager {
     [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
     [[nodiscard]] const Vk::Image&     Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
     [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept { return _slotViews[slot]; }
+    // A retained slice must not borrow View(slot).Info(): _slotViews may relocate
+    // when new textures are adopted. The manager supplies rich view info on demand.
+    [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent, VkFormat format) const noexcept -> Vk::ImageSlice {
+        return Vk::ImageSlice {_slotImages[slot].Handle(), _slotViews[slot].Get(), extent, format};
+    }
     void NameSlots() noexcept;
 
   private:

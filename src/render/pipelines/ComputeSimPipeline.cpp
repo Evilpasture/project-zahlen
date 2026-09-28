@@ -47,7 +47,7 @@ template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {
         auto ref = std::forward<RefFn>(makeRef)();
-        binder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
+        binder.template Bind<Tag>(ref);
     }
 }
 

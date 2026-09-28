@@ -194,73 +194,53 @@ auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags as
 
     constexpr VkImageLayout src_layout = LayoutMap<SrcState>::value;
     TypedImage<src_layout>  src_image;
-
     if constexpr (requires { resource.State(); }) {
-        auto state = resource.State();
-        src_image  = {state.handle, state.view, state.extent, state.aspect, state.format, state.info};
+        src_image = TypedImage<src_layout> {resource.State().Raw()};
+    } else if constexpr (requires { resource.Raw(); }) {
+        src_image = TypedImage<src_layout> {resource.Raw()};
+    } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
+        src_image = TypedImage<src_layout> {resource};
     } else {
-        src_image = {resource.handle, resource.view, resource.extent, resource.aspect, resource.format, resource.info};
+        src_image = TypedImage<src_layout> {ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Info().format}};
     }
 
     return std::make_pair(transitioned_image, ScopedBarrierGuard<SrcState, DstState>(cmd, src_image, aspectOverride));
 }
-
-template <typename T>
-struct TargetFormat;
 
 template <typename InState, typename OutState, typename T>
 inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride) {
     constexpr VkImageLayout in_layout  = LayoutMap<InState>::value;
     constexpr VkImageLayout out_layout = LayoutMap<OutState>::value;
 
-    VkImage                      image = VK_NULL_HANDLE;
-    VkImageView                  view  = VK_NULL_HANDLE;
-    VkExtent3D                   extent {};
-    VkImageAspectFlags           aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    VkFormat                     format = VK_FORMAT_UNDEFINED;
-    const VkImageViewCreateInfo* info   = nullptr;
-
-    if constexpr (requires { resource.handle; }) {
-        image  = resource.handle;
-        view   = resource.view;
-        extent = resource.extent;
-        aspect = resource.aspect;
-        format = resource.format;
-        info   = resource.info;
-    } else if constexpr (requires { resource.image.Handle(); }) {
-        image      = resource.image.Handle();
-        view       = resource.view.Get();
-        if constexpr (requires { resource.extent.depth; }) {
-            extent = resource.extent;
-        } else {
-            extent = {.width = resource.extent.width, .height = resource.extent.height, .depth = 1};
-        }
-        aspect     = resource.State().aspect;
-        info       = &resource.view.Info();
-        using RawT = std::decay_t<T>;
-        if constexpr (requires { TargetFormat<RawT>::value; }) {
-            format = TargetFormat<RawT>::value;
-        }
+    ImageSlice slice;
+    if constexpr (requires { resource.Raw(); }) {
+        slice = resource.Raw();
+    } else if constexpr (requires { resource.AsSlice(); }) {
+        slice = resource.AsSlice();
+    } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
+        slice = resource;
+    } else if constexpr (requires { resource.image.Handle(); resource.view.Info(); }) {
+        slice = ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Info().format};
+    } else {
+        static_assert(sizeof(T) == 0, "IssueBarrier requires an image slice or an owning image resource");
     }
 
-    if (aspectOverride != VK_IMAGE_ASPECT_NONE) {
-        aspect = aspectOverride;
-    }
-
-    TransitionLayout<in_layout, out_layout>(cmd, image, aspect);
-
-    return TypedImage<out_layout> {.handle = image, .view = view, .extent = extent, .aspect = aspect, .format = format, .info = info};
+    const VkImageAspectFlags aspect = aspectOverride != VK_IMAGE_ASPECT_NONE ? aspectOverride : slice.aspect;
+    TransitionLayout<in_layout, out_layout>(cmd, slice.image, aspect);
+    slice.aspect = aspect;
+    return TypedImage<out_layout> {slice};
 }
 
-template <VkImageLayout NewLayout, VkImageLayout OldLayout>
-inline auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, VkImageAspectFlags overrideAspect) noexcept -> TypedImage<NewLayout> {
-    VkImageAspectFlags aspect = (overrideAspect != VK_IMAGE_ASPECT_NONE) ? overrideAspect : img.aspect;
-    TransitionLayout<OldLayout, NewLayout>(cmd, img.handle, aspect);
-    return TypedImage<NewLayout> {.handle = img.handle, .view = img.view, .extent = img.extent, .aspect = img.aspect, .format = img.format, .info = img.info};
+template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
+inline auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect) noexcept
+    -> TypedImage<NewLayout, Format> {
+    const VkImageAspectFlags aspect = overrideAspect != VK_IMAGE_ASPECT_NONE ? overrideAspect : img.Aspect();
+    TransitionLayout<OldLayout, NewLayout>(cmd, img.Handle(), aspect);
+    return img.template WithLayout<NewLayout>(aspect);
 }
 
-template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
-constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, Tag<TargetLayout> /*unused*/) noexcept {
+template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
+constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout> /*unused*/) noexcept {
     return Transition<TargetLayout>(cmd, img);
 }
 
@@ -280,7 +260,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
     _colors[ColorCount] = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .pNext              = nullptr,
-        .imageView          = img.view,
+        .imageView          = img.View(),
         .imageLayout        = Layout,
         .resolveMode        = VK_RESOLVE_MODE_NONE,
         .resolveImageView   = VK_NULL_HANDLE,
@@ -289,7 +269,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
         .storeOp            = storeOp,
         .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
     };
-    _colorFormats[ColorCount] = img.format;
+    _colorFormats[ColorCount] = img.GetFormat();
 
     return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>(std::move(*this));
 }
@@ -311,11 +291,11 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
             size_t offset = ColorCount;
             const auto add = [&](const auto& image) {
                 const size_t index = offset++;
-                _colorFormats[index] = image.format;
+                _colorFormats[index] = image.GetFormat();
                 _colors[index] = {
                     .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                     .pNext              = nullptr,
-                    .imageView          = image.view,
+                    .imageView          = image.View(),
                     .imageLayout        = std::remove_cvref_t<decltype(image)>::layout,
                     .resolveMode        = VK_RESOLVE_MODE_NONE,
                     .resolveImageView   = VK_NULL_HANDLE,
@@ -348,13 +328,13 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
         Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL
     );
 
-    _depthFormat = img.format;
-    _hasStencil = StencilFormatForDepth(img.format) != VK_FORMAT_UNDEFINED;
+    _depthFormat = img.GetFormat();
+    _hasStencil = StencilFormatForDepth(img.GetFormat()) != VK_FORMAT_UNDEFINED;
 
     _depth = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .pNext              = nullptr,
-        .imageView          = img.view,
+        .imageView          = img.View(),
         .imageLayout        = Layout,
         .resolveMode        = VK_RESOLVE_MODE_NONE,
         .resolveImageView   = VK_NULL_HANDLE,

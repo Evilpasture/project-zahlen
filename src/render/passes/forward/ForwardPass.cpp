@@ -29,7 +29,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor);
     const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(impl.presenter.depthTarget);
 
-    Vk::DynamicPass(litColor.extent)
+    Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)

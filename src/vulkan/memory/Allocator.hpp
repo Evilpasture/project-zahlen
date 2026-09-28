@@ -304,6 +304,10 @@ class Buffer {
     VkDeviceSize                          _requestedSize = 0;
 };
 
+inline BufferSlice::BufferSlice(const Buffer& b, VkDeviceAddress base) noexcept:
+    BufferSlice(b.Handle(), base, 0, static_cast<VkDeviceSize>(b.Size())) {
+}
+
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
 
@@ -375,6 +379,16 @@ inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst
     CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
 }
 
+inline void CopyBuffer(VkCommandBuffer cmd, BufferSlice src, BufferSlice dst) {
+    if (!src.Valid() || !dst.Valid()) {
+        return;
+    }
+    const VkDeviceSize bytes = std::min(src.Size(), dst.Size());
+    if (bytes != 0) {
+        CopyBuffer(cmd, src.buffer, dst.buffer, bytes, src.offset, dst.offset);
+    }
+}
+
 inline void BufferBarrier(
     VkCommandBuffer cmd,
     const Buffer&   buffer,
@@ -390,10 +404,9 @@ inline void BufferBarrier(
 class StagingRingBuffer {
   public:
     struct Allocation {
-        VkBuffer     buffer        = VK_NULL_HANDLE;
-        VkDeviceSize offset        = 0;
-        void*        mappedData    = nullptr;
-        uint64_t     timelineValue = 0;
+        BufferSlice slice {};
+        void*       mappedData    = nullptr;
+        uint64_t    timelineValue = 0;
     };
 
     StagingRingBuffer() = default;
@@ -461,8 +474,8 @@ class StagingRingBuffer {
     std::vector<RetiredPool> _retiredPools;
 };
 
-inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer, VkDeviceSize size) {
-    CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
+inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer) {
+    CopyBuffer(cmd, stagingAlloc.slice, BufferSlice {buffer});
 }
 
 

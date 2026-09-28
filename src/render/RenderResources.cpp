@@ -457,14 +457,14 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         const VkBufferImageCopy2 region = {
             .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
             .pNext             = nullptr,
-            .bufferOffset      = staging.offset,
+            .bufferOffset      = staging.slice.offset,
             .bufferRowLength   = 0,
             .bufferImageHeight = 0,
             .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
             .imageOffset       = {0, 0, 0},
             .imageExtent       = {w, h, 1},
         };
-        Vk::CopyBufferToImage<1>(cmd, staging.buffer, image.Handle(), {region});
+        Vk::CopyBufferToImage<1>(cmd, staging.slice.buffer, image.Handle(), {region});
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
@@ -540,10 +540,8 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     if (!scratchBufOpt) {
         return;
     }
-    Vk::Buffer      scratchBuf     = std::move(*scratchBufOpt);
-    VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
-
-    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), scratchAddress, primitiveCount);
+    Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
+    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
@@ -731,7 +729,9 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
                     Vk::BarrierAccess::AccelerationStructureRead
                 );
-                Vk::BuildBLAS(tempCmd, b.geom, b.blas.Get(), Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
+                Vk::BuildBLAS(
+                    tempCmd, b.geom, b.blas.Get(), Vk::BufferSlice {b.scratch, impl->ctx.BufferAddress(b.scratch.Handle())}, b.primitiveCount
+                );
             }
 
             return Vk::SubmitAndWait(
@@ -802,13 +802,13 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
 
-                if (record.image.handle != source) {
+                if (record.image.Handle() != source) {
                     ZHLN::Log(
                         "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                        reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
+                        reinterpret_cast<uint64_t>(record.image.Handle()), reinterpret_cast<uint64_t>(source)
                     );
                 }
-                source = record.image.handle;
+                source = record.image.Handle();
                 extent = record.image.Extent2D();
                 sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
             }

@@ -45,7 +45,7 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
             }
 
             Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf);
             });
 
             VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
@@ -102,7 +102,7 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     std::memcpy(stagingAlloc.mappedData, data, size);
 
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
+        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer);
     });
 }
 

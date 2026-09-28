@@ -51,6 +51,8 @@
 #include "pipeline/ShaderStages.hpp"
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
+#include "memory/ImageSlice.hpp"
+#include "memory/BufferSlice.hpp"
 #include "core/RenderCore.hpp"
 #include "graph/DynamicRendering.hpp"
 #include "pipeline/DescriptorWrites.hpp"

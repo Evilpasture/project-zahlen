@@ -52,7 +52,7 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
     using enum Vk::BarrierAccess;
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(sceneVp)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -79,7 +79,7 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
                     RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                 );
             }
-            DrawCSGMeshes(passCtx, in.sceneColor.extent);
+            DrawCSGMeshes(passCtx, in.sceneColor.Extent());
             Draw3DParticles(passCtx);
         });
 }
@@ -90,7 +90,7 @@ void RecordCpuCulled(PassContext& passCtx, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(ctx.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -100,7 +100,7 @@ void RecordCpuCulled(PassContext& passCtx, const GBufferTargets& in) noexcept {
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
             ctx.BindHeapsAndPushFrame(cmd);
-            DrawCSGMeshes(passCtx, in.sceneColor.extent);
+            DrawCSGMeshes(passCtx, in.sceneColor.Extent());
             Draw3DParticles(passCtx);
         });
 }

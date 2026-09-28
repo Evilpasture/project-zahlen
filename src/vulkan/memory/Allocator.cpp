@@ -533,7 +533,8 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
     _head = aligned_head + size;
     _activeAllocations.push_back({.offset = aligned_head, .size = size, .timelineValue = 0});
 
-    return {.buffer = _stagingBuffer.Handle(), .offset = aligned_head, .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
+    return {.slice = BufferSlice {_stagingBuffer.Handle(), 0, aligned_head, size},
+            .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
 }
 
 auto StagingRingBuffer::Submit(VkCommandBuffer cmd, VkFence fence) noexcept -> uint64_t {

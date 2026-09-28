@@ -283,8 +283,12 @@ void RenderContext::Impl::FlushLineQueue() {
     auto lineInstanceIdx = static_cast<uint32_t>(queues.Draws().size());
     lineInstanceId       = lineInstanceIdx;
 
-    VkDeviceAddress posAddr  = frames.lineVboAddresses[presenter.frameIndex];
-    VkDeviceAddress attrAddr = posAddr + (maxLineVerts * sizeof(VertexPosition));
+    const Vk::BufferSlice lineBuffer {frames.lineVbos[presenter.frameIndex], frames.lineVboAddresses[presenter.frameIndex]};
+    const VkDeviceSize posBytes = static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexPosition);
+    const auto positions = lineBuffer.Subspan(0, posBytes);
+    const auto attributes = lineBuffer.Subspan(posBytes, static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexAttributes));
+    const VkDeviceAddress posAddr  = positions.Address();
+    const VkDeviceAddress attrAddr = attributes.Address();
 
     auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map();
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);

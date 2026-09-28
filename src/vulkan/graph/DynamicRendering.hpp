@@ -22,88 +22,132 @@ static constexpr VkCommandBufferInheritanceInfo NullInheritanceInfo = {
     .pipelineStatistics   = 0
 };
 
-struct ImageSlice;
-
-// Keep the layout-first, runtime-format form for existing graph resources;
-// the optional second template argument carries a checked attachment format.
+// The runtime-format form stays constructible from any slice. The known-format
+// specialization below can only be created by ImageSlice::MatchFormat.
 template <VkImageLayout Layout, VkFormat Format = VK_FORMAT_UNDEFINED>
 struct TypedImage {
     static constexpr VkImageLayout layout       = Layout;
     static constexpr VkFormat      known_format = Format;
-    VkImage            handle = VK_NULL_HANDLE;
-    VkImageView        view   = VK_NULL_HANDLE;
-    VkExtent3D         extent {};
-    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    VkFormat           format = Format;
-    // Borrows ImageView::Info(); the owning view must outlive this copy.
-    // Null for raw slices, which synthesize a single-mip 2D description on use.
-    const VkImageViewCreateInfo* info = nullptr;
+    ImageSlice slice {};
+
+    constexpr TypedImage() noexcept = default;
+    constexpr explicit TypedImage(ImageSlice s) noexcept: slice(s) {
+    }
+
+    [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
+        return slice.image;
+    }
+    [[nodiscard]] constexpr auto View() const noexcept -> VkImageView {
+        return slice.view;
+    }
+    [[nodiscard]] constexpr auto Extent() const noexcept -> VkExtent3D {
+        return slice.extent;
+    }
+    [[nodiscard]] constexpr auto Extent2D() const noexcept -> VkExtent2D {
+        return slice.Extent2D();
+    }
+    [[nodiscard]] constexpr auto GetFormat() const noexcept -> VkFormat {
+        return slice.format;
+    }
+    [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
+        return slice.aspect;
+    }
+    [[nodiscard]] constexpr auto Info() const noexcept -> const VkImageViewCreateInfo* {
+        return slice.info;
+    }
+    [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
+        return slice;
+    }
+    [[nodiscard]] constexpr auto operator->() const noexcept -> const ImageSlice* {
+        return &slice;
+    }
+    template <VkImageLayout NewLayout>
+    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, Format> {
+        ImageSlice result = slice;
+        result.aspect     = newAspect;
+        return TypedImage<NewLayout, Format> {result};
+    }
 };
 
-// A known-format image is immutable and cannot be assembled from unchecked
-// handles. ImageSlice::MatchFormat is the only runtime-to-typed entry point.
+// Preserve the checked-format invariant: a caller cannot manufacture a
+// TypedImage<Layout, Format> by claiming that an arbitrary slice has Format.
 template <VkImageLayout Layout, VkFormat Format>
     requires (Format != VK_FORMAT_UNDEFINED)
 struct TypedImage<Layout, Format> {
     static constexpr VkImageLayout layout       = Layout;
     static constexpr VkFormat      known_format = Format;
     static constexpr VkFormat      format       = Format;
-    const VkImage                      handle;
-    const VkImageView                  view;
-    const VkExtent3D                   extent;
-    const VkImageAspectFlags           aspect;
-    const VkImageViewCreateInfo* const info;
+    const ImageSlice slice;
 
   private:
     friend struct ImageSlice;
-    constexpr TypedImage(VkImage image, VkImageView imageView, VkExtent3D size, VkImageAspectFlags imageAspect,
-                         const VkImageViewCreateInfo* createInfo) noexcept:
-        handle(image), view(imageView), extent(size), aspect(imageAspect), info(createInfo) {
-    }
-};
-
-struct ImageSlice {
-    VkImage     handle = VK_NULL_HANDLE;
-    VkImageView view   = VK_NULL_HANDLE;
-    VkExtent3D  extent {};
-    VkFormat    format = VK_FORMAT_UNDEFINED;
-
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return handle != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
+    template <VkImageLayout, VkFormat>
+    friend struct TypedImage;
+    constexpr explicit TypedImage(ImageSlice s) noexcept: slice(s) {
     }
 
+  public:
+    [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
+        return slice.image;
+    }
+    [[nodiscard]] constexpr auto View() const noexcept -> VkImageView {
+        return slice.view;
+    }
+    [[nodiscard]] constexpr auto Extent() const noexcept -> VkExtent3D {
+        return slice.extent;
+    }
     [[nodiscard]] constexpr auto Extent2D() const noexcept -> VkExtent2D {
-        return {.width = extent.width, .height = extent.height};
+        return slice.Extent2D();
     }
-
-    // Raw slices (swapchain, headless and render textures) have no owned view
-    // metadata. A single-mip 2D description is synthesized when needed.
-    template <VkImageLayout Layout>
-    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept -> TypedImage<Layout> {
-        return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format, .info = nullptr};
+    [[nodiscard]] constexpr auto GetFormat() const noexcept -> VkFormat {
+        return slice.format;
     }
-
-    // Runtime Vulkan images cross into the format-typed API only after their
-    // view format has been checked. Assume<Layout>() intentionally stays
-    // format-agnostic; it must not manufacture a format proof.
-    template <VkFormat Format, VkImageLayout Layout>
-    [[nodiscard]] constexpr auto MatchFormat(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept
-        -> std::optional<TypedImage<Layout, Format>> {
-        static_assert(Format != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete VkFormat.");
-        if (!Valid() || format != Format) {
-            return std::nullopt;
-        }
-        return TypedImage<Layout, Format> {handle, view, extent, aspect, nullptr};
+    [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
+        return slice.aspect;
+    }
+    [[nodiscard]] constexpr auto Info() const noexcept -> const VkImageViewCreateInfo* {
+        return slice.info;
+    }
+    [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
+        return slice;
+    }
+    [[nodiscard]] constexpr auto operator->() const noexcept -> const ImageSlice* {
+        return &slice;
+    }
+    template <VkImageLayout NewLayout>
+    [[nodiscard]] constexpr auto WithLayout(VkImageAspectFlags newAspect) const noexcept -> TypedImage<NewLayout, Format> {
+        ImageSlice result = slice;
+        result.aspect     = newAspect;
+        return TypedImage<NewLayout, Format> {result};
     }
 };
 
-[[nodiscard]] constexpr auto MakeSlice(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept -> ImageSlice {
-    return ImageSlice {
-        .handle = handle,
-        .view   = view,
-        .extent = {.width = extent.width, .height = extent.height, .depth = 1},
-        .format = format,
-    };
+template <VkImageLayout Layout>
+constexpr auto ImageSlice::Assume(VkImageAspectFlags imageAspect) const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED> {
+    ImageSlice result = *this;
+    result.aspect     = imageAspect;
+    return TypedImage<Layout, VK_FORMAT_UNDEFINED> {result};
+}
+
+template <VkImageLayout Layout>
+constexpr auto ImageSlice::Assume() const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED> {
+    return Assume<Layout>(aspect);
+}
+
+template <VkFormat Format, VkImageLayout Layout>
+constexpr auto ImageSlice::MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>> {
+    static_assert(Format != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete VkFormat.");
+    if (!Valid() || format != Format || (info != nullptr && info->format != Format)) {
+        return std::nullopt;
+    }
+    ImageSlice result = *this;
+    result.aspect     = imageAspect;
+    return TypedImage<Layout, Format> {result};
+}
+
+template <VkFormat Format, VkImageLayout Layout>
+constexpr auto ImageSlice::MatchFormat() const noexcept -> std::optional<TypedImage<Layout, Format>> {
+    return MatchFormat<Format, Layout>(aspect);
 }
 
 enum class AttachmentLayout : uint8_t {
@@ -220,9 +264,9 @@ void ClearColorImage(
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
 
-template <VkImageLayout NewLayout, VkImageLayout OldLayout>
-[[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
-    -> TypedImage<NewLayout>;
+template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
+[[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
+    -> TypedImage<NewLayout, Format>;
 
 
 template <typename SrcState, typename DstState>
@@ -322,8 +366,8 @@ inline constexpr Tag<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> AsReadOnly;
 inline constexpr Tag<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> AsDepthAttachment;
 inline constexpr Tag<VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>          AsPresent;
 
-template <VkImageLayout TargetLayout, VkImageLayout OldLayout>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, Tag<TargetLayout> ) noexcept;
+template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout>) noexcept;
 
 template <typename ImageT, VkImageLayout Final>
 class ScopedTransition {

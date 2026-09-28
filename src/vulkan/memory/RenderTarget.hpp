@@ -37,6 +37,10 @@ struct RenderTarget {
     [[nodiscard]] static auto
         Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, F};
+    }
+
     [[nodiscard]] auto Valid() const noexcept -> bool;
     explicit           operator bool() const noexcept;
 };
@@ -60,6 +64,10 @@ struct RenderTarget3D {
             extent = other.extent;
         }
         return *this;
+    }
+
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, F};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
@@ -147,6 +155,10 @@ struct MipmappedRenderTarget {
         return target;
     }
 
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), fullView, extent, F};
+    }
+
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && fullView.Valid();
     }
@@ -184,17 +196,17 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.view.Info()};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.view.Info()};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullView.Info()};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <typename Usage>

@@ -113,16 +113,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         const uint32_t csmDrawCount = passDrawCounts[0];
 
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> shadowMapArrayImage = {
-            .handle = ctx.graphResources.shadowMap.image.Handle(),
-            .view   = ctx.graphResources.shadowMap.view.Get(),
-            .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
-            .format = VK_FORMAT_D32_SFLOAT,
-            .info   = &ctx.graphResources.shadowMap.view.Info()
-        };
+        const auto shadowMapArrayImage = ctx.graphResources.shadowMap.AsSlice().Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
-        Vk::DynamicPass(shadowMapArrayImage.extent)
+        Vk::DynamicPass(shadowMapArrayImage.Extent())
             .ViewMask(ShadowRenderer::kCascadeViewMask)
             .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
             .Execute(cmd, [&]() {
@@ -181,7 +174,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     if (ctx.shadows.PunctualPipeline() != VK_NULL_HANDLE && !ctx.targets.PunctualViews().empty()) {
         auto ExecutePunctualPass = [&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage, auto&& recordFn) {
-            Vk::DynamicPass(subViewImage.extent)
+            Vk::DynamicPass(subViewImage.Extent())
                 .ViewMask(ShadowRenderer::kCubemapFaceMask)
                 .AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
                 .Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
@@ -200,14 +193,10 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 continue;
             }
 
-            const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
-                .handle = ctx.graphResources.shadowAtlas.image.Handle(),
-                .view   = ctx.targets.PunctualViews()[light.shadowLayer].Get(),
-                .extent = {.width = 1024, .height = 1024, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .format = VK_FORMAT_D32_SFLOAT,
-                .info   = &ctx.targets.PunctualViews()[light.shadowLayer].Info()
-            };
+            const auto subViewImage = Vk::ImageSlice {
+                ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.PunctualViews()[light.shadowLayer], VkExtent2D {1024, 1024},
+                VK_FORMAT_D32_SFLOAT
+            }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
             ExecutePunctualPass(subViewImage, [&]() {
                 if (drawCount > 0) {

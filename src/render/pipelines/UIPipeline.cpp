@@ -20,6 +20,7 @@ using LdrPass = decltype(Vk::DynamicPass(VkExtent2D {}).AddColor(std::declval<Ld
 static_assert(std::same_as<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>>);
 static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo&>);
 static_assert(!std::is_constructible_v<LdrImage, VkImage, VkImageView, VkExtent3D, VkImageAspectFlags, const VkImageViewCreateInfo*>);
+static_assert(!std::is_constructible_v<LdrImage, Vk::ImageSlice>);
 static_assert(!std::is_constructible_v<LdrPass, VkExtent2D>);
 static_assert(!std::is_constructible_v<LdrPass, UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&&>);
 
@@ -88,7 +89,7 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
     const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
     if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
-            .image      = target.image.handle,
+            .image      = target.image.Handle(),
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
             .src_layout = sourceLayout,

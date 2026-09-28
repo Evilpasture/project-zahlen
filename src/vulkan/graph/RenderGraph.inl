@@ -461,9 +461,9 @@ consteval auto ReflectedMemberName() -> std::string_view {
 
 template <typename ResourceList>
 template <typename Image>
-constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
+constexpr void ResourceBinder<ResourceList>::Bind(ImageSlice slice) noexcept {
     constexpr size_t idx = TemplatedDetail::GetResourceIndex<ResourceList, Image>();
-    _resources[idx]      = {handle, view, extent};
+    _resources[idx]      = slice;
 }
 
 template <typename ResourceList>
@@ -479,7 +479,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
                 //    does not own (or must not own, as with the shadow map).
                 if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
                     auto ref = ResourceResolver<Tag>::Resolve(impl);
-                    this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                    this->template Bind<Tag>(ref);
                 } else {
                     // 2. Otherwise the tag is a member of the reflected
                     //    GraphResources bundle: locate it through the metadata and
@@ -487,7 +487,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
                     constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
                     Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
                         auto ref = MakeRef<Tag>(image);
-                        this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                        this->template Bind<Tag>(ref);
                     });
                 }
             }(),
@@ -496,7 +496,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
 }
 
 template <typename ResourceList>
-constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> const std::array<GraphResource, ResourceList::size>& {
+constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> const std::array<ImageSlice, ResourceList::size>& {
     return _resources;
 }
 
@@ -572,7 +572,7 @@ template <typename... Passes>
 template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::ExecutePass(
     VkCommandBuffer                                cmd,
-    const std::array<GraphResource, NumResources>& bindings,
+    const std::array<ImageSlice, NumResources>& bindings,
     const PassType&                                pass,
     uint32_t                                       frameIndex,
     ProfilerT*                                     profiler,
@@ -628,7 +628,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     const auto&                              resource   = bindings[r_idx];
 
                     barriers[Bs] = MakeImageBarrier({
-                        .image      = resource.handle,
+                        .image      = resource.image,
                         .src_access = prev_state.access,
                         .dst_access = UsageType::access,
                         .src_layout = prev_state.layout,
@@ -739,7 +739,7 @@ inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
     VkCommandBuffer                                      cmd,
-    const std::array<GraphResource, ResourceList::size>& bindings
+    const std::array<ImageSlice, ResourceList::size>& bindings
 ) noexcept: RasterPassContextBase(cmd) {
     SetExtent({});
     ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
@@ -781,7 +781,7 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
-    const std::array<GraphResource, ResourceList::size>& bindings,
+    const std::array<ImageSlice, ResourceList::size>& bindings,
     TypeList<Imgs...> /*unused*/,
     TypeList<DImgs...> /*unused*/
 ) noexcept {
@@ -811,7 +811,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
+    BuildColorAttachments(const std::array<ImageSlice, ResourceList::size>& bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
     (([&]() {
          using Img              = Imgs;
          constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
@@ -841,7 +841,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
-    const std::array<GraphResource, ResourceList::size>& bindings,
+    const std::array<ImageSlice, ResourceList::size>& bindings,
     VkRenderingAttachmentInfo&                           outDepth,
     TypeList<DImgs...> /*unused*/
 ) noexcept {
@@ -873,16 +873,19 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     }
 }
 
-// Factory Helper Definitions
-
+// Factory Helper Definitions: graph references are plain borrowed slices.
 template <typename Tag, typename T>
-constexpr auto MakeRef(const T& resource) noexcept {
-    if constexpr (requires { resource.fullView.Get(); }) {
-        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.fullView.Get(), .extent = TemplatedDetail::ToExtent3D(resource.extent)};
-    } else if constexpr (requires { resource.image.Handle(); }) {
-        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = TemplatedDetail::ToExtent3D(resource.extent)};
-    } else if constexpr (requires { resource.handle; }) {
-        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = TemplatedDetail::ToExtent3D(resource.extent)};
+constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice {
+    if constexpr (requires { resource.AsSlice(); }) {
+        return resource.AsSlice();
+    } else if constexpr (requires { resource.Raw(); }) {
+        return resource.Raw();
+    } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
+        return resource;
+    } else if constexpr (requires { resource.image.Handle(); resource.fullView.Info(); }) {
+        return ImageSlice {resource.image.Handle(), resource.fullView, resource.extent, Tag::format};
+    } else if constexpr (requires { resource.image.Handle(); resource.view.Info(); }) {
+        return ImageSlice {resource.image.Handle(), resource.view, resource.extent, Tag::format};
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
     }
@@ -890,21 +893,17 @@ constexpr auto MakeRef(const T& resource) noexcept {
 
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept {
-    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = {0, 0, 1}};
+    return ImageSlice {handle, view, VkExtent3D {0, 0, 1}, Tag::format, Tag::aspect};
 }
 
-// 2D manual overload (used by the Swapchain binding)
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept {
-    return GraphImageRef<Tag> {
-        .handle = handle, .view = view, .extent = {extent.width, extent.height, 1} // Promote 2D -> 3D
-    };
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept {
+    return ImageSlice {handle, view, extent, format, Tag::aspect};
 }
 
-// 3D manual overload
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
-    return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format) noexcept {
+    return ImageSlice {handle, view, extent, format, Tag::aspect};
 }
 
 template <typename... Passes>
