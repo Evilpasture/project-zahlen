@@ -8,8 +8,6 @@
 #include <array>
 #include <atomic>
 #include <expected>
-#include <functional>
-#include <type_traits>
 #include <vector>
 
 // ============================================================================
@@ -80,21 +78,9 @@ struct TaskSystemTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> borrowed_dispatch_waits_for_stack_callables() {
-            using Borrow = ZHLN::FunctionRef<void(uint32_t) const>;
-            static_assert(std::is_trivially_copyable_v<Borrow>);
-
             std::atomic<uint32_t> total {0};
             const auto add = [&](uint32_t value) { total.fetch_add(value, std::memory_order_relaxed); };
-#if defined(__cpp_lib_function_ref) && __cpp_lib_function_ref >= 202306L
-            static_assert(std::is_same_v<Borrow, std::function_ref<void(uint32_t) const>>);
-#else
-            // `F&` alone accepts const rvalues; the fallback must exclude both
-            // const and non-const temporary targets explicitly.
-            static_assert(std::is_constructible_v<Borrow, decltype(add)&>);
-            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>);
-            static_assert(!std::is_constructible_v<Borrow, std::remove_const_t<decltype(add)>&&>);
-#endif
-            const Borrow view {add};
+            const ZHLN::FunctionRef<void(uint32_t) const> view {add};
             view(1);
 
             // The outer worker borrows two closures in a nested dispatch. Both

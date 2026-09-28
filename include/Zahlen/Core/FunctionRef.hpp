@@ -3,11 +3,11 @@
 
 #pragma once
 #include <functional> // std::function_ref and its feature-test macro, when available
+#include <type_traits>
 
 #if !defined(__cpp_lib_function_ref) || __cpp_lib_function_ref < 202306L
 #include <concepts>
 #include <memory>
-#include <type_traits>
 #include <utility>
 #endif
 
@@ -24,8 +24,7 @@ using FunctionRef = std::function_ref<Signature>;
 
 // Fallback for standard libraries without C++26 std::function_ref (notably
 // the reflection toolchain). Unlike the standard type, this subset accepts
-// only const-callable lvalue
-// objects; it rejects temporaries at construction.
+// only const-callable lvalue objects; it rejects temporaries at construction.
 template <typename Signature>
 class FunctionRef;
 
@@ -56,6 +55,14 @@ class FunctionRef<R(Args...) const> {
     R (*invoke_)(const void*, Args...);
 };
 
+// The fallback must borrow const-callable lvalues, not temporaries (even
+// const temporaries, which can otherwise bind an F& constructor).
+static_assert(std::is_constructible_v<FunctionRef<int(int, int) const>, const std::plus<int>&>);
+static_assert(!std::is_constructible_v<FunctionRef<int(int, int) const>, std::plus<int>&&>);
+static_assert(!std::is_constructible_v<FunctionRef<int(int, int) const>, const std::plus<int>&&>);
+
 #endif
+
+static_assert(std::is_trivially_copyable_v<FunctionRef<void() const>>);
 
 }
