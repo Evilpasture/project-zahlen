@@ -6,10 +6,40 @@
 #include <ShaderBindings.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
+#include <tuple>
 
 namespace ZHLN::Passes {
 
 namespace {
+
+// GBufferSceneTargets uses runtime-format TypedImages (AssumeLayout), so a
+// secondary must inherit the formats AddColor/AddDepth actually recorded.
+// Exercise both a combined stencil attachment and a depth-only attachment.
+static_assert([] {
+    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> colorA {.format = VK_FORMAT_R8G8B8A8_UNORM};
+    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> colorB {.format = VK_FORMAT_B8G8R8A8_SRGB};
+    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> depthStencil {.format = VK_FORMAT_D32_SFLOAT_S8_UINT};
+    constexpr Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> depthOnly {.format = VK_FORMAT_D32_SFLOAT};
+
+    const auto pass = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
+        .Viewport(2.0F, 3.0F, 30.0F, 20.0F)
+        .AddColor(colorA)
+        .AddColorGroup(std::tuple {colorB})
+        .AddDepth(depthStencil)
+        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
+        .ViewMask(3);
+    const auto inherit = pass.GetSecondaryInheritance();
+    const auto colors = inherit.ColorFormats();
+    const auto noStencil = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
+        .AddDepth(depthOnly)
+        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
+        .GetSecondaryInheritance();
+
+    return colors.size() == 2 && colors[0] == colorA.format && colors[1] == colorB.format &&
+           inherit.depthFormat == depthStencil.format && inherit.stencilFormat == depthStencil.format && inherit.viewMask == 3 &&
+           inherit.viewport.x == 2.0F && inherit.viewport.width == 30.0F &&
+           noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.format && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
+}(), "Secondary inheritance must match the DynamicPass's bound runtime attachments.");
 
 struct TaskSystemSchedulerAdapter {
     void ParallelFor(uint32_t count, uint32_t chunkSize, auto&& func) const {
@@ -95,12 +125,11 @@ void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange
 // across worker secondaries inside one render pass begun with the
 // secondary-command-buffer flag.
 void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GBufferTargets& in) noexcept {
-    VkCommandBuffer cmd          = recorder.cmd;
-    auto&           ctx          = recorder.ctx;
-    const auto&     colorFormats = ActiveGBuffer::array;
-    const auto      sceneVp      = ctx.EffectiveViewport();
+    VkCommandBuffer cmd     = recorder.cmd;
+    auto&           ctx     = recorder.ctx;
+    const auto      sceneVp = ctx.EffectiveViewport();
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    const auto pass = Vk::DynamicPass(in.sceneColor.extent)
         .Viewport(sceneVp)
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -108,45 +137,38 @@ void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GB
         .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
         .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorClearcoat)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
-        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
-        .Execute(cmd, [&]() {
-            ctx.BindHeapsAndPushFrame(cmd);
-            const auto frameAddresses = ctx.FrameHeapAddresses();
-            const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
-            const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();
+        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
+    pass.Execute(cmd, [&]() {
+        ctx.BindHeapsAndPushFrame(cmd);
+        const auto frameAddresses = ctx.FrameHeapAddresses();
+        const auto samplerBind    = ctx.heapManager.GetSamplerHeapBindInfo();
+        const auto resourceBind   = ctx.heapManager.GetResourceHeapBindInfo();
 
-            Vk::ParallelDrawDispatch(
-                cmd,
-                Vk::SecondaryInheritance {
-                    .colorFormats           = colorFormats,
-                    .depthFormat            = in.depth.format,
-                    .stencilFormat          = Vk::StencilFormatForDepth(in.depth.format),
-                    .samplerHeapBindInfo    = &samplerBind,
-                    .resourceHeapBindInfo   = &resourceBind,
-                    .pushDataFrameOffsets   = GpuAbi::kScenePushLayout.UsedFrameAddresses(),
-                    .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
-                    .viewport               = sceneVp,
-                },
-                {.width = in.sceneColor.extent.width, .height = in.sceneColor.extent.height}, drawCount, kParallelChunkSize,
-                TaskSystemSchedulerAdapter {},
-                [&](uint32_t ) -> VkCommandBuffer {
-                    uint32_t wIdx = TaskSystem::GetWorkerIndex();
-                    if (wIdx >= ctx.workerCmds.size()) {
-                        wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
-                    }
-                    uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
-                    return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
-                },
-                [&](Vk::CommandEncoder& encoder, uint32_t i) {
-                    const auto& drawCmd = ctx.queues.Draws()[i];
-                    if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
-                        !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
-                        return;
-                    }
-                    SubmitDrawInstanced(encoder, drawCmd, i, RenderContext::Impl::ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
+        Vk::ParallelDrawDispatch(
+            cmd,
+            pass.GetSecondaryInheritance(
+                &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
+                std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()}
+            ),
+            drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
+            [&](uint32_t ) -> VkCommandBuffer {
+                uint32_t wIdx = TaskSystem::GetWorkerIndex();
+                if (wIdx >= ctx.workerCmds.size()) {
+                    wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
                 }
-            );
-        });
+                uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
+                return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
+            },
+            [&](Vk::CommandEncoder& encoder, uint32_t i) {
+                const auto& drawCmd = ctx.queues.Draws()[i];
+                if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
+                    !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
+                    return;
+                }
+                SubmitDrawInstanced(encoder, drawCmd, i, RenderContext::Impl::ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
+            }
+        );
+    });
 }
 
 } // namespace

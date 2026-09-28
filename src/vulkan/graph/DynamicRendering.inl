@@ -282,6 +282,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
         .storeOp            = storeOp,
         .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
     };
+    _colorFormats[ColorCount] = img.format;
 
     return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>(std::move(*this));
 }
@@ -301,18 +302,23 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
     std::apply(
         [&](const auto&... img) {
             size_t offset = ColorCount;
-            ((_colors[offset++] =
-                  {.sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                   .pNext              = nullptr,
-                   .imageView          = img.view,
-                   .imageLayout        = std::remove_cvref_t<decltype(img)>::layout,
-                   .resolveMode        = VK_RESOLVE_MODE_NONE,
-                   .resolveImageView   = VK_NULL_HANDLE,
-                   .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                   .loadOp             = loadOp,
-                   .storeOp            = storeOp,
-                   .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}}),
-             ...);
+            const auto add = [&](const auto& image) {
+                const size_t index = offset++;
+                _colorFormats[index] = image.format;
+                _colors[index] = {
+                    .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                    .pNext              = nullptr,
+                    .imageView          = image.view,
+                    .imageLayout        = std::remove_cvref_t<decltype(image)>::layout,
+                    .resolveMode        = VK_RESOLVE_MODE_NONE,
+                    .resolveImageView   = VK_NULL_HANDLE,
+                    .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .loadOp             = loadOp,
+                    .storeOp            = storeOp,
+                    .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
+                };
+            };
+            (add(img), ...);
         },
         imageTuple
     );
@@ -335,6 +341,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
         Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL
     );
 
+    _depthFormat = img.format;
     _hasStencil = StencilFormatForDepth(img.format) != VK_FORMAT_UNDEFINED;
 
     _depth = {
@@ -360,6 +367,47 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlag
 }
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritance(
+    const VkBindHeapInfoEXT* samplerHeap, const VkBindHeapInfoEXT* resourceHeap, std::span<const uint32_t> pushOffsets,
+    std::span<const VkDeviceAddress> pushAddresses
+) const noexcept -> SecondaryInheritance {
+    std::span<const VkFormat> colors;
+    VkFormat depth = VK_FORMAT_UNDEFINED;
+    if constexpr (std::same_as<Formats, RuntimeAttachmentFormats>) {
+        // AssumeLayout yields runtime-format images even for a RenderTarget<F>.
+        colors = std::span<const VkFormat> {_colorFormats.data(), ColorCount};
+        if constexpr (HasDepth) {
+            depth = _depthFormat;
+        }
+    } else {
+        static_assert(Formats::color_formats.size() == ColorCount);
+        static_assert((Formats::depth_format != VK_FORMAT_UNDEFINED) == HasDepth);
+        colors = std::span<const VkFormat> {Formats::color_formats};
+        if constexpr (HasDepth) {
+            depth = Formats::depth_format;
+        }
+    }
+
+    // Execute binds stencil only when AddDepth marked it active; use that
+    // same decision rather than assuming a combined view always binds it.
+    const VkFormat stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : VK_FORMAT_UNDEFINED;
+    return SecondaryInheritance {colors, depth, stencil, _viewMask, samplerHeap, resourceHeap, pushOffsets, pushAddresses, EffectiveViewport()};
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::EffectiveViewport() const noexcept -> VkViewport {
+    const bool useVp = _vpW > 1.0F && _vpH > 1.0F;
+    return {
+        .x        = useVp ? _vpX : 0.0F,
+        .y        = useVp ? _vpY : 0.0F,
+        .width    = useVp ? _vpW : static_cast<float>(_extent.width),
+        .height   = useVp ? _vpH : static_cast<float>(_extent.height),
+        .minDepth = 0.0F,
+        .maxDepth = 1.0F,
+    };
+}
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
 template <typename Func>
 void DynamicPass<ColorCount, HasDepth, Formats>::Execute(VkCommandBuffer cmd, Func&& func) const {
     VkRenderingInfo rendering_info = {
@@ -377,18 +425,10 @@ void DynamicPass<ColorCount, HasDepth, Formats>::Execute(VkCommandBuffer cmd, Fu
 
     vkCmdBeginRendering(cmd, &rendering_info);
 
-    const bool     useVp = _vpW > 1.0F && _vpH > 1.0F;
-    const VkViewport viewport = {
-        .x        = useVp ? _vpX : 0.0F,
-        .y        = useVp ? _vpY : 0.0F,
-        .width    = useVp ? _vpW : static_cast<float>(_extent.width),
-        .height   = useVp ? _vpH : static_cast<float>(_extent.height),
-        .minDepth = 0.0F,
-        .maxDepth = 1.0F,
-    };
+    const VkViewport viewport = EffectiveViewport();
     const VkRect2D scissor = {
-        .offset = {.x = useVp ? static_cast<int32_t>(_vpX) : 0, .y = useVp ? static_cast<int32_t>(_vpY) : 0},
-        .extent = {.width = useVp ? static_cast<uint32_t>(_vpW) : _extent.width, .height = useVp ? static_cast<uint32_t>(_vpH) : _extent.height}
+        .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+        .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
     };
 
     vkCmdSetViewport(cmd, 0, 1, &viewport);

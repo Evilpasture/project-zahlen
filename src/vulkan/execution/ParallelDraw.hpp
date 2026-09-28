@@ -8,21 +8,6 @@
 
 namespace ZHLN::Vk {
 
-struct SecondaryInheritance {
-    std::span<const VkFormat> colorFormats;
-    VkFormat                  depthFormat   = VK_FORMAT_UNDEFINED;
-    // Must match the primary's active stencil attachment, not just its depth format.
-    VkFormat                  stencilFormat = VK_FORMAT_UNDEFINED;
-
-    const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
-    const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;
-
-    std::span<const uint32_t>        pushDataFrameOffsets;
-    std::span<const VkDeviceAddress> pushDataFrameAddresses;
-
-    VkViewport viewport {};
-};
-
 namespace detail {
 struct ParallelForCallback {
     void operator()([[maybe_unused]] uint32_t start, [[maybe_unused]] uint32_t end, [[maybe_unused]] uint32_t chunkIdx) const noexcept {
@@ -37,7 +22,6 @@ template <ParallelScheduler SchedulerT, typename CmdProviderFn, typename RecordF
 inline void ParallelDrawDispatch(
     VkCommandBuffer             primaryCmd,
     const SecondaryInheritance& inheritDesc,
-    VkExtent2D                  extent,
     uint32_t                    drawCount,
     uint32_t                    chunkSize,
     SchedulerT&&                scheduler,
@@ -58,13 +42,14 @@ inline void ParallelDrawDispatch(
         .pResourceHeapBindInfo = inheritDesc.resourceHeapBindInfo,
     };
 
+    const auto colorFormats = inheritDesc.ColorFormats();
     VkCommandBufferInheritanceRenderingInfo inherit = {
         .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
         .pNext                   = nullptr,
         .flags                   = 0,
-        .viewMask                = 0,
-        .colorAttachmentCount    = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
-        .pColorAttachmentFormats = inheritDesc.colorFormats.data(),
+        .viewMask                = inheritDesc.viewMask,
+        .colorAttachmentCount    = static_cast<uint32_t>(colorFormats.size()),
+        .pColorAttachmentFormats = colorFormats.empty() ? nullptr : colorFormats.data(),
         .depthAttachmentFormat   = inheritDesc.depthFormat,
         .stencilAttachmentFormat = inheritDesc.stencilFormat,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
@@ -102,25 +87,10 @@ inline void ParallelDrawDispatch(
 
         CommandEncoder encoder(sec_cmd);
 
-        const bool useVp = inheritDesc.viewport.width > 1.0F && inheritDesc.viewport.height > 1.0F;
-        const VkViewport viewport = useVp ? inheritDesc.viewport :
-            VkViewport {
-                .x        = 0.0F,
-                .y        = 0.0F,
-                .width    = static_cast<float>(extent.width),
-                .height   = static_cast<float>(extent.height),
-                .minDepth = 0.0F,
-                .maxDepth = 1.0F
-            };
+        const VkViewport viewport = inheritDesc.viewport;
         const VkRect2D scissor = {
-            .offset = {
-                .x = useVp ? static_cast<int32_t>(inheritDesc.viewport.x) : 0,
-                .y = useVp ? static_cast<int32_t>(inheritDesc.viewport.y) : 0
-            },
-            .extent = {
-                .width  = useVp ? static_cast<uint32_t>(inheritDesc.viewport.width) : extent.width,
-                .height = useVp ? static_cast<uint32_t>(inheritDesc.viewport.height) : extent.height
-            }
+            .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+            .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
         };
         vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);

@@ -267,6 +267,49 @@ static constexpr size_t kMaxColorAttachments = 8;
     return (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED;
 }
 
+template <size_t ColorCount, bool HasDepth, typename Formats>
+class DynamicPass;
+
+// A snapshot of one DynamicPass's attachment formats and view state. Its
+// color formats are owned, not borrowed from a temporary pass. Only the pass
+// can construct it; the recording caller cannot supply or change formats.
+class SecondaryInheritance {
+    template <size_t, bool, typename>
+    friend class DynamicPass;
+
+    std::array<VkFormat, kMaxColorAttachments> _colorFormats {};
+    uint32_t                                   _colorFormatCount;
+
+    constexpr SecondaryInheritance(
+        std::span<const VkFormat> colorFormats, VkFormat depth, VkFormat stencil, uint32_t mask, const VkBindHeapInfoEXT* samplerHeap,
+        const VkBindHeapInfoEXT* resourceHeap, std::span<const uint32_t> pushOffsets, std::span<const VkDeviceAddress> pushAddresses,
+        VkViewport effectiveViewport
+    ) noexcept:
+        _colorFormatCount(static_cast<uint32_t>(colorFormats.size())), depthFormat(depth), stencilFormat(stencil), viewMask(mask),
+        samplerHeapBindInfo(samplerHeap), resourceHeapBindInfo(resourceHeap), pushDataFrameOffsets(pushOffsets),
+        pushDataFrameAddresses(pushAddresses), viewport(effectiveViewport) {
+        for (size_t i = 0; i < colorFormats.size(); ++i) {
+            _colorFormats[i] = colorFormats[i];
+        }
+    }
+
+  public:
+    [[nodiscard]] constexpr auto ColorFormats() const noexcept -> std::span<const VkFormat> {
+        return {_colorFormats.data(), _colorFormatCount};
+    }
+
+    const VkFormat                         depthFormat;
+    const VkFormat                         stencilFormat;
+    const uint32_t                         viewMask;
+    const VkBindHeapInfoEXT* const         samplerHeapBindInfo;
+    const VkBindHeapInfoEXT* const         resourceHeapBindInfo;
+    const std::span<const uint32_t>        pushDataFrameOffsets;
+    const std::span<const VkDeviceAddress> pushDataFrameAddresses;
+    const VkViewport                       viewport;
+};
+
+static_assert(!std::is_aggregate_v<SecondaryInheritance> && !std::is_default_constructible_v<SecondaryInheritance>);
+
 template <VkImageLayout Layout>
 struct Tag {};
 
@@ -353,6 +396,14 @@ class DynamicPass {
 
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 
+    // For a pass begun with VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT.
+    // Uses checked formats when available, otherwise the formats recorded by
+    // AddColor/AddDepth for runtime-format attachments.
+    [[nodiscard]] constexpr auto GetSecondaryInheritance(
+        const VkBindHeapInfoEXT* samplerHeap = nullptr, const VkBindHeapInfoEXT* resourceHeap = nullptr,
+        std::span<const uint32_t> pushOffsets = {}, std::span<const VkDeviceAddress> pushAddresses = {}
+    ) const noexcept -> SecondaryInheritance;
+
     template <typename Func>
     void Execute(VkCommandBuffer cmd, Func&& func) const;
 
@@ -377,16 +428,20 @@ class DynamicPass {
     // Only AddColor/AddDepth/AddColorGroup may change the pass's format type.
     template <size_t InsideCount, bool InsideDepth, typename InsideFormats>
     constexpr explicit DynamicPass(DynamicPass<InsideCount, InsideDepth, InsideFormats>&& other) noexcept:
-        _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _depth(other._depth), _viewMask(other._viewMask),
-        _hasStencil(other._hasStencil), _vpX(other._vpX), _vpY(other._vpY), _vpW(other._vpW), _vpH(other._vpH) {
+        _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _colorFormats(other._colorFormats),
+        _depth(other._depth), _depthFormat(other._depthFormat), _viewMask(other._viewMask), _hasStencil(other._hasStencil),
+        _vpX(other._vpX), _vpY(other._vpY), _vpW(other._vpW), _vpH(other._vpH) {
     }
 
     [[nodiscard]] constexpr auto GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo*;
+    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport;
 
     VkExtent2D                                                  _extent {};
     VkRenderingFlags                                            _flags = 0;
     std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> _colors {};
+    std::array<VkFormat, kMaxColorAttachments>                  _colorFormats {};
     VkRenderingAttachmentInfo                                   _depth {};
+    VkFormat                                                    _depthFormat = VK_FORMAT_UNDEFINED;
     uint32_t                                                    _viewMask   = 0;
     bool                                                        _hasStencil = false;
     float                                                       _vpX        = 0.0f;
