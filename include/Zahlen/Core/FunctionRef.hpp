@@ -33,9 +33,10 @@ template <typename R, typename... Args>
 class FunctionRef<R(Args...) const> {
   public:
     template <typename F>
-        requires(std::is_object_v<std::remove_reference_t<F>> && !std::same_as<std::remove_cvref_t<F>, FunctionRef> &&
-                 std::is_invocable_r_v<R, const F&, Args...>)
-    constexpr FunctionRef(F& callable) noexcept:
+        requires(std::is_lvalue_reference_v<F> && std::is_object_v<std::remove_reference_t<F>> &&
+                 !std::same_as<std::remove_cvref_t<F>, FunctionRef> &&
+                 std::is_invocable_r_v<R, const std::remove_reference_t<F>&, Args...>)
+    constexpr FunctionRef(F&& callable) noexcept:
         object_(std::addressof(callable)),
         invoke_([](const void* object, Args... args) -> R {
             const auto& callable = *static_cast<const std::remove_cvref_t<F>*>(object);

@@ -88,7 +88,11 @@ struct TaskSystemTestSuite {
 #if defined(__cpp_lib_function_ref) && __cpp_lib_function_ref >= 202306L
             static_assert(std::is_same_v<Borrow, std::function_ref<void(uint32_t) const>>);
 #else
-            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>); // fallback rejects temporary targets
+            // `F&` alone accepts const rvalues; the fallback must exclude both
+            // const and non-const temporary targets explicitly.
+            static_assert(std::is_constructible_v<Borrow, decltype(add)&>);
+            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>);
+            static_assert(!std::is_constructible_v<Borrow, std::remove_const_t<decltype(add)>&&>);
 #endif
             const Borrow view {add};
             view(1);
