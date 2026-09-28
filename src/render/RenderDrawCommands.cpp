@@ -459,7 +459,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         return;
     }
 
-    CSGDrawCommand csgCmd;
+    CSGDrawCommand csgCmd {};
     csgCmd.eyeDraw = *eyeDraw;
 
     for (const auto& cutter: params.cutters) {

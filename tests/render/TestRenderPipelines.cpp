@@ -157,8 +157,8 @@ struct RenderPipelinesTestSuite {
             // reaches the skinned attribute-address branch.
             std::array<ZHLN::VertexPosition, 3> positions {};
             std::array<ZHLN::VertexAttributes, 3> attributes {};
-            const auto pos     = rc.CreateVertexBuffer(std::span {positions});
-            const auto attr    = rc.CreateVertexBuffer(std::span {attributes});
+            const auto pos     = rc.CreateVertexBuffer(std::span<ZHLN::VertexPosition> {positions});
+            const auto attr    = rc.CreateVertexBuffer(std::span<ZHLN::VertexAttributes> {attributes});
             const auto scratch = rc.CreateSkinnedScratchBuffer(3);
             if (!ZHLN::Test::ExpectTrue(pos != ZHLN::BufferHandle::Invalid && attr != ZHLN::BufferHandle::Invalid &&
                                         scratch != ZHLN::BufferHandle::Invalid)) {
