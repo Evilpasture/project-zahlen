@@ -54,9 +54,9 @@ struct RenderTarget3D {
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
 
-    RenderTarget3D(const RenderTarget3D&)                = delete;
-    RenderTarget3D& operator=(const RenderTarget3D&)     = delete;
-    RenderTarget3D(RenderTarget3D&&) noexcept = default;
+    RenderTarget3D(const RenderTarget3D&)            = delete;
+    RenderTarget3D& operator=(const RenderTarget3D&) = delete;
+    RenderTarget3D(RenderTarget3D&&) noexcept        = default;
     auto operator=(RenderTarget3D&& other) noexcept -> RenderTarget3D& {
         if (this != &other) {
             view   = std::move(other.view);
@@ -77,8 +77,7 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
 };
 
 template <VkFormat F>
@@ -138,8 +137,8 @@ struct MipmappedRenderTarget {
         }
         target.image = std::move(img_res.value());
 
-        const VkImageAspectFlags aspect = GetFormatAspect(F);
-        auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
+        const VkImageAspectFlags aspect   = GetFormatAspect(F);
+        auto                     view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
@@ -168,7 +167,7 @@ struct MipmappedRenderTarget {
 };
 
 template <VkImageLayout TargetLayout, VkFormat F>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> ) noexcept;
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout>) noexcept;
 
 template <typename T>
 struct TargetFormat;
@@ -186,6 +185,7 @@ struct GBufferLayout {
     using TargetTypeAt = Targets...[Index];
 
     template <size_t Index>
+        requires(Index < count)
     static constexpr VkFormat get() {
         static_assert(Index < count, "GBuffer layout index out of bounds.");
         return TargetFormat<TargetTypeAt<Index>>::value;
@@ -210,6 +210,7 @@ Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAs
 }
 
 template <typename Usage>
+    requires requires { typename Usage::Resource; }
 struct UsageLayout {
     static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
 
@@ -266,6 +267,6 @@ template <typename... Images>
     return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
 }
 
-}
+} // namespace ZHLN::Vk
 
 #include "RenderTarget.inl"
