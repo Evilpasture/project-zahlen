@@ -262,7 +262,6 @@ target_compile_options(
   PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
   PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 if(WIN32)
-  target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
   target_compile_options(
     zahlen_engine
     PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter

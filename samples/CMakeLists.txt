@@ -64,6 +64,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         continue()
     endif()
 
+    # No WIN32 keyword: on Windows, these are console applications by default.
     add_executable(${SAMPLE_NAME} ${SAMPLE_SRC})
 
     set_target_properties(${SAMPLE_NAME} PROPERTIES
@@ -102,10 +103,6 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     if(TARGET zahlen_fonts)
         target_link_libraries(${SAMPLE_NAME} PRIVATE zahlen_fonts)
         target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)
-    endif()
-
-    if(WIN32)
-        target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
     endif()
 
     if(COMMAND zahlen_enable_reflection)
