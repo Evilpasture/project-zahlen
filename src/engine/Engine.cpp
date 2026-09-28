@@ -351,20 +351,20 @@ void Engine::RemoveWindow(Window& window) {
     _impl->kernel->RemoveWindow(window);
 }
 
-auto Engine::AcquireTarget() noexcept -> FrameOutcome<RenderAttachment> {
+auto Engine::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->kernel->AcquireTarget();
 }
 
-auto Engine::AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+auto Engine::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->kernel->AcquireTarget(window);
 }
 
-auto Engine::GetTargetAttachment() noexcept -> std::optional<RenderAttachment> {
-    return _impl->kernel->GetTargetAttachment();
+auto Engine::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
+    return _impl->kernel->GetAcquiredTarget();
 }
 
-auto Engine::GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->kernel->GetTargetAttachment(window);
+auto Engine::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
+    return _impl->kernel->GetAcquiredTarget(window);
 }
 
 auto Engine::GetKernel() -> Kernel& {

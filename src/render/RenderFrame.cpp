@@ -409,6 +409,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     }
 
     _impl->destinations.BeginFrame();
+    ++_impl->frameSerial;
     _impl->frameState.Reset();
     _impl->sceneTarget.reset();
 
@@ -443,7 +444,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
                 impl->queues.Clear();
                 impl->frameState.Reset();
                 impl->sceneTarget.reset();
-                impl->destinations.SetActive(nullptr);
+                impl->destinations.SetActive(0);
             }
         }
         EndFrameGuard(const EndFrameGuard&)                    = delete;
@@ -475,11 +476,11 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 }
 
 
-auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetTargetAttachment(const PresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::GetAcquiredTarget(const PresentationTarget& target) noexcept -> std::optional<FrameTarget> {
     return _impl->TargetAttachment(target);
 }
 
@@ -487,52 +488,30 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<RenderTextureHandle, ErrorCode> {
     return _impl->CreateRenderTexture(width, height, hdr);
 }
 
-void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 
 auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped> {
-    auto resolved = _impl->destinations.Resolve(view.target);
+    auto resolved = _impl->ResolveTarget(view.target);
     if (!resolved) {
-        const DestinationRegistry::Miss& miss = resolved.error();
-        ZHLN::Log(
-            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target: {}.",
-            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, miss.reason
-        );
-
-        if (!miss.Adoptable()) {
-            ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
-            return FrameSkipped {};
-        }
-        ZHLN::Log(
-            "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
-            miss.asked.Serial(), miss.live->handle.Serial()
-        );
-        _impl->sceneTarget = *miss.live;
-    } else {
-        _impl->sceneTarget = *resolved;
+        return std::unexpected(resolved.error());
     }
+    const VkCommandBuffer cmd = resolved->window.recording.Command();
+    _impl->destinations.SetActive(resolved->window.id);
+    _impl->sceneTarget = resolved->image;
     _impl->settings = settings;
 
-    const VkCommandBuffer cmd = _impl->RecordingFor(*_impl->sceneTarget);
-    if (cmd == VK_NULL_HANDLE) {
-        ZHLN::Log(
-            "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
-        );
-        return FrameSkipped {};
-    }
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
-    if (_impl->sceneTarget.has_value()) {
-        _impl->destinations.NoteWritten(
-            RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0},
-            DestinationRegistry::Rendered::By::Scene, Vk::AttachmentLayout::ColorAttachment
-        );
-    }
+    _impl->sceneTarget.reset();
+    resolved->layout = Vk::AttachmentLayout::ColorAttachment;
+    resolved->drawn = true;
+    _impl->warnedUnwrittenTarget = false;
     return std::nullopt;
 }
 

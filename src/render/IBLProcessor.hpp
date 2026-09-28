@@ -21,6 +21,7 @@ namespace ZHLN::Vk {
 enum class EnvironmentBakeError : uint8_t {
     RadianceTooLarge ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect exceeds the bake size limit"> {}) = 1,
     RadianceUploadFailed ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect could not be staged for the IBL bake"> {}),
+    InvalidRadianceData ZHLN_ANNOTATION(ZHLN::Description<"radiance float4 data does not match its extent"> {}),
 };
 
 class IBLProcessor {

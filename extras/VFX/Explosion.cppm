@@ -371,12 +371,12 @@ export class ExplosionSystem {
         s_LastRenderContext = &rc;
 
         // Register procedural textures into TextureManager
-        s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", 256, 256, true, GenerateFireTexture(256).data());
-        s_SoilTexHandle         = rc.CreateProceduralTexture("vfx_artillery_soil", 256, 256, true, GenerateSoilTexture(256).data());
-        s_ShockwaveTexHandle    = rc.CreateProceduralTexture("vfx_artillery_shockwave", 512, 512, true, GenerateShockwaveRingTexture(512).data());
-        s_GroundRingHandle      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", 512, 512, true, GenerateGroundRingTexture(512).data());
-        s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", 256, 256, true, GenerateCraterTexture(256).data());
-        s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", 256, 256, false, GenerateCraterNormalTexture(256).data());
+        s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", {256, 256}, GenerateFireTexture(256), true);
+        s_SoilTexHandle         = rc.CreateProceduralTexture("vfx_artillery_soil", {256, 256}, GenerateSoilTexture(256), true);
+        s_ShockwaveTexHandle    = rc.CreateProceduralTexture("vfx_artillery_shockwave", {512, 512}, GenerateShockwaveRingTexture(512), true);
+        s_GroundRingHandle      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", {512, 512}, GenerateGroundRingTexture(512), true);
+        s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
+        s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
         // Debris box mesh for physical ejecta chunks
         Mesh boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
@@ -776,7 +776,7 @@ export class ExplosionSystem {
             }
 
             BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x1111, static_cast<uint32_t>(exp.fireball.size()));
-            rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
+            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.fireball.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_FireTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
@@ -808,7 +808,7 @@ export class ExplosionSystem {
             }
 
             BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x2222, static_cast<uint32_t>(exp.soilSmoke.size()));
-            rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
+            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.soilSmoke.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_SoilTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 0}
@@ -843,7 +843,7 @@ export class ExplosionSystem {
                 }
 
                 BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x3333, 4);
-                rc.UpdateBuffer(buf, t_gpuScratch.data(), 4 * sizeof(Particle));
+                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(4));
                 rc.SubmitParticleEmitter(
                     buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
                 );
@@ -873,7 +873,7 @@ export class ExplosionSystem {
                 };
 
                 BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x4444, 1);
-                rc.UpdateBuffer(buf, t_gpuScratch.data(), 1 * sizeof(Particle));
+                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(1));
                 rc.SubmitParticleEmitter(
                     buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}
                 );

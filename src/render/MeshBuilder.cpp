@@ -44,9 +44,9 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
         return;
     }
 
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
-    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
-    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint8_t));
+    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::span {built.meshlets});
+    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
+    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
         mesh.meshletBuffer       = BufferHandle::Invalid;
@@ -73,9 +73,9 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
         attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c});
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-    BufferHandle ibo     = ctx.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle ibo     = ctx.CreateIndexBuffer(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer   = posVbo,
@@ -110,8 +110,8 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
         {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 0.0f), .color = c}, {.normal = n, .tangent = t, .uv = Math::PackUV(0.0f, 1.0f), .color = c}
     };
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
 
     auto finalMesh = Mesh {
         .posBuffer   = posVbo,
@@ -233,8 +233,8 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
         {.normal = nNX, .tangent = tNX, .uv = uv01, .color = c}
     };
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
 
     auto finalMesh = Mesh {
         .posBuffer   = posVbo,
@@ -299,9 +299,9 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-    BufferHandle ibo     = ctx.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle ibo     = ctx.CreateIndexBuffer(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer   = posVbo,
@@ -374,9 +374,9 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-    BufferHandle ibo     = ctx.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle ibo     = ctx.CreateIndexBuffer(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer   = posVbo,
@@ -441,9 +441,9 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
         indices.insert(indices.end(), {ct, first + static_cast<uint32_t>(ix), first + static_cast<uint32_t>(ix) + 1});
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-    BufferHandle ibo     = ctx.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle ibo     = ctx.CreateIndexBuffer(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer   = posVbo,

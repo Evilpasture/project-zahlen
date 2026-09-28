@@ -51,9 +51,9 @@ void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const Verte
 
     // Storage, not vertex data: the task/mesh shaders reach these only through
     // their device address, they are never bound to the input assembler.
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(built.meshlets.data(), built.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet));
-    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(built.vertices.data(), built.vertices.size() * sizeof(uint32_t), sizeof(uint32_t));
-    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(built.triangles.data(), built.triangles.size(), sizeof(uint8_t));
+    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::span {built.meshlets});
+    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
+    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
         mesh.meshletBuffer       = BufferHandle::Invalid;
@@ -169,8 +169,8 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
 
     Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
     AttachTerrainMeshlets(ctx, finalMesh, positions, {});
@@ -377,8 +377,8 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
+    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
 
     auto finalMesh = Mesh {
         .posBuffer   = posVbo,

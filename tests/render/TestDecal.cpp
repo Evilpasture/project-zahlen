@@ -86,7 +86,7 @@ struct DecalTestSuite {
 
             // 1. Create a 64x64 bright yellow procedural decal texture
             auto                yellowPixels = GenerateCircularDecalTexture(64, 255, 230, 20);
-            ZHLN::TextureHandle decalTex     = rc.CreateProceduralTexture("vfx_test_decal_yellow", 64, 64, true, yellowPixels.data());
+            ZHLN::TextureHandle decalTex     = rc.CreateProceduralTexture("vfx_test_decal_yellow", {64, 64}, yellowPixels, true);
 
             ZHLN::Test::ExpectTrue(decalTex != ZHLN::TextureHandle::Invalid);
             if (decalTex == ZHLN::TextureHandle::Invalid) {
@@ -178,7 +178,7 @@ struct DecalTestSuite {
 
             // 3. Create solid red procedural decal texture (R=255, G=0, B=0, A=255)
             auto                redPixels   = GenerateCircularDecalTexture(64, 255, 0, 0);
-            ZHLN::TextureHandle redDecalTex = rc.CreateProceduralTexture("vfx_test_decal_red", 64, 64, true, redPixels.data());
+            ZHLN::TextureHandle redDecalTex = rc.CreateProceduralTexture("vfx_test_decal_red", {64, 64}, redPixels, true);
 
             // 4. Spawn Decal centered on the wall (at Z = -2.0m, Scale 2.5m x 2.5m x 2.0m depth)
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
@@ -284,7 +284,7 @@ struct DecalTestSuite {
 
             // 3. Small decal positioned tightly around the front wall (depth extent = 1.0m)
             auto                bluePixels   = GenerateCircularDecalTexture(64, 0, 120, 255);
-            ZHLN::TextureHandle blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", 64, 64, true, bluePixels.data());
+            ZHLN::TextureHandle blueDecalTex = rc.CreateProceduralTexture("vfx_test_decal_blue", {64, 64}, bluePixels, true);
 
             const JPH::Vec3  decalPos(0.0f, 1.5f, -2.0f);
             const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(decalPos, JPH::Quat::sIdentity(), JPH::Vec3(1.5f, 1.5f, 1.0f));

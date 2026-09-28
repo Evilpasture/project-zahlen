@@ -366,7 +366,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     auto& rc  = engine.GetRenderContext();
 
     constexpr uint32_t  kMaxParticles = 20000;
-    ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", 64, 64, true, GenerateProceduralDecalTexture(64, 255, 200, 50).data());
+    ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
@@ -472,7 +472,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     );
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
-    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", 64, 64, true, decalPixels.data());
+    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", {64, 64}, decalPixels, true);
 
     constexpr size_t kDecalCount = 100;
     for (size_t i = 0; i < kDecalCount; ++i) {
@@ -775,7 +775,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 4. GPU Particle Emitter (10,000 Particles)
-    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", 64, 64, true, GenerateProceduralDecalTexture(64, 255, 180, 40).data());
+    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 1.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =

@@ -21,13 +21,18 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/UIData.hpp>
+#include <array>
 #include <atomic>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace ZHLN {
 
@@ -41,11 +46,10 @@ class PipelineStatsCapture;
 class PresentationTarget;
 
 struct EnvironmentRadianceDesc {
-    const float* rgba         = nullptr;
-    uint32_t     width        = 0;
-    uint32_t     height       = 0;
-    uint64_t     contentHash  = 0;
-    int          renderSkybox = 0;
+    std::span<const float> rgba {};
+    Extent2D               extent {};
+    uint64_t               contentHash  = 0;
+    bool                   renderSkybox = false;
 };
 
 class ZHLN_API RenderContext {
@@ -97,30 +101,43 @@ class ZHLN_API RenderContext {
     void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
-    auto CreateStorageBuffer(const void* data, size_t size, uint32_t stride = sizeof(uint32_t)) -> BufferHandle;
-
-    auto CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
-    auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
+    // Raw byte streams declare their element stride; typed spans derive it.
+    [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
+    [[nodiscard]] auto CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
+    [[nodiscard]] auto CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle;
     void DestroyBuffer(BufferHandle handle);
-    void UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
+    void UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept;
+
+    template <typename T> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateStorageBuffer(std::span<T> elements) -> BufferHandle {
+        return CreateStorageBuffer(std::as_bytes(elements), static_cast<uint32_t>(sizeof(T)));
+    }
+    template <typename T> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateVertexBuffer(std::span<T> vertices) -> BufferHandle {
+        return CreateVertexBuffer(std::as_bytes(vertices), static_cast<uint32_t>(sizeof(T)));
+    }
+    template <typename T> requires std::is_trivially_copyable_v<T>
+    void UpdateBuffer(BufferHandle handle, std::span<T> elements) noexcept {
+        UpdateBuffer(handle, std::as_bytes(elements));
+    }
     auto CreateConstantBuffer(size_t size) -> BufferHandle;
     [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false, bool depthWrite = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
-    void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
+    [[nodiscard]] uint32_t UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexAttributes> attributes) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
 
-    [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget>;
 
-    [[nodiscard]] std::optional<RenderAttachment> GetTargetAttachment(const PresentationTarget& target) noexcept;
+    [[nodiscard]] std::optional<FrameTarget> GetAcquiredTarget(const PresentationTarget& target) noexcept;
 
     void ReleaseTarget(const PresentationTarget& target) noexcept;
 
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<RenderTextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
 
 
     [[nodiscard]] auto RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
@@ -134,20 +151,25 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
 
-    [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<uint32_t, ErrorCode>;
+    template <typename T> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateTexture(std::span<T> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode> {
+        return CreateTexture(std::as_bytes(pixels), extent, isSRGB);
+    }
     [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
     void UnloadTexture(TextureHandle handle);
 
-    template <typename Func>
-    [[nodiscard]] auto CreateTextureProcedural(uint32_t width, uint32_t height, bool isSRGB, Func&& callback) -> std::expected<uint32_t, ErrorCode> {
-        std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
-        callback(pixels.data(), width, height);
-        return CreateTexture(pixels.data(), width, height, isSRGB);
+    template <typename Func> requires std::invocable<Func&, std::span<uint32_t>>
+    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<uint32_t, ErrorCode> {
+        std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
+        callback(std::span<uint32_t> {pixels});
+        return CreateTexture(std::span {pixels}, extent, isSRGB);
     }
 
-    void     UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count);
-    uint32_t AllocateMorphDeltas(uint32_t count, const float* deltas);
+    void UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices);
+    // Morph deltas are tightly packed float4s; the count is derived from the span.
+    uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
@@ -161,7 +183,7 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
 
-    static void UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept;
+    static void UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept;
 
     void WriteCheckpoint(std::string_view name) noexcept;
 
@@ -175,7 +197,7 @@ class ZHLN_API RenderContext {
     void                                         ProvokeDeviceLost();
 
     auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, ErrorCode>;
-    TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
+    TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 
@@ -193,7 +215,7 @@ class ZHLN_API RenderContext {
 
     void SetGISettings(const GISettings& settings) noexcept;
     void SetAAState(const AAState& state);
-    void SetLights(const Light* lights, uint32_t count) noexcept;
+    void SetLights(std::span<const Light> lights) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;

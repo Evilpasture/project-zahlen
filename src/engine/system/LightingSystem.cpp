@@ -12,6 +12,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 namespace ZHLN {
 
@@ -164,7 +165,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         });
     }
 
-    rc.SetLights(sceneLights.data(), sceneLights.size());
+    rc.SetLights(std::span {sceneLights});
 }
 
 }

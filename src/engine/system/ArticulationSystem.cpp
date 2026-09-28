@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <span>
 
 namespace ZHLN {
 
@@ -354,7 +355,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                 }
             }
 
-            rc.UpdateJointMatrices(offset, finalSkinningMatrices.data(), count);
+            rc.UpdateJointMatrices(offset, std::span {finalSkinningMatrices.data(), static_cast<size_t>(count)});
         }
     }
 

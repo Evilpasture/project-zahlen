@@ -344,7 +344,7 @@ type it spells through its own includes.
 | `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
-| `TextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `RenderAttachment` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
 | `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
 | `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
 
@@ -606,9 +606,9 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
-if (!target) { ... }                              // why there is nothing to draw into
-if (!*target) { ... }                             // nothing to draw into this frame
+const auto target = kernel.AcquireTarget(window); // the kernel owns the presentation seam
+if (!target) { ... }                              // acquisition error
+if (!*target) { ... }                             // no drawable image this frame
 const auto ui = rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 if (!ui) { ... }                                  // hard failure (propagate it)
 else if (ui->has_value()) { ... }                 // FrameSkipped: nowhere drawable this frame
@@ -617,10 +617,17 @@ rc.EndFrame();
 
 `Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
 own window) is the verb that takes the frame's image for a window and opens the
-command stream that window's passes record into. `GetTargetAttachment` is the
-query beside it: it answers what the frame has already acquired for a window and
-nothing more -- it never waits, acquires, or opens a command buffer, so asking
-about a window early in a frame cannot change what the frame does.
+command stream that window's passes record into. `GetAcquiredTarget` is the
+query beside it: it answers only for an open frame and never acquires an image.
+The returned `FrameTarget` identifies the exact renderer, frame, window and
+acquisition. It is a non-owning value: after `EndFrame`, a window release or
+rebuild, or renderer destruction, rendering through it fails instead of
+adopting whatever image has since reused the slot. To render into a persistent
+render texture, create a `RenderTextureHandle` and use
+`frameTarget.ForTexture(renderTexture)`: the output still belongs to the
+explicitly acquired frame's command stream. Window presenters persist; their
+acquired images, layout and written state live only with the frame. The two
+are not stored together in a table of versioned texture handles.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -651,13 +658,13 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into the attachment
+the editor itself: `RenderUI` into the frame target
 `kernel.AcquireTarget(previewWindow)` hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
-window declares what it draws — a destination is image-slot addressing, and the
-caller picks the passes (`RenderScene` / `RenderUI` / `DispatchSimulations`).
+window declares what it draws — the caller picks the passes
+(`RenderScene` / `RenderUI` / `DispatchSimulations`).
 `BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
-targeting a second window's attachment re-executes the graph for it. CameraSystem
+targeting a second window's frame target re-executes the graph for it. CameraSystem
 still writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.

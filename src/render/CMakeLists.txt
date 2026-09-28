@@ -8,7 +8,7 @@ set(RAW_RENDER_SOURCES
     PresentationSurface.cpp
     RenderTexture.cpp
     RenderPresentation.cpp
-    DestinationRegistry.cpp
+    FrameDestinations.cpp
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp
     DrawQueueManager.cpp

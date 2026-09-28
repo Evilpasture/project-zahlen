@@ -3,7 +3,6 @@
 
 
 #include "UIPipeline.hpp"
-#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Pipelines {
 
@@ -64,29 +63,27 @@ static_assert(std::same_as<typename RuntimePipeline::value_type, Vk::TypedPipeli
 }
 
 auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
-    if (uiData.Empty() || !view.target.Valid()) {
+    if (uiData.Empty()) {
         return FrameSkipped {};
     }
 
-    auto resolved = impl.destinations.Resolve(view.target);
+    auto resolved = impl.ResolveTarget(view.target);
     if (!resolved) {
-        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", resolved.error().reason);
-        return FrameSkipped {};
+        return std::unexpected(resolved.error());
     }
-    const DestinationRegistry::Record target = *resolved;
-    if (!target.image.Valid() || !impl.uiRenderer.SupportsFormat(target.image.format)) {
-        ZHLN::Log("[RenderUI] Destination 0x{:016X} has no supported image/pipeline for format {}; UI skipped.", target.handle.Raw(), static_cast<int>(target.image.format));
-        return FrameSkipped {};
+    auto& target = *resolved;
+    if (!target.image.Valid()) {
+        return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
-
-    const VkCommandBuffer cmd = impl.RecordingFor(target);
-    if (cmd == VK_NULL_HANDLE) {
-        ZHLN::Log("[RenderUI] Destination 0x{:016X} has no recording open this frame (was it acquired?); UI skipped.", target.handle.Raw());
-        return FrameSkipped {};
+    if (!impl.uiRenderer.SupportsFormat(target.image.format)) {
+        return std::unexpected(DestinationError::UnsupportedColorFormat);
     }
 
-    const bool   firstTouch  = target.trackedLayout == Vk::AttachmentLayout::Undefined;
-    const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
+    const VkCommandBuffer cmd = target.window.recording.Command();
+    impl.destinations.SetActive(target.window.id);
+
+    const bool   firstTouch  = target.layout == Vk::AttachmentLayout::Undefined;
+    const auto   sourceLayout = Vk::ToVkImageLayout(target.layout);
     if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
             .image      = target.image.Handle(),
@@ -115,14 +112,16 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
             Vk::CommandEncoder encoder(cmd);
             record(pass, encoder);
         });
-        impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);
+        target.layout = Vk::AttachmentLayout::ColorAttachment;
+        target.drawn = true;
+        impl.warnedUnwrittenTarget = false;
         return std::nullopt;
     };
 
     auto DrawTyped = [&]<VkFormat Format>() -> FrameOutcome<FrameSkipped> {
         auto image = target.image.MatchFormat<Format, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         if (!image) {
-            return FrameSkipped {};
+            return std::unexpected(DestinationError::UnsupportedColorFormat);
         }
         return Draw(*image, [&](const auto& pass, Vk::CommandEncoder& encoder) {
             impl.uiRenderer.Record<Format>(pass, encoder, extent.width, extent.height, view.frameIndex, uiData);

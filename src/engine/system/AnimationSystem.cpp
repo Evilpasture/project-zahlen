@@ -15,6 +15,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <span>
 
 namespace ZHLN {
 
@@ -298,7 +299,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
     });
 
     if (totalJoints > 0) {
-        ctx.UpdateJointMatrices(0, calculatedJoints.data(), totalJoints);
+        ctx.UpdateJointMatrices(0, std::span {calculatedJoints.data(), static_cast<size_t>(totalJoints)});
     }
 }
 

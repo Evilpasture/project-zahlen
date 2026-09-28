@@ -35,6 +35,10 @@ enum class BlueNoiseError : uint8_t {
     UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
+enum class TextureDataError : uint8_t {
+    InvalidPixels ZHLN_ANNOTATION(ZHLN::Description<"RGBA pixels do not match the texture's nonzero extent"> {}) = 1,
+};
+
 }
 
 namespace ZHLN {
@@ -122,6 +126,10 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->geometry.ReleaseParticleBuffers();
     _impl->geometry.ReleaseLedgers();
 
+    for (const auto& entry: _impl->renderTextures) {
+        _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
+    }
+    _impl->renderTextures.clear();
     _impl->textureManager.Clear();
 
     _impl->deletionQueue.Drain();
@@ -149,8 +157,8 @@ auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
     return _impl->geometry.EntityBufferCount();
 }
 
-void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
-    Vk::Instance::UseDiagnostics({validationErrors, deviceLost});
+void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {
+    Vk::Instance::UseDiagnostics({&validationErrors, &deviceLost});
 }
 
 uint32_t RenderContext::ValidationErrorCount() noexcept {
@@ -282,21 +290,23 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
     return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
-auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(data, size, stride, Vk::BufferUsage::Storage);
+auto RenderContext::CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
+    return _impl->geometry.CreateStorageBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Storage);
 }
 
-auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateVertexBuffer(data, size, stride, Vk::BufferUsage::Vertex);
+auto RenderContext::CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
+    return _impl->geometry.CreateVertexBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Vertex);
 }
 
-auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->geometry.CreateIndexBuffer(data, size, Vk::BufferUsage::Index);
+auto RenderContext::CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle {
+    return _impl->geometry.CreateIndexBuffer(indices.data(), indices.size_bytes(), Vk::BufferUsage::Index);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
 
-void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
+void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept {
+    _impl->geometry.Update(handle, bytes.data(), bytes.size());
+}
 
 
 namespace {
@@ -409,12 +419,31 @@ void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event)
     }
 }
 
-auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->textureManager.Upload2D(data, width, height, Rgba8Format(isSRGB));
+auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.Upload2D(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->textureManager.UploadCube(faceData, width);
+auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<uint32_t, ErrorCode> {
+    if (faceSize == 0) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    const uint64_t pixelsPerFace = static_cast<uint64_t>(faceSize) * faceSize;
+    if (pixelsPerFace > std::numeric_limits<size_t>::max() / 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    const size_t bytesPerFace = static_cast<size_t>(pixelsPerFace) * 4;
+    std::array<const void*, 6> faceData {};
+    for (size_t i = 0; i < faces.size(); ++i) {
+        if (faces[i].size() != bytesPerFace) {
+            return std::unexpected(TextureDataError::InvalidPixels);
+        }
+        faceData[i] = faces[i].data();
+    }
+    return _impl->textureManager.UploadCube(faceData.data(), faceSize);
 }
 
 auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
@@ -544,47 +573,59 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
 }
 
-void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
+uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexAttributes> attributes) noexcept {
+    if (positions.size() != attributes.size()) {
+        ZHLN::Assert(false, "debug vertex positions and attributes must have the same count");
+        return 0;
+    }
     auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
-        return;
+        return 0;
     }
 
-    size_t maxPosSize  = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
-    size_t maxAttrSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexAttributes);
+    constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
     auto  mapped  = nativeMesh->buffer.Map();
     char* basePtr = static_cast<char*>(mapped.data);
 
-    std::memcpy(basePtr, posData, std::min(posSize, maxPosSize));
-    std::memcpy(basePtr + maxPosSize, attrData, std::min(attrSize, maxAttrSize));
-
-    nativeMesh->vertexCount = std::min(vertexCount, RenderContext::Impl::kMaxDebugVertices);
+    const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
+    if (count > 0) {
+        std::memcpy(basePtr, positions.data(), count * sizeof(VertexPosition));
+        std::memcpy(basePtr + maxPosSize, attributes.data(), count * sizeof(VertexAttributes));
+    }
+    nativeMesh->vertexCount = static_cast<uint32_t>(count);
+    return nativeMesh->vertexCount;
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
     return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
-    if (count == 0) {
+void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices) {
+    if (matrices.empty()) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->presenter.frameIndex].Map();
-    auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
-
-    std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
+    auto& buffer = _impl->frames.jointBuffers[_impl->presenter.frameIndex];
+    if (offset > buffer.Size() / sizeof(JPH::Mat44) || matrices.size() > buffer.Size() / sizeof(JPH::Mat44) - offset) {
+        ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
+        return;
+    }
+    auto* gpuJoints = static_cast<JPH::Mat44*>(buffer.Map().data);
+    std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
 }
 
-auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> uint32_t {
-    uint32_t offset = _impl->nextMorphDeltaIndex;
-
-    auto   mappedRegion = _impl->morphDeltasBuffer.Map();
-    float* gpuDeltas    = std::bit_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
-
-    std::memcpy(gpuDeltas, deltas, count * sizeof(float) * 4);
-
-    _impl->nextMorphDeltaIndex += count;
+auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
+    const uint32_t offset = _impl->nextMorphDeltaIndex;
+    const size_t capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
+    if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
+        ZHLN::Assert(false, "morph deltas must fit in the buffer as complete float4s");
+        return offset;
+    }
+    if (!deltas.empty()) {
+        auto* gpuDeltas = static_cast<float*>(_impl->morphDeltasBuffer.Map().data) + static_cast<size_t>(offset) * 4;
+        std::memcpy(gpuDeltas, deltas.data(), deltas.size_bytes());
+    }
+    _impl->nextMorphDeltaIndex += static_cast<uint32_t>(deltas.size() / 4);
     return offset;
 }
 
@@ -753,10 +794,15 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
-    const auto uploaded = _impl->textureManager.Upload(name, pixels, width, height, Rgba8Format(isSRGB));
+auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB) -> TextureHandle {
+    const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (expectedPixels == 0 || expectedPixels != pixels.size()) {
+        ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
+        return TextureHandle::Invalid;
+    }
+    const auto uploaded = _impl->textureManager.Upload(name, pixels.data(), extent.width, extent.height, Rgba8Format(isSRGB));
     if (!uploaded) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, width, height, uploaded.error());
+        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureHandle::Invalid;
     }
     return *uploaded;
@@ -777,41 +823,15 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        if (auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
-            const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
-            if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
-                const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
-
-                const auto receipt = record.GetRenderedContent();
-                if (!receipt) {
-                    ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-                if (!receipt->has_value()) {
-                    ZHLN::Log(
-                        "[Test Capture] Destination 0x{:016X} was not written this frame (its contents are undefined); capture refused.",
-                        record.handle.Raw()
-                    );
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-                if (!(*receipt)->Drawn()) {
-                    ZHLN::Log(
-                        "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
-                        record.handle.Raw()
-                    );
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-
-                if (record.image.Handle() != source) {
-                    ZHLN::Log(
-                        "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                        reinterpret_cast<uint64_t>(record.image.Handle()), reinterpret_cast<uint64_t>(source)
-                    );
-                }
-                source = record.image.Handle();
-                extent = record.image.Extent2D();
-                sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
+        if (const auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->acquired) {
+            const auto& frameImage = *dest->acquired;
+            if (!frameImage.drawn) {
+                ZHLN::Log("[Test Capture] Window image was not drawn into this frame (only the background fill); capture refused.");
+                return std::unexpected(ScreenshotError::DestinationNotRecorded);
             }
+            source = frameImage.image.Handle();
+            extent = frameImage.image.Extent2D();
+            sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
         }
 
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;

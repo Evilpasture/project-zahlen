@@ -26,7 +26,7 @@ enum class UITestError : uint8_t {
     RenderTextureFailed          ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateRenderTexture failed for the second destination."> {}),
     SharedVertexRange            ZHLN_ANNOTATION(ZHLN::Description<"A UI call's vertices were replaced by another call in the same frame."> {}),
     SecondDestinationReplacedUI  ZHLN_ANNOTATION(ZHLN::Description<"A second destination in the frame replaced the window's own UI geometry."> {}),
-    DestinationQueryFailed       ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::GetWindowAttachment did not answer what the frame had acquired."> {}),
+    DestinationQueryFailed       ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::GetAcquiredTarget did not answer what the frame had acquired."> {}),
 };
 
 namespace {
@@ -356,7 +356,7 @@ struct UITestSuite {
             // Both verbs are the engine's, not the renderer's: which target a
             // session presents through is the kernel's business, and a caller
             // only ever sees the attachment it resolves to.
-            if (!ZHLN::Test::ExpectTrue(!engine->GetTargetAttachment().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!engine->GetAcquiredTarget().has_value())) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
@@ -364,12 +364,12 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const ZHLN::RenderAttachment attachment = **target;
+            const ZHLN::FrameTarget attachment = **target;
 
             // And after it, the query is that same answer asked a second time --
             // a read of what the acquisition did, not a second acquisition.
-            const std::optional<ZHLN::RenderAttachment> queried = engine->GetTargetAttachment();
-            if (!ZHLN::Test::ExpectTrue(queried.has_value() && queried->texture == attachment.texture)) {
+            const std::optional<ZHLN::FrameTarget> queried = engine->GetAcquiredTarget();
+            if (!ZHLN::Test::ExpectTrue(queried.has_value() && *queried == attachment)) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
@@ -444,13 +444,13 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::TextureHandle texture = *textureRes;
+            const ZHLN::RenderTextureHandle texture = *textureRes;
             const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
             if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
                 rc.DestroyRenderTexture(texture);
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::TextureHandle hdrTexture = *hdrTextureRes;
+            const ZHLN::RenderTextureHandle hdrTexture = *hdrTextureRes;
 
             const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 
@@ -463,7 +463,7 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const ZHLN::RenderAttachment attachment = **target;
+            const ZHLN::FrameTarget attachment = **target;
             const uint32_t               frameIndex = rc.GetFrameIndex();
             // All destinations must draw. A silent skip would make the window
             // test pass without exercising either offscreen pipeline variant.
@@ -474,7 +474,7 @@ struct UITestSuite {
             const auto otherDrawn = rc.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
-                    .target     = ZHLN::RenderAttachment {.texture = texture, .mipLevel = 0, .arrayLayer = 0},
+                    .target     = attachment.ForTexture(texture),
                     .frameIndex = frameIndex
                 },
                 otherPayload.View()
@@ -482,7 +482,7 @@ struct UITestSuite {
             const auto hdrDrawn = rc.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
-                    .target     = ZHLN::RenderAttachment {.texture = hdrTexture, .mipLevel = 0, .arrayLayer = 0},
+                    .target     = attachment.ForTexture(hdrTexture),
                     .frameIndex = frameIndex
                 },
                 otherPayload.View()
@@ -513,6 +513,72 @@ struct UITestSuite {
                 return std::unexpected(UITestError::SecondDestinationReplacedUI);
             }
 
+            return {};
+        }
+        // An acquired target is a capability for this acquisition only. A
+        // subsequent frame may reuse the exact same swapchain image, but must
+        // not revive the previous frame's target or a destroyed offscreen one.
+        std::expected<void, ZHLN::ErrorCode> frame_targets_expire_without_rebinding() {
+            auto engine = CreateTestEngine(320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+            auto& rc = engine->GetRenderContext();
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            const SolidPayload payload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 80.0f);
+            if (!ZHLN::Test::ExpectTrue(!payload.View().Empty())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+            const ZHLN::ViewportRect viewport {.x = 0, .y = 0, .width = 320, .height = 240};
+
+            if (const auto began = rc.BeginFrame(); !began || began->has_value()) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const auto first = engine->AcquireTarget();
+            if (!first || !first->has_value()) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const ZHLN::FrameTarget stale = **first;
+            if (!rc.EndFrame()) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            if (!ZHLN::Test::ExpectTrue(!engine->GetAcquiredTarget().has_value())) {
+                return std::unexpected(UITestError::DestinationQueryFailed);
+            }
+
+            if (const auto began = rc.BeginFrame(); !began || began->has_value()) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const auto invalidResult = rc.RenderUI(ZHLN::UIView {.viewport = viewport}, payload.View());
+            if (!ZHLN::Test::ExpectTrue(!invalidResult)) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const auto second = engine->AcquireTarget();
+            if (!second || !second->has_value() || !ZHLN::Test::ExpectTrue(**second != stale)) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            // A new acquisition is already live. Neither pass may quietly
+            // adopt it when handed the previous frame's capability.
+            const auto staleUI = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = stale}, payload.View());
+            const auto staleScene = rc.RenderScene(ZHLN::SceneView {.target = stale}, rc.GetSettings());
+            if (!ZHLN::Test::ExpectTrue(!staleUI && !staleScene)) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const auto texture = rc.CreateRenderTexture(32, 32);
+            if (!texture) {
+                return std::unexpected(UITestError::RenderTextureFailed);
+            }
+            const ZHLN::FrameTarget retiredTexture = (**second).ForTexture(*texture);
+            rc.DestroyRenderTexture(*texture);
+            const auto retiredResult = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
+            if (!ZHLN::Test::ExpectTrue(!retiredResult)) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const auto drawn = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = **second}, payload.View());
+            const auto ended = rc.EndFrame();
+            if (!ZHLN::Test::ExpectTrue(drawn.has_value() && !drawn->has_value() && ended.has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
             return {};
         }
     };

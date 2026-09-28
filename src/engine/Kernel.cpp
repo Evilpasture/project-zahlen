@@ -184,20 +184,20 @@ void Kernel::RemoveWindow(Window& window) {
 }
 
 
-auto Kernel::AcquireTarget() noexcept -> FrameOutcome<RenderAttachment> {
+auto Kernel::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(window));
 }
 
-auto Kernel::GetTargetAttachment() noexcept -> std::optional<RenderAttachment> {
-    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.Target());
+auto Kernel::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
+    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.TargetFor(window));
+auto Kernel::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
+    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.TargetFor(window));
 }
 
 auto Kernel::GetRenderContext() -> RenderContext& {

@@ -90,10 +90,10 @@ class ZHLN_API Engine {
     auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> Window*;
     void RemoveWindow(Window& window);
 
-    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<RenderAttachment>;
-    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment>;
-    [[nodiscard]] auto GetTargetAttachment() noexcept -> std::optional<RenderAttachment>;
-    [[nodiscard]] auto GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget() noexcept -> std::optional<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
 
     auto GetKernel() -> Kernel&;
     auto GetWorld() -> World&;

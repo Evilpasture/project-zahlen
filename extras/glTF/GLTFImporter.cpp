@@ -737,7 +737,10 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
     for (size_t i = 0; i < textureJobs.size(); ++i) {
         auto& texJob = textureJobs[i];
         if (texJob.decodedPixels != nullptr) {
-            const auto tex_res = ctx.CreateTexture(texJob.decodedPixels, texJob.width, texJob.height, texJob.isSRGB);
+            const auto tex_res = ctx.CreateTexture(
+                std::span {texJob.decodedPixels, static_cast<size_t>(texJob.width) * texJob.height * 4},
+                {static_cast<uint32_t>(texJob.width), static_cast<uint32_t>(texJob.height)}, texJob.isSRGB
+            );
             if (texJob.wasRescaled) {
                 std::free(texJob.decodedPixels);
             } else {
@@ -767,15 +770,15 @@ auto GetOrCreateCompiledPrimitive(
         return it->second;
     }
 
-    const BufferHandle posVbo = ctx.CreateVertexBuffer(primJob.positions.data(), primJob.positions.size() * sizeof(VertexPosition), sizeof(VertexPosition));
+    const BufferHandle posVbo = ctx.CreateVertexBuffer(std::span {primJob.positions});
     const BufferHandle attrVbo =
-        ctx.CreateVertexBuffer(primJob.attributes.data(), primJob.attributes.size() * sizeof(VertexAttributes), sizeof(VertexAttributes));
+        ctx.CreateVertexBuffer(std::span {primJob.attributes});
 
     const BufferHandle skinVbo = !primJob.skins.empty() ?
-                                     ctx.CreateVertexBuffer(primJob.skins.data(), primJob.skins.size() * sizeof(VertexSkin), sizeof(VertexSkin)) :
+                                     ctx.CreateVertexBuffer(std::span {primJob.skins}) :
                                      BufferHandle::Invalid;
 
-    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateIndexBuffer(primJob.indices.data(), primJob.indexCount * sizeof(uint32_t)) :
+    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateIndexBuffer(std::span {primJob.indices}.first(primJob.indexCount)) :
                                                         BufferHandle::Invalid;
 
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
@@ -784,13 +787,13 @@ auto GetOrCreateCompiledPrimitive(
     const bool hasMeshlets = !primJob.meshlets.Empty();
 
     const BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.meshlets.data(), primJob.meshlets.meshlets.size() * sizeof(GPUMeshlet), sizeof(GPUMeshlet)) :
+        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.meshlets}) :
                       BufferHandle::Invalid;
     const BufferHandle meshletVertexVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.vertices.data(), primJob.meshlets.vertices.size() * sizeof(uint32_t), sizeof(uint32_t)) :
+        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.vertices}) :
                       BufferHandle::Invalid;
     const BufferHandle meshletTriVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(primJob.meshlets.triangles.data(), primJob.meshlets.triangles.size(), sizeof(uint8_t)) : BufferHandle::Invalid;
+        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
 
     Mesh subMesh = {
         .posBuffer           = posVbo,
@@ -813,7 +816,7 @@ auto GetOrCreateCompiledPrimitive(
 
     const uint32_t finalMorphOffset =
         (primJob.activeMorphCount > 0) ?
-            ctx.AllocateMorphDeltas(static_cast<uint32_t>(primJob.positions.size()) * primJob.activeMorphCount, primJob.tempDeltas.data()) :
+            ctx.AllocateMorphDeltas(std::span {primJob.tempDeltas}) :
             0;
 
     const Material subMaterial =

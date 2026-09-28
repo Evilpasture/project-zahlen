@@ -345,15 +345,20 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
 
 auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
-    const bool hasPixels = desc.rgba != nullptr && desc.width > 0 && desc.height > 0;
-    if (hasPixels && (desc.width > kMaxRadianceExtent || desc.height > kMaxRadianceExtent)) {
+    const bool hasPixels = !desc.rgba.empty();
+    if (hasPixels && (desc.extent.width > kMaxRadianceExtent || desc.extent.height > kMaxRadianceExtent)) {
         return std::unexpected(Vk::EnvironmentBakeError::RadianceTooLarge);
+    }
+    if ((hasPixels && (desc.extent.width == 0 || desc.extent.height == 0 ||
+                      desc.rgba.size() != static_cast<size_t>(desc.extent.width) * desc.extent.height * 4)) ||
+        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0))) {
+        return std::unexpected(Vk::EnvironmentBakeError::InvalidRadianceData);
     }
 
     uint64_t hash = 0;
     int      mode = 0;
     if (hasPixels) {
-        hash = desc.contentHash != 0 ? desc.contentHash : HashRadiancePixels(desc.rgba, desc.width, desc.height);
+        hash = desc.contentHash != 0 ? desc.contentHash : HashRadiancePixels(desc.rgba.data(), desc.extent.width, desc.extent.height);
         mode = desc.renderSkybox != 0 ? 1 : 2;
     }
     if (impl->iblPayload.contentHash == hash && impl->iblPayload.environmentMode == mode) {
@@ -372,10 +377,10 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 
     Vk::IBLProcessor::RadianceSource source {};
     if (hasPixels) {
-        source.rgba         = desc.rgba;
-        source.width        = desc.width;
-        source.height       = desc.height;
-        source.renderSkybox = desc.renderSkybox;
+        source.rgba         = desc.rgba.data();
+        source.width        = desc.extent.width;
+        source.height       = desc.extent.height;
+        source.renderSkybox = desc.renderSkybox ? 1 : 0;
     }
     auto baked = Vk::IBLProcessor::Bake(*impl, sky, source);
     if (!baked) {

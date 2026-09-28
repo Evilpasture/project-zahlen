@@ -76,16 +76,7 @@ struct ResourceResolver<Res_AccumCurrent> {
 template <>
 struct ResourceResolver<Res_Swapchain> {
     [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
-        if (impl.sceneTarget.has_value()) {
-            return impl.sceneTarget->image;
-        }
-        auto& dest = impl.ActivePresentation();
-        if (dest.swapchain.Valid()) {
-            const auto& sc = dest.swapchain.Get();
-            const uint32_t imageIndex = impl.destinations.ActiveImageIndex();
-            return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format);
-        }
-        return MakeRef<Res_Swapchain>(dest.headlessColorTarget);
+        return *impl.sceneTarget;
     }
 };
 
@@ -249,16 +240,7 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
     auto getSwapchainImage = [&]() -> SwapchainImage {
-        if (sceneTarget.has_value()) {
-            return sceneTarget->image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-        }
-        auto& dest = ActivePresentation();
-        if (dest.swapchain.Valid()) {
-            const auto&    sc         = dest.swapchain.Get();
-            const uint32_t imageIndex = destinations.ActiveImageIndex();
-            return Vk::ImageSlice {sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-        }
-        return Vk::AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
+        return sceneTarget->Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
     };
 
     DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, view, sceneSettings, getSwapchainImage);

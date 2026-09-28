@@ -462,7 +462,7 @@ TestStats RunSuite() {
     // every engine, so engines increment it directly (teardown included) and
     // per-test deltas below bracket whole engine lifecycles exactly.
     // Idempotent: nested suites re-register the same storage.
-    RenderContext::UseDiagnostics(&g_validationErrors, &g_deviceLost);
+    RenderContext::UseDiagnostics(g_validationErrors, g_deviceLost);
 
     Suite     suite;
     TestStats stats;

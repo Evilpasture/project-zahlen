@@ -2397,7 +2397,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                     skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
                 );
             }
-            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, palette.data(), static_cast<uint32_t>(paletteCount));
+            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, std::span {palette}.first(paletteCount));
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 
             if (skeletalMesh == skin.skeletalMesh) {

@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <vector>
+#include <span>
 #include "ArticulationSystem.hpp"
 #include "LightingSystem.hpp"
 #include <stb_image.h>
@@ -94,7 +95,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetMa
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", asset->atlasWidth, asset->atlasHeight, false, rgbaPixels.data());
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false);
 
     FontAtlas& font      = uiSettings->fontAtlas;
     font                 = FontAtlas {};
@@ -191,7 +192,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
         return 1;
     }
 
-    auto texRes = ctx.CreateTexture(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), isSRGB);
+    auto texRes = ctx.CreateTexture(std::span {pixels, static_cast<size_t>(width) * height * 4}, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
     stbi_image_free(pixels);
 
     return texRes ? *texRes : 1;

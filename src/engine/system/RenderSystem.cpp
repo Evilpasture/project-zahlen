@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 
 namespace ZHLN {
 
@@ -62,11 +63,10 @@ namespace {
     }
     const RadianceMap& map = **loaded;
     return rc.SetEnvironmentRadiance({
-        .rgba         = map.rgba.data(),
-        .width        = map.width,
-        .height       = map.height,
+        .rgba         = map.rgba,
+        .extent       = {.width = map.width, .height = map.height},
         .contentHash  = map.contentHash,
-        .renderSkybox = env->renderSkybox,
+        .renderSkybox = env->renderSkybox != 0,
     });
 }
 
@@ -236,7 +236,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     return extra;
 }
 
-SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
+SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport) {
     auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
     Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
@@ -399,10 +399,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     const ViewportRect viewport = rc.GetViewport();
     const auto target = engine.AcquireTarget();
     if (!target) {
-        ZHLN::Log("[Render] Window attachment refused: {}", target.error());
+        return std::unexpected(target.error());
     }
-    const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
-    const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    if (!target->has_value()) {
+        return {};
+    }
+    const FrameTarget attachment = **target;
+    const SceneView sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
     if (auto scene_res = rc.RenderScene(sceneView, gfx); !scene_res) {
         return std::unexpected(scene_res.error());
     }
@@ -475,17 +478,14 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 );
             }
 
-            rc.UploadDebugVertices(
-                debugPos.data(), debugPos.size() * sizeof(VertexPosition), debugAttr.data(), debugAttr.size() * sizeof(VertexAttributes),
-                static_cast<uint32_t>(debugPos.size())
-            );
+            const uint32_t uploadedVertices = rc.UploadDebugVertices(std::span {debugPos}, std::span {debugAttr});
 
             Mesh debugMesh = {
                 .posBuffer   = rc.GetDebugMeshBuffer(),
                 .attrBuffer  = rc.GetDebugMeshBuffer(),
                 .skinBuffer  = BufferHandle::Invalid,
                 .indexBuffer = BufferHandle::Invalid,
-                .vertexCount = static_cast<uint32_t>(debugPos.size()),
+                .vertexCount = uploadedVertices,
                 .indexCount  = 0
             };
 

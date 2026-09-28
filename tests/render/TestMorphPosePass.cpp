@@ -67,6 +67,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <span>
 
 enum class MorphPosePassTestError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the morph pose pass test."> {}) = 1,
@@ -164,7 +165,7 @@ struct MorphPosePassSuite {
         part.meshAsset              = ZHLN::HashAssetID("zahlen_test_morph_pose_box_mesh");
         part.materialAsset          = ZHLN::HashAssetID("zahlen_test_morph_pose_box_material");
         part.boundingRadius         = 2.0f;
-        part.morphOffset            = rc.AllocateMorphDeltas(static_cast<uint32_t>(box.vertexCount) * kMorphTargets, deltas.data());
+        part.morphOffset            = rc.AllocateMorphDeltas(std::span {deltas});
         part.activeMorphCount       = kMorphTargets;
         part.defaultMorphWeights[0] = kDefaultMorphWeight0;
         part.defaultMorphWeights[1] = kDefaultMorphWeight1;

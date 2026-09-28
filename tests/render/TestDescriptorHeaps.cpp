@@ -179,7 +179,7 @@ struct DescriptorHeapsSuite {
                 texelBlock.fill(texel);
 
                 const std::string   texName = std::format("dheap_tex_{:02}", i);
-                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, 8, 8, false, texelBlock.data());
+                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, false);
                 if (tex == ZHLN::TextureHandle::Invalid) {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }
@@ -286,7 +286,7 @@ struct DescriptorHeapsSuite {
             std::array<uint32_t, 16 * 16> texels {};
             texels.fill(0xFF3366CCu);
 
-            const ZHLN::TextureHandle first = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+            const ZHLN::TextureHandle first = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
             if (first == ZHLN::TextureHandle::Invalid) {
                 return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
             }
@@ -296,7 +296,7 @@ struct DescriptorHeapsSuite {
             // slot, no new upload. Before the guard each of these consumed a
             // fresh globalTextures[] index and leaked the previous image.
             for (uint32_t attempt = 0; attempt < 10; ++attempt) {
-                const ZHLN::TextureHandle again = rc.CreateProceduralTexture("dheap_slot_reuse", 16, 16, false, texels.data());
+                const ZHLN::TextureHandle again = rc.CreateProceduralTexture("dheap_slot_reuse", {16, 16}, texels, false);
                 ZHLN::Test::ExpectTrue(again == first);
                 ZHLN::Test::ExpectEq(rc.GetBindlessIndex(again), firstIndex);
             }
@@ -305,7 +305,7 @@ struct DescriptorHeapsSuite {
             // the dedupe is by asset id and content, not a blanket refusal.
             std::array<uint32_t, 16 * 16> otherTexels {};
             otherTexels.fill(0xFF22AA55u);
-            const ZHLN::TextureHandle other = rc.CreateProceduralTexture("dheap_slot_reuse_other", 16, 16, false, otherTexels.data());
+            const ZHLN::TextureHandle other = rc.CreateProceduralTexture("dheap_slot_reuse_other", {16, 16}, otherTexels, false);
             ZHLN::Test::ExpectTrue(other != first);
             ZHLN::Test::ExpectTrue(rc.GetBindlessIndex(other) != firstIndex);
 

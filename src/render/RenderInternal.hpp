@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "DestinationRegistry.hpp"
+#include "FrameDestinations.hpp"
 #include "Rendering.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
@@ -40,6 +40,7 @@
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -52,6 +53,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -511,7 +513,24 @@ struct RenderContext::Impl {
     UIRenderer uiRenderer;
 
 
-    DestinationRegistry destinations;
+    FrameDestinations destinations;
+
+    struct RenderTexture {
+        Vk::ImageSlice image {};
+        uint32_t bindlessIndex = 0;
+        Vk::AttachmentLayout layout = Vk::AttachmentLayout::Undefined;
+        bool drawn = false;
+    };
+    std::unordered_map<RenderTextureHandle, RenderTexture> renderTextures;
+
+    // Process-wide IDs prevent a handle from one renderer from aliasing a new
+    // render texture (or a frame capability) after device-loss recovery.
+    static inline std::atomic<uint64_t> nextRenderTextureId {1};
+    static inline std::atomic<uint64_t> nextRendererId {1};
+    uint64_t rendererId = nextRendererId.fetch_add(1, std::memory_order_relaxed);
+    uint64_t frameSerial = 0;
+    uint64_t nextAcquisition = 1;
+    bool warnedUnwrittenTarget = false;
 
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
@@ -553,37 +572,39 @@ struct RenderContext::Impl {
 
 
     struct DestinationVend {
-        DestinationRegistry::WindowEntry* entry   = nullptr;
-        bool                              created = false;
+        FrameDestinations::Window* entry = nullptr;
+        bool created = false;
     };
 
-    [[nodiscard]] auto FindOrCreateDestination(PresentationTarget& aux, bool primary) noexcept
+    [[nodiscard]] auto FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept
         -> std::expected<DestinationVend, ErrorCode>;
-    [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
-        -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
-    struct ReconcileReceipt {
-        DestinationRegistry::Rendered rendered;
-        Vk::AttachmentLayout          layout = Vk::AttachmentLayout::Undefined;
+    [[nodiscard]] auto AcquireDestinationImage(FrameDestinations::Window& dest) noexcept -> std::expected<bool, ErrorCode>;
+    [[nodiscard]] auto ReconcileDestination(FrameDestinations::Window& dest) noexcept -> FrameOutcome<Vk::AttachmentLayout>;
+    [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget>;
+    [[nodiscard]] auto AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<FrameTarget>;
+
+    struct ResolvedTarget {
+        FrameDestinations::Window& window;
+        Vk::ImageSlice image;
+        Vk::AttachmentLayout& layout;
+        bool& drawn;
     };
-    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept -> FrameOutcome<ReconcileReceipt>;
-    [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) noexcept -> std::optional<RenderAttachment>;
-    [[nodiscard]] auto AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment>;
-    [[nodiscard]] auto RecordingFor(const DestinationRegistry::Record& record) const noexcept -> VkCommandBuffer;
+    [[nodiscard]] auto ResolveTarget(const FrameTarget& target) noexcept -> std::expected<ResolvedTarget, ErrorCode>;
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
-    void               ReleaseTarget(const PresentationTarget& aux) noexcept;
-    void               DestroyDestinations() noexcept;
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+    void ReleaseTarget(const PresentationTarget& aux) noexcept;
+    void DestroyDestinations() noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode>;
+    void DestroyRenderTexture(RenderTextureHandle handle) noexcept;
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
-    std::optional<DestinationRegistry::Record> sceneTarget;
+    // Non-owning view while a scene graph is executing. Never cached across
+    // a frame or used as an alternate path around ResolveTarget.
+    std::optional<Vk::ImageSlice> sceneTarget;
 
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
-        if (const PresentationTarget* active = destinations.ActiveTarget(); active != nullptr) {
-            if (auto* dest = destinations.Find(*active); dest != nullptr) {
-                return dest->Presenter();
-            }
+        if (const auto* active = destinations.Active(); active != nullptr) {
+            return active->Presenter();
         }
         return presenter;
     }

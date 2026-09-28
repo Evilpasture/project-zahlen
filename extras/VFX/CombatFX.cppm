@@ -122,7 +122,7 @@ class System {
         auto& rc = engine.GetRenderContext();
 
         // 1. Build default bullet hole texture
-        m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", 128, 128, true, GenerateBulletHoleTexture(128).data());
+        m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", {128, 128}, GenerateBulletHoleTexture(128), true);
 
         // 2. Setup standard default surface presets
         // Preset 0: Generic Solid / Concrete

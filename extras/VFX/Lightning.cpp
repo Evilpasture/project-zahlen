@@ -199,8 +199,8 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const auto segments = GenerateFractalSegments(cloudOrigin, groundTarget, cfg.ribbonWidth, cfg, s_rng);
     const auto ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
 
-    const BufferHandle vboPos  = rc.CreateVertexBuffer(ribbon.positions.data(), ribbon.positions.size() * sizeof(VertexPosition));
-    const BufferHandle vboAttr = rc.CreateVertexBuffer(ribbon.attributes.data(), ribbon.attributes.size() * sizeof(VertexAttributes));
+    const BufferHandle vboPos  = rc.CreateVertexBuffer(std::span {ribbon.positions});
+    const BufferHandle vboAttr = rc.CreateVertexBuffer(std::span {ribbon.attributes});
 
     const Entity boltEntity = reg.Create();
     // The renderer, not the component destructor, owns this association. It

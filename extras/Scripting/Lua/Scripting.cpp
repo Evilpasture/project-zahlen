@@ -30,10 +30,14 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
+#include <limits>
 #include <physics/PhysicsWorld.hpp>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -709,10 +713,13 @@ void RegisterCreativeWorkCommands() {
                 }));
 
     RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
-                    if (a.data == nullptr || a.width == 0 || a.height == 0) {
+                    const uint64_t texels = static_cast<uint64_t>(a.width) * a.height;
+                    if (a.data == nullptr || texels == 0 || texels > std::numeric_limits<size_t>::max() / 4) {
                         return 1;
                     }
-                    auto res = engine->GetRenderContext().CreateTexture(a.data, a.width, a.height, a.isSRGB != 0);
+                    auto res = engine->GetRenderContext().CreateTexture(
+                        std::span {static_cast<const std::byte*>(a.data), static_cast<size_t>(texels) * 4}, {a.width, a.height}, a.isSRGB != 0
+                    );
                     return res.value_or(1);
                 }));
 }

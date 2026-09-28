@@ -158,7 +158,7 @@ struct Pixel {
 //
 // That is the layout RenderContext::CreateTexture takes, so uploading a raster
 // is a call to the engine's own function with no repacking and no wrapper here:
-// `ctx.CreateTexture(raster.pixels.data(), raster.width, raster.height)`. The
+// `ctx.CreateTexture(std::as_bytes(std::span {raster.pixels}), {raster.width, raster.height})`. The
 // render calls already converted to straight alpha unless Premultiplied was
 // asked for, which is what that function expects.
 struct Raster {

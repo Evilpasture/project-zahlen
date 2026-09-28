@@ -22,7 +22,7 @@ struct SceneView {
     JPH::Mat44       invViewProjMatrix = JPH::Mat44::sIdentity();
     JPH::Vec3        worldPosition     = JPH::Vec3::sZero();
     ViewportRect     viewport          = {};
-    RenderAttachment target            = {};
+    FrameTarget     target            = {};
     Frustum          frustum           = {};
     uint64_t         visibilityMask    = ~0ULL;
     uint32_t         frameIndex        = 0;
@@ -31,7 +31,7 @@ struct SceneView {
 
 struct UIView {
     ViewportRect     viewport   = {};
-    RenderAttachment target     = {};
+    FrameTarget     target     = {};
     uint32_t         frameIndex = 0;
 };
 
