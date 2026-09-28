@@ -131,14 +131,14 @@ struct MipmappedRenderTarget {
         target.image = std::move(img_res.value());
 
         const VkImageAspectFlags aspect = GetFormatAspect(F);
-        auto view_res = CreateView(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
+        auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
         target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            auto mip_res = CreateView(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m));
+            auto mip_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m));
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }

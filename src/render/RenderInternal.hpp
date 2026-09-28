@@ -837,7 +837,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
-            auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }

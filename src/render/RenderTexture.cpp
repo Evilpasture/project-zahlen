@@ -22,7 +22,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     }
     auto image = std::move(*imageRes);
 
-    auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }

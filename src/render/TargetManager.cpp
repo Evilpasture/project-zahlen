@@ -15,7 +15,7 @@ auto TargetManager::CreateCascadeViews(VkImage image, ZHLN::Array<Vk::ImageView>
     out.clear();
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(_ctx.Device(), image, i, 1);
+        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(_ctx.Device(), image, i, 1);
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -135,7 +135,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowAtlas   = std::move(*sa_res);
 
     const VkImage atlas = _graph.shadowAtlas.image.Handle();
-    auto cube_res = Vk::CreateView(
+    auto cube_res = Vk::ImageView::Create(
         _ctx.Device(), Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
     );
     if (!cube_res) {
@@ -143,7 +143,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     }
     _shadowAtlasCubeView = std::move(*cube_res);
 
-    auto array_res = Vk::CreateView(
+    auto array_res = Vk::ImageView::Create(
         _ctx.Device(), Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
     );
     if (!array_res) {
@@ -218,7 +218,7 @@ void TargetManager::RecreatePunctualShadowViews() noexcept {
     _punctualShadowViews.clear();
     _punctualShadowViews.resize(kPunctualLights);
     for (uint32_t i = 0; i < kPunctualLights; ++i) {
-        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(
             _ctx.Device(), _graph.shadowAtlas.image.Handle(),
             i * 6,
             6,

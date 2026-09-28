@@ -87,7 +87,7 @@ class TextureUploader {
             }
         });
 
-        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT));
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -136,7 +136,7 @@ class TextureUploader {
             );
         });
 
-        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1));
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -177,7 +177,7 @@ class TextureUploader {
             );
         });
 
-        auto viewRes = CreateView(_ctx.Device(), MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1));
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {

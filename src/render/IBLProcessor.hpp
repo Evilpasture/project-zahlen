@@ -281,14 +281,14 @@ class IBLProcessor {
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 const auto info = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView lutView) mutable -> auto {
+                return ImageView::Create(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView lutView) mutable -> auto {
                     state.payload.brdfLutView = std::move(lutView);
                     return std::move(state);
                 });
             })
             .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 const auto info = MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), state.payload.prefilteredFormat, kMipLevels);
-                return CreateView(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView cubeView) mutable -> auto {
+                return ImageView::Create(impl.ctx.Device(), info).transform([state = std::move(state)](ImageView cubeView) mutable -> auto {
                     state.payload.prefilteredView = std::move(cubeView);
                     return std::move(state);
                 });

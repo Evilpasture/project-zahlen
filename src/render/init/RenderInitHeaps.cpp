@@ -296,11 +296,11 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 
             stagingContext->ExecuteAsync();
 
-            return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
+            return Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
                 .transform_error([](auto res) -> ErrorCode { return res; })
                 .and_then([&](auto&& matView) -> std::expected<void, ErrorCode> {
                     ltcMatView = std::forward<decltype(matView)>(matView);
-                    return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
+                    return Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
                         .transform_error([](auto res) -> ErrorCode { return res; })
                         .transform([&](auto&& ampView) -> auto {
                             ltcAmpView = std::forward<decltype(ampView)>(ampView);

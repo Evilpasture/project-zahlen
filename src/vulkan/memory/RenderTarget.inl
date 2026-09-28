@@ -68,7 +68,7 @@ inline auto
     const auto viewDesc = desc.arrayLayers > 1
         ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
         : MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
-    auto view_res = CreateView(ctx.Device(), viewDesc);
+    auto view_res = ImageView::Create(ctx.Device(), viewDesc);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
@@ -115,7 +115,7 @@ inline auto
     }
     rt.image = std::move(img_res.value());
 
-    auto view_res = CreateView(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
+    auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
