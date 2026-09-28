@@ -4,20 +4,24 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "Zahlen/Render/Render.hpp"
+#include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 // Engine.hpp only forward-declares SystemGraph; the scene-reset test calls
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/gui/GUI.hpp>
+#include <array>
 #include <cstddef>
 #include <expected>
+#include <span>
 #include <format>
 #include <string>
 
@@ -133,6 +137,53 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(engine != nullptr);
             engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> stale_skinned_scratch_skips_draw_and_csg() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("StaleSkinnedScratch", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+
+            auto& rc = engine->GetRenderContext();
+            auto material = rc.CreateBasicMaterial();
+            if (!ZHLN::Test::ExpectTrue(material.has_value())) {
+                return {};
+            }
+
+            // Valid mesh/material, but a destroyed (nonzero) scratch handle.
+            // The position and attribute buffers must differ so resolution
+            // reaches the skinned attribute-address branch.
+            std::array<ZHLN::VertexPosition, 3> positions {};
+            std::array<ZHLN::VertexAttributes, 3> attributes {};
+            const auto pos     = rc.CreateVertexBuffer(std::span {positions});
+            const auto attr    = rc.CreateVertexBuffer(std::span {attributes});
+            const auto scratch = rc.CreateSkinnedScratchBuffer(3);
+            if (!ZHLN::Test::ExpectTrue(pos != ZHLN::BufferHandle::Invalid && attr != ZHLN::BufferHandle::Invalid &&
+                                        scratch != ZHLN::BufferHandle::Invalid)) {
+                rc.DestroyBuffer(pos);
+                rc.DestroyBuffer(attr);
+                rc.DestroyBuffer(scratch);
+                return {};
+            }
+
+            rc.DestroyBuffer(scratch);
+            const ZHLN::Mesh mesh {.posBuffer = pos, .attrBuffer = attr, .vertexCount = 3};
+            rc.Draw(*material, mesh, ZHLN::DrawParams {.skinnedVertexBuffer = scratch});
+
+            ZHLN::CSGDrawParams invalidEye;
+            invalidEye.eyeParams.skinnedVertexBuffer = scratch;
+            invalidEye.cutters.push_back(ZHLN::CSGCutterParams {.mesh = mesh, .material = *material});
+            rc.DrawCSG(*material, mesh, invalidEye);
+
+            ZHLN::CSGDrawParams invalidCutter;
+            invalidCutter.cutters.push_back(ZHLN::CSGCutterParams {.mesh = mesh, .material = *material, .skinnedVertexBuffer = scratch});
+            rc.DrawCSG(*material, mesh, invalidCutter);
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+
+            rc.DestroyBuffer(pos);
+            rc.DestroyBuffer(attr);
             return {};
         }
 

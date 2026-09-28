@@ -199,9 +199,14 @@ struct InstanceDataDesc {
     res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer) : res.posMesh;
+    // A non-invalid scratch handle can still be stale or destroyed; unlike
+    // the base position buffer, it has not been validated yet.
+    if (res.finalPosMesh == nullptr) [[unlikely]] {
+        return std::nullopt;
+    }
 
-    res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
-    res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
+    res.posAddr  = res.finalPosMesh->vboAddress;
+    res.attrAddr = res.attrMesh->vboAddress;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
         auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
@@ -216,9 +221,9 @@ struct InstanceDataDesc {
         }
     }
 
-    if (res.posMesh == res.attrMesh && res.posMesh != nullptr) {
+    if (res.posMesh == res.attrMesh) {
         res.attrAddr = res.posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
-    } else if (skinnedVertexBuffer != Invalid && res.posMesh != nullptr) {
+    } else if (skinnedVertexBuffer != Invalid) {
         res.attrAddr = res.finalPosMesh->vboAddress + (res.posMesh->vertexCount * sizeof(VertexPosition));
     }
 
@@ -309,7 +314,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     if (!resolved) [[unlikely]] {
         static uint32_t s_WarnCount = 0;
         if (s_WarnCount++ < 5) {
-            ZHLN::Log("WARNING: RenderContext::Draw skipped draw call with invalid mesh or material handle.");
+            ZHLN::Log("WARNING: RenderContext::Draw skipped draw call with invalid mesh, material, or skinned scratch handle.");
         }
         return;
     }
@@ -336,7 +341,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .alphaMode        = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel      = isViewmodel != 0u,
                  .isSkinned        = isSkinned != 0u,
-                 .vertexCount      = (resolved->posMesh != nullptr) ? resolved->posMesh->vertexCount : 0u,
+                 .vertexCount      = resolved->posMesh->vertexCount,
                  .indexCount       = mesh.indexCount,
                  .jointOffset      = params.jointOffset,
                  .morphOffset      = params.morphOffset,
@@ -383,17 +388,17 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
 void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept {
     auto MakeCommand = [&](const Material& material, const Mesh& mesh, const JPH::Mat44& transform, const JPH::Mat44& prevTransform, float cullRadius,
-                           uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> DrawCommand {
+                           uint32_t jointOffset, BufferHandle skinnedVertexBuffer, DrawFlags flags) -> std::optional<DrawCommand> {
         auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, skinnedVertexBuffer);
         if (!resolved) {
-            return {};
+            return std::nullopt;
         }
 
         auto tex = ResolveMaterialTextures(_impl.get(), material);
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
-        return {
+        return DrawCommand {
             .instanceData =
             BuildGPUInstanceData(
                 InstanceDataDesc {
@@ -405,7 +410,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .indices         = tex,
                     .alphaMode       = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                     .isSkinned       = isSkinned != 0u,
-                    .vertexCount     = (resolved->finalPosMesh != nullptr) ? resolved->finalPosMesh->vertexCount : 0u,
+                    .vertexCount     = resolved->finalPosMesh->vertexCount,
                     .indexCount      = mesh.indexCount,
                     .jointOffset     = jointOffset,
                     .cullRadius      = cullRadius,
@@ -446,20 +451,27 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         };
     };
 
-    CSGDrawCommand csgCmd;
-
-    DrawFlags eyeFlags = params.eyeParams.flags;
-    csgCmd.eyeDraw     = MakeCommand(
+    const auto eyeDraw = MakeCommand(
         eyeMaterial, eyeMesh, params.eyeParams.transform, params.eyeParams.prevTransform, params.eyeParams.cullRadius, params.eyeParams.jointOffset,
-        params.eyeParams.skinnedVertexBuffer, eyeFlags
+        params.eyeParams.skinnedVertexBuffer, params.eyeParams.flags
     );
+    if (!eyeDraw) [[unlikely]] {
+        return;
+    }
+
+    CSGDrawCommand csgCmd;
+    csgCmd.eyeDraw = *eyeDraw;
 
     for (const auto& cutter: params.cutters) {
-        DrawCommand cutCmd = MakeCommand(
+        auto cutCmd = MakeCommand(
             cutter.material, cutter.mesh, cutter.transform, cutter.prevTransform, cutter.cullRadius, cutter.jointOffset, cutter.skinnedVertexBuffer,
             cutter.flags
         );
-        csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
+        // Missing geometry invalidates the whole boolean, not just this cutter.
+        if (!cutCmd) [[unlikely]] {
+            return;
+        }
+        csgCmd.cutters.push_back({.draw = *cutCmd, .instanceIdx = 0, .operation = cutter.operation});
     }
 
     _impl->queues.CsgDraws().push_back(std::move(csgCmd));

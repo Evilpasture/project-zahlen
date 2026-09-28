@@ -5,7 +5,6 @@
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
-#include <utility>
 
 namespace ZHLN {
 
@@ -65,22 +64,29 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
     };
 
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
-    return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get())
-        .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
-            return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
-                       pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0}
-            )
-                .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
-                    _smaaAreaTexIdx = areaIdx;
-                    return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
-                        pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1}
-                    );
-                })
-                .transform([&](uint32_t searchIdx) -> void {
-                    _smaaSearchTexIdx = searchIdx;
-                    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
-                });
-        });
+    auto pass = Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get());
+    if (!pass) {
+        return std::unexpected(pass.error());
+    }
+
+    auto area = impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
+        *pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0}
+    );
+    if (!area) {
+        return std::unexpected(area.error());
+    }
+
+    auto search = impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
+        *pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1}
+    );
+    if (!search) {
+        return std::unexpected(search.error());
+    }
+
+    _smaaAreaTexIdx   = *area;
+    _smaaSearchTexIdx = *search;
+    ZHLN::Log("[SMAA] Area and search LUTs baked on GPU.");
+    return {};
 }
 
 void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
