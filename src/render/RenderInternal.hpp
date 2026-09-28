@@ -503,19 +503,6 @@ struct RenderContext::Impl {
 
     uint32_t packedLightCount = 0;
 
-    struct ScenePassStamp {
-        uint32_t draws         = 0;
-        uint32_t csgDraws      = 0;
-        uint32_t meshParticles = 0;
-        uint32_t shadowDraws   = 0;
-        bool     ran           = false;
-        bool     gpuCulling    = false;
-        bool     meshShading   = false;
-    };
-    ScenePassStamp scenePass1;
-    ScenePassStamp scenePass2;
-    ScenePassStamp shadowPass;
-
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;

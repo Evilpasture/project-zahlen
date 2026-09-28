@@ -92,6 +92,4 @@ using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
 // pipeline, which is the granularity a GPU-culled indirect draw is issued at.
 [[nodiscard]] auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange>;
 
-void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept;
-
 }

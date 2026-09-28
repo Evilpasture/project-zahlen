@@ -202,13 +202,4 @@ auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange
     return groups;
 }
 
-void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
-    stamp.draws         = drawCount;
-    stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
-    stamp.meshParticles = static_cast<uint32_t>(ctx.queues.MeshParticleEmitters().size());
-    stamp.ran           = ran;
-    stamp.meshShading   = ctx.MeshShadingActive();
-    stamp.gpuCulling    = false;
-}
-
 }

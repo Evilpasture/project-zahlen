@@ -177,7 +177,6 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
     FrameRecorder recorder(cmd, impl);
 
     const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
-    StampScenePass(impl.scenePass1, impl, drawCount, drawCount != 0);
     if (drawCount == 0) {
         // Nothing to draw, but the GBuffer still has to be in a defined state:
         // clear it rather than leave last frame's contents in the targets.
@@ -197,7 +196,6 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
-    impl.scenePass1.gpuCulling = useGpuCulling;
 
     const GBufferTargets in = GBufferSceneTargets(impl);
     if (useGpuCulling) {

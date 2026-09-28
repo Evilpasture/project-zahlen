@@ -102,15 +102,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         }
     }
 
-    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.Draws().size());
-    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
-    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.MeshParticleEmitters().size());
-    ctx.shadowPass.meshShading   = ctx.MeshShadingActive();
-    for (const uint32_t slotDraws: passDrawCounts) {
-        ctx.shadowPass.shadowDraws += slotDraws;
-    }
-    ctx.shadowPass.ran = ctx.shadowPass.shadowDraws != 0 || ctx.shadowPass.meshParticles != 0;
-
     {
         const bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 

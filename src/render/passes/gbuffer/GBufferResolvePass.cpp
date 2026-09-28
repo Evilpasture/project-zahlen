@@ -110,9 +110,6 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
     FrameRecorder recorder(cmd, impl);
 
     const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
-    StampScenePass(
-        impl.scenePass2, impl, drawCount, !(drawCount == 0 && impl.queues.MeshParticleEmitters().empty() && impl.queues.CsgDraws().empty())
-    );
     if (drawCount == 0 && impl.queues.MeshParticleEmitters().empty() && impl.queues.CsgDraws().empty()) {
         return;
     }
@@ -121,7 +118,6 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
-    impl.scenePass2.gpuCulling = useGpuCulling;
 
     const GBufferTargets in = GBufferSceneTargets(impl);
     if (useGpuCulling) {
