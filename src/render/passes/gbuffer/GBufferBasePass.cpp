@@ -51,19 +51,20 @@ struct TaskSystemSchedulerAdapter {
 // pipeline-sorted runs are drawn from it. The HiZ pyramid is the rejection
 // test, so this is also the point where the second-pass candidate list is
 // produced for the resolve pass to pick up.
-void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
-    VkCommandBuffer cmd = recorder.cmd;
-    auto&           ctx = recorder.ctx;
+void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+    VkCommandBuffer cmd = passCtx.Cmd();
+    auto&           ctx = passCtx.ctx;
+    const uint32_t  frameIndex = ctx.presenter.frameIndex;
 
     Vk::BufferBarrier(
-        cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
+        cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
         Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
     );
 
-    Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
+    Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[frameIndex], 0, 0u);
 
     Vk::BufferBarrier(
-        cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+        cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
         Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
     );
 
@@ -79,11 +80,11 @@ void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange
     };
 
     const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
-        Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[recorder.frameIndex]),
+        ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
+        Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
-        Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
-        Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
+        Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
+        Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
     );
     ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
 
@@ -100,18 +101,18 @@ void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange
         .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorClearcoat)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
-            recorder.EnsureHeapState(cmd);
+            passCtx.EnsureHeapState();
 
             for (const auto& group: groups) {
                 if (!group.material->pipeline.Valid()) {
                     continue;
                 }
-                recorder.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
+                passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline.Get(),
                         .layout         = group.material->layout,
                         .heap           = true,
-                        .argumentBuffer = ctx.frames.indirectCommandsBuffers[recorder.frameIndex].Handle(),
+                        .argumentBuffer = ctx.frames.indirectCommandsBuffers[frameIndex].Handle(),
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,
                     },
@@ -124,10 +125,11 @@ void RecordGpuCulled(const FrameRecorder& recorder, const ZHLN::Array<GroupRange
 // CPU culling: no indirect buffer, so the draw queue is replayed in parallel
 // across worker secondaries inside one render pass begun with the
 // secondary-command-buffer flag.
-void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GBufferTargets& in) noexcept {
-    VkCommandBuffer cmd     = recorder.cmd;
-    auto&           ctx     = recorder.ctx;
-    const auto      sceneVp = ctx.EffectiveViewport();
+void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTargets& in) noexcept {
+    VkCommandBuffer cmd        = passCtx.Cmd();
+    auto&           ctx        = passCtx.ctx;
+    const uint32_t  frameIndex = ctx.presenter.frameIndex;
+    const auto      sceneVp    = ctx.EffectiveViewport();
 
     const auto pass = Vk::DynamicPass(in.sceneColor.extent)
         .Viewport(sceneVp)
@@ -156,8 +158,8 @@ void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GB
                 if (wIdx >= ctx.workerCmds.size()) {
                     wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
                 }
-                uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[recorder.frameIndex].fetch_add(1, std::memory_order::relaxed);
-                return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
+                uint32_t localCmdIdx = ctx.workerCmds[wIdx].cmdCount[frameIndex].fetch_add(1, std::memory_order::relaxed);
+                return ctx.workerCmds[wIdx].pools[frameIndex][localCmdIdx];
             },
             [&](Vk::CommandEncoder& encoder, uint32_t i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
@@ -174,7 +176,7 @@ void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GB
 } // namespace
 
 void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
-    FrameRecorder recorder(cmd, impl);
+    PassContext passCtx(cmd, impl);
 
     const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
     if (drawCount == 0) {
@@ -199,9 +201,9 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const GBufferTargets in = GBufferSceneTargets(impl);
     if (useGpuCulling) {
-        RecordGpuCulled(recorder, groups, drawCount, in);
+        RecordGpuCulled(passCtx, groups, drawCount, in);
     } else {
-        RecordCpuCulled(recorder, drawCount, in);
+        RecordCpuCulled(passCtx, drawCount, in);
     }
 }
 

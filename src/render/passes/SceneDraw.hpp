@@ -74,11 +74,11 @@ void SubmitDrawInstanced(
 
 // Stencil-buffer constructive solid geometry: the cutters write the stencil,
 // then the eye mesh is drawn against it to cut or intersect.
-void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept;
+void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept;
 
-void Draw3DParticles(const FrameRecorder& recorder) noexcept;
+void Draw3DParticles(PassContext& passCtx) noexcept;
 
-void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept;
+void Draw3DParticleShadows(PassContext& passCtx) noexcept;
 
 // The five GBuffer color targets plus the depth target, as the attachments a
 // raster pass writes them as. Both GBuffer passes (and the viewmodel pass,

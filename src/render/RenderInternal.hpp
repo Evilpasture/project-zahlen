@@ -857,29 +857,25 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         });
 }
 
-struct FrameRecorder {
-    Vk::CommandBuffer<Vk::QueueType::Graphics> cmd;
-    mutable Vk::CommandEncoder                 encoder;
-    RenderContext::Impl&                       ctx;
-    uint32_t                                   frameIndex;
-    bool heapsInherited;
+// Pass-local encoder and renderer state for the draw helpers. The encoder
+// holds the sole command-buffer handle; the frame slot comes from ctx.presenter.
+struct PassContext {
+    Vk::CommandEncoder   encoder;
+    RenderContext::Impl& ctx;
+    bool                 heapsInherited;
 
-    FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
+    PassContext(VkCommandBuffer cmd, RenderContext::Impl& impl, bool inherited = false) noexcept:
+        encoder(cmd), ctx(impl), heapsInherited(inherited) {
     }
 
-    FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
+    [[nodiscard]] auto Cmd() const noexcept -> VkCommandBuffer {
+        return encoder.cmd;
     }
 
-    void EnsureHeapState(VkCommandBuffer c) const noexcept {
+    void EnsureHeapState() noexcept {
         if (!heapsInherited) {
-            ctx.BindHeapsAndPushFrame(c);
+            ctx.BindHeapsAndPushFrame(Cmd());
         }
-    }
-
-    void WriteCheckpoint(std::string_view name) const noexcept {
-        ctx.WriteCheckpoint(cmd, name);
     }
 };
 

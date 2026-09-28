@@ -27,17 +27,18 @@ constexpr uint32_t kFirstPunctualSlot = 4;
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     using enum LightType;
 
-    FrameRecorder recorder(cmd, impl, impl.InheritsHeaps());
-    auto&         ctx = recorder.ctx;
+    PassContext    passCtx(cmd, impl, impl.InheritsHeaps());
+    auto&          ctx        = passCtx.ctx;
+    const uint32_t frameIndex = ctx.presenter.frameIndex;
 
-    recorder.EnsureHeapState(cmd);
+    passCtx.EnsureHeapState();
 
     std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
     for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
-    auto  mapped           = ctx.shadows.IndirectCommands(recorder.frameIndex).Map();
+    auto  mapped           = ctx.shadows.IndirectCommands(frameIndex).Map();
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
 
     std::array<uint32_t, kSlotCount> passWriteOffsets {};
@@ -135,7 +136,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         }
                         const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
-                            recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
+                            passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
                                  .layout        = ctx.shadows.CascadeLayout(),
                                  .heap          = true,
@@ -149,7 +150,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        recorder.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
+                        passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
                              .layout      = ctx.shadows.CascadeLayout(),
                              .heap        = true,
@@ -160,11 +161,11 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         );
                     }
                 } else if (csmDrawCount > 0) {
-                    recorder.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
+                    passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
                          .layout         = ctx.shadows.CascadeLayout(),
                          .heap           = true,
-                         .argumentBuffer = ctx.shadows.IndirectCommands(recorder.frameIndex).Handle(),
+                         .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
                          .drawCount      = csmDrawCount},
                         RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
@@ -173,7 +174,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 if (hasMeshParticles) {
-                    Draw3DParticleShadows(recorder);
+                    Draw3DParticleShadows(passCtx);
                 }
             });
     }
@@ -211,12 +212,12 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             ExecutePunctualPass(subViewImage, [&]() {
                 if (drawCount > 0) {
                     const PunctualPush pc = {l_idx};
-                    recorder.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
+                    passCtx.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
                         {
                             .pipeline       = ctx.shadows.PunctualPipeline(),
                             .layout         = ctx.shadows.PunctualLayout(),
                             .heap           = true,
-                            .argumentBuffer = ctx.shadows.IndirectCommands(recorder.frameIndex).Handle(),
+                            .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
                             .drawCount      = drawCount,
                         },

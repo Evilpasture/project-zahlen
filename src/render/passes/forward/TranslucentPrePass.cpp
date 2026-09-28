@@ -10,8 +10,8 @@ namespace ZHLN::Passes {
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
-    FrameRecorder recorder(cmd, impl);
-    const auto    sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, impl);
+    const auto  sceneVp = impl.EffectiveViewport();
 
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(impl.graphResources.transNormalBuffer);
     const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(impl.graphResources.transDepthBuffer);
@@ -35,7 +35,7 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
+                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
                     drawCmd.prePassMaterial->layout
                 );
             }

@@ -23,8 +23,8 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     ctx.BindHeapsAndPushFrame(cmd);
 
-    FrameRecorder recorder(cmd, impl);
-    const auto    sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, impl);
+    const auto  sceneVp = impl.EffectiveViewport();
 
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor);
     const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(impl.presenter.depthTarget);
@@ -47,7 +47,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
@@ -63,7 +63,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                         .textureIndex       = emitter.params.textureIndex
                     };
 
-                    recorder.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
+                    passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
                          .layout        = ctx.particleRenderLayout,
                          .heap          = true,
@@ -79,7 +79,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
                 const RenderContext::Impl::ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
 
-                recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
+                passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),
                      .layout        = ctx.linePipelineLayout,
                      .heap          = true,

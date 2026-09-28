@@ -63,8 +63,6 @@ struct TonemapBlitPass: Vk::RenderPass<
             }
         }();
 
-        FrameRecorder blitRecorder(cmd, impl);
-
         const uint32_t fIdx = impl.presenter.frameIndex;
 
         const Vk::HeapBlockBase block = impl.blitPass.WriteHeapParameters<Shaders::Blit>(
@@ -91,7 +89,7 @@ struct TonemapBlitPass: Vk::RenderPass<
         if (impl.blitPass.pipeline.Valid()) {
             const auto swapchainTarget = getSwapchainImage();
 
-            blitRecorder.EnsureHeapState(cmd);
+            impl.BindHeapsAndPushFrame(cmd);
             Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
                 impl.blitPass.ExecuteHeap<Shaders::Modules::BlitPS>(impl.ctx, cmd, pc, block);
             });
