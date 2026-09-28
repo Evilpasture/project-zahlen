@@ -99,8 +99,9 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
                     Vk::Pipeline meshPipeline = BuildMeshVariant(desc);
 
                     return Material {
-                        .pipeline  = _materials.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), _layout, std::move(meshPipeline)),
-                        .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
+                        .pipeline    = _materials.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), _layout, std::move(meshPipeline)),
+                        .alphaMode   = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u,
+                        .doubleSided = desc.doubleSided
                     };
                 });
         });

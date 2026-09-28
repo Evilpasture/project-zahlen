@@ -151,7 +151,13 @@ public extension InstanceData {
     public property bool isSkinned {
         [ForceInline]
         get {
-            return ((this.flags >> 8) & 0xFFu) != 0;
+            return (this.flags & (1u << 8)) != 0;
+        }
+    }
+    public property bool isDoubleSided {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 9)) != 0;
         }
     }
     public property bool isViewmodel {

@@ -88,6 +88,7 @@ struct Material {
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
+    bool                doubleSided        = false;
     float               transmissionFactor = 0.0f;
     float               iridescenceFactor  = 0.0f;
     float               filmThicknessNm    = 0.0f;

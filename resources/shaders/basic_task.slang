@@ -45,7 +45,9 @@ void TaskMain(uint gtid: SV_GroupIndex, uint3 gid: SV_GroupID) {
                 float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
                 isVisible         = SphereFrustumVisible(activeVP, sphereWorld, radiusWorld);
 
-                if (isVisible) {
+                // The rasterizer's CullNone cannot recover a meshlet discarded
+                // here: a double-sided material must be visible from either side.
+                if (isVisible && !inst.isDoubleSided) {
                     float3 coneAxisWorld = normalize(mul((float3x3) world, m.coneAxis));
                     if (ConeBackfaceCulledSphere(sphereWorld, radiusWorld, coneAxisWorld, m.coneCutoff, scene.frame.camPos.xyz)) {
                         isVisible = false;
