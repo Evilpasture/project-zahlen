@@ -312,8 +312,13 @@ class PipelineBuilder {
         if (_cfg.stages == nullptr) {
             return std::unexpected(MissingShaders);
         }
-        if (_cfg.stages->vert.handle == VK_NULL_HANDLE && _cfg.stages->mesh.handle == VK_NULL_HANDLE) {
+        if (_cfg.stages->vert.code == nullptr && _cfg.stages->mesh.code == nullptr) {
             return std::unexpected(MissingShaders);
+        }
+        for (const ZHLN_Shader* shader: {&_cfg.stages->vert, &_cfg.stages->task, &_cfg.stages->mesh, &_cfg.stages->frag}) {
+            if ((shader->code == nullptr) != (shader->size == 0) || shader->size % sizeof(uint32_t) != 0) {
+                return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
+            }
         }
         if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return std::unexpected(MissingLayout);

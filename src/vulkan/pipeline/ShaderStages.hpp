@@ -7,6 +7,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -18,10 +19,8 @@ enum class ShaderStageCreationError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader file open failed">{}) = 1,
     InvalidSpirvSize ZHLN_ANNOTATION(ZHLN::Description<"Invalid SPIR-V size">{}),
     ShaderLoadingFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader loading failed">{}),
-    VertexShaderEmpty ZHLN_ANNOTATION(ZHLN::Description<"Vertex shader is empty">{}),
-    ShaderModuleCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader module creation failed">{}),
+    VertexShaderEmpty ZHLN_ANNOTATION(ZHLN::Description<"Vertex or mesh shader is empty">{}),
 };
-
 
 [[nodiscard]] constexpr auto CreateShaderDesc(const uint32_t* code, size_t size, const char* entry = nullptr) -> ZHLN_ShaderDesc {
     return ZHLN_ShaderDesc {.code = code, .size = size, .entry_point = entry};
@@ -34,82 +33,81 @@ template <typename T, size_t Extent>
 
 class ShaderStages {
   public:
-    constexpr ShaderStages() = default;
-    constexpr ShaderStages(VkDevice device, const ZHLN_ShaderStages raw): _device(device), _raw(raw) {
-    }
-    constexpr ShaderStages(VkDevice device, const ZHLN_ShaderStages raw, std::vector<uint32_t> vertSpv, std::vector<uint32_t> fragSpv):
-        _device(device), _raw(raw), _vertSpv(std::move(vertSpv)), _fragSpv(std::move(fragSpv)) {
-    }
-    constexpr ShaderStages(
-        VkDevice                device,
-        const ZHLN_ShaderStages raw,
-        std::vector<uint32_t>   vertSpv,
-        std::vector<uint32_t>   fragSpv,
-        std::vector<uint32_t>   taskSpv,
-        std::vector<uint32_t>   meshSpv
-    ): _device(device), _raw(raw), _vertSpv(std::move(vertSpv)), _fragSpv(std::move(fragSpv)), _taskSpv(std::move(taskSpv)), _meshSpv(std::move(meshSpv)) {
-    }
-
-    ~ShaderStages();
+    ShaderStages() = default;
+    ~ShaderStages() = default;
     ShaderStages(const ShaderStages&)                    = delete;
     auto operator=(const ShaderStages&) -> ShaderStages& = delete;
     ShaderStages(ShaderStages&& other) noexcept;
     auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
 
+    // Copies arbitrary caller-provided SPIR-V so the stage metadata stays valid.
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+    static auto Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+
+    // The caller keeps both byte buffers alive through reflection and pipeline
+    // creation. Use this for embedded programs and synchronous material builds.
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto CreateBorrowed(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+
+    // Adopt file-loaded SPIR-V without a second copy. Empty vectors mean the
+    // corresponding descriptor borrows embedded fallback bytes instead.
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto CreateLoaded(
+        const ZHLN_ShaderDesc& vert, std::vector<uint32_t> vertDisk, const ZHLN_ShaderDesc& frag, std::vector<uint32_t> fragDisk
+    ) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(VkDevice device) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    static auto Create() -> std::expected<ShaderStages, ZHLN::ErrorCode> {
         static_assert(StageOf<Vert>() == VK_SHADER_STAGE_VERTEX_BIT, "Create() wants a vertex module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "Create() wants a fragment module second (<ShaderBindings.hpp>)");
-        return Create(device, CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
+        return CreateBorrowed(CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
     }
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    static auto CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+        -> std::expected<ShaderStages, ZHLN::ErrorCode>;
+
+    // As with CreateBorrowed, all three supplied SPIR-V spans must outlive use.
+    [[nodiscard("Shader creation may fail; verify validity before binding")]]
+    static auto CreateMeshBorrowed(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
         -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh(VkDevice device) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    static auto CreateMesh() -> std::expected<ShaderStages, ZHLN::ErrorCode> {
         static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "CreateMesh() wants a task module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "CreateMesh() wants a mesh module second (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "CreateMesh() wants a fragment module third (<ShaderBindings.hpp>)");
-        return CreateMesh(device, CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
+        return CreateMeshBorrowed(CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
     }
 
-    [[nodiscard]] constexpr auto Get() const -> const ZHLN_ShaderStages* {
+    [[nodiscard]] auto Get() const noexcept -> const ZHLN_ShaderStages* {
         return &_raw;
     }
-    [[nodiscard]] constexpr auto GetVertSpv() const noexcept -> std::span<const uint32_t> {
-        return _vertSpv;
+    [[nodiscard]] auto Vertex() const noexcept -> ZHLN_ShaderDesc {
+        return {.code = _raw.vert.code, .size = _raw.vert.size, .entry_point = _raw.vert.code ? _raw.vert.entry_point : nullptr};
     }
-    [[nodiscard]] constexpr auto GetFragSpv() const noexcept -> std::span<const uint32_t> {
-        return _fragSpv;
+    [[nodiscard]] auto Fragment() const noexcept -> ZHLN_ShaderDesc {
+        return {.code = _raw.frag.code, .size = _raw.frag.size, .entry_point = _raw.frag.code ? _raw.frag.entry_point : nullptr};
     }
-    [[nodiscard]] constexpr auto GetTaskSpv() const noexcept -> std::span<const uint32_t> {
-        return _taskSpv;
-    }
-    [[nodiscard]] constexpr auto GetMeshSpv() const noexcept -> std::span<const uint32_t> {
-        return _meshSpv;
-    }
-    [[nodiscard]] constexpr auto IsMeshPipeline() const noexcept -> bool {
-        return _raw.mesh.handle != VK_NULL_HANDLE;
+    [[nodiscard]] auto IsMeshPipeline() const noexcept -> bool {
+        return _raw.mesh.code != nullptr;
     }
     [[nodiscard("Always verify shader stages are valid before pipeline creation")]]
-    constexpr auto Valid() const -> bool {
-        return _raw.vert.handle != VK_NULL_HANDLE || _raw.mesh.handle != VK_NULL_HANDLE;
+    auto Valid() const noexcept -> bool {
+        return _raw.vert.code != nullptr || _raw.mesh.code != nullptr;
     }
 
   private:
-    VkDevice              _device = VK_NULL_HANDLE;
-    ZHLN_ShaderStages     _raw {};
-    std::vector<uint32_t> _vertSpv {};
-    std::vector<uint32_t> _fragSpv {};
-    std::vector<uint32_t> _taskSpv {};
-    std::vector<uint32_t> _meshSpv {};
+    explicit ShaderStages(const ZHLN_ShaderStages& raw) noexcept: _raw(raw) {
+    }
+
+    void RebindOwned() noexcept;
+
+    ZHLN_ShaderStages                    _raw {};
+    // Static shaders leave these empty; disk-loaded stages take ownership.
+    std::array<std::vector<uint32_t>, 4> _ownedSpv {};
 };
 
 [[nodiscard]] constexpr auto AsSpirV(const void* data) -> const uint32_t* {

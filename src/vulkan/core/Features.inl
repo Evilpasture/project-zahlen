@@ -18,6 +18,8 @@ template <typename T>
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMaintenance5FeaturesKHR>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceAccelerationStructureFeaturesKHR>) {

@@ -2,87 +2,117 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShaderStages.hpp"
+#include <utility>
 
 namespace ZHLN::Vk {
 
-ShaderStages::~ShaderStages() {
-    if (_device != VK_NULL_HANDLE) {
-        ZHLN_DestroyShaderStages(_device, &_raw);
+namespace {
+
+constexpr size_t kVert = 0;
+constexpr size_t kFrag = 1;
+constexpr size_t kTask = 2;
+constexpr size_t kMesh = 3;
+
+[[nodiscard]] auto CopyCode(const ZHLN_ShaderDesc& desc) -> std::vector<uint32_t> {
+    if (desc.code == nullptr) {
+        return {};
     }
+    return {desc.code, desc.code + desc.size / sizeof(uint32_t)};
+}
+
+}
+
+void ShaderStages::RebindOwned() noexcept {
+    const auto rebind = [](ZHLN_Shader& shader, const std::vector<uint32_t>& storage) {
+        if (!storage.empty()) {
+            shader.code = storage.data();
+            shader.size = storage.size() * sizeof(uint32_t);
+        }
+    };
+    rebind(_raw.vert, _ownedSpv[kVert]);
+    rebind(_raw.frag, _ownedSpv[kFrag]);
+    rebind(_raw.task, _ownedSpv[kTask]);
+    rebind(_raw.mesh, _ownedSpv[kMesh]);
 }
 
 ShaderStages::ShaderStages(ShaderStages&& other) noexcept:
-    _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})), _vertSpv(std::move(other._vertSpv)),
-    _fragSpv(std::move(other._fragSpv)), _taskSpv(std::move(other._taskSpv)), _meshSpv(std::move(other._meshSpv)) {
+    _raw(std::exchange(other._raw, {})), _ownedSpv(std::move(other._ownedSpv)) {
+    RebindOwned();
 }
 
 auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
     if (this != &other) {
-        if (_device != VK_NULL_HANDLE) {
-            ZHLN_DestroyShaderStages(_device, &_raw);
-        }
-        _device  = std::exchange(other._device, VK_NULL_HANDLE);
-        _raw     = std::exchange(other._raw, {});
-        _vertSpv = std::move(other._vertSpv);
-        _fragSpv = std::move(other._fragSpv);
-        _taskSpv = std::move(other._taskSpv);
-        _meshSpv = std::move(other._meshSpv);
+        _raw      = std::exchange(other._raw, {});
+        _ownedSpv = std::move(other._ownedSpv);
+        RebindOwned();
     }
     return *this;
 }
 
-auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
-    ZHLN_ShaderStages           stages {};
-    if (!ZHLN_CreateShaderStages(&desc, &stages)) {
-        if (vert.code && vert.size > 0 && stages.vert.handle == VK_NULL_HANDLE) {
-            return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
-        }
-        if (frag.code && frag.size > 0 && stages.frag.handle == VK_NULL_HANDLE) {
-            return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
-        }
-        return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
+auto ShaderStages::CreateBorrowed(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    if (vert.code == nullptr || vert.size == 0) {
+        return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-    stages.vert.view_mask = ZHLN_DetectShaderViewMask(&vert);
-    stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
-    std::vector<uint32_t> vertSpv;
-    std::vector<uint32_t> fragSpv;
-    if (vert.code && vert.size > 0) {
-        vertSpv.assign(vert.code, vert.code + (vert.size / sizeof(uint32_t)));
+    const ZHLN_ShaderStagesDesc desc = {.vert = vert, .frag = frag};
+    ZHLN_ShaderStages stages {};
+    if (!ZHLN_InitShaderStages(&desc, &stages)) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
-    if (frag.code && frag.size > 0) {
-        fragSpv.assign(frag.code, frag.code + (frag.size / sizeof(uint32_t)));
-    }
-    return ShaderStages {device, stages, std::move(vertSpv), std::move(fragSpv)};
+    return ShaderStages {stages};
 }
 
-auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+auto ShaderStages::Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    auto result = CreateBorrowed(vert, frag);
+    if (result) {
+        result->_ownedSpv[kVert] = CopyCode(vert);
+        result->_ownedSpv[kFrag] = CopyCode(frag);
+        result->RebindOwned();
+    }
+    return result;
+}
+
+auto ShaderStages::CreateLoaded(
+    const ZHLN_ShaderDesc& vert, std::vector<uint32_t> vertDisk, const ZHLN_ShaderDesc& frag, std::vector<uint32_t> fragDisk
+) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    // The non-empty buffers must be the ones backing the provided descriptors;
+    // otherwise rebinding after the move could point into unrelated SPIR-V.
+    if ((!vertDisk.empty() && (vert.code != vertDisk.data() || vert.size != vertDisk.size() * sizeof(uint32_t))) ||
+        (!fragDisk.empty() && (frag.code != fragDisk.data() || frag.size != fragDisk.size() * sizeof(uint32_t)))) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
+    }
+    auto result = CreateBorrowed(vert, frag);
+    if (result) {
+        result->_ownedSpv[kVert] = std::move(vertDisk);
+        result->_ownedSpv[kFrag] = std::move(fragDisk);
+        result->RebindOwned();
+    }
+    return result;
+}
+
+auto ShaderStages::CreateMeshBorrowed(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
     -> std::expected<ShaderStages, ZHLN::ErrorCode> {
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-
-    const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = {}, .frag = frag, .task = task, .mesh = mesh};
-
+    const ZHLN_ShaderStagesDesc desc = {.frag = frag, .task = task, .mesh = mesh};
     ZHLN_ShaderStages stages {};
-    if (!ZHLN_CreateShaderStages(&desc, &stages)) {
-        return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
+    if (!ZHLN_InitShaderStages(&desc, &stages)) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
+    return ShaderStages {stages};
+}
 
-    stages.mesh.view_mask = ZHLN_DetectShaderViewMask(&mesh);
-    stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
-    if (stages.task.handle != VK_NULL_HANDLE) {
-        stages.task.view_mask = ZHLN_DetectShaderViewMask(&task);
+auto ShaderStages::CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    auto result = CreateMeshBorrowed(task, mesh, frag);
+    if (result) {
+        result->_ownedSpv[kTask] = CopyCode(task);
+        result->_ownedSpv[kMesh] = CopyCode(mesh);
+        result->_ownedSpv[kFrag] = CopyCode(frag);
+        result->RebindOwned();
     }
-
-    const auto copy = [](const ZHLN_ShaderDesc& d) -> std::vector<uint32_t> {
-        if (d.code == nullptr || d.size == 0) {
-            return {};
-        }
-        return std::vector<uint32_t>(d.code, d.code + (d.size / sizeof(uint32_t)));
-    };
-
-    return ShaderStages {device, stages, {}, copy(frag), copy(task), copy(mesh)};
+    return result;
 }
 
 }

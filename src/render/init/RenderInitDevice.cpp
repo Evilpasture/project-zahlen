@@ -268,6 +268,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.dynamicRendering               = VK_TRUE;
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
+        .Require<VkPhysicalDeviceMaintenance5FeaturesKHR>([](auto& f) -> auto { f.maintenance5 = VK_TRUE; })
         .Require<VkPhysicalDeviceVulkan12Features>([&](auto& f) -> auto {
             f.descriptorIndexing                           = VK_TRUE;
             f.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;

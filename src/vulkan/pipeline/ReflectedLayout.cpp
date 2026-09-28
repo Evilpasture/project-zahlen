@@ -137,21 +137,13 @@ auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t co
 
 bool ReflectedLayout::Build(VkDevice , const ShaderStages& shaders) noexcept {
     ReflectedLayoutBuilder builder;
-    auto                   vert_spv = shaders.GetVertSpv();
-    auto                   frag_spv = shaders.GetFragSpv();
-    auto task_spv = shaders.GetTaskSpv();
-    auto mesh_spv = shaders.GetMeshSpv();
-    if (!vert_spv.empty()) {
-        builder.AddStageUnsafe({.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_VERTEX_BIT);
-    }
-    if (!task_spv.empty()) {
-        builder.AddStageUnsafe({.code = task_spv.data(), .size = task_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_TASK_BIT_EXT);
-    }
-    if (!mesh_spv.empty()) {
-        builder.AddStageUnsafe({.code = mesh_spv.data(), .size = mesh_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_MESH_BIT_EXT);
-    }
-    if (!frag_spv.empty()) {
-        builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);
+    const auto* const      raw = shaders.Get();
+    // Reflect the same SPIR-V the inline module create infos will use. Stages
+    // backed by disk files are kept alive by ShaderStages; embedded ones are static.
+    for (const ZHLN_Shader* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
+        if (shader->code != nullptr && shader->size > 0) {
+            builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entry_point}, shader->stage);
+        }
     }
     return BuildInto(*this, builder);
 }

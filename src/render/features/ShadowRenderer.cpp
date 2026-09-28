@@ -56,7 +56,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
     -> std::expected<void, ErrorCode> {
     _cascadeLayout = impl.emptyPipelineLayout;
 
-    return Vk::ShaderStages::Create(device, vert, frag)
+    return Vk::ShaderStages::CreateBorrowed(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
@@ -80,7 +80,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                 return {};
             }
 
-            auto shaders = Vk::ShaderStages::CreateMesh<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS>(device);
+            auto shaders = Vk::ShaderStages::CreateMesh<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS>();
             if (!shaders) {
                 ZHLN::Log("[ShadowRenderer] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
                 return {};
@@ -108,7 +108,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
 auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
     _punctualLayout = impl.emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, vert, frag)
+    return Vk::ShaderStages::CreateBorrowed(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}

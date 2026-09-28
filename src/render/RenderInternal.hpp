@@ -904,11 +904,17 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     if (!file.is_open()) {
         return {};
     }
-    auto                  fileSize = file.tellg();
-    std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+    const auto fileSize = static_cast<std::streamoff>(file.tellg());
+    // A partial word would make read() overrun the uint32_t buffer and cannot
+    // be passed to VkShaderModuleCreateInfo in any case.
+    if (fileSize <= 0 || fileSize % sizeof(uint32_t) != 0) {
+        return {};
+    }
+    std::vector<uint32_t> buffer(static_cast<size_t>(fileSize) / sizeof(uint32_t));
     file.seekg(0);
-    file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-    file.close();
+    if (!file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(fileSize))) {
+        return {};
+    }
     return buffer;
 }
 

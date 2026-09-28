@@ -267,8 +267,11 @@ typedef struct ZHLN_ShaderDesc {
     [[maybe_unused]] const char* entry_point;
 } ZHLN_ShaderDesc;
 
+// Borrowed SPIR-V: code must remain alive through pipeline creation and any
+// reflection performed on these stages. No Vulkan shader-module handle is owned.
 typedef struct ZHLN_Shader {
-    VkShaderModule        handle;
+    const uint32_t*       code;
+    size_t                size;
     VkShaderStageFlagBits stage;
     char                  entry_point[64];
     uint32_t              view_mask;
@@ -282,7 +285,6 @@ typedef struct ZHLN_ShaderStages {
 } ZHLN_ShaderStages;
 
 typedef struct ZHLN_ShaderStagesDesc {
-    const VkDevice        device;
     const ZHLN_ShaderDesc vert;
     const ZHLN_ShaderDesc frag;
     const ZHLN_ShaderDesc task;
@@ -292,22 +294,20 @@ typedef struct ZHLN_ShaderStagesDesc {
 [[nodiscard]]
 uint32_t ZHLN_DetectShaderViewMask(const ZHLN_ShaderDesc* ZHLN_RESTRICT desc);
 
+// Builds handle-free stage metadata, including entry points and view masks.
 [[nodiscard]]
-VkShaderModule ZHLN_CreateShaderModule(VkDevice device, const ZHLN_ShaderDesc* ZHLN_RESTRICT desc);
-
-[[nodiscard]]
-bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* ZHLN_RESTRICT desc, ZHLN_ShaderStages* ZHLN_RESTRICT out);
-
-void ZHLN_DestroyShaderModule(VkDevice device, VkShaderModule module);
-void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT stages);
+bool ZHLN_InitShaderStages(const ZHLN_ShaderStagesDesc* ZHLN_RESTRICT desc, ZHLN_ShaderStages* ZHLN_RESTRICT out);
 
 static constexpr auto ZHLN_MAX_SHADER_STAGES = 3;
 
 static constexpr auto ZHLN_MAX_COLOR_ATTACHMENTS = 8;
 
+// Both output arrays must hold ZHLN_MAX_SHADER_STAGES elements and remain alive
+// until vkCreateGraphicsPipelines returns (pNext points into outModuleInfos).
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
     VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       outStages,
+    VkShaderModuleCreateInfo* ZHLN_RESTRICT              outModuleInfos,
     const VkSpecializationInfo*                          specInfo,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
@@ -365,6 +365,8 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const bool                     color_write_enable;
 } ZHLN_GraphicsPipelineDesc;
 
+// Requires the enabled maintenance5 feature; SPIR-V is chained directly to
+// each VkPipelineShaderStageCreateInfo during pipeline creation.
 [[nodiscard]]
 VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipelineDesc* ZHLN_RESTRICT desc);
 
@@ -529,6 +531,7 @@ typedef struct ZHLN_ComputePipelineDesc {
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const cs_mapping;
 } ZHLN_ComputePipelineDesc;
 
+// Also requires maintenance5; shader.code must live until this call returns.
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelineDesc* ZHLN_RESTRICT desc);
 

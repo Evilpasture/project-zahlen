@@ -99,7 +99,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         .Build();
 
     Vk::ShaderStages uiShaders;
-    auto             stagesRes = Vk::ShaderStages::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(ctx.ctx.Device());
+    auto             stagesRes = Vk::ShaderStages::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>();
     if (!stagesRes) {
         return std::unexpected(stagesRes.error());
     }

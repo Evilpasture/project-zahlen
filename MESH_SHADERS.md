@@ -113,11 +113,12 @@ round number reveals a truncation regression) from "features not advertised",
 
 ## 3. Pipelines
 
-`ZHLN_ShaderStages` grew `task` and `mesh` modules.
-`ZHLN_PopulateShaderStageInfos` emits **task+mesh instead of vertex** when a
-mesh module is present (a pipeline may not declare both), and chains the same
-`VkShaderDescriptorSetAndBindingMappingInfoEXT` (`vs_mapping`) into their
-`pNext`, because task/mesh consume the identical `scene` parameter block.
+`ZHLN_ShaderStages` carries handle-free SPIR-V metadata for vertex, fragment,
+task, and mesh stages. `ZHLN_PopulateShaderStageInfos` emits **task+mesh
+instead of vertex** when mesh SPIR-V is present (a pipeline may not declare
+both). Each stage chains an inline `VkShaderModuleCreateInfo` and, when using
+the descriptor heap, the same `VkShaderDescriptorSetAndBindingMappingInfoEXT`
+(`vs_mapping`) for task and mesh, since both consume the `scene` block.
 `ZHLN_CreateGraphicsPipeline` passes `pVertexInputState`/`pInputAssemblyState`
 as `NULL` for mesh pipelines; the descriptor-heap flag path is untouched.
 

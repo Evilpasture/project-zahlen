@@ -9,6 +9,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -27,9 +28,11 @@ std::expected<Vk::ShaderStages, ErrorCode> RenderContext::Impl::LoadAndCreateSha
     gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, "VSMain");
     gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, "PSMain");
 
-    return Vk::ShaderStages::Create(
-        ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
+    // Dev-mode shaders come from local vectors; transfer those buffers into
+    // ShaderStages. Empty vectors mean the descriptors point at static fallback SPIR-V.
+    return Vk::ShaderStages::CreateLoaded(
+        {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, std::move(disk_vs),
+        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, std::move(disk_ps)
     );
 }
 
