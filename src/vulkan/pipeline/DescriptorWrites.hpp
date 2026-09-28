@@ -88,7 +88,7 @@ template <ZHLN::StringLiteral Name>
 
 template <typename T>
 struct IsTypedImage: std::false_type {};
-template <VkImageLayout L>
-struct IsTypedImage<TypedImage<L>>: std::true_type {};
+template <VkImageLayout L, VkFormat F>
+struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
 
 }

@@ -259,14 +259,14 @@ constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
 
 // DynamicPass Implementation
 
-template <size_t ColorCount, bool HasDepth>
-template <VkImageLayout Layout>
-constexpr auto DynamicPass<ColorCount, HasDepth>::AddColor(
-    const TypedImage<Layout>& img,
-    VkAttachmentLoadOp        loadOp,
-    VkAttachmentStoreOp       storeOp,
-    const ZHLN::Color4&       clearColor
-) && noexcept -> DynamicPass<ColorCount + 1, HasDepth> {
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
+    const TypedImage<Layout, Format>& img,
+    VkAttachmentLoadOp                loadOp,
+    VkAttachmentStoreOp               storeOp,
+    const ZHLN::Color4&               clearColor
+) && noexcept -> DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type> {
     static_assert(ColorCount < kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
     static_assert(Layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL);
 
@@ -283,17 +283,18 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColor(
         .clearValue         = {.color = {.float32 = {clearColor.r, clearColor.g, clearColor.b, clearColor.a}}}
     };
 
-    return DynamicPass<ColorCount + 1, HasDepth>(std::move(*this));
+    return DynamicPass<ColorCount + 1, HasDepth, typename AppendAttachmentColors<Formats, Format>::type>(std::move(*this));
 }
 
-template <size_t ColorCount, bool HasDepth>
+template <size_t ColorCount, bool HasDepth, typename Formats>
 template <typename... TypedImages>
-constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
     const std::tuple<TypedImages...>& imageTuple,
     VkAttachmentLoadOp                loadOp,
     VkAttachmentStoreOp               storeOp,
     const ZHLN::Color4&               clearColor
-) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth> {
+) && noexcept -> DynamicPass<ColorCount + sizeof...(TypedImages), HasDepth,
+                          typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type> {
     constexpr size_t added_count = sizeof...(TypedImages);
     static_assert(ColorCount + added_count <= kMaxColorAttachments, "ZHLN Error: DynamicPass exceeded maximum color attachments (8).");
 
@@ -316,17 +317,18 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddColorGroup(
         imageTuple
     );
 
-    return DynamicPass<ColorCount + added_count, HasDepth>(std::move(*this));
+    return DynamicPass<ColorCount + added_count, HasDepth,
+                       typename AppendAttachmentColors<Formats, TypedImages::known_format...>::type>(std::move(*this));
 }
 
-template <size_t ColorCount, bool HasDepth>
-template <VkImageLayout Layout>
-constexpr auto DynamicPass<ColorCount, HasDepth>::AddDepth(
-    const TypedImage<Layout>& img,
-    VkAttachmentLoadOp        loadOp,
-    VkAttachmentStoreOp       storeOp,
-    float                     clearVal
-) && noexcept -> DynamicPass<ColorCount, true> {
+template <size_t ColorCount, bool HasDepth, typename Formats>
+template <VkImageLayout Layout, VkFormat Format>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
+    const TypedImage<Layout, Format>& img,
+    VkAttachmentLoadOp                loadOp,
+    VkAttachmentStoreOp               storeOp,
+    float                             clearVal
+) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
     static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound.");
     // Allow both depth-only and combined depth-stencil layouts
     static_assert(
@@ -348,18 +350,18 @@ constexpr auto DynamicPass<ColorCount, HasDepth>::AddDepth(
         .clearValue         = {.depthStencil = {.depth = clearVal, .stencil = 0}}
     };
 
-    return DynamicPass<ColorCount, true>(std::move(*this));
+    return DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type>(std::move(*this));
 }
 
-template <size_t ColorCount, bool HasDepth>
-constexpr auto DynamicPass<ColorCount, HasDepth>::Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth>&& {
+template <size_t ColorCount, bool HasDepth, typename Formats>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&& {
     _flags = flags;
     return std::move(*this);
 }
 
-template <size_t ColorCount, bool HasDepth>
+template <size_t ColorCount, bool HasDepth, typename Formats>
 template <typename Func>
-void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func) const {
+void DynamicPass<ColorCount, HasDepth, Formats>::Execute(VkCommandBuffer cmd, Func&& func) const {
     VkRenderingInfo rendering_info = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .pNext                = nullptr,
@@ -397,14 +399,14 @@ void DynamicPass<ColorCount, HasDepth>::Execute(VkCommandBuffer cmd, Func&& func
     vkCmdEndRendering(cmd);
 }
 
-template <size_t ColorCount, bool HasDepth>
-constexpr auto DynamicPass<ColorCount, HasDepth>::ViewMask(uint32_t mask) && noexcept -> DynamicPass<ColorCount, HasDepth>&& {
+template <size_t ColorCount, bool HasDepth, typename Formats>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::ViewMask(uint32_t mask) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&& {
     _viewMask = mask;
     return std::move(*this);
 }
 
-template <size_t ColorCount, bool HasDepth>
-constexpr auto DynamicPass<ColorCount, HasDepth>::GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo* {
+template <size_t ColorCount, bool HasDepth, typename Formats>
+constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetDepthPtr() const noexcept -> const VkRenderingAttachmentInfo* {
     if constexpr (HasDepth) {
         return &_depth;
     } else {

@@ -63,12 +63,10 @@ struct PipelineConfig {
 };
 
 
-template <size_t ColorCount = 1, bool HasDepth = true>
+template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
 class PipelineBuilder {
   public:
-    PipelineBuilder() = default;
-    explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
-    }
+    PipelineBuilder() requires std::same_as<Formats, RuntimeAttachmentFormats> = default;
 
     auto Shaders(const ShaderStages& s) noexcept -> PipelineBuilder& {
         _cfg.stages = s.Get();
@@ -171,29 +169,31 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder& {
+    auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder&
+        requires std::same_as<Formats, RuntimeAttachmentFormats> {
         _cfg.color_formats = formats;
         return *this;
     }
 
-    auto ColorFormats(std::span<const VkFormat> formats) & noexcept -> PipelineBuilder& {
+    auto ColorFormats(std::span<const VkFormat> formats) & noexcept -> PipelineBuilder&
+        requires std::same_as<Formats, RuntimeAttachmentFormats> {
         _cfg.color_formats.assign(formats.begin(), formats.end());
         return *this;
     }
 
-    auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder& {
+    auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
         _cfg.depth_format = f;
         return *this;
     }
 
-    auto DepthOnly() & noexcept -> PipelineBuilder& {
+    auto DepthOnly() & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
         _cfg.color_formats.clear();
         _cfg.depth_test  = true;
         _cfg.depth_write = true;
         return *this;
     }
 
-    auto NoDepth() & noexcept -> PipelineBuilder& {
+    auto NoDepth() & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
         _cfg.depth_test   = false;
         _cfg.depth_write  = false;
         _cfg.depth_format = VK_FORMAT_UNDEFINED;
@@ -212,18 +212,25 @@ class PipelineBuilder {
         });
     }
 
-    [[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true> {
+    [[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true, typename ClearAttachmentColors<Formats>::type> {
         _cfg.color_formats.clear();
         _cfg.depth_test  = true;
         _cfg.depth_write = true;
-        return PipelineBuilder<0, true> {std::move(_cfg)};
+        return PipelineBuilder<0, true, typename ClearAttachmentColors<Formats>::type> {std::move(_cfg)};
     }
 
-    [[nodiscard]] auto NoDepth() && noexcept -> PipelineBuilder<ColorCount, false> {
+    [[nodiscard]] auto NoDepth() && noexcept -> PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {
         _cfg.depth_test   = false;
         _cfg.depth_write  = false;
         _cfg.depth_format = VK_FORMAT_UNDEFINED;
-        return PipelineBuilder<ColorCount, false> {std::move(_cfg)};
+        return PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {std::move(_cfg)};
+    }
+
+    template <VkFormat Depth>
+    [[nodiscard]] auto DepthFormat() && noexcept -> PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {
+        static_assert(Depth != VK_FORMAT_UNDEFINED, "A depth attachment needs a concrete format.");
+        _cfg.depth_format = Depth;
+        return PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {std::move(_cfg)};
     }
 
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
@@ -268,18 +275,38 @@ class PipelineBuilder {
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
     }
 
-    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth>, ErrorCode> {
-        return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth>, ErrorCode> {
+    // Unlike a runtime array, these values are part of the resulting pipeline
+    // type. A typed Build must subsequently specify the depth format or call
+    // NoDepth() so the entire rendering signature is known.
+    template <VkFormat... Colors>
+    [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {
+        static_assert(((Colors != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete formats.");
+        _cfg.color_formats = {Colors...};
+        return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {std::move(_cfg)};
+    }
+
+    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
+        if constexpr (!std::same_as<Formats, RuntimeAttachmentFormats>) {
+            static_assert(Formats::color_formats.size() == ColorCount, "Typed pipeline color count does not match its formats.");
+            static_assert(!HasDepth || Formats::depth_format != VK_FORMAT_UNDEFINED, "Typed pipeline must specify its depth attachment format.");
+        }
+        return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
             const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
             VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
             if (pipeline == VK_NULL_HANDLE) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
-            return TypedPipeline<ColorCount, HasDepth> {Pipeline(device, pipeline)};
+            using Result = TypedPipeline<ColorCount, HasDepth, Formats>;
+            return Result {Pipeline(device, pipeline), typename Result::BuilderToken {}};
         });
     }
 
   private:
+    template <size_t, bool, typename>
+    friend class PipelineBuilder;
+    explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
+    }
+
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode> {
         using enum PipelineBuilderError;
         if (_cfg.stages == nullptr) {

@@ -128,26 +128,26 @@ inline auto
 
 namespace TemplatedDetail {
 
-// Uniformly unpacks RenderTarget<F> or TypedImage<Layout> configurations
+// Uniformly unpacks RenderTarget<F> or TypedImage<Layout, Format> configurations
 template <typename T>
 struct ResourceTraits;
 
-template <VkImageLayout Layout>
-struct ResourceTraits<TypedImage<Layout>> {
+template <VkImageLayout Layout, VkFormat Format>
+struct ResourceTraits<TypedImage<Layout, Format>> {
     static constexpr VkImageLayout old_layout = Layout;
-    static constexpr auto          GetImage(const TypedImage<Layout>& res) noexcept {
+    static constexpr auto          GetImage(const TypedImage<Layout, Format>& res) noexcept {
         return res.handle;
     }
-    static constexpr auto GetView(const TypedImage<Layout>& res) noexcept {
+    static constexpr auto GetView(const TypedImage<Layout, Format>& res) noexcept {
         return res.view;
     }
-    static constexpr auto GetExtent(const TypedImage<Layout>& res) noexcept {
+    static constexpr auto GetExtent(const TypedImage<Layout, Format>& res) noexcept {
         return res.extent;
     }
-    static constexpr auto GetAspect(const TypedImage<Layout>& res) noexcept {
+    static constexpr auto GetAspect(const TypedImage<Layout, Format>& res) noexcept {
         return res.aspect;
     }
-    static constexpr auto GetFormat(const TypedImage<Layout>& res) noexcept {
+    static constexpr auto GetFormat(const TypedImage<Layout, Format>& res) noexcept {
         return res.format;
     }
 };

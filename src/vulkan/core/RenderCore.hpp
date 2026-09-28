@@ -118,33 +118,98 @@ template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
 
 
-template <size_t ColorCount, bool HasDepth>
+// A runtime-format pipeline remains available for legacy render paths. A
+// format-specialized pipeline can only be created by the corresponding typed
+// PipelineBuilder; its attachment formats are not a caller-supplied label.
+struct RuntimeAttachmentFormats {};
+
+template <VkFormat DepthFormat, VkFormat... ColorFormats>
+struct AttachmentFormats {
+    static constexpr VkFormat depth_format = DepthFormat;
+    static constexpr std::array<VkFormat, sizeof...(ColorFormats)> color_formats {ColorFormats...};
+};
+
+template <typename Formats, VkFormat... Added>
+struct AppendAttachmentColors {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors, VkFormat... Added>
+struct AppendAttachmentColors<AttachmentFormats<Depth, Colors...>, Added...> {
+    using type = std::conditional_t<
+        ((Added != VK_FORMAT_UNDEFINED) && ...), AttachmentFormats<Depth, Colors..., Added...>, RuntimeAttachmentFormats
+    >;
+};
+
+template <typename Formats, VkFormat Depth>
+struct SetAttachmentDepth {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat OldDepth, VkFormat... Colors, VkFormat Depth>
+struct SetAttachmentDepth<AttachmentFormats<OldDepth, Colors...>, Depth> {
+    using type = std::conditional_t<Depth == VK_FORMAT_UNDEFINED, RuntimeAttachmentFormats, AttachmentFormats<Depth, Colors...>>;
+};
+
+template <typename Formats>
+struct WithoutAttachmentDepth {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors>
+struct WithoutAttachmentDepth<AttachmentFormats<Depth, Colors...>> {
+    using type = AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>;
+};
+
+template <typename Formats>
+struct ClearAttachmentColors {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors>
+struct ClearAttachmentColors<AttachmentFormats<Depth, Colors...>> {
+    using type = AttachmentFormats<Depth>;
+};
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+class PipelineBuilder;
+
+template <size_t ColorCount, bool HasDepth, typename Formats = RuntimeAttachmentFormats>
 class TypedPipeline {
   public:
-    Pipeline handle;
+    using FormatSet = Formats;
 
     TypedPipeline() = default;
-    explicit TypedPipeline(Pipeline&& p) noexcept: handle(std::move(p)) {
+    explicit TypedPipeline(Pipeline&& p) noexcept requires std::same_as<Formats, RuntimeAttachmentFormats>: handle(std::move(p)) {
     }
 
-    TypedPipeline& operator=(Pipeline&& p) noexcept {
+    auto operator=(Pipeline&& p) noexcept -> TypedPipeline& requires std::same_as<Formats, RuntimeAttachmentFormats> {
         handle = std::move(p);
         return *this;
     }
 
-    [[nodiscard]] VkPipeline Get() const noexcept {
+    [[nodiscard]] auto Get() const noexcept -> VkPipeline {
         return handle.Get();
     }
-    [[nodiscard]] bool Valid() const noexcept {
+    [[nodiscard]] auto Valid() const noexcept -> bool {
         return handle.Valid();
     }
     explicit operator bool() const noexcept {
         return Valid();
     }
 
-    [[nodiscard]] Pipeline Release() noexcept {
+    [[nodiscard]] auto Release() noexcept -> Pipeline {
         return std::move(handle);
     }
+
+  private:
+    template <size_t, bool, typename>
+    friend class PipelineBuilder;
+    struct BuilderToken {};
+    explicit TypedPipeline(Pipeline&& p, BuilderToken) noexcept: handle(std::move(p)) {
+    }
+
+    Pipeline handle;
 };
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;

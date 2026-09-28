@@ -17,6 +17,8 @@
 #include <span>
 #include <cstring>
 #include <memory>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace ZHLN {
@@ -29,28 +31,35 @@ enum class UIRendererError : uint8_t {
 
 constexpr uint32_t kMaxUiVertices = 100'000;
 
+template <typename Formats>
+struct UIVariants;
+
+template <VkFormat... Formats>
+struct UIVariants<std::integer_sequence<VkFormat, Formats...>> {
+    std::tuple<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Formats>>...> pipelines;
+
+    template <VkFormat Format>
+    [[nodiscard]] auto Get() noexcept -> auto& {
+        return std::get<Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, Format>>>(pipelines);
+    }
+
+    [[nodiscard]] auto Supports(VkFormat format) const noexcept -> bool {
+        return std::apply([format](const auto&... pipeline) {
+            return ((format == std::remove_cvref_t<decltype(pipeline)>::FormatSet::color_formats[0] && pipeline.Valid()) || ...);
+        }, pipelines);
+    }
+};
+
 }
 
 struct UIRenderer::Impl {
     TextureManager* textureManager = nullptr;
 
-    struct FormatPipeline {
-        VkFormat     format = VK_FORMAT_UNDEFINED;
-        Vk::Pipeline pipeline;
-    };
-    // The window and render textures can have different attachment formats.
-    std::array<FormatPipeline, 3> pipelines {};
-    VkPipelineLayout              layout = VK_NULL_HANDLE;
-    Vk::HeapMappingBundle         mappings;
-
-    [[nodiscard]] auto PipelineFor(VkFormat colorFormat) const noexcept -> VkPipeline {
-        for (const auto& variant: pipelines) {
-            if (variant.format == colorFormat) {
-                return variant.pipeline.Get();
-            }
-        }
-        return VK_NULL_HANDLE;
-    }
+    UIVariants<SupportedUITargetFormats> pipelines;
+    VkFormat          fallbackFormat = VK_FORMAT_UNDEFINED;
+    Vk::Pipeline      fallbackPipeline;
+    VkPipelineLayout  layout = VK_NULL_HANDLE;
+    Vk::HeapMappingBundle mappings;
 
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
@@ -96,32 +105,57 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
     uiShaders = std::move(*stagesRes);
 
-    // Dynamic rendering requires each pipeline's color format to match the
-    // attachment view exactly. The present target can be sRGB/BGRA, while
-    // CreateRenderTexture uses RGBA8 UNORM or RGBA16F. Build one variant per
-    // distinct format (the present format may already be RGBA8 UNORM).
+    // A typed builder can produce a typed pipeline only from constant formats.
+    // Build just the offscreen variants and the active presentation format; an
+    // unusual native swapchain format retains a checked runtime fallback.
     impl.pipelines = {};
+    impl.fallbackPipeline = {};
+    impl.fallbackFormat = VK_FORMAT_UNDEFINED;
+    const VkFormat presentFormat = ctx.presenter.GetPresentFormat();
+    auto MakeBuilder = [&]() {
+        Vk::PipelineBuilder builder;
+        builder.Shaders(uiShaders)
+            .Layout(impl.layout)
+            .Cache(ctx.pipelineCache.Get())
+            .HeapMappings(&impl.mappings.info, &impl.mappings.info)
+            .AlphaBlend()
+            .CullNone();
+        return builder;
+    };
+    auto BuildVariant = [&]<VkFormat Format>(auto& pipeline) -> std::expected<void, ErrorCode> {
+        auto result = std::move(MakeBuilder()).ColorFormats<Format>().NoDepth().Build(ctx.ctx.Device());
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+        pipeline = std::move(*result);
+        return {};
+    };
+
     size_t pipelineCount = 0;
-    const std::array formats {ctx.presenter.GetPresentFormat(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT};
-    for (VkFormat format: formats) {
-        if (impl.PipelineFor(format) != VK_NULL_HANDLE) {
-            continue;
+    std::expected<void, ErrorCode> built;
+    std::apply([&](auto&... pipelines) {
+        ([&] {
+            using Pipeline = std::remove_cvref_t<decltype(pipelines)>;
+            constexpr VkFormat Format = Pipeline::FormatSet::color_formats[0];
+            if (built && (Format == presentFormat || Format == VK_FORMAT_R8G8B8A8_UNORM || Format == VK_FORMAT_R16G16B16A16_SFLOAT)) {
+                built = BuildVariant.template operator()<Format>(pipelines);
+                if (built) {
+                    ++pipelineCount;
+                }
+            }
+        }(), ...);
+    }, impl.pipelines.pipelines);
+    if (!built) {
+        return std::unexpected(built.error());
+    }
+
+    if (!impl.pipelines.Supports(presentFormat)) {
+        auto fallback = std::move(MakeBuilder()).ColorFormats(std::array {presentFormat}).NoDepth().Build(ctx.ctx.Device());
+        if (!fallback) {
+            return std::unexpected(fallback.error());
         }
-        auto pipeRes = Vk::PipelineBuilder {}
-                           .Shaders(uiShaders)
-                           .Layout(impl.layout)
-                           .Cache(ctx.pipelineCache.Get())
-                           .HeapMappings(&impl.mappings.info, &impl.mappings.info)
-                           .ColorFormats(std::array {format})
-                           .NoDepth()
-                           .AlphaBlend()
-                           .CullNone()
-                           .Build(ctx.ctx.Device());
-        if (!pipeRes) {
-            return std::unexpected(pipeRes.error());
-        }
-        impl.pipelines[pipelineCount].format   = format;
-        impl.pipelines[pipelineCount].pipeline = std::move(*pipeRes);
+        impl.fallbackPipeline = fallback->Release();
+        impl.fallbackFormat   = presentFormat;
         ++pipelineCount;
     }
 
@@ -147,18 +181,17 @@ void UIRenderer::BeginFrame() noexcept {
 }
 
 auto UIRenderer::SupportsFormat(VkFormat colorFormat) const noexcept -> bool {
-    return _impl != nullptr && _impl->PipelineFor(colorFormat) != VK_NULL_HANDLE;
+    return _impl != nullptr && (_impl->pipelines.Supports(colorFormat) ||
+                                (_impl->fallbackFormat == colorFormat && _impl->fallbackPipeline.Valid()));
 }
 
-void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat, const UIDrawData& uiData) noexcept {
-    if (_impl == nullptr || uiData.Empty()) {
+template <typename DrawBatch>
+void UIRenderer::RecordBatches(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData,
+                               DrawBatch&& drawBatch) noexcept {
+    if (_impl == nullptr || uiData.Empty() || width == 0 || height == 0) {
         return;
     }
     auto& impl = *_impl;
-    const VkPipeline pipeline = impl.PipelineFor(colorFormat);
-    if (pipeline == VK_NULL_HANDLE || width == 0 || height == 0) {
-        return;
-    }
 
     const uint32_t slot        = frameIndex & 1u;
     auto&          vbo         = impl.vbos[slot];
@@ -217,17 +250,48 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
              .fallback = defaultScissor}
         );
 
-        encoder.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
-            {.pipeline      = pipeline,
-             .layout        = impl.layout,
-             .heap          = true,
-             .vertexCount   = batch.vertexCount,
-             .instanceCount = 1,
-             .firstVertex   = 0,
-             .firstInstance = 0},
-            uipc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-        );
+        drawBatch(encoder, batch.vertexCount, uipc);
     }
 }
+
+template <VkFormat Format>
+void UIRenderer::Record(const UIColorPass<Format>& pass, Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex,
+                        const UIDrawData& uiData) noexcept {
+    if (_impl == nullptr || !_impl->pipelines.Get<Format>().Valid() || uiData.Empty() || width == 0 || height == 0) {
+        return;
+    }
+    // DrawHeap only pushes constants and draws; it cannot rebind an unchecked
+    // VkPipeline over the format-checked binding supplied by DynamicPass.
+    pass.Bind(encoder.cmd, _impl->pipelines.Get<Format>());
+    RecordBatches(encoder, width, height, frameIndex, uiData, [](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
+        cmd.DrawHeap<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(count, 1, constants);
+    });
+}
+
+void UIRenderer::RecordFallback(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat,
+                                const UIDrawData& uiData) noexcept {
+    if (_impl == nullptr || _impl->fallbackFormat != colorFormat || !_impl->fallbackPipeline.Valid()) {
+        return;
+    }
+    const VkPipeline pipeline = _impl->fallbackPipeline.Get();
+    const VkPipelineLayout layout = _impl->layout;
+    RecordBatches(encoder, width, height, frameIndex, uiData, [pipeline, layout](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
+        cmd.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
+            {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = count, .instanceCount = 1},
+            constants, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+        );
+    });
+}
+
+template void UIRenderer::Record<VK_FORMAT_B8G8R8A8_SRGB>(
+    const UIColorPass<VK_FORMAT_B8G8R8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+template void UIRenderer::Record<VK_FORMAT_B8G8R8A8_UNORM>(
+    const UIColorPass<VK_FORMAT_B8G8R8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+template void UIRenderer::Record<VK_FORMAT_R8G8B8A8_SRGB>(
+    const UIColorPass<VK_FORMAT_R8G8B8A8_SRGB>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+template void UIRenderer::Record<VK_FORMAT_R8G8B8A8_UNORM>(
+    const UIColorPass<VK_FORMAT_R8G8B8A8_UNORM>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
+template void UIRenderer::Record<VK_FORMAT_R16G16B16A16_SFLOAT>(
+    const UIColorPass<VK_FORMAT_R16G16B16A16_SFLOAT>&, Vk::CommandEncoder&, uint32_t, uint32_t, uint32_t, const UIDrawData&) noexcept;
 
 }
