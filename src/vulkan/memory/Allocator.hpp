@@ -31,16 +31,17 @@ class DeletionQueue {
     DeletionQueue(const DeletionQueue&)            = delete;
     DeletionQueue& operator=(const DeletionQueue&) = delete;
 
-    void Init(uint32_t doubleBufferCount) noexcept;
     void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
     void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
     void BeginFrame(uint32_t frameIndex) noexcept;
+    // The caller must wait for the GPU to be idle before flushing every slot.
+    void Drain() noexcept;
 
   private:
     void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
 
-    std::vector<std::vector<DeferredDeletionEntry>> _queues;
-    uint32_t                                        _currentFrameIndex = 0;
+    std::array<std::vector<DeferredDeletionEntry>, kFramesInFlight> _queues {};
+    uint32_t _currentFrameIndex = 0;
 };
 
 void                               DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;

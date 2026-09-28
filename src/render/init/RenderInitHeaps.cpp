@@ -67,9 +67,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
+            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped per-frame debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-            for (int i = 0; i < 2; ++i) {
+            for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                 auto gpu_buf_res = Vk::Buffer::Create(
                     allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
                 );
@@ -90,7 +90,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
 
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots,
-        kFrameTransientResourceSlots, kImmediateTransientResourceSlots, 2
+        kFrameTransientResourceSlots, kImmediateTransientResourceSlots
     );
     if (!init_res) {
         return std::unexpected(init_res.error());
@@ -224,7 +224,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
-    for (int i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto jb_res = Vk::Buffer::Create(
             allocator.Get(), sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
             Vk::MemoryUsage::CPUToGPU

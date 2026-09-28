@@ -131,7 +131,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
 ) noexcept -> std::expected<void, ErrorCode> {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
-    for (int i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res = Vk::Buffer::Create(
             allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags,
             Vk::MemoryUsage::CPUToGPU
@@ -142,7 +142,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
         bufs[i]  = std::move(*res);
         addrs[i] = ctx.BufferAddress(bufs[i].Handle());
     }
-    ZHLN::Log("Allocated double-buffered dynamic {} VBOs ({} bytes).", label, bufferSize);
+    ZHLN::Log("Allocated per-frame dynamic {} VBOs ({} bytes).", label, bufferSize);
     return {};
 }
 
@@ -503,7 +503,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 })
                 .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
-                    for (uint32_t i = 0; i < 2; ++i) {
+                    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
                             Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
                             Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
@@ -561,7 +561,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 })
                 .transform([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
-                    for (uint32_t i = 0; i < 2; ++i) {
+                    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         frames.tlas[i] = Vk::AccelerationStructure(
                             ctx.Device(),
                             Vk::CreateAccelerationStructure(

@@ -19,8 +19,8 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
 
     _pacer.Resolve(ctx, surface.Get(), vsync);
 
-    sync  = FrameSync<2>::Create(ctx.Device());
-    pools = CommandPools<2, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
+    sync  = FrameSync<kFramesInFlight>::Create(ctx.Device());
+    pools = CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
     frameIndex = 0;
     if (!sync.Valid() || !pools.Valid()) {
         return std::unexpected(PresentationError::SyncCreationFailed);

@@ -257,9 +257,9 @@ auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expe
 }
 
 void TextureManager::BeginFrame(uint32_t frameIndex) noexcept {
-    _frameIndex = frameIndex;
+    _frameIndex = Vk::FrameSlot(frameIndex);
 
-    auto& pending = _pendingFrees[frameIndex];
+    auto& pending = _pendingFrees[_frameIndex];
     for (auto& released: pending) {
         WriteSlotToHeap(released.index, _slotViews[kFallbackWhiteTextureIndex]);
         _freeSlots.push_back(released.index);

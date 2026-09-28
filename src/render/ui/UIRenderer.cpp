@@ -61,11 +61,11 @@ struct UIRenderer::Impl {
     VkPipelineLayout  layout = VK_NULL_HANDLE;
     Vk::HeapMappingBundle mappings;
 
-    std::array<Vk::Buffer, 2>      vbos {};
-    std::array<VkDeviceAddress, 2> vboAddresses {};
+    std::array<Vk::Buffer, Vk::kFramesInFlight>      vbos {};
+    std::array<VkDeviceAddress, Vk::kFramesInFlight> vboAddresses {};
 
-    std::array<uint32_t, 2> arenaOffset {};
-    std::array<uint32_t, 2> arenaFrame {};
+    std::array<uint32_t, Vk::kFramesInFlight> arenaOffset {};
+    std::array<uint32_t, Vk::kFramesInFlight> arenaFrame {};
     uint32_t                frameEpoch = 0;
 };
 
@@ -160,7 +160,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
 
     const size_t bufferSize = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-    for (int i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res = Vk::Buffer::Create(
             ctx.allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
@@ -193,7 +193,7 @@ void UIRenderer::RecordBatches(Vk::CommandEncoder& encoder, uint32_t width, uint
     }
     auto& impl = *_impl;
 
-    const uint32_t slot        = frameIndex & 1u;
+    const uint32_t slot        = Vk::FrameSlot(frameIndex);
     auto&          vbo         = impl.vbos[slot];
     const size_t   maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 

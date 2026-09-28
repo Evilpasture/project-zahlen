@@ -124,8 +124,7 @@ void RenderContext::ClearGPUCaches() noexcept {
 
     _impl->textureManager.Clear();
 
-    _impl->deletionQueue.BeginFrame(0);
-    _impl->deletionQueue.BeginFrame(1);
+    _impl->deletionQueue.Drain();
 }
 
 auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {

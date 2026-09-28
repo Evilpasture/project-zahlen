@@ -104,7 +104,7 @@ class TextureManager {
     ZHLN::Array<Vk::ImageView> _slotViews;
     uint32_t                                 _nextSlotIndex = 0;
     ZHLN::Array<uint32_t>                    _freeSlots;
-    std::array<ZHLN::Array<ReleasedSlot>, 2> _pendingFrees;
+    std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;
     mutable Mutex                    _mutex {};

@@ -433,7 +433,7 @@ template <typename Declared, typename... Slots>
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
     const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
-                                       _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) :
+                                       _staticResourceCount + (kFramesInFlight * _frameTransientResourceCount) :
                                        _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
     const uint32_t blockBase = block.value_or(partitionBase);
 

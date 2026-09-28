@@ -571,14 +571,13 @@ void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation al
 
 
 DeletionQueue::~DeletionQueue() {
+    Drain();
+}
+
+void DeletionQueue::Drain() noexcept {
     for (auto& queue: _queues) {
         CleanupQueue(queue);
     }
-}
-
-void DeletionQueue::Init(uint32_t doubleBufferCount) noexcept {
-    _queues.resize(doubleBufferCount);
-    _currentFrameIndex = 0;
 }
 
 void DeletionQueue::EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept {
@@ -590,7 +589,7 @@ void DeletionQueue::EnqueueImage(VmaAllocator allocator, VkImage image, VmaAlloc
 }
 
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
-    _currentFrameIndex = frameIndex % _queues.size();
+    _currentFrameIndex = FrameSlot(frameIndex);
     CleanupQueue(_queues[_currentFrameIndex]);
 }
 

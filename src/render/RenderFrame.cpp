@@ -48,9 +48,12 @@ template <typename... Ptrs>
 
 auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle()),
+        ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -279,7 +282,7 @@ void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::F
 void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept {
     auto& self = *impl;
 
-    using Recorder          = std::remove_reference_t<decltype(self.parallelRecorder[0])>;
+    using Recorder          = std::remove_reference_t<decltype(self.parallelRecorders[0])>;
     constexpr size_t kSlots = Recorder::Slots();
     const size_t     count  = bodies.size();
 
@@ -299,7 +302,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     self.BindHeapsAndPushFrame(cmd);
 
-    auto& rec = self.parallelRecorder[0];
+    auto& rec = self.parallelRecorders[self.presenter.frameIndex];
     rec.Reset();
 
     const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
@@ -331,7 +334,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
-    if (const VkResult waited = _impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u); waited != VK_SUCCESS) {
+    if (const VkResult waited = _impl->presenter.sync.Wait(Vk::PreviousFrameSlot(_impl->presenter.frameIndex)); waited != VK_SUCCESS) {
         return std::unexpected(Vk::ToFrameError(waited));
     }
     for (auto& dest: _impl->destinations.Windows()) {
@@ -339,7 +342,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
             continue;
         }
         auto& sess = dest.Presenter();
-        if (const VkResult waited = sess.sync.Wait(sess.frameIndex ^ 1u); waited != VK_SUCCESS) {
+        if (const VkResult waited = sess.sync.Wait(Vk::PreviousFrameSlot(sess.frameIndex)); waited != VK_SUCCESS) {
             return std::unexpected(Vk::ToFrameError(waited));
         }
     }
@@ -434,7 +437,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
     auto           presented         = _impl->PresentUsedWindows();
     if (_impl->presenter.frameIndex == primarySlotBefore) {
-        _impl->presenter.frameIndex = (primarySlotBefore + 1) & 1u;
+        _impl->presenter.AdvanceFrame();
     }
 
     if (_impl->stagingContext) {

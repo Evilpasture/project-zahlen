@@ -115,9 +115,12 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
         }
     }
 
-    return parallelRecorder[0]
-        .Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
-        .and_then([&]() { return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); });
+    for (auto& recorder: parallelRecorders.data) {
+        if (auto initialized = recorder.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); !initialized) {
+            return std::unexpected(initialized.error());
+        }
+    }
+    return {};
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
@@ -144,7 +147,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() {
             computePools =
-                Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
+                Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -152,7 +155,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
-            deletionQueue.Init(2);
             auto fvb_res = CreateDoubleBuffered(
                 allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                 Vk::MemoryUsage::CPUToGPU

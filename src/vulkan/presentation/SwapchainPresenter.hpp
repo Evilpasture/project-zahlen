@@ -58,8 +58,8 @@ class SwapchainPresenter {
     RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
     RenderTarget<kHeadlessColorFormat>         headlessColorTarget;
 
-    FrameSync<2>                         sync;
-    CommandPools<2, QueueType::Graphics> pools;
+    FrameSync<kFramesInFlight>                         sync;
+    CommandPools<kFramesInFlight, QueueType::Graphics> pools;
 
     uint32_t frameIndex = 0;
 
@@ -80,7 +80,7 @@ class SwapchainPresenter {
     ) noexcept -> FrameOutcome<PresentSuboptimal>;
 
     void AdvanceFrame() noexcept {
-        frameIndex = (frameIndex + 1) & 1u;
+        frameIndex = NextFrameSlot(frameIndex);
     }
 
 

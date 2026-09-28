@@ -222,8 +222,8 @@ static constexpr uint32_t kGpuCullingMaxBatches          = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
 struct WorkerCmdContext {
-    std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
-    std::array<ZHLN::Atomic<uint32_t>, 2>                   cmdCount {};
+    std::array<Vk::CommandPool<Vk::QueueType::Graphics>, Vk::kFramesInFlight> pools;
+    std::array<ZHLN::Atomic<uint32_t>, Vk::kFramesInFlight>                   cmdCount {};
 };
 
 template <VkImageLayout ColorL, VkImageLayout DepthL>
@@ -271,7 +271,7 @@ struct RenderContext::Impl {
     Vk::Allocator                                allocator;
     Vk::SwapchainPresenter                       presenter;
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
-    Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
+    Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute> computePools;
     Vk::StagingRingBuffer                        stagingRingBuffer;
     mutable Vk::StagingRingBuffer                transferRingBuffer;
 
@@ -292,8 +292,9 @@ struct RenderContext::Impl {
     Vk::DeletionQueue                      deletionQueue;
     std::optional<Vk::ScopedDeletionQueue> activeQueueGuard;
 
-    ZHLN::Array<WorkerCmdContext>                  workerCmds;
-    DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
+    static constexpr size_t kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
+    ZHLN::Array<WorkerCmdContext> workerCmds;
+    PerFrame<Vk::ParallelCommandRecorder<kParallelRecordingSlots>> parallelRecorders;
 
     TargetManager  targets;
     GraphResources& graphResources = targets.Graph();
@@ -645,8 +646,8 @@ struct RenderContext::Impl {
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
         if (ctx.Device() != VK_NULL_HANDLE) {
-            for (uint32_t i = 0; i < 2; ++i) {
-                frames.tlas[i] = Vk::AccelerationStructure {};
+            for (auto& tlas: frames.tlas.data) {
+                tlas = Vk::AccelerationStructure {};
             }
         }
     }

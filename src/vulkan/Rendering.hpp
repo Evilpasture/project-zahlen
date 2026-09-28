@@ -35,6 +35,7 @@
 
 
 #include "core/RenderCore.h"
+#include "core/FrameConfig.hpp"
 
 // clang-format off
 #include "core/Extensions.hpp"

@@ -440,21 +440,19 @@ auto HeapManager::Init(
     uint32_t       staticResourceCount,
     uint32_t       staticSamplerCount,
     uint32_t       frameTransientResourceCount,
-    uint32_t       immediateTransientResourceCount,
-    uint32_t       doubleBufferCount
+    uint32_t       immediateTransientResourceCount
 ) noexcept -> std::expected<void, ErrorCode> {
     _staticResourceCount              = staticResourceCount;
     _staticSamplerCount               = staticSamplerCount;
     _frameTransientResourceCount      = frameTransientResourceCount;
     _immediateTransientResourceCount  = immediateTransientResourceCount;
-    _doubleBufferCount                = doubleBufferCount;
     _currentFrameIndex                = 0;
 
     _staticResourceAlloc.Init(staticResourceCount, DescriptorHeapError::ResourceSlotsExhausted);
     _staticSamplerAlloc.Init(staticSamplerCount, DescriptorHeapError::SamplerSlotsExhausted);
 
     const uint32_t total_resource_count =
-        staticResourceCount + (doubleBufferCount * frameTransientResourceCount) + immediateTransientResourceCount;
+        staticResourceCount + (kFramesInFlight * frameTransientResourceCount) + immediateTransientResourceCount;
     const uint32_t total_sampler_count = staticSamplerCount;
 
     auto res_heap_init = _resourceHeap.Init(ctx, allocator, total_resource_count);
@@ -491,7 +489,7 @@ void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
             );
         }
     }
-    _currentFrameIndex       = _doubleBufferCount > 0 ? frameIndex % _doubleBufferCount : 0;
+    _currentFrameIndex       = FrameSlot(frameIndex);
     _frameTransientAllocated = 0;
 }
 
@@ -519,7 +517,7 @@ auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle l
     const ZHLN::MutexGuard guard(_writeMutex);
 
     if (lifecycle == HeapLifecycle::Immediate) {
-        const uint32_t base_slot = _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) + _immediateTransientAllocated;
+        const uint32_t base_slot = _staticResourceCount + (kFramesInFlight * _frameTransientResourceCount) + _immediateTransientAllocated;
         if (_immediateTransientAllocated + count > _immediateTransientResourceCount) [[unlikely]] {
             return std::unexpected(DescriptorHeapError::TransientResourceOverflow);
         }

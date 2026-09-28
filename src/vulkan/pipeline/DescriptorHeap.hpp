@@ -249,8 +249,7 @@ class HeapManager {
         uint32_t       staticResourceCount,
         uint32_t       staticSamplerCount,
         uint32_t       frameTransientResourceCount,
-        uint32_t       immediateTransientResourceCount,
-        uint32_t       doubleBufferCount = 2
+        uint32_t       immediateTransientResourceCount
     ) noexcept -> std::expected<void, ErrorCode>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
@@ -355,7 +354,6 @@ class HeapManager {
     uint32_t _staticSamplerCount              = 0;
     uint32_t _frameTransientResourceCount     = 0;
     uint32_t _immediateTransientResourceCount = 0;
-    uint32_t _doubleBufferCount               = 2;
     uint32_t _currentFrameIndex               = 0;
 
     VkDeviceSize _maxPushDataSize = 0;

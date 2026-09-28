@@ -24,10 +24,14 @@ struct Color4 {
 
 // NOLINTBEGIN(misc-misplaced-const, readability-avoid-const-params-in-decls)
 
+// Per-frame resources also serve as two-slot temporal history (Next()).
+// Their two-resource constructors must be generalized before increasing the frame ring depth.
+static_assert(Vk::kFramesInFlight == 2, "PerFrame/DoubleBuffered history and resource creation still require two frame slots");
+
 template <typename T>
 struct PerFrame {
-    std::array<T, 2> data {};
-    uint32_t         idx = 0;
+    std::array<T, Vk::kFramesInFlight> data {};
+    uint32_t                          idx = 0;
 
     PerFrame() = default;
 
@@ -42,10 +46,10 @@ struct PerFrame {
     }
 
     [[nodiscard]] constexpr T& operator[](uint32_t i) noexcept {
-        return data[i % 2];
+        return data[Vk::FrameSlot(i)];
     }
     [[nodiscard]] constexpr const T& operator[](uint32_t i) const noexcept {
-        return data[i % 2];
+        return data[Vk::FrameSlot(i)];
     }
 
     [[nodiscard]] constexpr T& operator*() noexcept {
@@ -67,17 +71,17 @@ struct PerFrame {
         return data[idx];
     }
     [[nodiscard]] constexpr T& Next() noexcept {
-        return data[idx ^ 1];
+        return data[Vk::NextFrameSlot(idx)];
     }
     [[nodiscard]] constexpr const T& Next() const noexcept {
-        return data[idx ^ 1];
+        return data[Vk::NextFrameSlot(idx)];
     }
 
     void Advance() noexcept {
-        idx ^= 1;
+        idx = Vk::NextFrameSlot(idx);
     }
     void Flip() noexcept {
-        idx ^= 1;
+        Advance();
     }
 };
 
