@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -235,8 +236,8 @@ struct FrameStats {
     const double p99Ms   = sorted[p99Idx];
     const double p99_9Ms = sorted[p99_9Idx];
 
-    const size_t count1Pct  = std::max(1UL, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.01)));
-    const size_t count01Pct = std::max(1UL, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.001)));
+    const size_t count1Pct  = std::max(size_t{1}, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.01)));
+    const size_t count01Pct = std::max(size_t{1}, static_cast<size_t>(std::ceil(static_cast<double>(n) * 0.001)));
 
     const double avgSlowest1PctMs  = std::accumulate(sorted.end() - count1Pct, sorted.end(), 0.0) / static_cast<double>(count1Pct);
     const double avgSlowest01PctMs = std::accumulate(sorted.end() - count01Pct, sorted.end(), 0.0) / static_cast<double>(count01Pct);
