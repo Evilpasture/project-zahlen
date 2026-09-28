@@ -2,17 +2,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <functional> // std::function_ref and its feature-test macro, when available
+
+#if !defined(__cpp_lib_function_ref) || __cpp_lib_function_ref < 202306L
 #include <concepts>
-#include <functional>
 #include <memory>
 #include <type_traits>
 #include <utility>
+#endif
 
 namespace ZHLN {
 
-// A non-owning view of a const-callable lvalue object. The callable must
-// outlive the view; rvalues cannot bind. Keep asynchronous uses inside a dispatch-and-wait
-// scope so neither the callable nor the view can expire on a worker thread.
+// Borrowed callable; never owns its target. Keep the target alive through any
+// synchronous dispatch-and-wait scope that passes this view to worker fibers.
+#if defined(__cpp_lib_function_ref) && __cpp_lib_function_ref >= 202306L
+
+template <typename Signature>
+using FunctionRef = std::function_ref<Signature>;
+
+#else
+
+// Fallback for standard libraries without C++26 std::function_ref (notably
+// the reflection toolchain). Unlike the standard type, this subset accepts
+// only const-callable lvalue
+// objects; it rejects temporaries at construction.
 template <typename Signature>
 class FunctionRef;
 
@@ -41,5 +54,7 @@ class FunctionRef<R(Args...) const> {
     const void* object_;
     R (*invoke_)(const void*, Args...);
 };
+
+#endif
 
 }

@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <expected>
+#include <functional>
 #include <type_traits>
 #include <vector>
 
@@ -84,7 +85,11 @@ struct TaskSystemTestSuite {
 
             std::atomic<uint32_t> total {0};
             const auto add = [&](uint32_t value) { total.fetch_add(value, std::memory_order_relaxed); };
-            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>); // no borrowing a temporary
+#if defined(__cpp_lib_function_ref) && __cpp_lib_function_ref >= 202306L
+            static_assert(std::is_same_v<Borrow, std::function_ref<void(uint32_t) const>>);
+#else
+            static_assert(!std::is_constructible_v<Borrow, decltype(add)&&>); // fallback rejects temporary targets
+#endif
             const Borrow view {add};
             view(1);
 

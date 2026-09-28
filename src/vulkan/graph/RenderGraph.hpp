@@ -181,9 +181,9 @@ inline constexpr bool DependentFalse = false;
 }
 
 
-// Only borrowed during ExecuteFork; the graph owns the pass objects. Unlike
-// the old void*-plus-thunk pair, this view cannot point at a mutable pass or
-// be constructed from a temporary callable.
+// Only borrowed during ExecuteFork; the graph owns the const-callable passes
+// and keeps them alive until recording completes. No pass-specific trampoline
+// or const_cast is needed.
 using ForkCall = ZHLN::FunctionRef<void(VkCommandBuffer) const>;
 
 template <typename Executor>
