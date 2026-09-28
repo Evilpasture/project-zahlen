@@ -17,16 +17,9 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    const void*           cs_code = nullptr;
-    size_t                cs_size = 0;
-    std::vector<uint32_t> disk_cs;
-
-    LoadShaderData(
-        MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>(), cs_code, cs_size,
-        disk_cs
-    );
-
-    ZHLN_ShaderDesc shaderDesc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
+    const auto source = MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>();
+    const auto loaded = LoadShaderData(source);
+    const ZHLN_ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
 
     struct BakeSpec {
         int bakeType = 0;

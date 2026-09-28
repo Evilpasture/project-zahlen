@@ -39,6 +39,7 @@
 #include "features/PostProcessFeature.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -907,19 +908,39 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
     return buffer;
 }
 
+// Embedded shaders are byte arrays, not uint32_t objects. Keep a byte span
+// until CreateShaderDesc crosses the C ABI boundary. Compute the view from
+// storage on demand so moving this result cannot leave a cached span dangling.
+struct LoadedShaderSource {
+    std::span<const std::byte> fallback {};
+    std::vector<uint32_t>     storage {};
+
+    [[nodiscard]] auto Code() const noexcept -> std::span<const std::byte> {
+        return storage.empty() ? fallback : std::as_bytes(std::span {storage});
+    }
+};
+
 template <ShaderStage Stage>
-inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& outData, size_t& outSize, std::vector<uint32_t>& diskBuffer) {
-    outData = src.fallback.data();
-    outSize = src.fallback.size_bytes();
+[[nodiscard]] inline auto LoadShaderData(const ShaderStageSource<Stage>& src) -> LoadedShaderSource {
     if constexpr (isDev) {
-        diskBuffer = LoadShaderSpv(src.path);
-        if (!diskBuffer.empty()) {
-            outData = diskBuffer.data();
-            outSize = diskBuffer.size() * 4;
-            return true;
+        auto disk = LoadShaderSpv(src.path);
+        if (!disk.empty()) {
+            return {.storage = std::move(disk)};
         }
     }
-    return false;
+
+    const auto bytes = std::as_bytes(src.fallback);
+    if (bytes.empty() || bytes.size() % sizeof(uint32_t) != 0) {
+        return {};
+    }
+    // Generated fallbacks are word-aligned. A caller-supplied byte span need
+    // not be: copy only that case before the C ABI reads uint32_t words.
+    if (reinterpret_cast<std::uintptr_t>(bytes.data()) % alignof(uint32_t) != 0) {
+        std::vector<uint32_t> aligned(bytes.size() / sizeof(uint32_t));
+        std::ranges::copy(bytes, std::as_writable_bytes(std::span {aligned}).begin());
+        return {.storage = std::move(aligned)};
+    }
+    return {.fallback = bytes};
 }
 
 template <typename T = Vk::Buffer, typename... Args>

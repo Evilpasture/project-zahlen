@@ -10,41 +10,27 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <functional>
 #include <utility>
-#include <vector>
 
 namespace ZHLN {
 
 std::expected<Vk::ShaderStages, ErrorCode> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
-    const void*           vs_code = nullptr;
-    size_t                vs_size = 0;
-    const void*           ps_code = nullptr;
-    size_t                ps_size = 0;
-    std::vector<uint32_t> disk_vs;
-    std::vector<uint32_t> disk_ps;
+    auto vertex   = LoadShaderData(vs);
+    auto fragment = LoadShaderData(ps);
 
-    LoadShaderData(vs, vs_code, vs_size, disk_vs);
-    LoadShaderData(ps, ps_code, ps_size, disk_ps);
+    // Make both descriptors before moving either buffer into ShaderStages:
+    // function arguments need not be evaluated in their written order.
+    const ZHLN_ShaderDesc vertexShader   = Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint);
+    const ZHLN_ShaderDesc fragmentShader = Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint);
+    gpuDiagnostics.RegisterShader(vertexShader, "VSMain");
+    gpuDiagnostics.RegisterShader(fragmentShader, "PSMain");
 
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, "VSMain");
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, "PSMain");
-
-    // Dev-mode shaders come from local vectors; transfer those buffers into
-    // ShaderStages. Empty vectors mean the descriptors point at static fallback SPIR-V.
-    return Vk::ShaderStages::CreateLoaded(
-        {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, std::move(disk_vs),
-        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, std::move(disk_ps)
-    );
+    return Vk::ShaderStages::CreateLoaded(vertexShader, std::move(vertex.storage), fragmentShader, std::move(fragment.storage));
 }
 
 std::expected<Vk::Pipeline, ErrorCode>
     RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
-    const void*           cs_code = nullptr;
-    size_t                cs_size = 0;
-    std::vector<uint32_t> disk_cs;
-
-    LoadShaderData(cs, cs_code, cs_size, disk_cs);
-
-    const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
+    const auto loaded = LoadShaderData(cs);
+    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);

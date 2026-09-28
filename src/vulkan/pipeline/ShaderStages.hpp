@@ -49,8 +49,8 @@ class ShaderStages {
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateBorrowed(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
-    // Adopt file-loaded SPIR-V without a second copy. Empty vectors mean the
-    // corresponding descriptor borrows embedded fallback bytes instead.
+    // Adopt owned SPIR-V (disk override or aligned copy) without a second copy.
+    // Empty vectors mean the corresponding descriptor borrows static bytes.
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateLoaded(
         const ZHLN_ShaderDesc& vert, std::vector<uint32_t> vertDisk, const ZHLN_ShaderDesc& frag, std::vector<uint32_t> fragDisk
@@ -110,7 +110,4 @@ class ShaderStages {
     std::array<std::vector<uint32_t>, 4> _ownedSpv {};
 };
 
-[[nodiscard]] constexpr auto AsSpirV(const void* data) -> const uint32_t* {
-    return std::bit_cast<const uint32_t*>(data);
-}
 }
