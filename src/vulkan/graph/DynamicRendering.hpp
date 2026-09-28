@@ -260,6 +260,13 @@ inline constexpr ColorToReadTrans ColorToRead {};
 
 static constexpr size_t kMaxColorAttachments = 8;
 
+// DynamicPass binds the stencil attachment only for these combined formats.
+// Secondary command buffers must inherit the same format (or UNDEFINED when
+// the primary has no stencil attachment).
+[[nodiscard]] constexpr auto StencilFormatForDepth(VkFormat depthFormat) noexcept -> VkFormat {
+    return (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED;
+}
+
 template <VkImageLayout Layout>
 struct Tag {};
 

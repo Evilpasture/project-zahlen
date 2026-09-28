@@ -1597,6 +1597,7 @@ void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd, const ZHLN_Seco
         .colorAttachmentCount    = (desc->color_format != VK_FORMAT_UNDEFINED) ? VK_TRUE : VK_FALSE,
         .pColorAttachmentFormats = &desc->color_format,
         .depthAttachmentFormat   = desc->depth_format,
+        .stencilAttachmentFormat = desc->stencil_format,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT,
     };
 

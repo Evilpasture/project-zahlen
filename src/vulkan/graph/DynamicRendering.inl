@@ -335,7 +335,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
         Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL
     );
 
-    _hasStencil = (img.format == VK_FORMAT_D32_SFLOAT_S8_UINT || img.format == VK_FORMAT_D24_UNORM_S8_UINT);
+    _hasStencil = StencilFormatForDepth(img.format) != VK_FORMAT_UNDEFINED;
 
     _depth = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,

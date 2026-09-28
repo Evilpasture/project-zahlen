@@ -119,7 +119,8 @@ void RecordCpuCulled(const FrameRecorder& recorder, uint32_t drawCount, const GB
                 cmd,
                 Vk::SecondaryInheritance {
                     .colorFormats           = colorFormats,
-                    .depthFormat            = VK_FORMAT_D32_SFLOAT_S8_UINT,
+                    .depthFormat            = in.depth.format,
+                    .stencilFormat          = Vk::StencilFormatForDepth(in.depth.format),
                     .samplerHeapBindInfo    = &samplerBind,
                     .resourceHeapBindInfo   = &resourceBind,
                     .pushDataFrameOffsets   = GpuAbi::kScenePushLayout.UsedFrameAddresses(),

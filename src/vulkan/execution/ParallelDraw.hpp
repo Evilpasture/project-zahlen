@@ -10,8 +10,9 @@ namespace ZHLN::Vk {
 
 struct SecondaryInheritance {
     std::span<const VkFormat> colorFormats;
-    VkFormat                  depthFormat = VK_FORMAT_UNDEFINED;
-    VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
+    VkFormat                  depthFormat   = VK_FORMAT_UNDEFINED;
+    // Must match the primary's active stencil attachment, not just its depth format.
+    VkFormat                  stencilFormat = VK_FORMAT_UNDEFINED;
 
     const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;

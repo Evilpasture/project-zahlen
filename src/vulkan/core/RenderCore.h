@@ -422,6 +422,9 @@ VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 typedef struct ZHLN_SecondaryCmdDesc {
     const VkFormat color_format;
     const VkFormat depth_format;
+    // Match the primary's stencil attachment format, or VK_FORMAT_UNDEFINED
+    // when the primary does not bind one (even if depth uses a combined format).
+    const VkFormat stencil_format;
 } ZHLN_SecondaryCmdDesc;
 
 void     ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd, const ZHLN_SecondaryCmdDesc* ZHLN_RESTRICT desc);
