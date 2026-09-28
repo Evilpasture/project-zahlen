@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "Rendering.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/gui/UIData.hpp>
@@ -30,7 +31,8 @@ class UIRenderer {
 
     void BeginFrame() noexcept;
 
-    void Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData) noexcept;
+    [[nodiscard]] auto SupportsFormat(VkFormat colorFormat) const noexcept -> bool;
+    void Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat, const UIDrawData& uiData) noexcept;
 
   private:
     struct Impl;

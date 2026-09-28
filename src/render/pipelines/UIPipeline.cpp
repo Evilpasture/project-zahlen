@@ -31,6 +31,10 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         return FrameSkipped {};
     }
     const DestinationRegistry::Record target = *resolved;
+    if (!impl.uiRenderer.SupportsFormat(target.image.format)) {
+        ZHLN::Log("[RenderUI] Destination 0x{:016X} has unsupported color format {}; UI skipped.", target.handle.Raw(), static_cast<int>(target.image.format));
+        return FrameSkipped {};
+    }
 
     const VkCommandBuffer cmd = impl.RecordingFor(target);
     if (cmd == VK_NULL_HANDLE) {
@@ -68,7 +72,7 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
             impl.BindHeapsAndPushFrame(cmd);
 
             Vk::CommandEncoder encoder(cmd);
-            impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
+            impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, target.image.format, uiData);
         });
 
     impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);

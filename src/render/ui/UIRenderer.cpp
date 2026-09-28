@@ -34,9 +34,23 @@ constexpr uint32_t kMaxUiVertices = 100'000;
 struct UIRenderer::Impl {
     TextureManager* textureManager = nullptr;
 
-    Vk::Pipeline     pipeline;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    Vk::HeapMappingBundle mappings;
+    struct FormatPipeline {
+        VkFormat     format = VK_FORMAT_UNDEFINED;
+        Vk::Pipeline pipeline;
+    };
+    // The window and render textures can have different attachment formats.
+    std::array<FormatPipeline, 3> pipelines {};
+    VkPipelineLayout              layout = VK_NULL_HANDLE;
+    Vk::HeapMappingBundle         mappings;
+
+    [[nodiscard]] auto PipelineFor(VkFormat colorFormat) const noexcept -> VkPipeline {
+        for (const auto& variant: pipelines) {
+            if (variant.format == colorFormat) {
+                return variant.pipeline.Get();
+            }
+        }
+        return VK_NULL_HANDLE;
+    }
 
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
@@ -82,22 +96,34 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
     uiShaders = std::move(*stagesRes);
 
-    const VkFormat swapchainFormat = ctx.presenter.GetPresentFormat();
-    auto           pipeRes         =
-        Vk::PipelineBuilder {}
-            .Shaders(uiShaders)
-            .Layout(impl.layout)
-            .Cache(ctx.pipelineCache.Get())
-            .HeapMappings(&impl.mappings.info, &impl.mappings.info)
-            .ColorFormats(std::array {swapchainFormat})
-            .NoDepth()
-            .AlphaBlend()
-            .CullNone()
-            .Build(ctx.ctx.Device());
-    if (!pipeRes) {
-        return std::unexpected(pipeRes.error());
+    // Dynamic rendering requires each pipeline's color format to match the
+    // attachment view exactly. The present target can be sRGB/BGRA, while
+    // CreateRenderTexture uses RGBA8 UNORM or RGBA16F. Build one variant per
+    // distinct format (the present format may already be RGBA8 UNORM).
+    impl.pipelines = {};
+    size_t pipelineCount = 0;
+    const std::array formats {ctx.presenter.GetPresentFormat(), VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT};
+    for (VkFormat format: formats) {
+        if (impl.PipelineFor(format) != VK_NULL_HANDLE) {
+            continue;
+        }
+        auto pipeRes = Vk::PipelineBuilder {}
+                           .Shaders(uiShaders)
+                           .Layout(impl.layout)
+                           .Cache(ctx.pipelineCache.Get())
+                           .HeapMappings(&impl.mappings.info, &impl.mappings.info)
+                           .ColorFormats(std::array {format})
+                           .NoDepth()
+                           .AlphaBlend()
+                           .CullNone()
+                           .Build(ctx.ctx.Device());
+        if (!pipeRes) {
+            return std::unexpected(pipeRes.error());
+        }
+        impl.pipelines[pipelineCount].format   = format;
+        impl.pipelines[pipelineCount].pipeline = std::move(*pipeRes);
+        ++pipelineCount;
     }
-    impl.pipeline = std::move(*pipeRes);
 
     const size_t bufferSize = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexAttributes));
     for (int i = 0; i < 2; ++i) {
@@ -110,7 +136,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         impl.vbos[i]          = std::move(*res);
         impl.vboAddresses[i]  = ctx.ctx.BufferAddress(impl.vbos[i].Handle());
     }
-    ZHLN::Log("UIRenderer: pipeline + double-buffered VBOs ({} bytes).", bufferSize);
+    ZHLN::Log("UIRenderer: {} format-matched pipelines + double-buffered VBOs ({} bytes).", pipelineCount, bufferSize);
     return {};
 }
 
@@ -120,12 +146,17 @@ void UIRenderer::BeginFrame() noexcept {
     }
 }
 
-void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData) noexcept {
-    if (_impl == nullptr || uiData.Empty() || !_impl->pipeline.Valid()) {
+auto UIRenderer::SupportsFormat(VkFormat colorFormat) const noexcept -> bool {
+    return _impl != nullptr && _impl->PipelineFor(colorFormat) != VK_NULL_HANDLE;
+}
+
+void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, VkFormat colorFormat, const UIDrawData& uiData) noexcept {
+    if (_impl == nullptr || uiData.Empty()) {
         return;
     }
     auto& impl = *_impl;
-    if (width == 0 || height == 0) {
+    const VkPipeline pipeline = impl.PipelineFor(colorFormat);
+    if (pipeline == VK_NULL_HANDLE || width == 0 || height == 0) {
         return;
     }
 
@@ -187,7 +218,7 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
         );
 
         encoder.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
-            {.pipeline      = impl.pipeline.Get(),
+            {.pipeline      = pipeline,
              .layout        = impl.layout,
              .heap          = true,
              .vertexCount   = batch.vertexCount,

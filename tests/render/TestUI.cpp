@@ -420,9 +420,10 @@ struct UITestSuite {
         // which is why the assertion is on the window: it is the surface the
         // user is looking at, and it must show its own chrome.
         //
-        // A headless engine has no second swapchain, so the second destination
-        // is a render texture -- the invariant being pinned is the call's, not
-        // the destination's.
+        // A headless engine has no second swapchain, so exercise LDR (UNORM)
+        // and HDR (float) render textures alongside the sRGB presentation
+        // target. Every UI call must use a pipeline matching its attachment
+        // format and keep the window's vertices intact.
         std::expected<void, ZHLN::ErrorCode> second_destination_does_not_replace_the_first() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -444,6 +445,12 @@ struct UITestSuite {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
             const ZHLN::TextureHandle texture = *textureRes;
+            const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
+            if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
+                rc.DestroyRenderTexture(texture);
+                return std::unexpected(UITestError::RenderTextureFailed);
+            }
+            const ZHLN::TextureHandle hdrTexture = *hdrTextureRes;
 
             const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 
@@ -458,9 +465,8 @@ struct UITestSuite {
             }
             const ZHLN::RenderAttachment attachment = **target;
             const uint32_t               frameIndex = rc.GetFrameIndex();
-            // The window's own UI must draw (the pixel check below reads it);
-            // the render-texture destination must at least not hard-fail -- a
-            // skip there is acceptable to what this test asserts.
+            // All destinations must draw. A silent skip would make the window
+            // test pass without exercising either offscreen pipeline variant.
             const auto windowDrawn = rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},
                 windowPayload.View()
@@ -473,7 +479,18 @@ struct UITestSuite {
                 },
                 otherPayload.View()
             );
-            if (!ZHLN::Test::ExpectTrue(windowDrawn.has_value() && !windowDrawn->has_value() && otherDrawn.has_value())) {
+            const auto hdrDrawn = rc.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
+                    .target     = ZHLN::RenderAttachment {.texture = hdrTexture, .mipLevel = 0, .arrayLayer = 0},
+                    .frameIndex = frameIndex
+                },
+                otherPayload.View()
+            );
+            if (!ZHLN::Test::ExpectTrue(
+                    windowDrawn.has_value() && !windowDrawn->has_value() && otherDrawn.has_value() && !otherDrawn->has_value() && hdrDrawn.has_value() &&
+                    !hdrDrawn->has_value()
+                )) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
@@ -481,6 +498,7 @@ struct UITestSuite {
             }
 
             const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_window_and_second_destination.ppm");
+            rc.DestroyRenderTexture(hdrTexture);
             rc.DestroyRenderTexture(texture);
             if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                 return std::unexpected(UITestError::RenderOutputBlank);
