@@ -159,14 +159,15 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
-    template <typename T> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::span<T> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
-        return CreateTexture(std::as_bytes(pixels), extent, isSRGB);
-    }
-    template <typename T> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T> pixels, Extent2D extent, bool isSRGB = true)
+    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
         -> std::expected<TextureHandle, ErrorCode> {
-        return CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+        return CreateTexture(std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
+    }
+    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
+        -> std::expected<TextureHandle, ErrorCode> {
+        return CreateTexture(name, std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
     }
     void UnloadTexture(TextureHandle handle);
 
