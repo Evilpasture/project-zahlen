@@ -287,7 +287,7 @@ struct FrameDiff {
 
 enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
 
-[[nodiscard]] HueClass ClassifyPixel(uint8_t r8, uint8_t g8, uint8_t b8) noexcept {
+[[nodiscard]] constexpr HueClass ClassifyPixel(uint8_t r8, uint8_t g8, uint8_t b8) noexcept {
     const double r = static_cast<double>(r8);
     const double g = static_cast<double>(g8);
     const double b = static_cast<double>(b8);
@@ -305,13 +305,20 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     if (b >= kFloor && b >= 1.6 * r && b >= 1.6 * g) {
         return HueClass::Blue;
     }
-    // Pair hues additionally cap the complementary channel hard (0.45 of the
-    // weaker primary) so warm/cool tinted light pools on the neutral ground
-    // can never masquerade as a ring signature.
+    // The yellow and magenta probes are metallic; their specular is tinted
+    // and a tight complementary-channel cap excludes light on neutral ground.
     if (r >= kFloor && g >= kFloor && r >= 0.55 * g && g >= 0.55 * r && b <= 0.45 * std::min(r, g)) {
         return HueClass::Yellow;
     }
-    if (g >= kFloor && b >= kFloor && g >= 0.55 * b && b >= 0.55 * g && r <= 0.45 * std::min(g, b)) {
+    // The cyan probe is dielectric. At the sweep's near-normal view the
+    // visible box measured RGB (122,243,245) to (139,243,244): white PBR
+    // specular + tonemapping lift red above the old 0.45 cap, even though
+    // every pixel in its projected patch remains strongly cyan. Preserve the
+    // old minimum chroma at the 60-byte floor (>= 33) and require G/B to
+    // track each other so gray ground and blue sky cannot pose as the box.
+    const double weakerCyan = std::min(g, b);
+    if (g >= kFloor && b >= kFloor && g >= 0.75 * b && b >= 0.75 * g &&
+        r <= 0.65 * weakerCyan && weakerCyan - r >= 33.0) {
         return HueClass::Cyan;
     }
     if (r >= kFloor && b >= kFloor && r >= 0.55 * b && b >= 0.55 * r && g <= 0.45 * std::min(r, b)) {
@@ -319,6 +326,10 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     }
     return HueClass::None;
 }
+
+static_assert(ClassifyPixel(122, 243, 245) == HueClass::Cyan && ClassifyPixel(139, 243, 244) == HueClass::Cyan);
+static_assert(ClassifyPixel(87, 94, 95) != HueClass::Cyan && ClassifyPixel(70, 150, 215) != HueClass::Cyan);
+static_assert(ClassifyPixel(237, 29, 22) == HueClass::Red && ClassifyPixel(255, 255, 255) == HueClass::None);
 
 [[nodiscard]] uint32_t CountHue(const RgbImage& img, HueClass hue) {
     if (!img.Valid()) {
