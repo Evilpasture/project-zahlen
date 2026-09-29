@@ -272,7 +272,7 @@ void TextureManager::OnDeviceLost() {
     });
 }
 
-auto TextureManager::AdoptTexture(Vk::Image&& image, Vk::ImageView&& view, uint32_t width, uint32_t height)
+auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
     -> std::expected<TextureHandle, ErrorCode> {
     const VkFormat format = view.Info().format;
     return Adopt(std::move(image), std::move(view)).transform([&](uint32_t slot) {
@@ -280,7 +280,7 @@ auto TextureManager::AdoptTexture(Vk::Image&& image, Vk::ImageView&& view, uint3
     });
 }
 
-auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode> {
     uint32_t index = 0;
     if (!_freeSlots.empty()) {
         index = _freeSlots.back();
@@ -288,6 +288,9 @@ auto TextureManager::Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expe
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
             ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            // Parameter destruction order is unspecified; the view must go before its image.
+            view = Vk::ImageView {};
+            image = Vk::Image {};
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
         }
         index = _nextSlotIndex++;

@@ -58,7 +58,7 @@ class TextureManager {
     [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto AdoptTexture(Vk::Image&& image, Vk::ImageView&& view, uint32_t width, uint32_t height)
+    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
@@ -68,7 +68,7 @@ class TextureManager {
 
     // Raw slots are only for internal fallback, render-target and LUT setup.
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;
 
