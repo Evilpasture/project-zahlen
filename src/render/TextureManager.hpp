@@ -87,7 +87,7 @@ class TextureManager {
   private:
     struct TextureRecord {
         TextureHandle handle           = TextureHandle::Invalid;
-        std::string   identifier;
+        std::string   identifier {};
         bool          named            = false;
         VkFormat      format           = VK_FORMAT_UNDEFINED;
         uint32_t      width            = 0;
