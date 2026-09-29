@@ -19,6 +19,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/physics/PhysicsHandles.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -554,7 +555,7 @@ void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle    = {},
+    Physics::BodyHandle            ignoredPhysicsHandle    = {},
     float                          ikWeight                = 1.0f,
     bool                           preserveAuthoredFootXZ  = true,
     bool                           worldLockFeet           = false,

@@ -1,13 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include "ArticulationSystem.hpp"
 #include <unordered_set>
 #include <vector>
 
@@ -47,11 +43,6 @@ void DespawnEntity(Engine& engine, Entity entity) {
             continue;
         }
 
-        engine.GetArticulationSystem().Release(engine, current);
-        engine.GetAudioContext().ReleaseOwner(current);
-        if (const auto* physics = registry.Get<Components::PhysicsComponent>(current); physics != nullptr) {
-            engine.GetPhysicsContext().DestroyBody(physics->physicsHandle);
-        }
         registry.Destroy(current);
     }
 }

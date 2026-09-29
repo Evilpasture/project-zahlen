@@ -99,7 +99,7 @@ JPH::Constraint* CreateNativeConstraint(const ConstraintType type, JPH::Body* b1
 }
 
 Physics::ConstraintHandle
-    PhysicsContext::CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params) {
+    PhysicsContext::CreateConstraint(Physics::ConstraintType type, Physics::BodyHandle b1, Physics::BodyHandle b2, const Physics::ConstraintParams& params) {
     auto& world = GetInternalWorld();
 
     Physics::ConstraintHandle handle = world.AllocateConstraintHandle();

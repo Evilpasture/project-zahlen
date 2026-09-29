@@ -486,7 +486,7 @@ struct RenderPipelinesTestSuite {
                 const auto* trans = reg.Get<ZHLN::Components::TransformComponent>(box);
                 const auto* phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
                 const char* body  = (phys == nullptr) ? "no PhysicsComponent" :
-                                                        ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
+                                                        ((phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
                 const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
 
                 const std::string stateText = (phys == nullptr) ? std::string("no PhysicsComponent") : std::string(body);

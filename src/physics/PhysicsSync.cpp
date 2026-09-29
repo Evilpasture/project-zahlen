@@ -194,7 +194,7 @@ inline void ExecuteSyncPass(
 [[gnu::always_inline]]
 inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters, const MappingDataCreateInfo& map, const WorldDataCreateInfo& world) noexcept {
     for (auto* character: characters) {
-        const ZHLN::Entity h = ZHLN::Entity::Unpack(character->GetUserData());
+        const Physics::BodyHandle h = Physics::BodyHandle::Unpack(character->GetUserData());
 
         const uint32_t slot = h.index;
         if (slot >= map.slot_capacity) [[unlikely]] {

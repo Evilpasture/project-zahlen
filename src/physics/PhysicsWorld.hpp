@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "Zahlen/Entity.hpp"
 #include "Zahlen/Sync.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -25,7 +24,7 @@ namespace ZHLN::Physics {
 
 struct WorldStateHeader {
     static constexpr uint64_t ZHLN    = 0x5A484C4E;
-    static constexpr uint32_t Version = 2;
+    static constexpr uint32_t Version = 3;
     const uint64_t            magic   = ZHLN;
     const uint32_t            version = Version;
     uint32_t                  bodyCount {};
@@ -43,12 +42,12 @@ enum class CommandType : uint8_t { DestroyBody, CreateConstraint, DestroyConstra
 struct Command {
     CommandType type;
     union {
-        ZHLN::Entity     handle;
+        BodyHandle       handle;
         ConstraintHandle cHandle;
         struct {
             ConstraintType   cType;
-            ZHLN::Entity     b1;
-            ZHLN::Entity     b2;
+            BodyHandle       b1;
+            BodyHandle       b2;
             ConstraintParams params;
         } createC;
         struct {
@@ -56,9 +55,9 @@ struct Command {
             float            targetValue;
         } setTarget;
         struct {
-            ZHLN::Entity handle;
-            uint32_t     category;
-            uint32_t     mask;
+            BodyHandle handle;
+            uint32_t   category;
+            uint32_t   mask;
         } setFilter;
     };
 };
@@ -78,13 +77,13 @@ enum class SlotState : uint8_t {
 enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
-    ZHLN::Entity body1;
-    ZHLN::Entity body2;
-    JPH::Real    px, py, pz;
-    float        nx, ny, nz;
-    float        impulse;
-    ContactType  type;
-    uint32_t     flags;
+    BodyHandle  body1;
+    BodyHandle  body2;
+    JPH::Real   px, py, pz;
+    float       nx, ny, nz;
+    float       impulse;
+    ContactType type;
+    uint32_t    flags;
 
     float    slidingSpeed;
     float    rvx, rvy, rvz;
@@ -108,7 +107,7 @@ static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::i
 struct PhysicsWorld {
     mutable BufferSync sync {};
 
-    alignas(64) JPH::PhysicsSystem* system              = nullptr;
+    alignas(64) JPH::PhysicsSystem*     system          = nullptr;
     JPH::BodyInterface*                 bodyInterface   = nullptr;
     JPH::JobSystem*                     jobSystem       = nullptr;
     JPH::BroadPhaseLayerInterface*      bpInterface     = nullptr;
@@ -149,12 +148,11 @@ struct PhysicsWorld {
     JPH::Array<uint32_t>               slotToDense;
     JPH::Array<uint32_t>               denseToSlot;
     JPH::Array<uint32_t>               freeSlots;
-    JPH::Array<ZHLN::Entity>            bodyOwners;
 
     JPH::Array<uint32_t> categories;
     JPH::Array<uint32_t> masks;
 
-    JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
+    JPH::Array<ZHLN::Atomic<uint8_t>>   slotStates;
     JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
     alignas(64) JPH::Array<ContactEvent> contactBuffer;
@@ -178,7 +176,7 @@ struct PhysicsWorld {
     void Shutdown();
 
     void ResizeBuffers(size_t newCapacity);
-    auto AllocateHandle() -> ZHLN::Entity;
+    auto AllocateHandle() -> BodyHandle;
     void RemoveBodySlot(uint32_t slot);
     void ResizeConstraintBuffers(size_t newCapacity);
 

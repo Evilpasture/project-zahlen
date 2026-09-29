@@ -252,18 +252,14 @@ auto SpawnCharacter(
         .shape            = Physics::CreateDualShape(config),
         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
     };
-    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), characterParams);
-    const JPH::Mat44 world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
-    const Entity     player   = reg.Create(
+    const Physics::BodyHandle charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), characterParams);
+    const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
+    const Entity              player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
         Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
         Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
     );
-    // This construction flow must allocate the virtual character before the
-    // entity exists, so bind its durable ECS owner immediately afterwards.
-    pc.SetBodyOwner(charPhys, player);
-
     // Configure third-person follow camera and strip FreeCam. The rig
     // component lives in extras/Camera: this is gameplay camera policy the
     // spawner authors explicitly (a host that wants no follow camera removes

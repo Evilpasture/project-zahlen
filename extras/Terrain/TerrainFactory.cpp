@@ -463,7 +463,7 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
@@ -536,7 +536,7 @@ auto CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
             reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }

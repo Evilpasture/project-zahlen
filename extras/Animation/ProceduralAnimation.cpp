@@ -2082,16 +2082,16 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
-            const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
-            const float  pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
-            const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
-            const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
-            const float  maxBodyTilt            = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float  maxAnkleSideways       = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float  maxAnkleForward        = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
-            const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
-            const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
+            const Physics::BodyHandle ignoredHandle        = physicsComponent != nullptr ? physicsComponent->physicsHandle : Physics::BodyHandle {};
+            const float               legIKWeight          = config != nullptr ? config->legIKWeight : 1.0f;
+            const float               pelvisDropWeight     = config != nullptr ? config->pelvisDropWeight : 1.0f;
+            const float               maxHeightCorrection  = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
+            const float               maxLegExtension      = config != nullptr ? config->maxLegExtension : 0.98f;
+            const float               maxBodyTilt          = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float               maxAnkleSideways     = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float               maxAnkleForward      = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
+            const bool                preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
+            const bool                worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
                 physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward

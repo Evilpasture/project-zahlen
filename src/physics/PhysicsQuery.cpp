@@ -19,25 +19,38 @@ namespace ZHLN {
 namespace {
 
 class QueryFilter final: public JPH::BodyFilter {
-    JPH::BodyID _ignoreID;
+    const Physics::PhysicsWorld& _world;
+    JPH::BodyID                 _ignoreID;
 
   public:
-    explicit QueryFilter(JPH::BodyID ignore): _ignoreID(ignore) {
+    QueryFilter(const Physics::PhysicsWorld& world, JPH::BodyID ignore): _world(world), _ignoreID(ignore) {
     }
     [[nodiscard]] auto ShouldCollide(const JPH::BodyID& inBodyID) const -> bool override {
-        return inBodyID != _ignoreID;
+        if (inBodyID == _ignoreID) {
+            return false;
+        }
+        // Ragdoll parts are native Jolt bodies, not BodyHandles. In particular,
+        // a closest-hit cast must skip them rather than return an invalid hit.
+        const auto joltIndex = inBodyID.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
+        if (joltIndex >= _world.idToHandleMap.size()) {
+            return false;
+        }
+        const auto handle = Physics::BodyHandle::Unpack(_world.idToHandleMap[joltIndex].load(std::memory_order::acquire));
+        return handle.index < _world.slotCapacity &&
+               _world.generations[handle.index].load(std::memory_order::acquire) == handle.generation &&
+               Physics::GetSlotPredicate(_world.LoadSlotState(handle.index)).isActive;
     }
 };
 
-auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, ZHLN::Entity& outHandle) -> bool {
+auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, Physics::BodyHandle& outHandle) -> bool {
     if (bodyID.IsInvalid()) {
         [[unlikely]] return false;
     }
 
-    const uint64_t     rawData = world.bodyInterface->GetUserData(bodyID);
-    const ZHLN::Entity handle  = ZHLN::Entity::Unpack(rawData);
+    const uint64_t            rawData = world.bodyInterface->GetUserData(bodyID);
+    const Physics::BodyHandle handle  = Physics::BodyHandle::Unpack(rawData);
 
-    if (handle.index >= world.slotCapacity) {
+    if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
         [[unlikely]] return false;
     }
 
@@ -52,7 +65,7 @@ auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, Z
 
 }
 
-auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, ZHLN::Entity ignore) const -> Physics::RaycastResult {
+auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, Physics::BodyHandle ignore) const -> Physics::RaycastResult {
     const auto& world = GetWorld();
 
     if (world.isStepping.load(std::memory_order::relaxed)) {
@@ -69,7 +82,7 @@ auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float
     JPH::RayCastResult hit;
 
     JPH::BodyID ignoreID = Physics::GetBodyID(world, ignore);
-    QueryFilter filter(ignoreID);
+    QueryFilter filter(world, ignoreID);
 
     const auto* query  = &world.system->GetNarrowPhaseQuery();
     bool        hasHit = query->CastRay(ray, hit, {}, {}, filter);
@@ -98,7 +111,7 @@ void PhysicsContext::RaycastAll(
     JPH::Vec3Arg                        direction,
     float                               maxDistance,
     JPH::Array<Physics::RaycastResult>& outResults,
-    ZHLN::Entity                        ignore
+    Physics::BodyHandle                 ignore
 ) const {
     const auto& world = GetWorld();
 
@@ -120,7 +133,7 @@ void PhysicsContext::RaycastAll(
     settings.mTreatConvexAsSolid    = false;
 
     JPH::BodyID ignoreID = Physics::GetBodyID(world, ignore);
-    QueryFilter filter(ignoreID);
+    QueryFilter filter(world, ignoreID);
 
     JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
     const auto*                                          query = &world.system->GetNarrowPhaseQuery();
@@ -155,7 +168,7 @@ void PhysicsContext::RaycastAllPenetrations(
     JPH::Vec3Arg                                   direction,
     float                                          maxDistance,
     JPH::Array<Physics::RaycastPenetrationResult>& outResults,
-    ZHLN::Entity                                   ignore
+    Physics::BodyHandle                           ignore
 ) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
@@ -177,7 +190,7 @@ void PhysicsContext::RaycastAllPenetrations(
     settings.mTreatConvexAsSolid    = false;
 
     JPH::BodyID ignoreID = Physics::GetBodyID(world, ignore);
-    QueryFilter filter(ignoreID);
+    QueryFilter filter(world, ignoreID);
 
     JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
     const auto*                                          query = &world.system->GetNarrowPhaseQuery();
@@ -203,7 +216,7 @@ void PhysicsContext::RaycastAllPenetrations(
     hits.reserve(collector.mHits.size());
 
     for (const auto& hit: collector.mHits) {
-        ZHLN::Entity handle {};
+        Physics::BodyHandle handle {};
         if (TryGetValidHandle(world, hit.mBodyID, handle)) {
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
@@ -223,7 +236,7 @@ void PhysicsContext::RaycastAllPenetrations(
         }
 
         const auto&  entryHit = hits[i];
-        ZHLN::Entity handle {};
+        Physics::BodyHandle handle {};
         if (!TryGetValidHandle(world, entryHit.bodyID, handle)) {
             continue;
         }
@@ -273,7 +286,7 @@ void PhysicsContext::RaycastAllPenetrations(
     }
 }
 
-auto PhysicsContext::RaycastPenetration(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, ZHLN::Entity ignore) const
+auto PhysicsContext::RaycastPenetration(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance, Physics::BodyHandle ignore) const
     -> Physics::RaycastPenetrationResult {
     JPH::Array<Physics::RaycastPenetrationResult> results;
     RaycastAllPenetrations(origin, direction, maxDistance, results, ignore);
@@ -289,7 +302,7 @@ auto PhysicsContext::Shapecast(
     JPH::QuatArg          rot,
     JPH::Vec3Arg          direction,
     float                 maxDistance,
-    ZHLN::Entity          ignore
+    Physics::BodyHandle          ignore
 ) const -> Physics::ShapeCastResult {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
@@ -307,7 +320,7 @@ auto PhysicsContext::Shapecast(
 
     JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
     JPH::BodyID                                                ignoreID = Physics::GetBodyID(world, ignore);
-    QueryFilter                                                filter(ignoreID);
+    QueryFilter                                                filter(world, ignoreID);
 
     const auto*                  query = &world.system->GetNarrowPhaseQuery();
     const JPH::ShapeCastSettings settings {
@@ -331,7 +344,7 @@ auto PhysicsContext::Shapecast(
     return result;
 }
 
-void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Array<ZHLN::Entity>& outResults) const {
+void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Array<Physics::BodyHandle>& outResults) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
@@ -345,7 +358,7 @@ void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Arra
 
     query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(center), {}, JPH::RVec3::sZero(), collector);
 
-    ZHLN::Entity handle {};
+    Physics::BodyHandle handle {};
     for (const auto& hit: collector.mHits) {
         if (TryGetValidHandle(world, hit.mBodyID2, handle)) {
             outResults.push_back(handle);
@@ -353,7 +366,7 @@ void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Arra
     }
 }
 
-void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH::Array<ZHLN::Entity>& outResults) const {
+void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH::Array<Physics::BodyHandle>& outResults) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
@@ -365,7 +378,7 @@ void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH
 
     query->CollideAABox(box, collector);
 
-    ZHLN::Entity handle {};
+    Physics::BodyHandle handle {};
     for (const auto& hitID: collector.mHits) {
         if (TryGetValidHandle(world, hitID, handle)) {
             outResults.push_back(handle);
@@ -373,7 +386,7 @@ void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH
     }
 }
 
-void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZHLN::Entity>& outEntities) const {
+void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<Physics::BodyHandle>& outEntities) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
@@ -383,13 +396,13 @@ void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZH
 
     struct SimpleCollector: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld& world;
-        JPH::Array<ZHLN::Entity>&    out;
+        JPH::Array<Physics::BodyHandle>&    out;
 
-        SimpleCollector(const Physics::PhysicsWorld& w, JPH::Array<ZHLN::Entity>& o): world(w), out(o) {
+        SimpleCollector(const Physics::PhysicsWorld& w, JPH::Array<Physics::BodyHandle>& o): world(w), out(o) {
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            ZHLN::Entity handle {};
+            Physics::BodyHandle handle {};
             if (TryGetValidHandle(world, inBodyID, handle)) {
                 out.push_back(handle);
             }
@@ -400,7 +413,7 @@ void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZH
     world.system->GetBroadPhaseQuery().CollideAABox(box, collector);
 }
 
-void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<ZHLN::Entity>& outEntities) const {
+void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<Physics::BodyHandle>& outEntities) const {
     const auto& world = GetWorld();
     if (world.isStepping.load(std::memory_order::relaxed)) {
         return;
@@ -411,13 +424,13 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
     struct CullCollector: public JPH::CollideShapeBodyCollector {
         const Physics::PhysicsWorld& world;
         const Frustum&               frustum;
-        JPH::Array<ZHLN::Entity>&    out;
+        JPH::Array<Physics::BodyHandle>&    out;
 
-        CullCollector(const Physics::PhysicsWorld& w, const Frustum& f, JPH::Array<ZHLN::Entity>& o): world(w), frustum(f), out(o) {
+        CullCollector(const Physics::PhysicsWorld& w, const Frustum& f, JPH::Array<Physics::BodyHandle>& o): world(w), frustum(f), out(o) {
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            ZHLN::Entity handle {};
+            Physics::BodyHandle handle {};
             if (TryGetValidHandle(world, inBodyID, handle)) {
                 JPH::BodyLockRead lock(world.system->GetBodyLockInterfaceNoLock(), inBodyID);
                 if (lock.Succeeded()) {

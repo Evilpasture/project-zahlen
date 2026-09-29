@@ -9,7 +9,6 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <cstdint>
 #include <memory>
@@ -53,7 +52,9 @@ class ZHLN_API AudioContext {
     void PostEvent(const AudioEvent& event) noexcept;
     void FlushEvents() noexcept;
 
-    [[nodiscard]] auto CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle;
+    // Returned handles borrow context-owned slots. ECS users store them in
+    // AudioSourceComponent / LoopSynthComponent for removal-time cleanup.
+    [[nodiscard]] auto CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle;
     void               SetVoicePosition(AudioHandle handle, const JPH::Vec3& position);
     void               SetVoiceVolume(AudioHandle handle, float volume);
     void               SetVoicePitch(AudioHandle handle, float pitch);
@@ -63,12 +64,13 @@ class ZHLN_API AudioContext {
     [[nodiscard]] auto IsVoicePlaying(AudioHandle handle) const noexcept -> bool;
     [[nodiscard]] auto IsVoiceValid(AudioHandle handle) const noexcept -> bool;
 
-    [[nodiscard]] auto CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle;
+    [[nodiscard]] auto CreateLoopSynth(AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle;
     void               SetLoopSynthParams(SynthHandle handle, float charge, float baseFreq, float filterFreq, float volume);
     void               StopLoopSynth(SynthHandle handle, float fadeOutSeconds = 0.08f);
 
-    void ReleaseOwner(Entity owner) noexcept;
-    void ReconcileVoices(EntityAliveQuery alive, float dt);
+    [[nodiscard]] auto IsLoopSynthValid(SynthHandle handle) const noexcept -> bool;
+    // Advance fades and reclaim completed audio slots and transient sounds.
+    void UpdatePlayback(float dt);
 
     struct Impl;
 

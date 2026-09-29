@@ -28,7 +28,7 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
     auto physComps     = query.Raw<Components::PhysicsComponent>();
     float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
 
-    std::vector<Entity>                     handles;
+    std::vector<Physics::BodyHandle>        handles;
     std::vector<size_t>                     sourceIndex;
     std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.reserve(entities.size());
@@ -67,10 +67,6 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
 
 namespace ZHLN {
 
-void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
-    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry().AliveQuery());
-}
-
 void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
                                        ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept {
     auto entities = query.Entities<Components::PhysicsComponent>();
@@ -78,7 +74,7 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
 
     float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
 
-    thread_local std::vector<Entity>                     handles;
+    thread_local std::vector<Physics::BodyHandle>        handles;
     thread_local std::vector<size_t>                     sourceIndex;
     thread_local std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.clear();

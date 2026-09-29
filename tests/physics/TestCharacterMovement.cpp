@@ -60,11 +60,11 @@ inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex)
 // ============================================================================
 
 struct CPUPipelineHarness {
-    ZHLN::ECS::Registry  reg;
     ZHLN::PhysicsContext pc;
+    ZHLN::ECS::Registry  reg;
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
-    ZHLN::Entity         charPhys {};
+    ZHLN::Physics::BodyHandle charPhys {};
     JPH::Vec3            prevPos = JPH::Vec3::sZero();
     JPH::Vec3            currPos = JPH::Vec3::sZero();
 
@@ -75,6 +75,9 @@ struct CPUPipelineHarness {
 
     explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, JPH::RVec3Arg spawnPos = JPH::RVec3(0, 0, 0), const ZHLN::Physics::DualShapeConfig& hull = {}):
         pc(cfg) {
+        static_cast<void>(reg.ObserveRemoval<ZHLN::Components::PhysicsComponent>([this](ZHLN::Entity, auto& component) {
+            pc.DestroyBody(component.physicsHandle);
+        }));
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
         pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
@@ -92,7 +95,6 @@ struct CPUPipelineHarness {
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
         );
-        pc.SetBodyOwner(charPhys, player);
         prevPos = JPH::Vec3(spawnPos);
         currPos = JPH::Vec3(spawnPos);
 
@@ -445,7 +447,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
-            ZHLN::Entity pushBox =
+            ZHLN::Physics::BodyHandle pushBox =
                 harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 

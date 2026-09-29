@@ -264,6 +264,21 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     // entity ledger. These observers also run on raw Registry::Destroy and
     // Registry::Clear, not just through the Engine's despawn helper.
     auto& reg = _impl->world->GetRegistry();
+    static_cast<void>(reg.ObserveRemoval<Components::PhysicsComponent>([this](Entity, auto& body) {
+        GetPhysicsContext().DestroyBody(std::exchange(body.physicsHandle, Physics::BodyHandle::Null()));
+    }));
+    static_cast<void>(reg.ObserveRemoval<Components::AudioSourceComponent>([this](Entity, auto& audio) {
+        GetAudioContext().StopVoice(std::exchange(audio.voiceHandle, AudioHandle::Invalid), audio.fadeOut);
+    }));
+    static_cast<void>(reg.ObserveRemoval<Components::LoopSynthComponent>([this](Entity, auto& synth) {
+        GetAudioContext().StopLoopSynth(std::exchange(synth.synthHandle, SynthHandle::Invalid), synth.fadeOut);
+    }));
+    static_cast<void>(reg.ObserveRemoval<Components::RagdollComponent>([this](Entity, auto& ragdoll) {
+        // The physics pool knows whether this instance is active, so removal is
+        // safe even after an Inactive transition or a previous shutdown call.
+        GetPhysicsContext().DestroyRagdoll(std::exchange(ragdoll.ragdollHandle, Physics::RagdollHandle::Invalid));
+        ragdoll.isAddedToPhysics = false;
+    }));
     static_cast<void>(reg.ObserveRemoval<Components::OwnedMeshComponent>([this](Entity, auto& owned) {
         auto& render = GetRenderContext();
         if (owned.meshAsset != InvalidAssetID) {
@@ -333,7 +348,8 @@ Engine::~Engine() {
             hook(*this);
         }
 
-        _impl->world->GetArticulationSystem().Shutdown(*this);
+        // Observers release physics/ragdolls/audio while the World and Kernel
+        // contexts are still alive; World::~World can safely Clear again.
         _impl->world->GetRegistry().Clear();
     }
 

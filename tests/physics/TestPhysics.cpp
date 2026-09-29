@@ -8,16 +8,20 @@
 // clang-format on
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
+#include <Jolt/Skeleton/Skeleton.h>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <cmath>
 #include <expected>
+#include <vector>
 
 enum class PhysicsTestError : uint32_t {
     RaycastMissedExpectedBody ZHLN_ANNOTATION(ZHLN::Description<"Raycast did not hit expected collider.">{}) = 1,
     OverlapQueryFailed ZHLN_ANNOTATION(ZHLN::Description<"Broadphase overlap failed to detect sphere/AABB collision.">{}),
+    RagdollCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Creating a single-part ragdoll fixture failed.">{}),
 };
 
 struct PhysicsTestSuite {
@@ -48,22 +52,22 @@ struct PhysicsTestSuite {
 
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
-            ZHLN::Entity ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            ZHLN::Test::ExpectTrue(ground != ZHLN::Entity::Null());
+            ZHLN::Physics::BodyHandle ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            ZHLN::Test::ExpectTrue(ground != ZHLN::Physics::BodyHandle::Null());
 
             pc.OptimizeBroadphase();
 
             // 1. Raycast downwards from (0, 10, 0) -> (0, -1, 0)
             auto hit = pc.Raycast(JPH::RVec3(0, 10, 0), JPH::Vec3(0, -1, 0), 20.0f);
             ZHLN::Test::ExpectTrue(hit.hasHit);
-            ZHLN::Test::ExpectEq(hit.handle, ground);
+            ZHLN::Test::ExpectEq(hit.handle.Pack(), ground.Pack());
 
             // Ground box top surface is at Y = 1.0
             ZHLN::Test::ExpectLt(std::abs(hit.position.GetY() - 1.0f), 0.05f);
             ZHLN::Test::ExpectGt(hit.normal.GetY(), 0.9f);
 
             // 2. Sphere overlap at (0, 0, 0)
-            JPH::Array<ZHLN::Entity> overlapResults;
+            JPH::Array<ZHLN::Physics::BodyHandle> overlapResults;
             pc.OverlapSphere(JPH::RVec3(0, 0, 0), 5.0f, overlapResults);
             ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
@@ -77,9 +81,9 @@ struct PhysicsTestSuite {
             // Create a dynamic falling sphere (radius 0.5) centered at (0, 10, 0)
             // Top surface initially at Y = 10.5
             auto         sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
-            ZHLN::Entity sphere =
+            ZHLN::Physics::BodyHandle sphere =
                 pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(sphere != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectTrue(sphere != ZHLN::Physics::BodyHandle::Null());
 
             pc.OptimizeBroadphase();
 
@@ -115,27 +119,78 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> orphaned_ecs_owner_is_released_by_physics_reconciliation() {
-            ZHLN::PhysicsConfig  cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
+        std::expected<void, ZHLN::ErrorCode> ecs_removal_releases_body_without_liveness_sweep() {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
-            ZHLN::ECS::Registry  registry;
-
-            const ZHLN::Entity owner = registry.Create();
+            ZHLN::ECS::Registry registry; // destroyed before pc
+            ZHLN::Test::ExpectTrue(registry.ObserveRemoval<ZHLN::Components::PhysicsComponent>([&pc](ZHLN::Entity, auto& component) {
+                pc.DestroyBody(component.physicsHandle);
+                component.physicsHandle = ZHLN::Physics::BodyHandle::Null();
+            }));
             const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
-            const ZHLN::Entity body = pc.CreateRigidBody(
-                shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF,
-                0xFFFFFFFF, owner
-            );
-            ZHLN::Test::ExpectTrue(body != ZHLN::Entity::Null());
-            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);
+            auto createBody = [&] {
+                return pc.CreateRigidBody(shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            };
 
-            registry.Destroy(owner);
-            pc.ReconcileOrphanedBodies(registry.AliveQuery());
-            // Reconciliation uses the normal command queue: the slot remains
-            // present until the next physics step drains that command.
-            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 1u);
+            const auto firstBody = createBody();
+            const auto owner = registry.Create(ZHLN::Components::PhysicsComponent {.physicsHandle = firstBody});
+            registry.Remove<ZHLN::Components::PhysicsComponent>(owner);
+            registry.Remove<ZHLN::Components::PhysicsComponent>(owner);
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
+            ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(firstBody));
+
+            const auto secondBody = createBody();
+            registry.Add(owner, ZHLN::Components::PhysicsComponent {.physicsHandle = secondBody});
+            const auto thirdBody = createBody();
+            registry.Add(owner, ZHLN::Components::PhysicsComponent {.physicsHandle = thirdBody}); // replacement
+            pc.Step(1.0f / 60.0f);
+            ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(secondBody));
+            ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(thirdBody));
+            registry.Destroy(owner);
+            pc.Step(1.0f / 60.0f);
+            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
+
+            const auto lastBody = createBody();
+            registry.Create(ZHLN::Components::PhysicsComponent {.physicsHandle = lastBody});
+            registry.Clear();
+            pc.Step(1.0f / 60.0f);
+            ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
+            ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(lastBody));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> ragdoll_handles_are_released_by_component_removal() {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+            ZHLN::ECS::Registry registry;
+            static_cast<void>(registry.ObserveRemoval<ZHLN::Components::RagdollComponent>([&pc](ZHLN::Entity, auto& ragdoll) {
+                pc.DestroyRagdoll(ragdoll.ragdollHandle);
+                ragdoll.ragdollHandle = ZHLN::Physics::RagdollHandle::Invalid;
+            }));
+
+            JPH::Ref<JPH::Skeleton> skeleton = new JPH::Skeleton();
+            skeleton->AddJoint("root", "");
+            skeleton->CalculateParentJointIndices();
+            const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.25f);
+            std::vector<ZHLN::Physics::RagdollPartParams> parts {{.jointIndex = 0, .shape = shape}};
+
+            const auto first = pc.CreateSkeletalRagdoll(skeleton, parts);
+            if (!ZHLN::Test::ExpectTrue(first != ZHLN::Physics::RagdollHandle::Invalid)) {
+                return std::unexpected(PhysicsTestError::RagdollCreationFailed);
+            }
+            const auto owner = registry.Create(ZHLN::Components::RagdollComponent {.ragdollHandle = first});
+            ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) != nullptr);
+            registry.Remove<ZHLN::Components::RagdollComponent>(owner);
+            ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) == nullptr);
+
+            const auto second = pc.CreateSkeletalRagdoll(skeleton, parts);
+            ZHLN::Test::ExpectTrue(second != first);
+            ZHLN::Test::ExpectTrue(pc.GetRagdoll(second) != nullptr);
+            registry.Add(owner, ZHLN::Components::RagdollComponent {.ragdollHandle = second});
+            registry.Clear();
+            ZHLN::Test::ExpectTrue(pc.GetRagdoll(second) == nullptr);
+            pc.DestroyRagdoll(second); // stale generations and repeated release are safe
             return {};
         }
 
@@ -156,17 +211,17 @@ struct PhysicsTestSuite {
             // The motion type is queryable as soon as the body exists in Jolt,
             // before any Step has populated the engine's shadow SoA. A dynamic
             // body is dynamic the moment it is created.
-            const ZHLN::Entity dynamicBody = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Entity::Null());
+            const ZHLN::Physics::BodyHandle dynamicBody = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(dynamicBody));
 
-            const ZHLN::Entity staticBody    = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
-            const ZHLN::Entity kinematicBody = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(staticBody != ZHLN::Entity::Null());
-            ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Entity::Null());
+            const ZHLN::Physics::BodyHandle staticBody    = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            const ZHLN::Physics::BodyHandle kinematicBody = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(staticBody != ZHLN::Physics::BodyHandle::Null());
+            ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(staticBody));
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(kinematicBody));
-            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(ZHLN::Entity::Null()));
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(ZHLN::Physics::BodyHandle::Null()));
 
             // A destroyed body's slot is the first to be handed back out (LIFO
             // free list) with a bumped generation. The stale handle keeps the
@@ -175,8 +230,8 @@ struct PhysicsTestSuite {
             pc.DestroyBody(dynamicBody);
             pc.Step(1.0f / 60.0f);
 
-            const ZHLN::Entity reused = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
-            ZHLN::Test::ExpectTrue(reused != ZHLN::Entity::Null());
+            const ZHLN::Physics::BodyHandle reused = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(reused != ZHLN::Physics::BodyHandle::Null());
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(reused));        // the live occupant is dynamic
             ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(dynamicBody));  // the stale handle is not
             return {};

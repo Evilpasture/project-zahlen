@@ -8,13 +8,7 @@
 #include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
-class Engine;
 class PhysicsContext;
-
-class ZHLN_API PhysicsStateSystem {
-  public:
-    static void Reconcile(Engine& engine) noexcept;
-};
 
 class ZHLN_API VisualInterpolationSystem {
   public:

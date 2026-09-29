@@ -506,7 +506,6 @@ constexpr size_t MAX_SYNTH_SLOTS = 32;
 
 struct VoiceSlot {
     ma_sound               sound {};
-    Entity                 owner = Entity::Null();
     ZHLN::Atomic<uint32_t> generation {1};
     ZHLN::Atomic<bool>     inUse {false};
 
@@ -518,7 +517,6 @@ struct VoiceSlot {
 
 struct SynthSlot {
     LoopSynthData*         synthData = nullptr;
-    Entity                 owner     = Entity::Null();
     ZHLN::Atomic<uint32_t> generation {1};
     ZHLN::Atomic<bool>     inUse {false};
 };
@@ -550,6 +548,9 @@ struct AudioContext::Impl {
 
     std::array<VoiceSlot, MAX_VOICE_SLOTS> voiceSlots {};
     std::array<SynthSlot, MAX_SYNTH_SLOTS> synthSlots {};
+    // Only active slots need fade/completion processing on each audio tick.
+    std::vector<uint32_t> activeVoiceSlots;
+    std::vector<uint32_t> activeSynthSlots;
 
     std::vector<AudioEvent> eventQueue;
 
@@ -670,6 +671,8 @@ struct AudioContext::Impl {
 };
 
 AudioContext::AudioContext(const AudioConfig& ): _impl(std::make_unique<Impl>()) {
+    _impl->activeVoiceSlots.reserve(MAX_VOICE_SLOTS);
+    _impl->activeSynthSlots.reserve(MAX_SYNTH_SLOTS);
     ma_result result = ma_engine_init(nullptr, &_impl->engine);
     if (result == MA_SUCCESS) {
         _impl->initialized = true;
@@ -706,6 +709,17 @@ AudioContext::~AudioContext() {
             ma_noise_uninit(&burst->noise, nullptr);
             ma_data_source_uninit(&burst->base);
             _impl->burstPool.Destroy(burst);
+        }
+        for (auto* beep: _impl->activeBeeps) {
+            ma_sound_uninit(&beep->sound);
+            ma_waveform_uninit(&beep->waveform);
+            _impl->beepPool.Destroy(beep);
+        }
+        for (auto* sweep: _impl->activeSweeps) {
+            ma_sound_uninit(&sweep->sound);
+            ma_waveform_uninit(&sweep->waveform);
+            ma_data_source_uninit(&sweep->base);
+            _impl->sweepPool.Destroy(sweep);
         }
         ma_engine_uninit(&_impl->engine);
     }
@@ -751,7 +765,7 @@ void AudioContext::FlushEvents() noexcept {
 }
 
 
-auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
+auto AudioContext::CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
     if (!_impl->initialized || filepath.empty() || !std::filesystem::exists(filepath)) {
         return AudioHandle::Invalid;
     }
@@ -770,10 +784,10 @@ auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spa
                 ma_sound_set_looping(&slot.sound, looping ? MA_TRUE : MA_FALSE);
                 ma_sound_set_volume(&slot.sound, volume);
 
-                slot.owner       = owner;
                 slot.baseVolume  = volume;
                 slot.isStopping  = false;
                 slot.currentFade = 1.0f;
+                _impl->activeVoiceSlots.push_back(i);
                 slot.inUse.store(true, std::memory_order::release);
 
                 uint32_t gen = slot.generation.load(std::memory_order::relaxed);
@@ -852,6 +866,7 @@ void AudioContext::StopVoice(AudioHandle handle, float fadeOutSeconds) {
                 ma_sound_uninit(&slot.sound);
                 slot.inUse.store(false, std::memory_order::release);
                 slot.generation.fetch_add(1, std::memory_order::relaxed);
+                std::erase(_impl->activeVoiceSlots, idx);
             } else {
                 slot.isStopping      = true;
                 slot.fadeOutDuration = fadeOutSeconds;
@@ -884,7 +899,7 @@ auto AudioContext::IsVoiceValid(AudioHandle handle) const noexcept -> bool {
 }
 
 
-auto AudioContext::CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle {
+auto AudioContext::CreateLoopSynth(AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle {
     if (!_impl->initialized) {
         return SynthHandle::Invalid;
     }
@@ -918,7 +933,7 @@ auto AudioContext::CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioW
                 ma_sound_start(&data->sound);
 
                 slot.synthData = data;
-                slot.owner     = owner;
+                _impl->activeSynthSlots.push_back(i);
                 slot.inUse.store(true, std::memory_order::release);
                 uint32_t gen = slot.generation.load(std::memory_order::relaxed);
                 return static_cast<SynthHandle>(PackHandle(i, gen));
@@ -961,36 +976,44 @@ void AudioContext::StopLoopSynth(SynthHandle handle, float fadeOutSeconds) {
     });
 }
 
-void AudioContext::ReleaseOwner(Entity owner) noexcept {
-    if (owner == Entity::Null()) {
-        return;
+auto AudioContext::IsLoopSynthValid(SynthHandle handle) const noexcept -> bool {
+    if (handle == SynthHandle::Invalid) {
+        return false;
     }
-
-    Lock(_impl->voiceMutex, [&] -> void {
-        for (auto& slot: _impl->voiceSlots) {
-            if (slot.inUse.load(std::memory_order::relaxed) && slot.owner == owner) {
-                slot.isStopping = true;
-                slot.owner      = Entity::Null();
-            }
-        }
-    });
-    Lock(_impl->synthMutex, [&] -> void {
-        for (auto& slot: _impl->synthSlots) {
-            if (slot.inUse.load(std::memory_order::relaxed) && slot.owner == owner && slot.synthData != nullptr) {
-                slot.synthData->isStopping.store(true, std::memory_order::release);
-                slot.owner = Entity::Null();
-            }
-        }
-    });
+    auto [idx, gen] = UnpackHandle(static_cast<uint64_t>(handle));
+    if (idx >= MAX_SYNTH_SLOTS) {
+        return false;
+    }
+    const auto& slot = _impl->synthSlots[idx];
+    return slot.inUse.load(std::memory_order::acquire) && slot.generation.load(std::memory_order::relaxed) == gen;
 }
 
-void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
+void AudioContext::UpdatePlayback(float dt) {
     Lock(_impl->transientMutex, [&] -> void {
         using namespace ZHLN::Ranges;
         _impl->activeOneShots | EraseIf([&](ma_sound* sound) -> bool {
             if (ma_sound_at_end(sound) == MA_TRUE) {
                 ma_sound_uninit(sound);
                 _impl->soundPool.Destroy(sound);
+                return true;
+            }
+            return false;
+        });
+        _impl->activeBeeps | EraseIf([&](ProceduralBeep* beep) -> bool {
+            if (ma_sound_is_playing(&beep->sound) != MA_TRUE) {
+                ma_sound_uninit(&beep->sound);
+                ma_waveform_uninit(&beep->waveform);
+                _impl->beepPool.Destroy(beep);
+                return true;
+            }
+            return false;
+        });
+        _impl->activeSweeps | EraseIf([&](ToneSweepData* sweep) -> bool {
+            if (ma_sound_at_end(&sweep->sound) == MA_TRUE || sweep->currentFrame >= sweep->totalFrames) {
+                ma_sound_uninit(&sweep->sound);
+                ma_waveform_uninit(&sweep->waveform);
+                ma_data_source_uninit(&sweep->base);
+                _impl->sweepPool.Destroy(sweep);
                 return true;
             }
             return false;
@@ -1009,61 +1032,42 @@ void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
     });
 
     Lock(_impl->voiceMutex, [&] -> void {
-        for (uint32_t i = 0; i < MAX_VOICE_SLOTS; ++i) {
+        std::erase_if(_impl->activeVoiceSlots, [&](uint32_t i) {
             auto& slot = _impl->voiceSlots[i];
-            if (!slot.inUse.load(std::memory_order::relaxed)) {
-                continue;
-            }
-
-            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
-                slot.isStopping = true;
-                slot.owner      = Entity::Null();
-            }
-
             if (slot.isStopping) {
-                slot.currentFade -= (dt / slot.fadeOutDuration);
-                if (slot.currentFade <= 0.0f) {
-                    ma_sound_stop(&slot.sound);
-                    ma_sound_uninit(&slot.sound);
-                    slot.inUse.store(false, std::memory_order::release);
-                    slot.generation.fetch_add(1, std::memory_order::relaxed);
-                    continue;
+                slot.currentFade -= dt / slot.fadeOutDuration;
+                if (slot.currentFade > 0.0f) {
+                    ma_sound_set_volume(&slot.sound, slot.baseVolume * slot.currentFade);
+                    return false;
                 }
-                ma_sound_set_volume(&slot.sound, slot.baseVolume * slot.currentFade);
+                ma_sound_stop(&slot.sound);
+            } else if (ma_sound_at_end(&slot.sound) != MA_TRUE) {
+                return false;
             }
-
-            if (!slot.isStopping && ma_sound_at_end(&slot.sound) == MA_TRUE) {
-                ma_sound_uninit(&slot.sound);
-                slot.inUse.store(false, std::memory_order::release);
-                slot.generation.fetch_add(1, std::memory_order::relaxed);
-            }
-        }
+            ma_sound_uninit(&slot.sound);
+            slot.inUse.store(false, std::memory_order::release);
+            slot.generation.fetch_add(1, std::memory_order::relaxed);
+            return true;
+        });
     });
 
     Lock(_impl->synthMutex, [&] -> void {
-        for (uint32_t i = 0; i < MAX_SYNTH_SLOTS; ++i) {
+        std::erase_if(_impl->activeSynthSlots, [&](uint32_t i) {
             auto& slot = _impl->synthSlots[i];
-            if (!slot.inUse.load(std::memory_order::relaxed)) {
-                continue;
+            if (!slot.synthData->isFinished.load(std::memory_order::acquire)) {
+                return false;
             }
-
-            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
-                slot.synthData->isStopping.store(true, std::memory_order::release);
-                slot.owner = Entity::Null();
-            }
-
-            if (slot.synthData->isFinished.load(std::memory_order::acquire)) {
-                ma_sound_uninit(&slot.synthData->sound);
-                ma_biquad_uninit(&slot.synthData->biquad, nullptr);
-                ma_waveform_uninit(&slot.synthData->waveform1);
-                ma_waveform_uninit(&slot.synthData->waveform2);
-                ma_data_source_uninit(&slot.synthData->base);
-                _impl->loopSynthPool.Destroy(slot.synthData);
-
-                slot.inUse.store(false, std::memory_order::release);
-                slot.generation.fetch_add(1, std::memory_order::relaxed);
-            }
-        }
+            ma_sound_uninit(&slot.synthData->sound);
+            ma_biquad_uninit(&slot.synthData->biquad, nullptr);
+            ma_waveform_uninit(&slot.synthData->waveform1);
+            ma_waveform_uninit(&slot.synthData->waveform2);
+            ma_data_source_uninit(&slot.synthData->base);
+            _impl->loopSynthPool.Destroy(slot.synthData);
+            slot.synthData = nullptr;
+            slot.inUse.store(false, std::memory_order::release);
+            slot.generation.fetch_add(1, std::memory_order::relaxed);
+            return true;
+        });
     });
 }
 

@@ -494,7 +494,7 @@ void SolveLegGrounding(
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle,
+    Physics::BodyHandle            ignoredPhysicsHandle,
     float                          ikWeight,
     bool                           preserveAuthoredFootXZ,
     bool                           worldLockFeet,

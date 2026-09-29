@@ -210,7 +210,7 @@ void UpdateItemDynamics(
         const JPH::Mat44 worldItem = rootWorld * handling.itemModelTransform;
         const JPH::Vec3  origin    = worldItem.GetTranslation();
         const JPH::Vec3  forward   = SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
-        Entity           ignoredPhysics {};
+        Physics::BodyHandle ignoredPhysics {};
         if (const auto* physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsHandle;
         }

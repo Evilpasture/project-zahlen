@@ -225,10 +225,10 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
             continue; // Not moving: there is no momentum to impart.
         }
 
-        JPH::Array<ZHLN::Entity> overlaps;
+        JPH::Array<Physics::BodyHandle> overlaps;
         pc.OverlapSphere(charPos, kPushRadius, overlaps);
 
-        for (Entity other: overlaps) {
+        for (Physics::BodyHandle other: overlaps) {
             if (other == phys->physicsHandle || !pc.IsBodyDynamic(other)) {
                 continue;
             }

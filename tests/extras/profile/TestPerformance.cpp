@@ -608,10 +608,13 @@ struct PerformanceTestSuite {
             ZHLN::PhysicsConfig physCfg {
                 .maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024
             };
+            ZHLN::PhysicsContext physicsContext(physCfg);
             ZHLN::ECS::Registry  registry;
             ZHLN::AudioContext   audio;
-            ZHLN::PhysicsContext physicsContext(physCfg);
             ZHLN::Camera         mainCamera;
+            static_cast<void>(registry.ObserveRemoval<ZHLN::Components::PhysicsComponent>([&physicsContext](ZHLN::Entity, auto& body) {
+                physicsContext.DestroyBody(body.physicsHandle);
+            }));
 
             mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;
@@ -639,7 +642,7 @@ struct PerformanceTestSuite {
                 float      spawnZ = posDist(rng);
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
-                ZHLN::Entity bodyHandle =
+                ZHLN::Physics::BodyHandle bodyHandle =
                     physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
@@ -650,7 +653,6 @@ struct PerformanceTestSuite {
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
 
-                physicsContext.SetBodyOwner(bodyHandle, agent);
                 agentEntities.push_back(agent);
             }
             physicsContext.OptimizeBroadphase();

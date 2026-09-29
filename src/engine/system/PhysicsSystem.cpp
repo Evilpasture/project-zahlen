@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsSystem.hpp"
-#include "PhysicsStateSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -44,8 +43,6 @@ void CommitImpulses(Engine& engine) {
 }
 
 void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcept {
-    PhysicsStateSystem::Reconcile(engine);
-
     float cappedDt = std::min(dt, 0.1f);
     accumulator += cappedDt;
 

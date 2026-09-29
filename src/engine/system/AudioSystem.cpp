@@ -64,7 +64,7 @@ ZHLN_API void AudioSystem(
 
         if (!device.IsVoiceValid(src.voiceHandle)) {
             if (src.playOnStart && !src.filepath.empty()) {
-                src.voiceHandle = device.CreateVoice(e, src.filepath.c_str(), src.isSpatialized, src.isLooping, src.volume);
+                src.voiceHandle = device.CreateVoice(src.filepath.c_str(), src.isSpatialized, src.isLooping, src.volume);
                 if (src.voiceHandle != AudioHandle::Invalid) {
                     device.PlayVoice(src.voiceHandle);
                 }
@@ -91,23 +91,24 @@ ZHLN_API void AudioSystem(
     auto synths        = query.Raw<Components::LoopSynthComponent>();
 
     for (size_t i = 0; i < synthEntities.size(); ++i) {
-        Entity                          e     = synthEntities[i];
         Components::LoopSynthComponent& synth = synths[i];
 
-        if (!device.IsVoiceValid(static_cast<AudioHandle>(synth.synthHandle))) {
-            synth.synthHandle = device.CreateLoopSynth(e, synth.waveType1, synth.waveType2, synth.filterType);
-        }
-
-        if (synth.synthHandle != SynthHandle::Invalid) {
-            device.SetLoopSynthParams(synth.synthHandle, synth.charge, synth.baseFreq, synth.filterFreq, synth.volume);
-            if (synth.isStopping) {
+        if (synth.isStopping) {
+            if (device.IsLoopSynthValid(synth.synthHandle)) {
                 device.StopLoopSynth(synth.synthHandle, synth.fadeOut);
             }
+            continue;
+        }
+        if (!device.IsLoopSynthValid(synth.synthHandle)) {
+            synth.synthHandle = device.CreateLoopSynth(synth.waveType1, synth.waveType2, synth.filterType);
+        }
+        if (synth.synthHandle != SynthHandle::Invalid) {
+            device.SetLoopSynthParams(synth.synthHandle, synth.charge, synth.baseFreq, synth.filterFreq, synth.volume);
         }
     }
 
     device.FlushEvents();
-    device.ReconcileVoices(query.AliveQuery(), dt);
+    device.UpdatePlayback(dt.value);
 }
 
 }

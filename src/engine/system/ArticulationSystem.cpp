@@ -8,7 +8,6 @@
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -18,8 +17,9 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstring>
-#include <string>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace ZHLN {
 
@@ -47,81 +47,6 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
         }
     }
 }
-}
-
-void ArticulationSystem::ReleaseTracked(ECS::Registry& registry, PhysicsContext& physics, size_t index) noexcept {
-    TrackedRagdoll& tracked = _tracked[index];
-    if (tracked.instance != nullptr && tracked.isAddedToPhysics) {
-        physics.RemoveRagdoll(*tracked.instance.GetPtr());
-    }
-
-    if (auto* component = registry.Get<Components::RagdollComponent>(tracked.owner);
-        component != nullptr && component->ragdollInstance.GetPtr() == tracked.instance.GetPtr()) {
-        component->isAddedToPhysics = false;
-    }
-    _tracked.erase(_tracked.begin() + static_cast<std::ptrdiff_t>(index));
-}
-
-void ArticulationSystem::Track(Entity owner, const Components::RagdollComponent& component) {
-    if (component.ragdollInstance == nullptr) {
-        return;
-    }
-
-    for (auto& tracked: _tracked) {
-        if (tracked.owner == owner) {
-            if (tracked.instance.GetPtr() == component.ragdollInstance.GetPtr()) {
-                tracked.isAddedToPhysics = component.isAddedToPhysics;
-                return;
-            }
-            return;
-        }
-    }
-
-    _tracked.push_back(
-        {.owner = owner, .instance = JPH::Ref<JPH::Ragdoll>(component.ragdollInstance.GetPtr()), .isAddedToPhysics = component.isAddedToPhysics}
-    );
-}
-
-void ArticulationSystem::Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept {
-    for (size_t index = 0; index < _tracked.size();) {
-        const TrackedRagdoll& tracked   = _tracked[index];
-        const auto* current = registry.Get<Components::RagdollComponent>(tracked.owner);
-        if (!registry.IsAlive(tracked.owner) || current == nullptr || current->ragdollInstance.GetPtr() != tracked.instance.GetPtr()) {
-            ReleaseTracked(registry, physics, index);
-        } else {
-            _tracked[index].isAddedToPhysics = current->isAddedToPhysics;
-            ++index;
-        }
-    }
-}
-
-void ArticulationSystem::Release(Engine& engine, Entity owner) noexcept {
-    for (size_t index = 0; index < _tracked.size();) {
-        if (_tracked[index].owner == owner) {
-            ReleaseTracked(engine.GetRegistry(), engine.GetPhysicsContext(), index);
-        } else {
-            ++index;
-        }
-    }
-
-    if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(owner);
-        component != nullptr && component->ragdollInstance != nullptr && component->isAddedToPhysics) {
-        engine.GetPhysicsContext().RemoveRagdoll(*component->ragdollInstance.GetPtr());
-        component->isAddedToPhysics = false;
-    }
-}
-
-void ArticulationSystem::Shutdown(Engine& engine) noexcept {
-    Reconcile(engine.GetRegistry(), engine.GetPhysicsContext());
-    const auto owners = engine.GetRegistry().GetEntitiesWith<Components::RagdollComponent>();
-    for (const Entity owner: owners) {
-        if (const auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(owner); component != nullptr) {
-            Track(owner, *component);
-        }
-    }
-    while (!_tracked.empty()) {
-        ReleaseTracked(engine.GetRegistry(), engine.GetPhysicsContext(), _tracked.size() - 1);
-    }
 }
 
 void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
@@ -155,14 +80,16 @@ bool ArticulationSystem::AttachRagdoll(
 
     const std::vector<Physics::RagdollPartParams> parts(authoredParts.begin(), authoredParts.end());
 
-    auto ragdollInstance = pc.CreateSkeletalRagdoll(joltSkel, parts);
-    ragdollInstance->AddRef();
+    const auto ragdollHandle = pc.CreateSkeletalRagdoll(joltSkel, parts);
+    if (ragdollHandle == Physics::RagdollHandle::Invalid) {
+        return false;
+    }
 
     BindSkeleton(jointOffset, skeleton);
 
     reg.Add(
         rootEntity, Components::RagdollComponent {
-                        .ragdollInstance  = ragdollInstance.GetPtr(),
+                        .ragdollHandle    = ragdollHandle,
                         .skeletonAsset    = InvalidAssetID,
                         .state            = RagdollState::Inactive,
                         .prevState        = RagdollState::Inactive,
@@ -185,7 +112,6 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
     auto& pc  = *physics;
     auto& rc  = *render;
     const float dt = frameDt.value;
-    sys.Reconcile(registry, pc);
 
     auto entities = query.Entities<Components::RagdollComponent>();
     auto ragdolls = query.Raw<Components::RagdollComponent>();
@@ -195,10 +121,13 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         Components::RagdollComponent& ragComp = ragdolls[i];
         auto*                         phys    = query.Get<Components::PhysicsComponent>(e);
 
-        if (ragComp.ragdollInstance == nullptr) {
+        if (ragComp.ragdollHandle == Physics::RagdollHandle::Invalid) {
             continue;
         }
-        sys.Track(e, ragComp);
+        JPH::Ragdoll* ragdoll = pc.GetRagdoll(ragComp.ragdollHandle);
+        if (ragdoll == nullptr) {
+            continue;
+        }
 
         uint32_t offset = ragComp.jointOffset;
         uint32_t count  = ragComp.jointCount;
@@ -216,7 +145,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         }
 
         if (auto* impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
-            pc.AddRagdollImpulse(*ragComp.ragdollInstance.GetPtr(), impulseCmd->jointIndex, impulseCmd->impulse);
+            pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, impulseCmd->impulse);
             registry.Remove<Components::RagdollImpulseCommand>(e);
         }
 
@@ -249,8 +178,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             continue;
         }
 
-        JPH::Ragdoll*        ragdoll = ragComp.ragdollInstance;
-        const JPH::Skeleton* skel    = ragdoll->GetRagdollSettings()->GetSkeleton();
+        const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
         if (phys != nullptr && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
@@ -288,26 +216,25 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
                     const JPH::Vec3 initialVelocity = phys != nullptr ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
-                    pc.ActivateRagdoll(*ragdoll, animPose, initialVelocity);
+                    pc.ActivateRagdoll(ragComp.ragdollHandle, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;
                 }
             } else if (ragComp.state == RagdollState::Inactive && ragComp.isAddedToPhysics) {
-                pc.RemoveRagdoll(*ragdoll);
+                pc.RemoveRagdoll(ragComp.ragdollHandle);
                 ragComp.isAddedToPhysics = false;
             }
             ragComp.prevState = ragComp.state;
         }
-        sys.Track(e, ragComp);
 
         if (ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
-            pc.DriveRagdollPose(*ragdoll, animPose);
+            pc.DriveRagdollPose(ragComp.ragdollHandle, animPose);
         }
 
         if (ragComp.state != RagdollState::Inactive) {
             JPH::Array<JPH::Mat44> physicalWorldJoints(count, JPH::Mat44::sIdentity());
             JPH::RVec3             actualRootOffset = JPH::RVec3::sZero();
 
-            if (!pc.GetRagdollPose(*ragdoll, actualRootOffset, physicalWorldJoints.data())) {
+            if (!pc.GetRagdollPose(ragComp.ragdollHandle, actualRootOffset, physicalWorldJoints.data())) {
                 continue;
             }
 

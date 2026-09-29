@@ -5,12 +5,12 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Scene.hpp>
@@ -113,7 +113,7 @@ struct Components {
     };
 
     struct PhysicsComponent {
-        Entity physicsHandle;
+        Physics::BodyHandle physicsHandle = Physics::BodyHandle::Null();
         bool   isStatic = true;
     };
 
@@ -136,8 +136,8 @@ struct Components {
     };
 
     struct RagdollComponent {
-        JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr;
-        AssetID                skeletonAsset   = InvalidAssetID;
+        Physics::RagdollHandle ragdollHandle = Physics::RagdollHandle::Invalid;
+        AssetID                skeletonAsset = InvalidAssetID;
 
         RagdollState state     = RagdollState::Inactive;
         RagdollState prevState = RagdollState::Inactive;
@@ -146,8 +146,8 @@ struct Components {
         uint32_t jointCount  = 0;
 
         bool isAddedToPhysics = false;
-
     };
+    static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
 
     struct CameraComponent {
         JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
@@ -251,6 +251,7 @@ struct Components {
         String128 filepath;
         float     volume        = 1.0f;
         float     pitch         = 1.0f;
+        float     fadeOut       = 0.05f;
         bool      isLooping     = false;
         bool      isSpatialized = true;
         bool      playOnStart   = true;
@@ -273,6 +274,7 @@ struct Components {
 
         SynthHandle synthHandle = SynthHandle::Invalid;
     };
+    static_assert(std::is_trivially_copyable_v<AudioSourceComponent> && std::is_trivially_copyable_v<LoopSynthComponent>);
     struct InputStateComponent {
         std::bitset<Reflect::EnumCount<KeyCode>()> keys;
 

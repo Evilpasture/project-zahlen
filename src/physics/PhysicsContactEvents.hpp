@@ -48,15 +48,22 @@ class ContactListener final: public JPH::ContactListener {
   private:
     PhysicsWorld* _world;
 
-    auto GetDense(JPH::BodyID id) -> uint32_t {
-        uint32_t     j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-        ZHLN::Entity h     = ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
-        return (h.index < _world->slotCapacity) ? _world->slotToDense[h.index] : 0xFFFFFFFF;
+    static auto DecodeHandle(uint64_t raw) noexcept -> Physics::BodyHandle {
+        return raw != 0 ? Physics::BodyHandle::Unpack(raw) : Physics::BodyHandle::Null();
     }
 
-    auto GetHandle(JPH::BodyID id) -> ZHLN::Entity {
+    auto GetDense(JPH::BodyID id) -> uint32_t {
+        const auto handle = GetHandle(id);
+        if (handle.index >= _world->slotCapacity ||
+            _world->generations[handle.index].load(std::memory_order::relaxed) != handle.generation) {
+            return 0xFFFFFFFF;
+        }
+        return _world->slotToDense[handle.index];
+    }
+
+    auto GetHandle(JPH::BodyID id) -> Physics::BodyHandle {
         uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
-        return ZHLN::Entity::Unpack(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
+        return DecodeHandle(_world->idToHandleMap[j_idx].load(std::memory_order::relaxed));
     }
 
     void Record(ContactType type, const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold) noexcept {
@@ -73,12 +80,12 @@ class ContactListener final: public JPH::ContactListener {
         JPH::Vec3 n  = manifold.mWorldSpaceNormal;
 
         if (r1 > r2) {
-            ev.body1 = ZHLN::Entity::Unpack(r2);
-            ev.body2 = ZHLN::Entity::Unpack(r1);
+            ev.body1 = DecodeHandle(r2);
+            ev.body2 = DecodeHandle(r1);
             n        = -n;
         } else {
-            ev.body1 = ZHLN::Entity::Unpack(r1);
-            ev.body2 = ZHLN::Entity::Unpack(r2);
+            ev.body1 = DecodeHandle(r1);
+            ev.body2 = DecodeHandle(r2);
         }
 
         const JPH::RVec3 p = manifold.GetWorldSpaceContactPointOn1(0);
@@ -129,8 +136,8 @@ class CharacterListener final: public JPH::CharacterContactListener {
             return false;
         }
 
-        uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
-        uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
+        uint32_t d1 = _world->slotToDense[Physics::BodyHandle::Unpack(u1).index];
+        uint32_t d2 = _world->slotToDense[Physics::BodyHandle::Unpack(u2).index];
         return ((_world->categories[d1] & _world->masks[d2]) != 0u) && ((_world->categories[d2] & _world->masks[d1]) != 0u);
     }
 
@@ -138,8 +145,8 @@ class CharacterListener final: public JPH::CharacterContactListener {
         if (u1 == 0 || u2 == 0) {
             return false;
         }
-        uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
-        uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
+        uint32_t d1 = _world->slotToDense[Physics::BodyHandle::Unpack(u1).index];
+        uint32_t d2 = _world->slotToDense[Physics::BodyHandle::Unpack(u2).index];
         return ((_world->categories[d1] & _world->masks[d2]) != 0u) && ((_world->categories[d2] & _world->masks[d1]) != 0u);
     }
 };
