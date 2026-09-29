@@ -672,12 +672,14 @@ struct RenderContext::Impl {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
 
-        trace("retire geometry and pipelines");
+        trace("retire geometry");
         geometry.RetireAll();
         // The registry destructor runs after this body; enqueue its pipelines
         // now, before the explicit deletion-queue drain below.
+        trace("retire material pipelines");
         pipelines.RetireAll();
         // Acceleration structures must go before their backing VMA buffers.
+        trace("release acceleration structures");
         for (auto& tlas: frames.tlas) {
             tlas = Vk::AccelerationStructure {};
         }

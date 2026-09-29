@@ -53,7 +53,9 @@ class DeletionQueue {
     void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
 
     VmaAllocator _allocator = nullptr; // Must outlive the queue and its final drain.
-    ZHLN::Mutex _mutex;
+    // Mutex is trivially default-constructible in release builds: a cold
+    // renderer can enqueue during teardown without ever calling BeginFrame.
+    ZHLN::Mutex _mutex {};
     std::array<std::vector<DeferredDeletionEntry>, kFramesInFlight> _queues {};
     uint32_t _currentFrameIndex = 0;
 };
