@@ -27,8 +27,7 @@ struct TextureSamplerAddress {
     constexpr bool operator==(const TextureSamplerAddress&) const noexcept = default;
 };
 
-// Must agree with the packed sampler slots in common.slang. Eight four-bit
-// indices fit in one uint; the remaining three fit in a second uint.
+// Each material texture reference can choose its own S/T wrap modes.
 enum class MaterialTextureSlot : uint8_t {
     Albedo,
     Normal,
@@ -45,18 +44,6 @@ enum class MaterialTextureSlot : uint8_t {
 };
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
 using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
-
-[[nodiscard]] constexpr uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept {
-    uint32_t packed = 0;
-    for (size_t i = 0; i < 8 && first + i < addresses.size(); ++i) {
-        const auto s = static_cast<uint32_t>(addresses[first + i].s);
-        const auto t = static_cast<uint32_t>(addresses[first + i].t);
-        const uint32_t code = (s < 3 && t < 3) ? s * 3 + t : 0;
-        packed |= code << (i * 4);
-    }
-    return packed;
-}
-static_assert(static_cast<size_t>(MaterialTextureSlot::Count) <= 16);
 
 struct Mesh {
     using enum BufferHandle;

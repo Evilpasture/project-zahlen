@@ -13,6 +13,32 @@ namespace ZHLN {
 
 namespace {
 
+// common.slang reads eight four-bit sampler codes per uint, in material slot
+// order. The sampler bank is laid out as S * 3 + T (invalid modes use Repeat).
+[[nodiscard]] constexpr auto EncodeMaterialSamplerWord(const MaterialSamplerAddresses& addresses, size_t first) noexcept -> uint32_t {
+    uint32_t packed = 0;
+    for (size_t i = 0; i < 8 && first + i < addresses.size(); ++i) {
+        const auto s = static_cast<uint32_t>(addresses[first + i].s);
+        const auto t = static_cast<uint32_t>(addresses[first + i].t);
+        const uint32_t code = (s < 3 && t < 3) ? s * 3 + t : 0;
+        packed |= code << (i * 4);
+    }
+    return packed;
+}
+
+static_assert(static_cast<size_t>(MaterialTextureSlot::Count) <= 16);
+// Pin the shader encoding here, not in the public Material representation.
+constexpr MaterialSamplerAddresses kAllAddressModes = [] {
+    MaterialSamplerAddresses modes {};
+    for (uint32_t i = 0; i < kMaterialSamplerVariantCount; ++i) {
+        modes[i] = {static_cast<TextureWrap>(i / 3), static_cast<TextureWrap>(i % 3)};
+    }
+    return modes;
+}();
+static_assert(EncodeMaterialSamplerWord(kAllAddressModes, 0) == 0x76543210u);
+static_assert(EncodeMaterialSamplerWord(kAllAddressModes, 8) == 0x8u);
+static_assert(EncodeMaterialSamplerWord(MaterialSamplerAddresses {}, 0) == 0u);
+
 struct ResolvedMeshMaterial {
     NativeMesh*     posMesh         = nullptr;
     NativeMesh*     attrMesh        = nullptr;
@@ -246,7 +272,9 @@ struct InstanceDataDesc {
 
 }
 
-
+uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept {
+    return EncodeMaterialSamplerWord(addresses, first);
+}
 
 void RenderContext::Impl::FlushLineQueue() {
     activeLineVertexCount = 0;

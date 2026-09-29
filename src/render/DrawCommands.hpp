@@ -10,6 +10,7 @@
 #include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <type_traits>
@@ -48,6 +49,10 @@ struct NativeMaterial {
     }
 };
 
+
+// Draw-submission translation: material S/T modes -> common.slang sampler words.
+// Kept private so shader packing changes do not become public Material API changes.
+[[nodiscard]] auto PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept -> uint32_t;
 
 struct DrawCommand {
     InstanceData         instanceData;

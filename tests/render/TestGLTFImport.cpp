@@ -63,18 +63,6 @@ namespace {
 
 constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 
-// Nine (S,T) combinations, including both independent mixed axes, must pack
-// to the same nibble indices as the GPU sampler bank. Slot 8 starts word 1.
-constexpr ZHLN::MaterialSamplerAddresses kAllAddressModes = [] {
-    ZHLN::MaterialSamplerAddresses modes {};
-    for (uint32_t i = 0; i < ZHLN::kMaterialSamplerVariantCount; ++i) {
-        modes[i] = {static_cast<ZHLN::TextureWrap>(i / 3), static_cast<ZHLN::TextureWrap>(i % 3)};
-    }
-    return modes;
-}();
-static_assert(ZHLN::PackMaterialSamplerAddresses(kAllAddressModes, 0) == 0x76543210u);
-static_assert(ZHLN::PackMaterialSamplerAddresses(kAllAddressModes, 8) == 0x8u);
-
 [[nodiscard]] auto ReadAssetBytes() -> std::vector<uint8_t> {
     const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/ProceduralAnimationBaseRig.glb";
     std::ifstream     stream(path, std::ios::binary);
@@ -1005,15 +993,12 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             using ZHLN::MaterialTextureSlot;
-            using ZHLN::TextureSamplerAddress;
             using ZHLN::TextureWrap;
-            const auto mode = [&](MaterialTextureSlot slot) { return material.textureSamplers[static_cast<size_t>(slot)]; };
+            ZHLN::MaterialSamplerAddresses expectedSamplers {};
+            expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Albedo)] = {TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat};
+            expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Pbr)] = {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge};
             if (material.albedoMap != material.pbrMap || material.pbrMap != material.anisotropyMap ||
-                mode(MaterialTextureSlot::Albedo) != TextureSamplerAddress {TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat} ||
-                mode(MaterialTextureSlot::Pbr) != TextureSamplerAddress {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge} ||
-                mode(MaterialTextureSlot::Anisotropy) != TextureSamplerAddress {} ||
-                ZHLN::PackMaterialSamplerAddresses(material.textureSamplers, 0) != (5u | (7u << 8)) ||
-                ZHLN::PackMaterialSamplerAddresses(material.textureSamplers, 8) != 0u) {
+                material.textureSamplers != expectedSamplers) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
