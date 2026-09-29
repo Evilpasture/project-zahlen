@@ -286,8 +286,9 @@ consteval auto GetMipLevels() noexcept -> uint32_t {
     return GetMipLevels(Width, Height);
 }
 
-inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height) {
-    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), GetMipLevels(width, height));
+inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height,
+                            VkPipelineStageFlags2 shaderReadStage) {
+    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), GetMipLevels(width, height), shaderReadStage);
 }
 
 } // namespace ZHLN::Vk

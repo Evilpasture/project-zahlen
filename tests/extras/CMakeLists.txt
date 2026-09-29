@@ -104,6 +104,12 @@ add_test(NAME TestFidelityTransmissionWiring
 )
 set_tests_properties(TestFidelityTransmissionWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
 
+# Source-panorama mip wiring and GGX PDF/solid-angle math. Not a GPU or golden-image test.
+add_test(NAME TestIBLFilteredImportanceSampling
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_ibl_filtered_importance_sampling.py"
+)
+set_tests_properties(TestIBLFilteredImportanceSampling PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a

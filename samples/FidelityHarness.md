@@ -101,9 +101,12 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    reflection, with LOD biased partway toward the wide-axis roughness (an
    approximation, not an anisotropically prefiltered integrator). The HDR
    prefilter uses 512 samples for mips 1–2 and 1024 for mips 3–5, versus 32
-   for procedural sky; mip 0 samples the environment directly. The HDR source
-   still has only mip 0, so very small bright lights can retain some aliasing.
-   The area-light LTC and split-sum BRDF LUT remain isotropic approximations.
+   for procedural sky; mip 0 samples the environment directly. The radiance
+   panorama has a full FP32 mip chain; rough specular rays read a source LOD
+   derived from their GGX reflection-direction PDF and the equirectangular
+   texel's latitude-dependent solid angle. Smooth reflections and diffuse SH
+   still read source mip 0; procedural sky is unchanged. The area-light LTC
+   and split-sum BRDF LUT remain isotropic approximations.
    The baseline diffuse SH/GI is gated by `(1 - F) * (1 - metallic)`, so metal
    no longer receives diffuse IBL on top of its specular term. Sheen and
    specular remain unsupported. Other differences (for example texture
@@ -125,6 +128,16 @@ texture path; it is not a substitute for this GPU image comparison. The IBL
 uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
 anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
 is not expected.
+
+For HDR IBL speckles, rebuild `FidelityHarness` and run both
+`SCENARIO=khronos-MetalRoughSpheres-HDR ./scripts/run_fidelity.sh -j1` and
+`SCENARIO=khronos-IridescentDishWithOlives ./scripts/run_fidelity.sh -j1`.
+Inspect the PAM captures against their goldens: the higher-roughness spheres
+and the glass/olives should no longer show isolated bright dots, while the
+smooth metal reflections retain their sharp environment detail. The CPU-only
+`tests/extras/test_ibl_filtered_importance_sampling.py` checks the GGX PDF,
+equirectangular solid-angle math, and bake wiring; it does **not** establish
+visual fidelity or replace these Vulkan captures.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.

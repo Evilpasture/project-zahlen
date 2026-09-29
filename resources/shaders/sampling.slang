@@ -29,6 +29,22 @@ public float3 ImportanceSampleGGX(float u1, float u2, float roughness) {
     return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
+// ImportanceSampleGGX samples half-vectors with density D(N,H) * (N.H).
+// Reflection L = 2(V.H)H - V changes solid angle by 4(V.H), so the
+// density below is per steradian of *reflected direction*, not half-vector.
+[ForceInline]
+public float GGXReflectionPDF(float3 N, float3 V, float3 H, float roughness) {
+    float NdotH = max(dot(N, H), 0.0f);
+    float VdotH = max(dot(V, H), 0.0f);
+    if (NdotH <= 0.0f || VdotH <= 0.0f)
+        return 0.0f;
+    float alpha  = roughness * roughness; // same alpha as ImportanceSampleGGX
+    float alpha2 = alpha * alpha;
+    float denom  = max(NdotH * NdotH * (alpha2 - 1.0f) + 1.0f, 1e-6f);
+    float D      = alpha2 / (PI * denom * denom);
+    return D * NdotH / (4.0f * VdotH);
+}
+
 [ForceInline]
 public float3 AlignHemisphere(float3 N, float3 localH) {
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);

@@ -325,7 +325,8 @@ void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) 
 template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t;
 
-void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height);
+void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height,
+                     VkPipelineStageFlags2 shaderReadStage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
 // NOLINTEND(misc-misplaced-const, readability-avoid-const-params-in-decls)
 

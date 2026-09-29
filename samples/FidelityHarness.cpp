@@ -29,7 +29,7 @@
  */
 //
 // Exit codes: 0 = rendered and captured; 1 = a usage, scenario or capture
-// error. See scripts/run_fidelity.py for the driver that feeds it the Khronos
+// error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
 #include <Zahlen/Camera.hpp>

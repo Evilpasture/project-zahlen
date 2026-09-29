@@ -89,7 +89,7 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
     ZHLN_CmdCopyBufferToImage(_recorder.Handle(), &copy_region);
 
     if (mipLevels > 1) {
-        ZHLN_GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels);
+        ZHLN_GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     } else {
         TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1

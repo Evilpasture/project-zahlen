@@ -538,7 +538,9 @@ VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelin
 void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
 
-void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height, uint32_t mip_levels);
+// Leaves every mip shader-readable; shader_read_stage must include the first consumer's stage.
+void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height, uint32_t mip_levels,
+                          VkPipelineStageFlags2 shader_read_stage);
 
 
 typedef struct ZHLN_MemoryBarrierDesc {

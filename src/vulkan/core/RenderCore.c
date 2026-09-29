@@ -1924,7 +1924,8 @@ void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX, con
     vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
 }
 
-void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width, const int32_t height, const uint32_t mipLevels) {
+void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width, const int32_t height, const uint32_t mipLevels,
+                          const VkPipelineStageFlags2 shaderReadStage) {
     int32_t mip_w = width;
     int32_t mip_h = height;
 
@@ -1959,7 +1960,7 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
             .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dst_stage  = shaderReadStage,
             .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
             .base_mip   = i - 1,
             .mip_count  = 1
@@ -1981,7 +1982,7 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
         .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dst_stage  = shaderReadStage,
         .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
         .base_mip   = mipLevels - 1,
         .mip_count  = 1
