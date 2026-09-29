@@ -11,7 +11,8 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest) noexcept -> FrameOutcome<Vk::AttachmentLayout> {
+auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, Vk::CommandRecorder& recorder) noexcept
+    -> std::expected<Vk::AttachmentLayout, ErrorCode> {
     if (!dest.acquired) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
@@ -19,14 +20,11 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest) 
     if (image.drawn) {
         return image.layout;
     }
-    if (!dest.recorder.IsRecording()) {
-        return std::nullopt;
-    }
 
     // Swapchain images are COLOR_ATTACHMENT-only (and headless presentation
     // targets need not support TRANSFER_DST either). Clear via attachment load
     // op rather than vkCmdClearColorImage, which requires TRANSFER_DST usage.
-    const VkCommandBuffer cmd = dest.recorder.Handle();
+    const VkCommandBuffer cmd = recorder.Handle();
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image.image.Handle());
     Vk::DynamicPass(image.image.Extent2D())
         .AddColor(image.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -52,16 +50,16 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             continue;
         }
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-
-        const auto reconciled = ReconcileDestination(dest);
-        if (!reconciled) {
-            ZHLN::Log("[Render] Window target cannot be presented: {}.", reconciled.error());
+        auto* recording = destinations.FindRecording(dest.id);
+        if (recording == nullptr || !recording->recorder.IsRecording()) {
+            ZHLN::Log("[Render] Window target has no command stream to present.");
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             continue;
         }
-        if (!reconciled->has_value()) {
-            ZHLN::Log("[Render] Window target has no command stream to present.");
+        const auto reconciled = ReconcileDestination(dest, recording->recorder);
+        if (!reconciled) {
+            ZHLN::Log("[Render] Window target cannot be presented: {}.", reconciled.error());
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             continue;
@@ -83,9 +81,9 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(computeTimeline, computeValue, Vk::kAsyncComputeConsumerStages);
         }
 
-        const VkImageLayout currentLayout = Vk::ToVkImageLayout(**reconciled);
-        destPresenter.PreparePresent(dest.recorder, dest.acquired->imageIndex, currentLayout);
-        auto executable = std::move(dest.recorder).End();
+        const VkImageLayout currentLayout = Vk::ToVkImageLayout(*reconciled);
+        destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
+        auto executable = std::move(recording->recorder).End();
         if (!executable) {
             if (executable.error().Is(FrameResult::DeviceLost)) {
                 Vk::Instance::IncrementNumericalDeviceLoss();

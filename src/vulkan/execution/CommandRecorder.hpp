@@ -10,7 +10,6 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
-#include <cstdlib>
 #include <expected>
 #include <type_traits>
 #include <utility>
@@ -27,15 +26,12 @@ enum class CommandRecordingError : uint8_t {
 // owns the buffer and must outlive this token and any GPU work submitted with it.
 class ExecutableCommands {
   public:
-    ExecutableCommands() noexcept = default;
+    ExecutableCommands() = delete;
     ~ExecutableCommands() noexcept = default;
     ExecutableCommands(const ExecutableCommands&) = delete;
     auto operator=(const ExecutableCommands&) -> ExecutableCommands& = delete;
     ExecutableCommands(ExecutableCommands&& other) noexcept: _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)) {}
-    auto operator=(ExecutableCommands&& other) noexcept -> ExecutableCommands& {
-        if (this != &other) { _cmd = std::exchange(other._cmd, VK_NULL_HANDLE); }
-        return *this;
-    }
+    auto operator=(ExecutableCommands&&) -> ExecutableCommands& = delete;
 
     [[nodiscard]] auto Handle() const noexcept -> VkCommandBuffer { return _cmd; }
     [[nodiscard]] auto Valid() const noexcept -> bool { return _cmd != VK_NULL_HANDLE; }
@@ -53,20 +49,14 @@ class ExecutableCommands {
 // (all CommandPool instances in this renderer have that flag).
 class CommandRecorder {
   public:
-    CommandRecorder() noexcept = default;
+    CommandRecorder() = delete;
     ~CommandRecorder() noexcept = default;
     CommandRecorder(const CommandRecorder&) = delete;
     auto operator=(const CommandRecorder&) -> CommandRecorder& = delete;
     CommandRecorder(CommandRecorder&& other) noexcept: _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)) {}
-    auto operator=(CommandRecorder&& other) noexcept -> CommandRecorder& {
-        if (this != &other) {
-            // Overwriting an active recording would silently discard its
-            // transition. The owner must End() or Abort() first.
-            if (_cmd != VK_NULL_HANDLE) { std::abort(); }
-            _cmd = std::exchange(other._cmd, VK_NULL_HANDLE);
-        }
-        return *this;
-    }
+    // A recording can be transferred to a new owner, never replaced in place.
+    // There is no "only when empty" precondition hidden in a move assignment.
+    auto operator=(CommandRecorder&&) -> CommandRecorder& = delete;
 
     [[nodiscard]] static auto Begin(
         VkCommandBuffer cmd,
@@ -79,16 +69,20 @@ class CommandRecorder {
     explicit operator bool() const noexcept { return IsRecording(); }
 
     [[nodiscard]] auto End() && noexcept -> std::expected<ExecutableCommands, ErrorCode>;
-    void Abort() noexcept;
+    void Abort() && noexcept;
 
   private:
     explicit CommandRecorder(VkCommandBuffer cmd) noexcept: _cmd(cmd) {}
     VkCommandBuffer _cmd = VK_NULL_HANDLE;
 };
 
+static_assert(!std::is_default_constructible_v<CommandRecorder>);
 static_assert(!std::is_copy_constructible_v<CommandRecorder> && !std::is_copy_assignable_v<CommandRecorder>);
-static_assert(std::is_nothrow_move_constructible_v<CommandRecorder> && std::is_nothrow_destructible_v<CommandRecorder>);
+static_assert(std::is_nothrow_move_constructible_v<CommandRecorder> && !std::is_move_assignable_v<CommandRecorder>);
+static_assert(std::is_nothrow_destructible_v<CommandRecorder>);
+static_assert(!std::is_default_constructible_v<ExecutableCommands>);
 static_assert(!std::is_copy_constructible_v<ExecutableCommands> && !std::is_copy_assignable_v<ExecutableCommands>);
+static_assert(!std::is_move_assignable_v<ExecutableCommands>);
 static_assert(std::is_nothrow_move_constructible_v<ExecutableCommands> && std::is_nothrow_destructible_v<ExecutableCommands>);
 static_assert(!std::is_constructible_v<ExecutableCommands, VkCommandBuffer>);
 

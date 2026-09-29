@@ -386,12 +386,12 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         }
     }
 
-    auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->presenter.frameIndex;
-    auto& deletionQueue  = _impl->deletionQueue;
-    if (stagingContext) {
-        stagingContext->Wait();
-        stagingContext.reset();
+    auto& submittedStaging = _impl->submittedStaging;
+    auto& frame_index      = _impl->presenter.frameIndex;
+    auto& deletionQueue    = _impl->deletionQueue;
+    if (submittedStaging) {
+        submittedStaging->Wait();
+        submittedStaging.reset();
     }
 
     deletionQueue.BeginFrame(frame_index);
@@ -480,9 +480,9 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         _impl->presenter.AdvanceFrame();
     }
 
-    if (_impl->stagingContext) {
-        _impl->stagingContext->Wait();
-        _impl->stagingContext.reset();
+    if (_impl->submittedStaging) {
+        _impl->submittedStaging->Wait();
+        _impl->submittedStaging.reset();
     }
 
     _impl->accumulationHistory.Swap();
@@ -522,7 +522,7 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     if (!resolved) {
         return std::unexpected(resolved.error());
     }
-    const VkCommandBuffer cmd = resolved->window.recorder.Handle();
+    const VkCommandBuffer cmd = resolved->recorder.Handle();
     _impl->destinations.SetActive(resolved->window.id);
     _impl->sceneTarget = resolved->image;
     _impl->settings = settings;

@@ -280,9 +280,9 @@ struct RenderContext::Impl {
     VolumetricFogSystem fog;
     PostProcessFeature  postProcess;
 
-    std::unique_ptr<Vk::StagingContext>    stagingContext;
-    Vk::DeletionQueue                      deletionQueue;
-    bool                                   frameOpen = false;
+    std::unique_ptr<Vk::SubmittedStagingWork> submittedStaging;
+    Vk::DeletionQueue                        deletionQueue;
+    bool                                     frameOpen = false;
 
     static constexpr size_t kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
     ZHLN::Array<WorkerCmdContext> workerCmds;
@@ -569,12 +569,14 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept
         -> std::expected<DestinationVend, ErrorCode>;
     [[nodiscard]] auto AcquireDestinationImage(FrameDestinations::Window& dest) noexcept -> std::expected<bool, ErrorCode>;
-    [[nodiscard]] auto ReconcileDestination(FrameDestinations::Window& dest) noexcept -> FrameOutcome<Vk::AttachmentLayout>;
+    [[nodiscard]] auto ReconcileDestination(FrameDestinations::Window& dest, Vk::CommandRecorder& recorder) noexcept
+        -> std::expected<Vk::AttachmentLayout, ErrorCode>;
     [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget>;
     [[nodiscard]] auto AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<FrameTarget>;
 
     struct ResolvedTarget {
         FrameDestinations::Window& window;
+        Vk::CommandRecorder& recorder;
         Vk::ImageSlice image;
         Vk::AttachmentLayout& layout;
         bool& drawn;
@@ -667,7 +669,7 @@ struct RenderContext::Impl {
             }
         }
         trace("reset staging and destinations");
-        stagingContext.reset();
+        submittedStaging.reset();
         DestroyDestinations();
         frameOpen = false;
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {

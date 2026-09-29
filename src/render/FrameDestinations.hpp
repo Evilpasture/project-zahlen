@@ -9,9 +9,12 @@
 #include <Zahlen/Render/FrameResult.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <list>
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -50,7 +53,6 @@ class FrameDestinations {
         std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         std::optional<Acquired> acquired;
         uint64_t cachedGeneration = 0;
-        Vk::CommandRecorder recorder;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool { return ownedPresenter == nullptr; }
         [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {
@@ -58,13 +60,27 @@ class FrameDestinations {
         }
     };
 
+    // List nodes are constructed once and never assigned or moved while a
+    // window's command buffer is recording. Window metadata remains separately
+    // movable so removing a presenter cannot overwrite another recording.
+    struct Recording {
+        uint64_t windowId;
+        Vk::CommandRecorder recorder;
+
+        Recording(uint64_t id, Vk::CommandRecorder&& active) noexcept: windowId(id), recorder(std::move(active)) {}
+        Recording(const Recording&) = delete;
+        auto operator=(const Recording&) -> Recording& = delete;
+        Recording(Recording&&) = delete;
+        auto operator=(Recording&&) -> Recording& = delete;
+    };
+
     static constexpr size_t kMaxWindows = 8;
 
     FrameDestinations() noexcept = default;
     ~FrameDestinations() noexcept;
-    FrameDestinations(FrameDestinations&&) noexcept;
-    auto operator=(FrameDestinations&&) noexcept -> FrameDestinations&;
-    FrameDestinations(const FrameDestinations&)                    = delete;
+    FrameDestinations(FrameDestinations&&) = delete;
+    auto operator=(FrameDestinations&&) -> FrameDestinations& = delete;
+    FrameDestinations(const FrameDestinations&) = delete;
     auto operator=(const FrameDestinations&) -> FrameDestinations& = delete;
 
     [[nodiscard]] auto Find(const PresentationTarget& target) noexcept -> Window*;
@@ -72,6 +88,10 @@ class FrameDestinations {
     [[nodiscard]] auto Find(uint64_t id) noexcept -> Window*;
     [[nodiscard]] auto Find(uint64_t id) const noexcept -> const Window*;
     [[nodiscard]] auto Windows() noexcept -> std::span<Window>;
+    [[nodiscard]] auto FindRecording(uint64_t windowId) noexcept -> Recording*;
+    [[nodiscard]] auto FindRecording(uint64_t windowId) const noexcept -> const Recording*;
+    void AddRecording(uint64_t windowId, Vk::CommandRecorder&& recorder) noexcept;
+    void AbortRecording(uint64_t windowId) noexcept;
     [[nodiscard]] auto Full() const noexcept -> bool;
     auto Attach(Window entry) noexcept -> Window*;
     void Detach(const PresentationTarget& target) noexcept;
@@ -86,6 +106,12 @@ class FrameDestinations {
     uint64_t activeWindow = 0;
     uint64_t nextWindowId = 1;
     std::vector<Window> windows;
+    std::list<Recording> recordings;
 };
+
+static_assert(std::is_move_constructible_v<FrameDestinations::Window> && std::is_move_assignable_v<FrameDestinations::Window>);
+static_assert(!std::is_default_constructible_v<FrameDestinations::Recording>);
+static_assert(!std::is_move_constructible_v<FrameDestinations::Recording> && !std::is_move_assignable_v<FrameDestinations::Recording>);
+static_assert(!std::is_move_assignable_v<FrameDestinations>);
 
 }

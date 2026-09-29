@@ -280,8 +280,9 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
 }
 
 auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
-    stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
-    if (auto started = stagingContext->Begin(); !started) return std::unexpected(started.error());
+    auto started = Vk::StagingContext::Begin(allocator, ctx);
+    if (!started) return std::unexpected(started.error());
+    auto staging = std::move(*started);
 
     auto ibl = Vk::IBLProcessor::Bake(*this);
     if (!ibl) return std::unexpected(ibl.error());
@@ -311,20 +312,25 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     auto matImg = makeLtc();
     if (!matImg) return std::unexpected(matImg.error());
     defer _([&] {
-        if (submitted) stagingContext->Wait();
+        if (submitted) submittedStaging->Wait();
         allocator.DestroyImage(*matImg);
     });
     auto ampImg = makeLtc();
     if (!ampImg) return std::unexpected(ampImg.error());
     defer _([&] {
-        if (submitted) stagingContext->Wait();
+        if (submitted) submittedStaging->Wait();
         allocator.DestroyImage(*ampImg);
     });
 
-    stagingContext->UploadImage2DBuffer(matImg->Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-    stagingContext->UploadImage2DBuffer(ampImg->Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
-    stagingContext->AddBuffer(std::move(ltcStaging));
-    if (auto executed = stagingContext->ExecuteAsync(); !executed) return std::unexpected(executed.error());
+    // Abort abandoned commands before the images and staging buffer they
+    // reference are destroyed. Earlier failures still abort in staging's dtor.
+    defer _([&] { std::move(staging).Abort(); });
+    staging.UploadImage2DBuffer(matImg->Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+    staging.UploadImage2DBuffer(ampImg->Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+    staging.AddBuffer(std::move(ltcStaging));
+    auto work = std::move(staging).ExecuteAsync();
+    if (!work) return std::unexpected(work.error());
+    submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
     submitted = true;
 
     auto matView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), matImg->Handle());

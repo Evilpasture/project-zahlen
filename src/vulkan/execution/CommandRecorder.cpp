@@ -41,7 +41,7 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
     return ExecutableCommands {cmd};
 }
 
-void CommandRecorder::Abort() noexcept {
+void CommandRecorder::Abort() && noexcept {
     if (const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE); cmd != VK_NULL_HANDLE) {
         if (const VkResult res = vkResetCommandBuffer(cmd, 0); res != VK_SUCCESS) {
             ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", ToFrameError(res));

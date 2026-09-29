@@ -528,8 +528,8 @@ RenderContext::~RenderContext() {
         }
         trace("save pipeline cache");
         Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
-        trace("reset staging context (fence wait)");
-        _impl->stagingContext.reset();
+        trace("reset submitted staging (fence wait)");
+        _impl->submittedStaging.reset();
         trace("RenderContext body complete; Impl teardown follows");
     }
 }

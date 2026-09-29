@@ -72,12 +72,12 @@ auto RenderContext::Impl::AcquireDestinationImage(FrameDestinations::Window& des
         if (acquired.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         }
-        dest.recorder.Abort();
+        destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return std::unexpected(acquired.error());
     }
     if (!acquired->has_value()) {
-        dest.recorder.Abort();
+        destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return false;
     }
@@ -100,7 +100,11 @@ auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) const 
         return std::nullopt;
     }
     const auto* dest = destinations.Find(aux);
-    if (dest == nullptr || !dest->acquired || !dest->recorder.IsRecording()) {
+    if (dest == nullptr || !dest->acquired) {
+        return std::nullopt;
+    }
+    const auto* recording = destinations.FindRecording(dest->id);
+    if (recording == nullptr || !recording->recorder.IsRecording()) {
         return std::nullopt;
     }
     return FrameTarget {rendererId, frameSerial, dest->id, dest->acquired->serial};
@@ -129,14 +133,18 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         return std::nullopt;
     }
 
-    Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-    if (!dest.recorder) {
+    if (const auto* existing = destinations.FindRecording(dest.id); existing != nullptr) {
+        if (!existing->recorder.IsRecording()) {
+            return std::unexpected(DestinationError::ExpiredFrameTarget);
+        }
+    } else {
+        Vk::SwapchainPresenter& destPresenter = dest.Presenter();
         auto recording = Vk::CommandRecorder::Begin(destPresenter.SlotCommand(destPresenter.frameIndex));
         if (!recording) {
             dest.acquired.reset();
             return std::unexpected(recording.error());
         }
-        dest.recorder = std::move(*recording);
+        destinations.AddRecording(dest.id, std::move(*recording));
     }
     destinations.SetActive(dest.id);
     return FrameTarget {rendererId, frameSerial, dest.id, dest.acquired->serial};
@@ -150,7 +158,11 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
     auto* dest = destinations.Find(target._window);
-    if (dest == nullptr || !dest->acquired || dest->acquired->serial != target._acquisition || !dest->recorder.IsRecording()) {
+    if (dest == nullptr || !dest->acquired || dest->acquired->serial != target._acquisition) {
+        return std::unexpected(DestinationError::ExpiredFrameTarget);
+    }
+    auto* recording = destinations.FindRecording(dest->id);
+    if (recording == nullptr || !recording->recorder.IsRecording()) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
     if (target._texture != RenderTextureHandle::Invalid) {
@@ -159,15 +171,17 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
             return std::unexpected(DestinationError::RenderTextureUnavailable);
         }
         auto& texture = it->second;
-        return ResolvedTarget {.window = *dest, .image = texture.image, .layout = texture.layout, .drawn = texture.drawn};
+        return ResolvedTarget {.window = *dest, .recorder = recording->recorder, .image = texture.image, .layout = texture.layout, .drawn = texture.drawn};
     }
     auto& image = *dest->acquired;
-    return ResolvedTarget {.window = *dest, .image = image.image, .layout = image.layout, .drawn = image.drawn};
+    return ResolvedTarget {.window = *dest, .recorder = recording->recorder, .image = image.image, .layout = image.layout, .drawn = image.drawn};
 }
 
 auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
     const auto* active = destinations.Active();
-    return active != nullptr ? active->recorder.Handle() : VK_NULL_HANDLE;
+    if (active == nullptr) { return VK_NULL_HANDLE; }
+    const auto* recording = destinations.FindRecording(active->id);
+    return recording != nullptr ? recording->recorder.Handle() : VK_NULL_HANDLE;
 }
 
 void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept {

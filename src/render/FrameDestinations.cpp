@@ -8,17 +8,6 @@
 namespace ZHLN {
 
 FrameDestinations::~FrameDestinations() noexcept { Clear(); }
-FrameDestinations::FrameDestinations(FrameDestinations&& other) noexcept:
-    activeWindow(std::exchange(other.activeWindow, 0)), nextWindowId(std::exchange(other.nextWindowId, 1)), windows(std::move(other.windows)) {}
-auto FrameDestinations::operator=(FrameDestinations&& other) noexcept -> FrameDestinations& {
-    if (this != &other) {
-        Clear();
-        activeWindow = std::exchange(other.activeWindow, 0);
-        nextWindowId = std::exchange(other.nextWindowId, 1);
-        windows = std::move(other.windows);
-    }
-    return *this;
-}
 
 auto FrameDestinations::Find(const PresentationTarget& target) noexcept -> Window* {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const Window& entry) { return entry.target == &target; });
@@ -43,6 +32,29 @@ auto FrameDestinations::Find(uint64_t id) const noexcept -> const Window* {
 }
 
 auto FrameDestinations::Windows() noexcept -> std::span<Window> { return windows; }
+
+auto FrameDestinations::FindRecording(uint64_t windowId) noexcept -> Recording* {
+    const auto it = std::find_if(recordings.begin(), recordings.end(), [windowId](const Recording& entry) { return entry.windowId == windowId; });
+    return it != recordings.end() ? &*it : nullptr;
+}
+
+auto FrameDestinations::FindRecording(uint64_t windowId) const noexcept -> const Recording* {
+    const auto it = std::find_if(recordings.begin(), recordings.end(), [windowId](const Recording& entry) { return entry.windowId == windowId; });
+    return it != recordings.end() ? &*it : nullptr;
+}
+
+void FrameDestinations::AddRecording(uint64_t windowId, Vk::CommandRecorder&& recorder) noexcept {
+    recordings.emplace_back(windowId, std::move(recorder));
+}
+
+void FrameDestinations::AbortRecording(uint64_t windowId) noexcept {
+    const auto it = std::find_if(recordings.begin(), recordings.end(), [windowId](const Recording& entry) { return entry.windowId == windowId; });
+    if (it != recordings.end()) {
+        std::move(it->recorder).Abort();
+        recordings.erase(it);
+    }
+}
+
 auto FrameDestinations::Full() const noexcept -> bool { return windows.size() >= kMaxWindows; }
 
 auto FrameDestinations::Attach(Window entry) noexcept -> Window* {
@@ -56,26 +68,29 @@ void FrameDestinations::Detach(const PresentationTarget& target) noexcept {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const Window& entry) { return entry.target == &target; });
     if (it == windows.end()) { return; }
     if (activeWindow == it->id) { activeWindow = 0; }
-    it->recorder.Abort();
+    AbortRecording(it->id);
     windows.erase(it);
 }
 
 void FrameDestinations::Clear() noexcept {
-    for (Window& entry: windows) { entry.recorder.Abort(); }
+    AbortRecordings();
     windows.clear();
     activeWindow = 0;
 }
 
 void FrameDestinations::BeginFrame() noexcept {
     activeWindow = 0;
+    AbortRecordings();
     for (Window& entry: windows) {
-        entry.recorder.Abort();
         entry.acquired.reset();
     }
 }
 
 void FrameDestinations::AbortRecordings() noexcept {
-    for (Window& entry: windows) { entry.recorder.Abort(); }
+    for (Recording& entry: recordings) {
+        std::move(entry.recorder).Abort();
+    }
+    recordings.clear();
 }
 
 }
