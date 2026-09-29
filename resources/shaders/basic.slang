@@ -15,95 +15,11 @@ struct PSOutput {
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint vertexId, uint instanceId, out float4 worldPos, out float4 activeVPPos
 ) {
-    SceneGeometryVertex output;
-
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
 
-    uint actualVertexId = inst.fetchIndex(vertexId);
-    actualVertexId = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
-
+    SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchIndex(vertexId), worldPos);
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-
-    float3 position     = inst.fetchPosition(actualVertexId);
-    float2 localUV      = float2(0, 0);
-    float4 localColor   = float4(1, 1, 1, 1);
-    float3 localNormal  = float3(0, 1, 0);
-    float4 localTangent = float4(1, 0, 0, 1);
-
-    if (inst.attrAddress != 0) {
-        VertexAttributes attributes = inst.fetchAttributes(actualVertexId);
-        localNormal                 = attributes.unpackedNormal.xyz;
-        localTangent                = attributes.unpackedTangent;
-        localUV                     = attributes.unpackedUV;
-        localColor                  = attributes.unpackedColor;
-    }
-
-    float4 localPos = float4(position, 1.0f);
-
-    uint4 localJoints = uint4(0, 0, 0, 0);
-    float4 weights    = float4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    if (inst.isSkinned && inst.skinAddress != 0) {
-        SkinVertex skin = inst.fetchSkin(actualVertexId);
-        localJoints     = skin.unpackedJoints;
-        weights         = skin.unpackedWeights;
-    }
-
-    uint vertexCount      = inst.vertexCount;
-    uint morphOffset      = inst.morphOffset;
-    uint activeMorphCount = inst.activeMorphCount;
-    float4 morphWeights   = inst.morphWeights;
-
-    if (activeMorphCount > 0) {
-        localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset, activeMorphCount, morphWeights);
-    }
-
-    float3x3 world3x3        = (float3x3) inst.world;
-    float4x4 worldMatrix     = inst.world;
-    float4x4 prevWorldMatrix = inst.prevWorld;
-    uint jointOffset         = inst.jointOffset;
-
-    if (inst.isSkinned) {
-        worldPos           = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
-        output.normal      = normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
-        output.tangent.xyz = normalize(mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
-    } else {
-        worldPos           = mul(worldMatrix, localPos);
-        output.normal      = normalize(mul(world3x3, localNormal));
-        output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
-    }
-
-    output.tangent.w = localTangent.w;
-    output.uv        = localUV;
-
-    output.color           = localColor;
-    output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
-    output.baseColorFactor = inst.baseColorFactor;
-    output.emissiveFactor      = inst.emissiveFactor;
-    output.pbrFactors          = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
-    output.alphaMode           = inst.alphaMode;
-    output.transmissionParams    = inst.transmissionParams();
-    output.volumeParams          = inst.volumeParams();
-    output.volumeParams.z        = AverageWorldScale(inst.world);
-    output.transmissionTextures  = inst.transmissionTextures();
-    output.coatParams            = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
-    output.coatTextures          = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
-    output.anisotropyParams      = float2(inst.anisotropyStrength, inst.anisotropyRotation);
-    output.anisotropyTexIndex    = inst.anisotropyTexIndex;
-    output.samplerCodes          = uint2(inst.samplerCodes0, inst.samplerCodes1);
-
-    if (withMotion) {
-        float4 prevWorldPos;
-        if (inst.isSkinned) {
-            prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
-        } else {
-            prevWorldPos = mul(prevWorldMatrix, localPos);
-        }
-        output.currClip = mul(activeVP, worldPos);
-        output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
-    }
-
     activeVPPos = mul(activeVP, worldPos);
     return output;
 }

@@ -254,6 +254,96 @@ public struct SceneGeometryVertex {
     public uint2 samplerCodes;
 };
 
+// Both indexed draws and meshlet draws supply their own vertex ID. Everything
+// after that lookup -- attribute defaults, morphing, skinning and material
+// payload -- is the same. Callers select SV_Position for their pass; motion
+// clips are computed here only when requested.
+public extension InstanceData {
+    [ForceInline]
+    public SceneGeometryVertex EvaluateVertex<bool withMotion>(uint actualVertexId, out float4 worldPos) {
+        actualVertexId = min(actualVertexId, max(this.vertexCount, 1u) - 1u);
+        SceneGeometryVertex output;
+
+        float3 position     = this.fetchPosition(actualVertexId);
+        float2 localUV      = float2(0, 0);
+        float4 localColor   = float4(1, 1, 1, 1);
+        float3 localNormal  = float3(0, 1, 0);
+        float4 localTangent = float4(1, 0, 0, 1);
+
+        if (this.attrAddress != 0) {
+            VertexAttributes attributes = this.fetchAttributes(actualVertexId);
+            localNormal                 = attributes.unpackedNormal.xyz;
+            localTangent                = attributes.unpackedTangent;
+            localUV                     = attributes.unpackedUV;
+            localColor                  = attributes.unpackedColor;
+        }
+
+        float4 localPos = float4(position, 1.0f);
+
+        uint4 localJoints = uint4(0, 0, 0, 0);
+        float4 weights    = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+        if (this.isSkinned && this.skinAddress != 0) {
+            SkinVertex skin = this.fetchSkin(actualVertexId);
+            localJoints     = skin.unpackedJoints;
+            weights         = skin.unpackedWeights;
+        }
+
+        uint vertexCount      = this.vertexCount;
+        uint morphOffset      = this.morphOffset;
+        uint activeMorphCount = this.activeMorphCount;
+        float4 morphWeights   = this.morphWeights;
+        if (activeMorphCount > 0) {
+            localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset, activeMorphCount, morphWeights);
+        }
+
+        float3x3 world3x3        = (float3x3) this.world;
+        float4x4 worldMatrix     = this.world;
+        float4x4 prevWorldMatrix = this.prevWorld;
+        uint jointOffset         = this.jointOffset;
+
+        if (this.isSkinned) {
+            worldPos           = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
+            output.normal      = normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
+            output.tangent.xyz = normalize(mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
+        } else {
+            worldPos           = mul(worldMatrix, localPos);
+            output.normal      = normalize(mul(world3x3, localNormal));
+            output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
+        }
+
+        output.tangent.w            = localTangent.w;
+        output.uv                   = localUV;
+        output.color                = localColor;
+        output.materialIndices      = uint4(this.albedoIndex, this.normalIndex, this.pbrIndex, this.emissiveIndex);
+        output.baseColorFactor      = this.baseColorFactor;
+        output.emissiveFactor       = this.emissiveFactor;
+        output.pbrFactors           = float3(this.metallicFactor, this.roughnessFactor, this.alphaCutoff);
+        output.alphaMode            = this.alphaMode;
+        output.transmissionParams   = this.transmissionParams();
+        output.volumeParams         = this.volumeParams();
+        output.volumeParams.z       = AverageWorldScale(this.world);
+        output.transmissionTextures = this.transmissionTextures();
+        output.coatParams           = float4(this.clearcoatFactor(), this.clearcoatRoughnessFactor(), this.clearcoatNormalScale(), 0.0f);
+        output.coatTextures         = uint4(this.clearcoatTexIndex(), this.clearcoatRoughnessTexIndex(), this.clearcoatNormalTexIndex(), 0u);
+        output.anisotropyParams     = float2(this.anisotropyStrength, this.anisotropyRotation);
+        output.anisotropyTexIndex   = this.anisotropyTexIndex;
+        output.samplerCodes         = uint2(this.samplerCodes0, this.samplerCodes1);
+
+        if (withMotion) {
+            float4 prevWorldPos;
+            if (this.isSkinned) {
+                prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
+            } else {
+                prevWorldPos = mul(prevWorldMatrix, localPos);
+            }
+            float4x4 activeVP = this.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
+            output.currClip = mul(activeVP, worldPos);
+            output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
+        }
+        return output;
+    }
+}
 
 public struct ShadowGeometryOutput {
     public float4 pos : SV_Position;
