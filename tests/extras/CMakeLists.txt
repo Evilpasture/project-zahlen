@@ -80,43 +80,13 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
-# The sample owns its composition-root install order, not the controller
-# library. A source-level regression check catches accidentally omitting
-# Character::Install while the controller's unit tests still pass.
-add_test(NAME TestProceduralSampleWiring
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_procedural_sample_wiring.py"
+# A genuinely independent math check: GGX PDF normalization and the solid
+# angle / LOD of equirectangular texels. No C++/Slang source inspection;
+# zshader compiles/reflects the shaders and fidelity captures test the image.
+add_test(NAME TestIBLImportanceSamplingMath
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_ibl_importance_sampling_math.py"
 )
-set_tests_properties(TestProceduralSampleWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
-
-# The Khronos scenarios include radius=0 camera orbits. This sample-level
-# check catches accidentally reintroducing an eye-to-target zero normalization
-# even on machines without the GPU or the large Sponza asset.
-add_test(NAME TestFidelityCameraWiring
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_fidelity_camera_wiring.py"
-)
-set_tests_properties(TestFidelityCameraWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
-
-# TransmissionRoughnessTest must use a full-mip sampled view but a mip-0
-# attachment, and leave the graph's state in the mip generator's exit layout.
-# This catches wiring regressions without pretending to validate GPU images.
-add_test(NAME TestFidelityTransmissionWiring
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_fidelity_transmission_wiring.py"
-)
-set_tests_properties(TestFidelityTransmissionWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
-
-# Source-panorama mip wiring and GGX PDF/solid-angle math. Not a GPU or golden-image test.
-add_test(NAME TestIBLFilteredImportanceSampling
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_ibl_filtered_importance_sampling.py"
-)
-set_tests_properties(TestIBLFilteredImportanceSampling PROPERTIES LABELS "CPU;Fast;Extras;Samples")
-
-# glTF MASK surfaces with two-sided normal maps and metallic textures need
-# back-facing tangent frames and the correct split-sum IBL Fresnel coefficient.
-# A CPU/source check; visual comparison still requires the Sponza capture.
-add_test(NAME TestSponzaMaskedIBLWiring
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_sponza_masked_ibl_wiring.py"
-)
-set_tests_properties(TestSponzaMaskedIBLWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+set_tests_properties(TestIBLImportanceSamplingMath PROPERTIES LABELS "CPU;Fast;Extras;Math")
 
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /

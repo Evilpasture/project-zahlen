@@ -149,19 +149,18 @@ For HDR IBL speckles, rebuild `FidelityHarness` and run both
 `SCENARIO=khronos-IridescentDishWithOlives ./scripts/run_fidelity.sh -j1`.
 Inspect the PAM captures against their goldens: the higher-roughness spheres
 and the glass/olives should no longer show isolated bright dots, while the
-smooth metal reflections retain their sharp environment detail. The CPU-only
-`tests/extras/test_ibl_filtered_importance_sampling.py` checks the GGX PDF,
-equirectangular solid-angle math, and bake wiring; it does **not** establish
-visual fidelity or replace these Vulkan captures.
+smooth metal reflections retain their sharp environment detail. The independent
+`tests/extras/test_ibl_importance_sampling_math.py` checks numerical properties
+of the GGX PDF and equirectangular texel solid angle; it does **not** inspect
+shader source, execute the shader, or replace these Vulkan captures.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.
 Compare against its golden: higher roughness columns should increasingly blur
 the opaque scene; higher IOR rows should reflect more strongly, while the IOR 1
-row remains clear regardless of roughness. The GPU-free wiring regression in
-`tests/extras/test_fidelity_transmission_wiring.py` checks the resource, graph,
-and shader contract but **does not** establish visual fidelity; a new GPU
-capture and golden comparison are still required.
+row remains clear regardless of roughness. `zshader` compiles and reflects the
+forward shader, but it cannot verify the runtime mip views or the appearance:
+a new GPU capture and golden comparison are still required.
 
 For `TextureSettingsTest`, compare the clamp S/T rows (solid green) and
 mirror S/T rows (checkmarks) against the golden; repeat S/T should remain
@@ -183,9 +182,9 @@ maps; they do not use sheen or texture-transform extensions. Check both hanging
 chains for the source texture's dark rusty color instead of chalk-white
 reflections, and check leaves for isolated white pixels. The deferred pass must
 orient the whole normal-map frame on backfaces, and the BRDF LUT's split-sum A
-term must multiply F0 (the LUT already integrated angular Fresnel). The CPU
-check `tests/extras/test_sponza_masked_ibl_wiring.py` pins those contracts but
-**cannot** establish that a new render matches the golden.
+term must multiply F0 (the LUT already integrated angular Fresnel). `zshader`
+compiles and reflects both paths; only the image comparison can test whether
+the illumination and the masked geometry actually look right.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible
