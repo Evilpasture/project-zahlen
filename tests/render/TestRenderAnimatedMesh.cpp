@@ -149,7 +149,7 @@ struct RenderAnimatedMeshTestSuite {
             if (engine->Tick(dt, ZHLN::GameplayDriver::Cpp) != ZHLN::GameplayStatus::OK) {
                 return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
             }
-            for (const auto [entity, buffer]: skinnedScratch) {
+            for (const auto& [entity, buffer]: skinnedScratch) {
                 const auto* skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
                 ZHLN::Test::ExpectTrue(skin != nullptr && skin->skinnedScratch == buffer);
             }
