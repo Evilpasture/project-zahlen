@@ -68,6 +68,7 @@ struct PSOutput {
     float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
     float4 anisotropy : SV_Target5;
+    float4 sheen : SV_Target6;
 };
 
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
@@ -196,6 +197,7 @@ PSOutput PSMain(VSOutput input) {
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
     output.clearcoat  = surface.clearcoat;
     output.anisotropy = surface.anisotropy;
+    output.sheen = surface.sheen;
 
     return output;
 }

@@ -10,6 +10,7 @@ struct PSOutput {
     float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
     float4 anisotropy : SV_Target5;
+    float4 sheen : SV_Target6;
 };
 
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
@@ -19,6 +20,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     InstanceData inst = scene.g_instances[instId];
 
     SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchIndex(vertexId), worldPos);
+    output.instanceId = instId;
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
     activeVPPos = mul(activeVP, worldPos);
     return output;
@@ -51,6 +53,7 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
 void PSShadow(ShadowGeometryOutput input) {
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, float4(1.0f), input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
     float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
@@ -61,6 +64,7 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
     float4 albedo   = SampleMaterialAlbedo<ClearCoatMaterial>(material);
     float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
@@ -87,6 +91,7 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
     output.clearcoat       = surface.clearcoat;
     output.anisotropy      = surface.anisotropy;
+    output.sheen           = surface.sheen;
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -114,25 +119,31 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     uint4 indices = input.materialIndices;
     if (indices.y != 2u) {
-        float3 mapN = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
-        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos, input.uv);
+        float3 mapN = SampleMaterialTexture(indices.y, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerNormal), input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
+        // Account for rotated/mirrored UVs before reconstructing the tangent frame.
+        MaterialSampleInputs normalInput = MakeMaterialInputs(input.uv, input.color, indices, input.samplerCodes,
+                                                               input.baseColorFactor, input.emissiveFactor, input.pbrFactors, 0u);
+        ConfigureSceneMaterial(normalInput, input.uv1, input.instanceId);
+        mapN = TransformNormalSample(mapN, normalInput, kSamplerNormal);
+        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos,
+                          SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerNormal));
     }
 
     float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
 
-    float4 pbr = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
+    float4 pbr = SampleMaterialTexture(indices.z, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerPbr), input.samplerCodes, kSamplerPbr);
     float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
 
     float4 params = input.transmissionParams;
     uint4 tex = input.transmissionTextures;
     float iridescence = saturate(params.y);
     if (tex.y != 0xFFFFu) {
-        iridescence *= SampleMaterialTexture(tex.y, input.uv, input.samplerCodes, kSamplerIridescence).r;
+        iridescence *= SampleMaterialTexture(tex.y, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerIridescence), input.samplerCodes, kSamplerIridescence).r;
     }
     float thicknessNm = params.z;
     if (tex.x != 0xFFFFu) {
-        float g = SampleMaterialTexture(tex.x, input.uv, input.samplerCodes, kSamplerFilmThickness).g;
+        float g = SampleMaterialTexture(tex.x, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerFilmThickness), input.samplerCodes, kSamplerFilmThickness).g;
         thicknessNm = lerp(params.w, params.z, g);
     }
 
@@ -150,7 +161,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     float thickness = input.volumeParams.x * input.volumeParams.z;
     if (tex.z != 0xFFFFu) {
-        thickness *= SampleMaterialTexture(tex.z, input.uv, input.samplerCodes, kSamplerVolumeThickness).g;
+        thickness *= SampleMaterialTexture(tex.z, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerVolumeThickness), input.samplerCodes, kSamplerVolumeThickness).g;
     }
     float2 refractUV = screenUV;
     if (thickness > 1.0e-5f) {
@@ -174,7 +185,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, lod).rgb * albedo;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 R = AnisotropicReflection(N, V, cross(N, anisotropicT), roughness, aniso.z);
     float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z) *
@@ -188,6 +199,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, 0u);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
     float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
     float3 emissive = sampledEmissive * albedo.a;
@@ -214,7 +226,7 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float metallic  = surface.metallic;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-    float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
     float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);
@@ -225,5 +237,13 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
-    return float4(diffuseIBL + specularIBL + emissive, albedo.a);
+    float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;
+    float3 sheenColor = surface.sheen.rgb;
+    if (any(sheenColor > 0.0f)) {
+        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotV, NdotV);
+        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-V, N), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
+        litBase = litBase * attenuation + sheenEnv * scene.frame.ambientExposure *
+                  SheenEnvironmentWeight(sheenColor, NdotV) * surface.occlusion;
+    }
+    return float4(litBase + emissive, albedo.a);
 }

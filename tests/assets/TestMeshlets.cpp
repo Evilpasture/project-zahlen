@@ -80,7 +80,7 @@ struct MeshletTestSuite {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexAttributes), size_t {16})) {
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexAttributes), size_t {20})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSkin), size_t {12})) {

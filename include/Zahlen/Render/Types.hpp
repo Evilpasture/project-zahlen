@@ -40,10 +40,24 @@ enum class MaterialTextureSlot : uint8_t {
     Iridescence,
     FilmThickness,
     VolumeThickness,
+    SheenColor,
+    SheenRoughness,
+    Occlusion,
     Count
 };
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
 using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+
+// glTF textureInfo, not the image, owns the UV transform and set selection.
+// Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
+struct MaterialTextureTransform {
+    std::array<float, 2> offset {0.0f, 0.0f};
+    std::array<float, 2> scale {1.0f, 1.0f};
+    float rotation = 0.0f; // Radians, counter-clockwise in glTF UV space.
+    uint32_t texCoord = 0;
+    constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
+};
+using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_cast<size_t>(MaterialTextureSlot::Count)>;
 
 struct Mesh {
     using enum BufferHandle;
@@ -95,7 +109,14 @@ struct Material {
     float               anisotropyStrength      = 0.0f;
     float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
     TextureHandle       anisotropyMap           = TextureHandle::Invalid;
+    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                sheenRoughnessFactor = 0.0f;
+    TextureHandle        sheenColorMap = TextureHandle::Invalid;
+    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
+    TextureHandle        occlusionMap = TextureHandle::Invalid;
+    float                occlusionStrength = 1.0f;
     MaterialSamplerAddresses textureSamplers {}; // Repeat/Repeat for non-glTF materials.
+    MaterialTextureTransforms textureTransforms {};
 };
 
 static_assert(
@@ -164,7 +185,14 @@ struct MaterialDesc {
     float         anisotropyStrength    = 0.0f;
     float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
     TextureHandle anisotropyMap         = TextureHandle::Invalid;
+    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                sheenRoughnessFactor = 0.0f;
+    TextureHandle        sheenColorMap = TextureHandle::Invalid;
+    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
+    TextureHandle        occlusionMap = TextureHandle::Invalid;
+    float                occlusionStrength = 1.0f;
     MaterialSamplerAddresses textureSamplers {};
+    MaterialTextureTransforms textureTransforms {};
 };
 
 struct DrawParams {

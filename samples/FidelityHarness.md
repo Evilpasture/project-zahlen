@@ -108,15 +108,23 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    still read source mip 0; procedural sky is unchanged. The area-light LTC
    and split-sum BRDF LUT remain isotropic approximations.
    The baseline diffuse SH/GI is gated by `(1 - F) * (1 - metallic)`, so metal
-   no longer receives diffuse IBL on top of its specular term. Sheen and
-   specular remain unsupported. Other differences (for example texture
-   coordinate sets and texture transforms) still contribute to the metric.
+   no longer receives diffuse IBL on top of its specular term. Sheen now
+   imports its linear color factor, sRGB color texture and independent
+   alpha-channel roughness, layers a Charlie direct lobe over the base and
+   under clearcoat, and attenuates the base by an approximate energy term.
+   Sheen IBL samples the existing GGX-filtered cube, not a Charlie-prefiltered
+   environment/LUT. `KHR_texture_transform` applies offset, rotation, scale
+   and texture-specific UV-set selection (TEXCOORD_0/1) to each textureInfo,
+   including the separately sampled glTF occlusion texture. Higher UV sets
+   are not stored. KHR_materials_specular remains unsupported.
 5. **Texture addressing.** The importer carries each glTF texture reference's
    independent `wrapS`/`wrapT` (repeat, clamp-to-edge, mirrored-repeat) through
    its material to one of nine preallocated GPU samplers. Images remain shared
-   even if their texture objects specify different samplers. glTF's
-   `minFilter`/`magFilter` are not imported yet: the bank retains the renderer's
-   existing linear, mip-0-only material filtering.
+   even if their texture objects specify different samplers, but color and
+   data references to the same source image use distinct sRGB/linear uploads.
+   glTF's `minFilter`/`magFilter` are not imported yet: the material sampler
+   bank uses trilinear minification and generated mipmaps (rather than mip 0)
+   to stabilize tiled fabrics.
 
 To check the reported mismatch visually, render the Khronos
 `AnisotropyStrengthTest` scenario with this harness and the matching HDR map.
@@ -128,6 +136,13 @@ texture path; it is not a substitute for this GPU image comparison. The IBL
 uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
 anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
 is not expected.
+
+For `SheenCloth`, the blue/black weave should repeat across the cloth instead
+of stretching into broad blue bands: its per-texture transform includes
+`scale: [30, -30]`. The importer regression checks that factor, the UV-set
+override, mirrored/rotated transforms, and the shared image's separate sRGB
+and linear handles. It does **not** compare a rendered frame to the golden;
+sheen's GGX-based environment approximation can still differ in brightness.
 
 For HDR IBL speckles, rebuild `FidelityHarness` and run both
 `SCENARIO=khronos-MetalRoughSpheres-HDR ./scripts/run_fidelity.sh -j1` and

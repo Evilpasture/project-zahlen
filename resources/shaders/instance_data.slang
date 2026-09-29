@@ -53,7 +53,22 @@ public struct InstanceData {
     public float anisotropyRotation;
     public uint anisotropyTexIndex;
     public uint samplerCodes0; // Slots 0..7, four bits each; reuses anisotropy padding.
-    public uint samplerCodes1; // Slots 8..10.
+    public uint samplerCodes1; // Slots 8..13.
+
+    // Linear-space sheen RGB and independent alpha-channel roughness. A zero
+    // color disables the layer; these fields are not part of the film/coat union.
+    [CxxArray]
+    public float4 sheenParams;
+    public uint sheenColorTexIndex;
+    public uint sheenRoughnessTexIndex;
+    public uint occlusionTexIndex;
+    public float occlusionStrength;
+
+    // One affine transform per textureInfo (not per shared image). Each row is
+    // (u coefficient, v coefficient, offset, unused/UV set). Keep them in
+    // InstanceData so vertex, fragment, meshlet and shadow paths agree.
+    public float4 uvRow0[14];
+    public float4 uvRow1[14];
 };
 
 [CxxSkip]
@@ -76,6 +91,7 @@ public struct VertexAttributes {
     public uint tangent;
     public uint uv;
     public uint color;
+    public uint uv1;
 };
 
 public struct SkinVertex {
@@ -101,6 +117,10 @@ public extension VertexAttributes {
         get {
             return UnpackHalf2(this.uv);
         }
+    }
+    public property float2 unpackedUV1 {
+        [ForceInline]
+        get { return UnpackHalf2(this.uv1); }
     }
     public property float4 unpackedColor {
         [ForceInline]

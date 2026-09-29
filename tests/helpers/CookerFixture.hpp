@@ -55,7 +55,7 @@ constexpr size_t kExpectedEntries3 = 3;
 
 constexpr uint32_t kZmetVersion          = 1u;
 constexpr uint32_t kMeshMagic            = 0x3048534Du; // 'MSH0'
-constexpr uint32_t kMeshVersion          = 4u;
+constexpr uint32_t kMeshVersion          = 5u;
 constexpr uint32_t kAnimMagic            = 0x304D4E41u; // 'ANM0'
 constexpr uint32_t kAnimVersion          = 1u;
 constexpr uint32_t kGlbMagic             = 0x46546C67u; // 'glTF'

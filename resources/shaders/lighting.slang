@@ -34,6 +34,7 @@ Texture2D<float4> texEmissive;
 Texture2D<float> texAo;
 
 Texture2D<float4> texClearcoat;
+Texture2D<float4> texSheen;
 Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
@@ -179,6 +180,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
     float NdotV = saturate(dot(N, V));
     float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
+    float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
+    float3 sheenColor = sheenRaw.rgb;
+    float materialAo = anisoRaw.w;
     float anisoStrength = anisoRaw.z;
     float3 T = anisoStrength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
     float3 B = cross(N, T);
@@ -256,7 +260,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
     float sunIntensity = frame.lightDir.w;
-    float3 directSun   = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * coatAtt * sunIntensity * NdotL_sun * shadow;
+    float sheenAttSun = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL_sun);
+    float3 sheenSun = sheenColor * SheenCharlieBRDF(N, V, L_sun, H_sun, sheenRaw.a);
+    float3 directSun   = ((kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sheenAttSun + sheenSun) *
+                         coatAtt * sunIntensity * NdotL_sun * shadow;
     if (coatFactor > 1.0f / 255.0f) {
         directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunIntensity * shadow * coatFactor;
     }
@@ -288,7 +295,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             const float shadowVisibility = 1.0f;
 
-            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * coatAtt * light.color * light.intensity * shadowVisibility;
+            // Approximate the fiber lobe with the diffuse LTC integral; the
+            // point/directional branches above evaluate Charlie explicitly.
+            float areaAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
+            float3 sheenArea = diffLTC * SheenEnvironmentWeight(sheenColor, NdotV);
+            directPunctual += (((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * areaAtt + sheenArea) *
+                              coatAtt * light.color * light.intensity * shadowVisibility;
         } else {
             if (light.type == 0 || light.type == 4)
                 continue;
@@ -334,7 +346,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     }
                 }
 
-                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * coatAtt * light.color * light.intensity * atten * NdotL * shadowVisibility;
+                float sheenAtt = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL);
+                float3 sheenSpec = sheenColor * SheenCharlieBRDF(N, V, L_p, H, sheenRaw.a);
+                directPunctual += ((kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * sheenAtt + sheenSpec) *
+                                  coatAtt * light.color * light.intensity * atten * NdotL * shadowVisibility;
                 if (coatFactor > 1.0f / 255.0f) {
                     float3 Lcoat = SafeNormalize(L_unnorm, N);
                     directPunctual += ClearcoatDirectSpecular(Nc, V, Lcoat, coatRough) * light.color * light.intensity * atten * shadowVisibility * coatFactor;
@@ -347,6 +362,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // it unconditionally to the specular IBL in reflection.slang made rough
     // metal look white even with physically correct exposure and no clearcoat.
     float3 kD_ambient = (1.0f - FresnelSchlickRoughness(NdotV, F0, roughness)) * (1.0f - metallic);
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * ao * coatAtt + directSun + directPunctual + emissive;
+    float sheenAttAmbient = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * ao * materialAo *
+                      sheenAttAmbient * coatAtt + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }

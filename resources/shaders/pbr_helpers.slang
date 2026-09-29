@@ -173,6 +173,34 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 #endif
 
+// KHR_materials_sheen: Charlie's cylindrical-fiber distribution with the
+// cheaper Ashikhmin/Premoze visibility. The prefiltered environment is GGX,
+// so its sheen term below is an approximation, not a Charlie convolution.
+public float SheenCharlieBRDF(float3 N, float3 V, float3 L, float3 H, float roughness) {
+    float alpha = max(roughness * roughness, 0.005f);
+    float invAlpha = 1.0f / alpha;
+    float NdotH = saturate(dot(N, H));
+    float sin2h = saturate(1.0f - NdotH * NdotH);
+    float distribution = (2.0f + invAlpha) * pow(max(sin2h, 1e-6f), 0.5f * invAlpha) / (2.0f * 3.14159265f);
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float visibility = 1.0f / (4.0f * max(NdotL + NdotV - NdotL * NdotV, 1e-4f));
+    return distribution * visibility;
+}
+
+// Approximate hemispherical sheen albedo in place of a dedicated Charlie DFG
+// LUT. Scale the base lobe before adding sheen; clearcoat remains on top.
+public float SheenAlbedoScaling(float3 color, float roughness, float NdotV, float NdotL) {
+    float grazing = max(1.0f - saturate(NdotV), 1.0f - saturate(NdotL));
+    float energy = (0.25f + 0.35f * grazing * grazing) * (0.75f + 0.25f * saturate(roughness));
+    return saturate(1.0f - max(color.r, max(color.g, color.b)) * energy);
+}
+
+public float3 SheenEnvironmentWeight(float3 color, float NdotV) {
+    float grazing = 1.0f - saturate(NdotV);
+    return color * (0.25f + 0.35f * grazing * grazing);
+}
+
 public float DistributionGGX(float3 N, float3 H, float roughness) {
     float r     = max(roughness, 0.001f);
     float a     = r * r;

@@ -26,6 +26,7 @@ void ReflectionCompositePass::operator()(Vk::RasterPassContextBase& ctx) const n
         Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
         Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)),
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
+        Vk::Slot<"texSheen">(Vk::Assume<Vk::ShaderRead<Res_Sheen>>(impl.graphResources.sheenBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ShaderRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
         Vk::Slot<"tlas">(inputs.tlas)
     );

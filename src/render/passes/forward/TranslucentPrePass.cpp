@@ -15,12 +15,14 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(impl.graphResources.transNormalBuffer);
     const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(impl.graphResources.transAnisotropyBuffer);
+    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(impl.graphResources.transSheenBuffer);
     const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(impl.graphResources.transDepthBuffer);
 
     Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddColor(aniso_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
+        .AddColor(sheen_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < impl.queues.Draws().size(); ++i) {

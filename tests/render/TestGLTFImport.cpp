@@ -327,6 +327,110 @@ struct GltfAnisotropyDocument {
     std::vector<GltfSamplerWrap>          samplers;
 };
 
+// TextureInfo owns the transform: several references to the SAME image below
+// use different matrices, UV sets and color spaces.
+struct GltfTextureTransform {
+    std::array<float, 2> offset {0.0f, 0.0f};
+    float rotation = 0.0f;
+    std::array<float, 2> scale {1.0f, 1.0f};
+    int32_t texCoord = 1;
+};
+
+struct GltfTextureInfoExtensions {
+    GltfTextureTransform KHR_texture_transform;
+};
+
+struct GltfTransformedTextureInfo {
+    int32_t index = 0;
+    int32_t texCoord = 0;
+    GltfTextureInfoExtensions extensions;
+};
+
+struct GltfOcclusionTextureInfo {
+    int32_t index = 0;
+    float strength = 0.4f;
+    GltfTextureInfoExtensions extensions {.KHR_texture_transform = {
+        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {1.0f, 1.0f}, .texCoord = 0
+    }};
+};
+
+struct GltfUv1TextureInfo {
+    int32_t index = 0;
+    int32_t texCoord = 1;
+};
+
+struct KhrMaterialsSheen {
+    std::array<float, 3> sheenColorFactor {0.25f, 0.5f, 0.75f};
+    GltfTransformedTextureInfo sheenColorTexture {.extensions = {.KHR_texture_transform = {
+        .offset = {0.1f, 0.3f}, .rotation = 0.0f, .scale = {4.0f, -5.0f}, .texCoord = 0
+    }}};
+    float sheenRoughnessFactor = 0.35f;
+    GltfUv1TextureInfo sheenRoughnessTexture;
+};
+
+struct GltfSheenExtensions {
+    KhrMaterialsSheen KHR_materials_sheen;
+};
+
+struct GltfSheenPbr {
+    float metallicFactor = 0.0f;
+    float roughnessFactor = 0.8f;
+    GltfTransformedTextureInfo baseColorTexture {.extensions = {.KHR_texture_transform = {
+        .offset = {0.2f, 0.4f}, .rotation = 1.5707963f, .scale = {2.0f, -3.0f}, .texCoord = 1
+    }}};
+    GltfTransformedTextureInfo metallicRoughnessTexture {.extensions = {.KHR_texture_transform = {
+        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0
+    }}};
+};
+
+struct GltfSheenMaterial {
+    std::string_view name = "Sheen/UV transform";
+    GltfSheenPbr pbrMetallicRoughness;
+    GltfTransformedTextureInfo normalTexture {.extensions = {.KHR_texture_transform = {
+        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0
+    }}};
+    GltfOcclusionTextureInfo occlusionTexture;
+    GltfSheenExtensions extensions;
+};
+
+struct GltfSheenAttributes {
+    int32_t POSITION = 0;
+    int32_t TEXCOORD_0 = 1;
+    int32_t TEXCOORD_1 = 2;
+};
+
+struct GltfSheenPrimitive {
+    GltfSheenAttributes attributes;
+    int32_t indices = 3;
+    int32_t material = 0;
+};
+
+struct GltfSheenMesh {
+    std::string_view name = "UV sets";
+    std::vector<GltfSheenPrimitive> primitives {GltfSheenPrimitive {}};
+};
+
+struct GltfSheenImage {
+    int32_t bufferView = 4;
+    std::string_view mimeType = "image/png";
+};
+
+struct GltfSheenDocument {
+    GltfAsset asset;
+    std::vector<std::string_view> extensionsUsed {"KHR_texture_transform", "KHR_materials_sheen"};
+    std::vector<std::string_view> extensionsRequired {"KHR_texture_transform"};
+    int32_t scene = 0;
+    std::vector<GltfScene> scenes {GltfScene {.nodes = {0}}};
+    std::vector<GltfMeshNode> nodes {GltfMeshNode {.name = "SheenTriangle"}};
+    std::vector<GltfSheenMesh> meshes {GltfSheenMesh {}};
+    std::vector<GltfSheenMaterial> materials {GltfSheenMaterial {}};
+    std::vector<GltfAccessor> accessors;
+    std::vector<GltfAnisotropyBufferView> bufferViews;
+    std::vector<GltfBuffer> buffers;
+    std::vector<GltfSheenImage> images {GltfSheenImage {}};
+    std::vector<GltfAnisotropyTexture> textures {GltfAnisotropyTexture {}};
+};
+
 // Same document with a root `extensions` object. A separate type rather than
 // an optional member, for the omission reason above.
 template <typename NodeT, typename MaterialT>
@@ -517,6 +621,48 @@ constexpr float                kEmissiveStrength = 4.0f;
         .samplers = {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648}, GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}}
     };
     // Texture 0 has no sampler at all, not a sampler explicitly set to repeat.
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
+}
+
+// The required transform repeats 30 times with a negative V scale, while
+// albedo overrides TEXCOORD_0 with TEXCOORD_1 and rotates around the origin.
+// Reusing one image in both color and data slots also checks color-space-aware
+// upload (one sRGB handle and one linear handle, not a merged format).
+[[nodiscard]] auto MakeSheenTransformFixture() -> std::vector<uint8_t> {
+    constexpr std::array<float, 6> uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6> uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
+    constexpr std::array<uint8_t, 70> png {
+        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
+        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
+        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
+        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
+        0x60u, 0x82u
+    };
+    constexpr int32_t uvSize = static_cast<int32_t>(sizeof(uv0));
+    constexpr int32_t indexOffset = kPositionBytes + uvSize * 2;
+    constexpr int32_t pngOffset = indexOffset + kIndexBytes;
+    std::vector<uint8_t> bin(static_cast<size_t>(pngOffset) + png.size());
+    std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
+    std::memcpy(bin.data() + kPositionBytes, uv0.data(), uvSize);
+    std::memcpy(bin.data() + kPositionBytes + uvSize, uv1.data(), uvSize);
+    std::memcpy(bin.data() + indexOffset, kTriangleIndices, kIndexBytes);
+    std::memcpy(bin.data() + pngOffset, png.data(), png.size());
+
+    GltfSheenDocument document {};
+    document.accessors = {
+        GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
+        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 3, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
+    };
+    document.bufferViews = {
+        {.byteOffset = 0, .byteLength = kPositionBytes},
+        {.byteOffset = kPositionBytes, .byteLength = uvSize},
+        {.byteOffset = kPositionBytes + uvSize, .byteLength = uvSize},
+        {.byteOffset = indexOffset, .byteLength = kIndexBytes},
+        {.byteOffset = pngOffset, .byteLength = static_cast<int32_t>(png.size())}
+    };
+    document.buffers = {{.byteLength = static_cast<int32_t>(bin.size())}};
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
 }
 
@@ -997,13 +1143,81 @@ struct GLTFImportTestSuite {
             ZHLN::MaterialSamplerAddresses expectedSamplers {};
             expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Albedo)] = {TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat};
             expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Pbr)] = {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge};
-            if (material.albedoMap != material.pbrMap || material.pbrMap != material.anisotropyMap ||
+            // Albedo is sRGB; PBR and anisotropy are linear data, even when
+            // all three texture objects reference the same image bytes.
+            if (material.albedoMap == material.pbrMap || material.pbrMap != material.anisotropyMap ||
                 material.textureSamplers != expectedSamplers) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
             if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
                 defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> importer_preserves_texture_transforms_and_sheen() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Sheen UV transform");
+            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto bytes = MakeSheenTransformFixture();
+            SourceDocument source;
+            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_sheen ||
+                !source.data->materials[0].pbr_metallic_roughness.base_color_texture.has_transform ||
+                source.data->meshes[0].primitives[0].attributes_count != 3) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ext_sheen_transform.glb"
+            );
+            if (prefab == nullptr || prefab->parts.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+
+            const auto& material = prefab->parts[0].defaultMaterial;
+            using ZHLN::MaterialTextureSlot;
+            const auto& albedo = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Albedo)];
+            const auto& pbr = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Pbr)];
+            const auto& normal = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Normal)];
+            const auto& sheenColor = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
+            const auto& sheenRoughness = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenRoughness)];
+            const auto& occlusion = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
+            if (albedo.texCoord != 1u || albedo.offset != std::array<float, 2> {0.2f, 0.4f} ||
+                albedo.scale != std::array<float, 2> {2.0f, -3.0f} || std::abs(albedo.rotation - 1.5707963f) > 1e-5f ||
+                pbr.texCoord != 0u || pbr.scale != std::array<float, 2> {30.0f, -30.0f} ||
+                normal != pbr || sheenColor.texCoord != 0u ||
+                sheenColor.scale != std::array<float, 2> {4.0f, -5.0f} ||
+                sheenRoughness.texCoord != 1u || sheenRoughness.scale != std::array<float, 2> {1.0f, 1.0f} ||
+                occlusion.scale != std::array<float, 2> {1.0f, 1.0f}) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            // This also pins the matrix multiplication order (T * R * S), the
+            // override of TEXCOORD_0, and preservation of a mirrored V axis.
+            auto apply = [](const ZHLN::MaterialTextureTransform& t, std::array<float, 2> uv) {
+                const float u = uv[0] * t.scale[0], v = uv[1] * t.scale[1];
+                return std::array<float, 2> {t.offset[0] + std::cos(t.rotation) * u - std::sin(t.rotation) * v,
+                                              t.offset[1] + std::sin(t.rotation) * u + std::cos(t.rotation) * v};
+            };
+            const auto transformed = apply(albedo, {0.5f, 0.2f}); // TEXCOORD_1, not TEXCOORD_0.
+            const auto tiled = apply(pbr, {0.25f, 0.5f});
+            if (std::abs(transformed[0] - 0.8f) > 1e-4f || std::abs(transformed[1] - 1.4f) > 1e-4f ||
+                std::abs(tiled[0] - 7.5f) > 1e-4f || std::abs(tiled[1] + 15.0f) > 1e-4f) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            auto& rc = engine->GetRenderContext();
+            if (material.sheenColorFactor != std::array<float, 3> {0.25f, 0.5f, 0.75f} ||
+                std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
+                material.sheenColorMap == ZHLN::TextureHandle::Invalid ||
+                material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
+                material.occlusionMap == ZHLN::TextureHandle::Invalid ||
+                material.albedoMap != material.sheenColorMap || material.pbrMap != material.sheenRoughnessMap ||
+                material.sheenRoughnessMap != material.occlusionMap ||
+                std::abs(material.occlusionStrength - 0.4f) > 1e-5f || material.albedoMap == material.pbrMap ||
+                rc.GetBindlessIndex(material.sheenColorMap) <= 2 || rc.GetBindlessIndex(material.sheenRoughnessMap) <= 2 ||
+                rc.GetBindlessIndex(material.albedoMap) == rc.GetBindlessIndex(material.pbrMap)) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            const ZHLN::Material defaults {};
+            if (defaults.sheenColorFactor != std::array<float, 3> {0.0f, 0.0f, 0.0f} ||
+                defaults.sheenRoughnessFactor != 0.0f || defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};

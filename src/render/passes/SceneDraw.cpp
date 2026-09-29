@@ -172,6 +172,7 @@ auto GBufferSceneTargets(RenderContext::Impl& impl) noexcept -> GBufferTargets {
         .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(impl.graphResources.emissiveBuffer),
         .clearcoat  = Vk::Assume<Vk::ColorWrite<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer),
         .anisotropy = Vk::Assume<Vk::ColorWrite<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer),
+        .sheen      = Vk::Assume<Vk::ColorWrite<Res_Sheen>>(impl.graphResources.sheenBuffer),
         .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(impl.ActivePresentation().depthTarget)
     };
 }

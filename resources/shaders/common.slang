@@ -48,7 +48,7 @@ public struct GlobalSceneRegistry {
 public ParameterBlock<GlobalSceneRegistry> scene;
 
 // MaterialTextureSlot in Render/Types.hpp uses this exact order. The first
-// eight four-bit sampler codes are packed in x and the final three in y.
+// eight four-bit sampler codes are packed in x and the remaining six in y.
 public static const uint kSamplerAlbedo             = 0u;
 public static const uint kSamplerNormal             = 1u;
 public static const uint kSamplerPbr                = 2u;
@@ -60,6 +60,9 @@ public static const uint kSamplerAnisotropy         = 7u;
 public static const uint kSamplerIridescence        = 8u;
 public static const uint kSamplerFilmThickness      = 9u;
 public static const uint kSamplerVolumeThickness    = 10u;
+public static const uint kSamplerSheenColor         = 11u;
+public static const uint kSamplerSheenRoughness     = 12u;
+public static const uint kSamplerOcclusion          = 13u;
 
 [ForceInline]
 public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
@@ -238,6 +241,8 @@ public struct SceneGeometryVertex {
     public float3 normal;
     public float4 tangent;
     public float2 uv;
+    public float2 uv1;
+    public uint instanceId;
     public float4 color;
     public uint4 materialIndices;
     public float4 baseColorFactor;
@@ -266,6 +271,7 @@ public extension InstanceData {
 
         float3 position     = this.fetchPosition(actualVertexId);
         float2 localUV      = float2(0, 0);
+        float2 localUV1     = float2(0, 0);
         float4 localColor   = float4(1, 1, 1, 1);
         float3 localNormal  = float3(0, 1, 0);
         float4 localTangent = float4(1, 0, 0, 1);
@@ -275,6 +281,7 @@ public extension InstanceData {
             localNormal                 = attributes.unpackedNormal.xyz;
             localTangent                = attributes.unpackedTangent;
             localUV                     = attributes.unpackedUV;
+            localUV1                    = attributes.unpackedUV1;
             localColor                  = attributes.unpackedColor;
         }
 
@@ -314,6 +321,7 @@ public extension InstanceData {
 
         output.tangent.w            = localTangent.w;
         output.uv                   = localUV;
+        output.uv1                  = localUV1;
         output.color                = localColor;
         output.materialIndices      = uint4(this.albedoIndex, this.normalIndex, this.pbrIndex, this.emissiveIndex);
         output.baseColorFactor      = this.baseColorFactor;
@@ -348,6 +356,8 @@ public extension InstanceData {
 public struct ShadowGeometryOutput {
     public float4 pos : SV_Position;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
@@ -363,6 +373,8 @@ public struct GBufferGeometryOutput {
     public float3 normal : NORMAL;
     public float4 tangent : TANGENT;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
@@ -380,6 +392,8 @@ public struct ForwardGeometryOutput {
     public float4 pos : SV_Position;
     public float3 normal : NORMAL;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
@@ -398,6 +412,8 @@ public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
     ShadowGeometryOutput o;
     o.pos              = v.pos;
     o.uv               = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color            = v.color;
     o.materialIndices  = v.materialIndices;
     o.baseColorFactor  = v.baseColorFactor;
@@ -415,6 +431,8 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.normal           = v.normal;
     o.tangent          = v.tangent;
     o.uv               = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color            = v.color;
     o.materialIndices  = v.materialIndices;
     o.baseColorFactor  = v.baseColorFactor;
@@ -434,6 +452,8 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.pos                 = v.pos;
     o.normal              = v.normal;
     o.uv                  = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color               = v.color;
     o.materialIndices     = v.materialIndices;
     o.baseColorFactor     = v.baseColorFactor;

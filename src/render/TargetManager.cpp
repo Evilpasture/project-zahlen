@@ -258,12 +258,14 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
                                      _graph.emissiveBuffer.image.Handle(),
                                      _graph.clearcoatBuffer.image.Handle(),
                                      _graph.anisotropyBuffer.image.Handle(),
+                                     _graph.sheenBuffer.image.Handle(),
                                      _graph.hdrSceneColor.image.Handle(),
                                      _graph.lightingTarget.image.Handle(),
                                      _graph.smaaEdgeTarget.image.Handle(),
                                      _graph.smaaWeightTarget.image.Handle(),
                                      _graph.transNormalBuffer.image.Handle(),
                                      _graph.transAnisotropyBuffer.image.Handle(),
+                                     _graph.transSheenBuffer.image.Handle(),
                                      _graph.transLightingTarget.image.Handle()};
     for (auto* const img: colorTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);

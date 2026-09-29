@@ -69,7 +69,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 4; // Version 4: separated SoA layouts + meshlet streams
+    meshHeader.version = 5; // Version 5: VertexAttributes adds packed TEXCOORD_1
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =

@@ -6,6 +6,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <optional>
 
@@ -137,7 +138,14 @@ struct InstanceDataDesc {
     float    anisotropyStrength      = 0.0f;
     float    anisotropyRotation      = 0.0f;
     uint32_t anisotropyTex           = kNoFilmTexture;
+    std::array<float, 3> sheenColorFactor {};
+    float sheenRoughnessFactor = 0.0f;
+    uint32_t sheenColorTex = kNoFilmTexture;
+    uint32_t sheenRoughnessTex = kNoFilmTexture;
+    uint32_t occlusionTex = kNoFilmTexture;
+    float occlusionStrength = 1.0f;
     MaterialSamplerAddresses textureSamplers {};
+    MaterialTextureTransforms textureTransforms {};
 };
 
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
@@ -172,6 +180,18 @@ struct InstanceDataDesc {
             paddingCenter         = (desc.clearcoatRoughnessTex << 16) | (desc.clearcoatTex & kNoFilmTexture);
             paddingMeshlet        = (scale8 << 24) | (coat8 << 16) | (desc.clearcoatNormalTex & kNoFilmTexture);
         }
+    }
+
+    // glTF: uv' = offset + rotation * scale * uv. Keep the per-reference
+    // matrices independent (one image can be used in several material slots).
+    std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
+    std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
+    for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
+        const auto& transform = desc.textureTransforms[slot];
+        const float c = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
+        const float s = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
+        uvRow0[slot] = JPH::Vec4(c * transform.scale[0], -s * transform.scale[1], transform.offset[0], 0.0f);
+        uvRow1[slot] = JPH::Vec4(s * transform.scale[0], c * transform.scale[1], transform.offset[1], static_cast<float>(transform.texCoord));
     }
 
     return InstanceData {
@@ -211,6 +231,14 @@ struct InstanceDataDesc {
         .anisotropyTexIndex   = desc.anisotropyTex,
         .samplerCodes0        = PackMaterialSamplerAddresses(desc.textureSamplers, 0),
         .samplerCodes1        = PackMaterialSamplerAddresses(desc.textureSamplers, 8),
+        .sheenParams          = {desc.sheenColorFactor[0], desc.sheenColorFactor[1], desc.sheenColorFactor[2],
+                                 std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
+        .sheenColorTexIndex   = desc.sheenColorTex,
+        .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
+        .occlusionTexIndex    = desc.occlusionTex,
+        .occlusionStrength    = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
+        .uvRow0               = uvRow0,
+        .uvRow1               = uvRow1,
     };
 }
 
@@ -305,7 +333,8 @@ void RenderContext::Impl::FlushLineQueue() {
             .normal  = dummyNorm,
             .tangent = dummyTang,
             .uv      = Math::PackUV(0.0f, 0.0f),
-            .color   = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW())
+            .color   = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW()),
+            .uv1     = Math::PackUV(0.0f, 0.0f)
         };
         vertIdx++;
 
@@ -314,7 +343,8 @@ void RenderContext::Impl::FlushLineQueue() {
             .normal  = dummyNorm,
             .tangent = dummyTang,
             .uv      = Math::PackUV(1.0f, 1.0f),
-            .color   = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW())
+            .color   = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW()),
+            .uv1     = Math::PackUV(1.0f, 1.0f)
         };
         vertIdx++;
     }
@@ -421,7 +451,14 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .anisotropyStrength      = material.anisotropyStrength,
                  .anisotropyRotation      = material.anisotropyRotation,
                  .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                 .sheenColorFactor        = material.sheenColorFactor,
+                 .sheenRoughnessFactor    = material.sheenRoughnessFactor,
+                 .sheenColorTex           = FilmTextureIndex(_impl.get(), material.sheenColorMap),
+                 .sheenRoughnessTex       = FilmTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                 .occlusionTex            = FilmTextureIndex(_impl.get(), material.occlusionMap),
+                 .occlusionStrength       = material.occlusionStrength,
                  .textureSamplers          = material.textureSamplers,
+                 .textureTransforms        = material.textureTransforms,
              }
          ),
          .material            = resolved->material,

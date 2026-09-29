@@ -53,10 +53,12 @@ requirement).
 
 ### `.zmesh` format
 
-Header bumped to **version 4**: three counts appended
+Header **version 4** added three counts
 (`meshletCount`, `meshletVertexCount`, `meshletTriByteCount`), and the three
 streams are written after the index stream. `sizeof(CookedMeshHeader)` is now
-56 bytes (was 44).
+56 bytes (was 44). **Version 5** adds `TEXCOORD_1` to each packed
+`VertexAttributes` record (20 bytes instead of 16); recook version-4 meshes
+before loading them with the new vertex shader.
 
 ---
 

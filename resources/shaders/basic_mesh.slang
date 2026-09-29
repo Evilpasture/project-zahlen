@@ -11,11 +11,12 @@ import common;
 #endif
 
 E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
-    GPUMeshlet m, InstanceData inst, uint gtid, uint viewId
+    GPUMeshlet m, InstanceData inst, uint instanceId, uint gtid, uint viewId
 ) {
     uint actualVertexId = inst.fetchMeshletVertex(m.vertexOffset, gtid);
     float4 worldPos;
     SceneGeometryVertex output = inst.EvaluateVertex<!isShadow>(actualVertexId, worldPos);
+    output.instanceId = instanceId;
 
     if (isShadow) {
         output.pos = mul(scene.frame.lightSpaceMatrices[min(viewId, 3u)], worldPos);
@@ -60,7 +61,7 @@ void MeshMain(
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
     if (gtid < vertexCountOut) {
-        outVertices[gtid] = EmitMeshletVertex<GBufferPassOutput, false>(m, inst, gtid, 0);
+        outVertices[gtid] = EmitMeshletVertex<GBufferPassOutput, false>(m, inst, instId, gtid, 0);
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {
@@ -100,7 +101,7 @@ void MeshMainForward(
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
     if (gtid < vertexCountOut) {
-        outVertices[gtid] = EmitMeshletVertex<ForwardPassOutput, false>(m, inst, gtid, 0);
+        outVertices[gtid] = EmitMeshletVertex<ForwardPassOutput, false>(m, inst, instId, gtid, 0);
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {
@@ -141,7 +142,7 @@ void MeshMainShadow(
     SetMeshOutputCounts(vertexCountOut, triangleCount);
 
     if (gtid < vertexCountOut) {
-        outVertices[gtid] = EmitMeshletVertex<ShadowPassOutput, true>(m, inst, gtid, viewId);
+        outVertices[gtid] = EmitMeshletVertex<ShadowPassOutput, true>(m, inst, instId, gtid, viewId);
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {

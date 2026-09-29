@@ -80,7 +80,7 @@ void Draw3DParticles(PassContext& passCtx) noexcept;
 
 void Draw3DParticleShadows(PassContext& passCtx) noexcept;
 
-// The six GBuffer color targets plus the depth target, as the attachments a
+// The seven GBuffer color targets plus the depth target, as the attachments a
 // raster pass writes them as. Both GBuffer passes (and the viewmodel pass,
 // which writes the same targets from a separate projection) resolve the set the
 // same way, so the spelling lives here rather than in each pass.

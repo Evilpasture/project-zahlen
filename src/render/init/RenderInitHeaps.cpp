@@ -143,7 +143,8 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
     for (uint32_t s = 0; s < modes.size(); ++s) {
         for (uint32_t t = 0; t < modes.size(); ++t) {
-            auto info = globalSamplerInfo; // Preserve existing material filtering and LOD.
+            auto info = globalSamplerInfo; // Keep filtering/aniso; let glTF materials use generated mips.
+            info.maxLod = VK_LOD_CLAMP_NONE;
             info.addressModeU = modes[s];
             info.addressModeV = modes[t];
             heapManager.WriteSampler(Vk::SamplerHandle {*materialBase + s * 3u + t}, info);

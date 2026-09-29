@@ -25,6 +25,7 @@ using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Clearcoat     = Vk::GraphImage<"Clearcoat", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_Sheen         = Vk::GraphImage<"Sheen", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Anisotropy    = Vk::GraphImage<"Anisotropy", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
@@ -51,6 +52,7 @@ using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLO
 using Res_VoxelHist     = Vk::GraphImage<"VoxelHist", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 1, true>;
 using Res_VoxelResolved = Vk::GraphImage<"VoxelResolved", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
 using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
+using Res_TransSheen    = Vk::GraphImage<"TransSheen", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_TransAnisotropy = Vk::GraphImage<"TransAnisotropy", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
@@ -83,6 +85,7 @@ class TargetManager {
         Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> emissiveBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          clearcoatBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          anisotropyBuffer;
+        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          sheenBuffer;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
@@ -108,6 +111,7 @@ class TargetManager {
         Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelResolved;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
         Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transAnisotropyBuffer;
+        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transSheenBuffer;
         Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
 
         Vk::MipmappedRenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT> transLightingTarget;
@@ -120,6 +124,7 @@ class TargetManager {
             Res_Emissive      emissiveBuffer;
             Res_Clearcoat     clearcoatBuffer;
             Res_Anisotropy    anisotropyBuffer;
+            Res_Sheen         sheenBuffer;
             Res_Lighting      lightingTarget;
             Res_HdrSceneColor hdrSceneColor;
             Res_DenoiseA      denoiseA;
@@ -143,6 +148,7 @@ class TargetManager {
             Res_VoxelResolved voxelResolved;
             Res_TransNorm     transNormalBuffer;
             Res_TransAnisotropy transAnisotropyBuffer;
+            Res_TransSheen    transSheenBuffer;
             Res_TransDepth    transDepthBuffer;
             Res_TransLighting transLightingTarget;
             Res_HiZ           hizMap;

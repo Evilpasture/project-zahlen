@@ -324,7 +324,11 @@ void DrawModelNodeRows(
            (a.clearcoatRoughnessFactor == b.clearcoatRoughnessFactor) && (a.clearcoatNormalScale == b.clearcoatNormalScale) &&
            (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) &&
            (a.clearcoatNormalMap == b.clearcoatNormalMap) && (a.anisotropyStrength == b.anisotropyStrength) &&
-           (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap);
+           (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap) &&
+           (a.sheenColorFactor == b.sheenColorFactor) && (a.sheenRoughnessFactor == b.sheenRoughnessFactor) &&
+           (a.sheenColorMap == b.sheenColorMap) && (a.sheenRoughnessMap == b.sheenRoughnessMap) &&
+           (a.occlusionMap == b.occlusionMap) && (a.occlusionStrength == b.occlusionStrength) &&
+           (a.textureSamplers == b.textureSamplers) && (a.textureTransforms == b.textureTransforms);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {

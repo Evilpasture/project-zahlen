@@ -5,6 +5,7 @@ struct VertexAttributes {
     uint tangent;
     uint uv;
     uint color;
+    uint uv1;
 };
 
 struct GPUJoint {
@@ -152,6 +153,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     uint outNorm       = PackNormal(skinnedNorm, normUnpack.w);
     uint outTang       = PackNormal(skinnedTang, tangUnpack.w);
-    VertexAttributes outAttr = { outNorm, outTang, uvRaw, colorRaw };
+    VertexAttributes outAttr = { outNorm, outTang, uvRaw, colorRaw, attr.uv1 };
     outAttrPool.store(tid.x, outAttr);
 }

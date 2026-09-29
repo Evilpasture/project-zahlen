@@ -50,6 +50,7 @@ SamplerState blueNoiseSampler;
 Texture2D<float4> texRtrHalf;
 
 Texture2D<float4> texClearcoat;
+Texture2D<float4> texSheen;
 Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
@@ -279,19 +280,32 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             R_corr      = lerp(R, boxR, boxFade);
         }
 
-        float ao = litColorRaw.a;
+        float ao = litColorRaw.a * anisoRaw.w;
 
         float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, roughness, strength) * frame.ambientExposure;
-        float3 specularIBL = prefilteredColor * FssEss * ao;
+        float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
+
+        // Independent Charlie layer above metallic-roughness and beneath the
+        // dielectric clearcoat. The existing GGX cube is an IBL approximation;
+        // direct lighting uses Charlie's distribution and visibility.
+        float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
+        float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
+        float3 sheenIBL = float3(0.0f);
+        if (any(sheenRaw.rgb > 0.0f)) {
+            float3 sheenPref = texEnvMap.SampleLevel(clampSampler, reflect(-V, N), max(sheenRaw.a, 0.2f) * 5.0f).rgb;
+            sheenIBL = sheenPref * frame.ambientExposure * SheenEnvironmentWeight(sheenRaw.rgb, NdotV) * ao;
+        }
         float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+        float coatAtt = 1.0f;
+        float3 coatIBL = float3(0.0f);
         if (coatRaw.a > 1.0f / 255.0f) {
             float3 Nc    = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
             float NcDotV = saturate(dot(Nc, V));
             float Fc     = ClearcoatFresnel(NcDotV) * coatRaw.a;
-            float att    = saturate(1.0f - Fc);
+            coatAtt      = saturate(1.0f - Fc);
             float3 Rc    = reflect(-V, Nc);
             float3 coatPref = texEnvMap.SampleLevel(clampSampler, Rc, coatRaw.z * 5.0f).rgb * frame.ambientExposure;
-            specularIBL = specularIBL * att + coatPref * Fc * ao;
+            coatIBL = coatPref * Fc * ao;
         }
 
         litColor = litColorRaw.rgb;
@@ -337,14 +351,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             }
 
-            float3 specReflect = lerp(specularIBL, reflectionColor * FssEss, confidence);
+            float3 specReflect = (lerp(baseSpecularIBL, reflectionColor * FssEss, confidence) * sheenAtt + sheenIBL) *
+                                 coatAtt + coatIBL;
 
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
             litColor += specReflect * horizonOcclusion;
         } else {
-            litColor += specularIBL;
+            litColor += (baseSpecularIBL * sheenAtt + sheenIBL) * coatAtt + coatIBL;
         }
     }
 

@@ -17,6 +17,7 @@ public struct SurfaceInteraction {
     public float alpha;
     public float4 clearcoat;
     public float4 anisotropy;
+    public float4 sheen; // linear RGB and independent roughness
 };
 
 // Interpolants and material data shared by the raster passes. The tangent
@@ -24,6 +25,8 @@ public struct SurfaceInteraction {
 // retain their respective handedness/fallback conventions.
 public struct MaterialSampleInputs {
     public float2 uv;
+    public float2 uv1;
+    public uint instanceId;
     public float4 vertexColor;
     public uint albedoIndex;
     public uint normalIndex;
@@ -45,6 +48,11 @@ public struct MaterialSampleInputs {
     public uint4 coatTextures;
     public float2 anisotropyParams;
     public uint anisotropyTexIndex;
+    public float4 sheenParams;
+    public uint sheenColorTexIndex;
+    public uint sheenRoughnessTexIndex;
+    public uint occlusionTexIndex;
+    public float occlusionStrength;
 };
 
 [ForceInline]
@@ -52,6 +60,8 @@ public MaterialSampleInputs MakeMaterialInputs(float2 uv, float4 color, uint4 in
                                                 float4 baseFactor, float4 emissiveFactor, float3 pbrFactors, uint alphaMode) {
     MaterialSampleInputs i;
     i.uv                 = uv;
+    i.uv1                = uv;
+    i.instanceId         = 0xFFFFFFFFu; // Particle paths without an InstanceData UV transform.
     i.vertexColor        = color;
     i.albedoIndex        = indices.x;
     i.normalIndex        = indices.y;
@@ -73,7 +83,54 @@ public MaterialSampleInputs MakeMaterialInputs(float2 uv, float4 color, uint4 in
     i.coatTextures       = uint4(0xFFFFu);
     i.anisotropyParams   = float2(0.0f);
     i.anisotropyTexIndex = 0xFFFFu;
+    i.sheenParams        = float4(0.0f);
+    i.sheenColorTexIndex = 0xFFFFu;
+    i.sheenRoughnessTexIndex = 0xFFFFu;
+    i.occlusionTexIndex  = 0xFFFFu;
+    i.occlusionStrength  = 1.0f;
     return i;
+}
+
+// The extension is defined on each textureInfo, not on the mesh or the
+// texture object. The instance index is flat across the primitive; fetching
+// its rows in the fragment preserves correct derivatives for minification.
+[ForceInline]
+public float2 SceneTextureUV(float2 uv0, float2 uv1, uint instanceId, uint slot) {
+    if (instanceId == 0xFFFFFFFFu) return uv0;
+    float4 row0 = scene.g_instances[instanceId].uvRow0[slot];
+    float4 row1 = scene.g_instances[instanceId].uvRow1[slot];
+    float2 uv = row1.w == 1.0f ? uv1 : row1.w == 0.0f ? uv0 : float2(0.0f);
+    return float2(dot(row0.xy, uv) + row0.z, dot(row1.xy, uv) + row1.z);
+}
+
+[ForceInline]
+public float2 MaterialTextureUV(MaterialSampleInputs i, uint slot) {
+    return SceneTextureUV(i.uv, i.uv1, i.instanceId, slot);
+}
+
+// Tangent-space normal directions must follow a rotated or mirrored normal
+// texture. Remove scale magnitude (it changes frequency, not bump height).
+[ForceInline]
+public float3 TransformNormalSample(float3 mapN, MaterialSampleInputs i, uint slot) {
+    if (i.instanceId == 0xFFFFFFFFu) return mapN;
+    float4 row0 = scene.g_instances[i.instanceId].uvRow0[slot];
+    float4 row1 = scene.g_instances[i.instanceId].uvRow1[slot];
+    float2 x = float2(row0.x, row1.x);
+    float2 y = float2(row0.y, row1.y);
+    return float3(dot(mapN.xy, x) / max(length(x), 1e-6f),
+                  dot(mapN.xy, y) / max(length(y), 1e-6f), mapN.z);
+}
+
+[ForceInline]
+public void ConfigureSceneMaterial(inout MaterialSampleInputs i, float2 uv1, uint instanceId) {
+    i.instanceId = instanceId;
+    i.uv1 = uv1;
+    InstanceData inst = scene.g_instances[instanceId];
+    i.sheenParams = inst.sheenParams;
+    i.sheenColorTexIndex = inst.sheenColorTexIndex;
+    i.sheenRoughnessTexIndex = inst.sheenRoughnessTexIndex;
+    i.occlusionTexIndex = inst.occlusionTexIndex;
+    i.occlusionStrength = inst.occlusionStrength;
 }
 
 // Staging these operations keeps alpha-only shadow passes from sampling PBR
@@ -109,12 +166,12 @@ public bool RejectMaskedAlpha(MaterialSampleInputs i, float alpha) {
 public struct StandardPBRMaterial : IMaterial {
     [ForceInline]
     public static float4 sampleAlbedo(MaterialSampleInputs i) {
-        return SampleMaterialTexture(i.albedoIndex, i.uv, i.samplerCodes, kSamplerAlbedo) * i.baseColorFactor * i.vertexColor;
+        return SampleMaterialTexture(i.albedoIndex, MaterialTextureUV(i, kSamplerAlbedo), i.samplerCodes, kSamplerAlbedo) * i.baseColorFactor * i.vertexColor;
     }
 
     [ForceInline]
     public static float3 sampleEmissive(MaterialSampleInputs i) {
-        return SampleMaterialTexture(i.emissiveIndex, i.uv, i.samplerCodes, kSamplerEmissive).rgb * i.emissiveFactor.rgb;
+        return SampleMaterialTexture(i.emissiveIndex, MaterialTextureUV(i, kSamplerEmissive), i.samplerCodes, kSamplerEmissive).rgb * i.emissiveFactor.rgb;
     }
 
     [ForceInline]
@@ -124,18 +181,38 @@ public struct StandardPBRMaterial : IMaterial {
         s.alpha    = albedo.a;
         s.emissive = emissive;
 
-        float4 pbr  = SampleMaterialTexture(i.pbrIndex, i.uv, i.samplerCodes, kSamplerPbr);
+        float4 pbr  = SampleMaterialTexture(i.pbrIndex, MaterialTextureUV(i, kSamplerPbr), i.samplerCodes, kSamplerPbr);
         s.roughness = max((i.pbrIndex == 0 ? 1.0f : pbr.g) * i.roughnessFactor, i.roughnessFloor);
         s.metallic  = (i.pbrIndex == 0 ? 1.0f : pbr.b) * i.metallicFactor;
-        s.occlusion = i.pbrIndex == 0 ? 1.0f : pbr.r;
+        s.occlusion = 1.0f;
+        if (i.occlusionTexIndex != 0xFFFFu) {
+            float texel = SampleMaterialTexture(i.occlusionTexIndex, MaterialTextureUV(i, kSamplerOcclusion),
+                                                 i.samplerCodes, kSamplerOcclusion).r;
+            s.occlusion = lerp(1.0f, texel, saturate(i.occlusionStrength));
+        }
 
         s.normal = i.geometricNormal;
         if (i.normalIndex != 2 && i.hasTangent) {
-            float3 normalMap = SampleMaterialTexture(i.normalIndex, i.uv, i.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
+            float3 normalMap = SampleMaterialTexture(i.normalIndex, MaterialTextureUV(i, kSamplerNormal), i.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
+            normalMap = TransformNormalSample(normalMap, i, kSamplerNormal);
             s.normal = normalize(normalMap.x * i.tangentDirection + normalMap.y * i.bitangentDirection + normalMap.z * i.geometricNormal);
         }
         s.clearcoat  = float4(0.0f);
-        s.anisotropy = float4(0.0f);
+        s.anisotropy = float4(0.0f, 0.0f, 0.0f, s.occlusion);
+        float3 sheenColor = saturate(i.sheenParams.rgb);
+        float sheenRoughness = saturate(i.sheenParams.a);
+        if (any(sheenColor > 0.0f)) {
+            if (i.sheenColorTexIndex != 0xFFFFu) {
+                // The bound image is VK_FORMAT_*_SRGB; sampling returns linear RGB.
+                sheenColor *= SampleMaterialTexture(i.sheenColorTexIndex, MaterialTextureUV(i, kSamplerSheenColor),
+                                                    i.samplerCodes, kSamplerSheenColor).rgb;
+            }
+            if (i.sheenRoughnessTexIndex != 0xFFFFu) {
+                sheenRoughness *= SampleMaterialTexture(i.sheenRoughnessTexIndex, MaterialTextureUV(i, kSamplerSheenRoughness),
+                                                       i.samplerCodes, kSamplerSheenRoughness).a;
+            }
+        }
+        s.sheen = float4(sheenColor, sheenRoughness);
         return s;
     }
 };
@@ -182,22 +259,24 @@ public struct ClearCoatMaterial : IMaterial {
         float coatFactor = i.coatParams.x;
         float coatRough = i.coatParams.y;
         if (coatFactor > 0.0f && i.coatTextures.x != 0xFFFFu) {
-            coatFactor *= SampleMaterialTexture(i.coatTextures.x, i.uv, i.samplerCodes, kSamplerClearcoat).r;
+            coatFactor *= SampleMaterialTexture(i.coatTextures.x, MaterialTextureUV(i, kSamplerClearcoat), i.samplerCodes, kSamplerClearcoat).r;
         }
         if (coatFactor > 0.0f && i.coatTextures.y != 0xFFFFu) {
-            coatRough *= SampleMaterialTexture(i.coatTextures.y, i.uv, i.samplerCodes, kSamplerClearcoatRoughness).g;
+            coatRough *= SampleMaterialTexture(i.coatTextures.y, MaterialTextureUV(i, kSamplerClearcoatRoughness), i.samplerCodes, kSamplerClearcoatRoughness).g;
         }
         coatFactor = saturate(coatFactor);
         coatRough = saturate(coatRough);
         if (coatFactor > 1.0f / 255.0f && i.coatTextures.z != 0xFFFFu && i.hasTangent) {
-            float3 mapN = SampleMaterialTexture(i.coatTextures.z, i.uv, i.samplerCodes, kSamplerClearcoatNormal).rgb * 2.0f - 1.0f;
+            float3 mapN = SampleMaterialTexture(i.coatTextures.z, MaterialTextureUV(i, kSamplerClearcoatNormal), i.samplerCodes, kSamplerClearcoatNormal).rgb * 2.0f - 1.0f;
             mapN.xy *= i.coatParams.z;
+            mapN = TransformNormalSample(mapN, i, kSamplerClearcoatNormal);
             coatNormal = normalize(mapN.x * i.tangentDirection + mapN.y * i.bitangentDirection + mapN.z * i.geometricNormal);
         }
         float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
         s.clearcoat = coatFactor > 1.0f / 255.0f ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f);
         s.anisotropy = SampleMaterialAnisotropy(s.normal, i.tangentDirection, i.bitangentDirection,
-                                               i.uv, i.anisotropyParams, i.anisotropyTexIndex, i.samplerCodes);
+                                               MaterialTextureUV(i, kSamplerAnisotropy), i.anisotropyParams, i.anisotropyTexIndex, i.samplerCodes);
+        s.anisotropy.w = s.occlusion;
         return s;
     }
 };
