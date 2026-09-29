@@ -10,8 +10,16 @@ RIGHT HANDED COORDINATES, COLUMN MAJOR/VECTOR COLUMN, CCW ONLY.
 Resource-free helpers live in `math/math.slang` (normalization and depth),
 `math/transform.slang` (quaternions, tangents and normal mapping), and
 `math/phase.slang` (volumetric scattering). Import them by their dotted module
-names (`math.transform`, for example); the declaration inside each module is\nits simple name (`module transform;`). They carry no descriptors or push data;
+names (`math.transform`, for example); the declaration inside each module is
+its simple name (`module transform;`). They carry no descriptors or push data;
 `pbr_helpers.slang` re-exports the math used by existing PBR consumers.
+
+`material_model.slang` defines the compile-time `IMaterial` contract. Scene
+G-buffer fragments specialize it for `ClearCoatMaterial` (base PBR plus optional
+coat and anisotropy layers); forward and mesh-particle fragments use
+`StandardPBRMaterial`. Shadow fragments sample only alpha. These structs are
+shader-local, not a host material ABI or runtime material-type dispatch.
+Forward transmission retains its separate refractive shading path.
 
 Descriptor binding authority lives in the shaders: the C++ side reflects
 the compiled SPIR-V (`ReflectedLayout`) instead of declaring static

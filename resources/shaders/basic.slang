@@ -133,101 +133,44 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
 }
 
 void PSShadow(ShadowGeometryOutput input) {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, float4(1.0f), input.pbrFactors, input.alphaMode);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
-}
-
-// glTF's optional RG channels are a direction in tangent space and B masks
-// strength. Rotation is in radians; the no-texture direction is (1, 0).
-float4 SampleMaterialAnisotropy(float3 N, float3 T, float3 B, float2 uv, float2 params, uint texIndex, uint2 samplerCodes) {
-    float strength = saturate(params.x);
-    if (strength <= 0.0f) {
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
-    }
-    float2 direction = float2(1.0f, 0.0f);
-    if (texIndex != 0xFFFFu) {
-        float3 sample = SampleMaterialTexture(texIndex, uv, samplerCodes, kSamplerAnisotropy).rgb;
-        direction = sample.rg * 2.0f - 1.0f;
-        float lenSq = dot(direction, direction);
-        direction = lenSq > 1e-6f ? direction * rsqrt(lenSq) : float2(1.0f, 0.0f);
-        strength *= sample.b;
-    }
-    float s = sin(params.y);
-    float c = cos(params.y);
-    float2 rotated = float2(c * direction.x - s * direction.y, s * direction.x + c * direction.y);
-    return PackAnisotropy(N, rotated.x * T + rotated.y * B, strength);
 }
 
 PSOutput PSMain(GBufferGeometryOutput input) {
     PSOutput output;
-
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float metallicFactor   = input.pbrFactors.x;
-    float roughnessFactor  = input.pbrFactors.y;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
-    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
-    float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    float4 albedo   = SampleMaterialAlbedo<ClearCoatMaterial>(material);
+    float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 
-    float4 pbr = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
+    // The masked pass used a higher floor than opaque or translucent scene
+    // fragments. Keep the floor in the sampling input, not the material type.
+    material.roughnessFloor     = input.alphaMode == 1 ? 0.045f : 0.001f;
+    material.geometricNormal    = normalize(input.normal);
+    material.hasTangent         = any(input.tangent.xyz);
+    material.tangentDirection   = OrthogonalTangent(material.geometricNormal, input.tangent.xyz);
+    material.bitangentDirection = cross(material.geometricNormal, material.tangentDirection) *
+                                   (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    material.coatParams         = input.coatParams;
+    material.coatTextures       = input.coatTextures;
+    material.anisotropyParams   = input.anisotropyParams;
+    material.anisotropyTexIndex = input.anisotropyTexIndex;
 
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
-
-    if (input.alphaMode == 1) {
-        roughness = max(roughness, 0.045f);
-    }
-
-    float3 geometric = normalize(input.normal);
-    float3 worldNormal = geometric;
-    float3 coatNormal  = geometric;
-    bool hasTangent = any(input.tangent.xyz);
-    float3 T = OrthogonalTangent(geometric, input.tangent.xyz);
-    float3 B = cross(geometric, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-
-    if (indices.y != 2 && hasTangent) {
-        float3 normalMap = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
-    }
-
-    float coatFactor = input.coatParams.x;
-    float coatRough  = input.coatParams.y;
-    if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
-        coatFactor *= SampleMaterialTexture(input.coatTextures.x, input.uv, input.samplerCodes, kSamplerClearcoat).r;
-    }
-    if (coatFactor > 0.0f && input.coatTextures.y != 0xFFFFu) {
-        coatRough *= SampleMaterialTexture(input.coatTextures.y, input.uv, input.samplerCodes, kSamplerClearcoatRoughness).g;
-    }
-    coatFactor = saturate(coatFactor);
-    coatRough  = saturate(coatRough);
-    if (coatFactor > 1.0f / 255.0f && input.coatTextures.z != 0xFFFFu && hasTangent) {
-        float3 mapN = SampleMaterialTexture(input.coatTextures.z, input.uv, input.samplerCodes, kSamplerClearcoatNormal).rgb * 2.0f - 1.0f;
-        mapN.xy *= input.coatParams.z;
-        coatNormal = normalize(mapN.x * T + mapN.y * B + mapN.z * geometric);
-    }
-    float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
-    output.clearcoat  = (coatFactor > 1.0f / 255.0f) ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    output.color           = float4(albedo.rgb, albedo.a);
-    output.emissive        = float4(emissive, 1.0f);
-    float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
-    output.normalRoughness = float4(packedNormal, roughness, metallic);
-    output.anisotropy = SampleMaterialAnisotropy(worldNormal, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
+    SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
+    output.color           = float4(surface.albedo, surface.alpha);
+    output.emissive        = float4(surface.emissive, 1.0f);
+    float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
+    output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
+    output.clearcoat       = surface.clearcoat;
+    output.anisotropy      = surface.anisotropy;
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -327,14 +270,11 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float roughnessFactor  = input.pbrFactors.y;
-
-    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
-    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
-
-    float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, 0u);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    float3 emissive = sampledEmissive * albedo.a;
 
     if (scene.frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
@@ -350,9 +290,12 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
     float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV     = saturate(dot(N, V));
-    float4 pbr      = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * input.pbrFactors.x;
+    // Forward shading uses the interpolated normal; its transmission branch
+    // applies a separate derivative-based normal map before reaching here.
+    material.geometricNormal = N;
+    SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, sampledEmissive);
+    float roughness = surface.roughness;
+    float metallic  = surface.metallic;
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
     float4 aniso = SampleMaterialAnisotropy(N, T, B, input.uv, input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);

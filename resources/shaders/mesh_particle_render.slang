@@ -1,5 +1,6 @@
 
 import common;
+import material_model;
 import math.transform;
 import pbr_helpers;
 import uniforms;
@@ -148,60 +149,43 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
 }
 
 void PSShadow(VSOutput input) {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 }
 
 PSOutput PSMain(VSOutput input) {
     PSOutput output;
-
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float metallicFactor   = input.pbrFactors.x;
-    float roughnessFactor  = input.pbrFactors.y;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo      = SampleMaterialTexture(indices.x, input.uv, input.samplerCodes, kSamplerAlbedo) * baseColorFactor * input.color;
-    float3 emissiveMap = SampleMaterialTexture(indices.w, input.uv, input.samplerCodes, kSamplerEmissive).rgb;
-    float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    float4 albedo   = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 
-    float4 pbr      = SampleMaterialTexture(indices.z, input.uv, input.samplerCodes, kSamplerPbr);
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
-
-    float3 N           = normalize(input.normal);
-    float3 worldNormal = N;
-
-    if (indices.y != 2 && any(input.tangent.xyz)) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
+    // Mesh-particle normals use their original tangent fallback and encoded
+    // tangent sign; their G-buffer roughness floor is 0.045 for every mode.
+    material.roughnessFloor = 0.045f;
+    material.geometricNormal = normalize(input.normal);
+    material.hasTangent = any(input.tangent.xyz);
+    if (material.normalIndex != 2 && material.hasTangent) {
+        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, material.geometricNormal) * material.geometricNormal;
         if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+            T_unnorm = cross(material.geometricNormal, abs(material.geometricNormal.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
         }
-        float3 T          = normalize(T_unnorm);
+        material.tangentDirection = normalize(T_unnorm);
         float tangentSign = input.tangent.w * 2.0f - 1.0f;
-        float3 B          = normalize(cross(N, T) * tangentSign);
-
-        float3 normalMap = SampleMaterialTexture(indices.y, input.uv, input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+        material.bitangentDirection = normalize(cross(material.geometricNormal, material.tangentDirection) * tangentSign);
     }
-
-    output.color           = float4(albedo.rgb, albedo.a);
-    output.emissive        = float4(emissive, 1.0f);
-    float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
-    output.normalRoughness = float4(packedNormal, roughness, metallic);
+    SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, emissive);
+    output.color           = float4(surface.albedo, surface.alpha);
+    output.emissive        = float4(surface.emissive, 1.0f);
+    float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
+    output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -209,8 +193,8 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcPrev = input.prevClip.xy / prevW;
 
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
-    output.clearcoat  = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    output.anisotropy = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    output.clearcoat  = surface.clearcoat;
+    output.anisotropy = surface.anisotropy;
 
     return output;
 }
