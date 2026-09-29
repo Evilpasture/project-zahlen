@@ -14,9 +14,16 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <memory>
+#include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 // ============================================================================
@@ -50,6 +57,94 @@ struct LifetimeTracker {
         return id == o.id;
     }
 };
+
+namespace {
+
+template <typename T>
+struct CountingArrayAllocator {
+    using value_type = T;
+    static inline size_t allocations = 0;
+    static inline size_t deallocations = 0;
+
+    [[nodiscard]] auto allocate(size_t count) -> T* {
+        ++allocations;
+        return std::allocator<T> {}.allocate(count);
+    }
+    void deallocate(T* ptr, size_t count) noexcept {
+        ++deallocations;
+        std::allocator<T> {}.deallocate(ptr, count);
+    }
+};
+
+struct ReallocatingIntAllocator {
+    using value_type = int;
+    static inline size_t reallocationCalls = 0;
+
+    [[nodiscard]] auto allocate(size_t count) -> int* {
+        auto* ptr = static_cast<int*>(std::malloc(count * sizeof(int)));
+        if (ptr == nullptr) {
+            std::abort();
+        }
+        return ptr;
+    }
+    void deallocate(int* ptr, size_t) noexcept { std::free(ptr); }
+    [[nodiscard]] auto reallocate(int* ptr, size_t, size_t count) -> int* {
+        ++reallocationCalls;
+        auto* result = static_cast<int*>(std::realloc(ptr, count * sizeof(int)));
+        if (result == nullptr) {
+            std::abort();
+        }
+        return result;
+    }
+};
+
+struct TaggedIntAllocator {
+    using value_type = int;
+    static inline int nextId = 0;
+    static inline int liveAllocations = 0;
+    int id = ++nextId;
+
+    [[nodiscard]] auto allocate(size_t count) -> int* {
+        auto* block = static_cast<int*>(std::malloc((count + 1) * sizeof(int)));
+        if (block == nullptr) {
+            std::abort();
+        }
+        block[0] = id;
+        ++liveAllocations;
+        return block + 1;
+    }
+    void deallocate(int* ptr, size_t) noexcept {
+        // A heap block must travel with its allocator across moves and swaps.
+        if (ptr[-1] != id) {
+            std::abort();
+        }
+        --liveAllocations;
+        std::free(ptr - 1);
+    }
+};
+
+struct MoveOnlyNoAssign {
+    std::unique_ptr<int> value;
+    explicit MoveOnlyNoAssign(int v): value(std::make_unique<int>(v)) {}
+    MoveOnlyNoAssign(MoveOnlyNoAssign&&) noexcept = default;
+    auto operator=(MoveOnlyNoAssign&&) -> MoveOnlyNoAssign& = delete;
+    MoveOnlyNoAssign(const MoveOnlyNoAssign&) = delete;
+    auto operator=(const MoveOnlyNoAssign&) -> MoveOnlyNoAssign& = delete;
+};
+
+struct alignas(64) AlignedArrayItem { int value = 0; };
+
+template <typename T>
+concept CanExtendUninitialized = requires(ZHLN::Array<T>& arr) { arr.extend_uninitialized(1); };
+
+static_assert(ZHLN::DefaultInlineCapacity<int>() == 16);
+static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 9>>() == 8);
+static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 24>>() == 4);
+static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 48>>() == 2);
+static_assert(ZHLN::DefaultInlineCapacity<std::array<std::byte, 65>>() == 1);
+static_assert(CanExtendUninitialized<int> && !CanExtendUninitialized<std::string> && !CanExtendUninitialized<LifetimeTracker>);
+
+} // namespace
 
 // ============================================================================
 // Test Suite Error Identifiers
@@ -127,6 +222,197 @@ struct ContainersTestSuite {
             if (LifetimeTracker::activeInstances != 0) {
                 return std::unexpected(CoreContainersTestError::MemoryLeakDetected);
             }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> array_sbo_copy_move_and_swap() {
+            ZHLN::Array<int> defaultPolicy;
+            ZHLN::Test::ExpectEq(defaultPolicy.capacity(), size_t {16});
+            for (int i = 0; i < 17; ++i) {
+                defaultPolicy.push_back(i);
+            }
+            ZHLN::Test::ExpectTrue(defaultPolicy.capacity() > 16 && defaultPolicy.begin() == defaultPolicy.data());
+
+            using TestArray = ZHLN::Array<int, 4, CountingArrayAllocator<int>>;
+            CountingArrayAllocator<int>::allocations = 0;
+            CountingArrayAllocator<int>::deallocations = 0;
+            {
+                TestArray a;
+                auto* inlineData = a.data();
+                ZHLN::Test::ExpectEq(a.capacity(), size_t {4});
+                for (int i = 0; i < 4; ++i) {
+                    a.push_back(i);
+                }
+                ZHLN::Test::ExpectEq(CountingArrayAllocator<int>::allocations, size_t {0});
+
+                a.swap_remove(1);
+                ZHLN::Test::ExpectEq(a[1], 3);
+                a.push_back(4);
+                auto copy = a;
+                ZHLN::Test::ExpectTrue(copy.data() != inlineData);
+                ZHLN::Test::ExpectEq(CountingArrayAllocator<int>::allocations, size_t {0});
+                auto moved = std::move(copy);
+                ZHLN::Test::ExpectTrue(copy.empty() && copy.capacity() == 4 && copy.data() != moved.data());
+                copy.push_back(99); // A moved-from inline array still owns its own storage.
+                ZHLN::Test::ExpectEq(moved[1], 3);
+
+                moved.push_back(5);
+                auto* heapData = moved.data();
+                ZHLN::Test::ExpectEq(CountingArrayAllocator<int>::allocations, size_t {1});
+                TestArray heapCopy = moved;
+                ZHLN::Test::ExpectTrue(heapCopy.data() != moved.data());
+                TestArray heapAssigned;
+                heapAssigned = heapCopy;
+                ZHLN::Test::ExpectEq(heapAssigned[4], 5);
+                TestArray dest;
+                dest = std::move(moved);
+                ZHLN::Test::ExpectTrue(dest.data() == heapData && moved.empty() && moved.capacity() == 4);
+                dest.resize(2);
+                dest.shrink_to_fit();
+                ZHLN::Test::ExpectTrue(dest.data() != heapData && dest.capacity() == 4);
+                ZHLN::Test::ExpectEq(CountingArrayAllocator<int>::deallocations, size_t {1});
+
+                auto* destInline = dest.data();
+                a.swap(dest); // Both inline: neither may point into the other's object.
+                ZHLN::Test::ExpectTrue(a.data() == inlineData && dest.data() == destInline);
+                ZHLN::Test::ExpectEq(a.size(), size_t {2});
+                ZHLN::Test::ExpectEq(dest.size(), size_t {4});
+                dest.swap(dest);
+                ZHLN::Test::ExpectEq(dest[1], 3);
+                dest.swap(copy);
+                ZHLN::Test::ExpectEq(copy.size(), size_t {4});
+                ZHLN::Test::ExpectEq(dest[0], 99);
+            }
+            ZHLN::Test::ExpectEq(CountingArrayAllocator<int>::allocations, CountingArrayAllocator<int>::deallocations);
+
+            ReallocatingIntAllocator::reallocationCalls = 0;
+            ZHLN::Array<int, 2, ReallocatingIntAllocator> reallocating;
+            for (int i = 0; i < 3; ++i) {
+                reallocating.push_back(i);
+            }
+            ZHLN::Test::ExpectEq(ReallocatingIntAllocator::reallocationCalls, size_t {0}); // Inline pointer never passed to realloc.
+            for (int i = 3; i < 5; ++i) {
+                reallocating.push_back(i);
+            }
+            ZHLN::Test::ExpectEq(ReallocatingIntAllocator::reallocationCalls, size_t {1});
+            ZHLN::Test::ExpectEq(reallocating[4], 4);
+
+            TaggedIntAllocator::liveAllocations = 0;
+            {
+                ZHLN::Array<int, 2, TaggedIntAllocator> heap;
+                ZHLN::Array<int, 2, TaggedIntAllocator> inlined;
+                for (int i = 0; i < 3; ++i) {
+                    heap.push_back(i);
+                }
+                inlined.push_back(99);
+                heap.swap(inlined);
+                ZHLN::Test::ExpectEq(heap[0], 99);
+                ZHLN::Test::ExpectEq(inlined[2], 2);
+                heap.push_back(100);
+                heap.push_back(101); // Both are now heap-backed with different allocators.
+                heap.swap(inlined);
+                ZHLN::Test::ExpectEq(heap[2], 2);
+                ZHLN::Test::ExpectEq(inlined[2], 101);
+            }
+            ZHLN::Test::ExpectEq(TaggedIntAllocator::liveAllocations, 0);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> array_sbo_append_and_uninitialized() {
+            using TestArray = ZHLN::Array<uint32_t, 2, CountingArrayAllocator<uint32_t>>;
+            CountingArrayAllocator<uint32_t>::allocations = 0;
+            CountingArrayAllocator<uint32_t>::deallocations = 0;
+            {
+                TestArray arr;
+                const std::array<uint32_t, 2> first {10, 20};
+                arr.append(first);
+                ZHLN::Test::ExpectEq(CountingArrayAllocator<uint32_t>::allocations, size_t {0});
+                arr.append(std::span<const uint32_t> {arr.data(), arr.size()}); // Inline -> heap, self-aliasing.
+                ZHLN::Test::ExpectEq(arr.size(), size_t {4});
+                ZHLN::Test::ExpectEq(arr[2], 10u);
+                ZHLN::Test::ExpectEq(arr[3], 20u);
+                auto tail = arr.extend_uninitialized(3); // Heap -> larger heap.
+                tail[0] = 30;
+                tail[1] = 40;
+                tail[2] = 50;
+                ZHLN::Test::ExpectEq(arr.size(), size_t {7});
+                arr.append(std::span<const uint32_t> {arr.data() + 2, 3}); // Self-aliasing after another growth.
+                ZHLN::Test::ExpectEq(arr.size(), size_t {10});
+                ZHLN::Test::ExpectEq(arr[7], 10u);
+                ZHLN::Test::ExpectEq(arr[9], 30u);
+                arr.append(std::span<const uint32_t> {});
+                arr.swap_remove(1);
+                ZHLN::Test::ExpectEq(arr.size(), size_t {9});
+                ZHLN::Test::ExpectEq(arr[1], 30u);
+                arr.resize(2);
+                arr.shrink_to_fit();
+                ZHLN::Test::ExpectEq(arr.capacity(), size_t {2});
+                ZHLN::Test::ExpectEq(arr[0], 10u);
+            }
+            ZHLN::Test::ExpectEq(CountingArrayAllocator<uint32_t>::allocations, CountingArrayAllocator<uint32_t>::deallocations);
+
+            ZHLN::Array<std::string, 2> words;
+            const std::array<std::string, 2> initial {"one", "two"};
+            words.append(initial);
+            words.append(std::span<const std::string> {words.data(), words.size()});
+            ZHLN::Test::ExpectEq(words.size(), size_t {4});
+            ZHLN::Test::ExpectEq(words[2], std::string {"one"});
+            ZHLN::Test::ExpectEq(words[3], std::string {"two"});
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> array_sbo_lifetime_alignment_and_opt_out() {
+            LifetimeTracker::activeInstances = 0;
+            {
+                ZHLN::Array<LifetimeTracker, 2> a;
+                a.emplace_back(1);
+                a.emplace_back(2);
+                auto moved = std::move(a);
+                a.emplace_back(3);
+                moved.emplace_back(4); // Cross from inline to heap.
+                moved.swap(a);           // Swap heap and inline owners.
+                ZHLN::Test::ExpectEq(moved[0].id, 3);
+                ZHLN::Test::ExpectEq(a[0].id, 1);
+                a.resize(1);
+                a.shrink_to_fit();
+                ZHLN::Test::ExpectEq(a.capacity(), size_t {2});
+                ZHLN::Test::ExpectEq(LifetimeTracker::activeInstances, 2);
+            }
+            ZHLN::Test::ExpectEq(LifetimeTracker::activeInstances, 0);
+
+            ZHLN::Array<MoveOnlyNoAssign, 2> noAssign;
+            noAssign.emplace_back(1);
+            noAssign.emplace_back(2);
+            noAssign.emplace_back(3);
+            noAssign.swap_remove(0);
+            ZHLN::Test::ExpectEq(*noAssign[0].value, 3);
+            noAssign.swap_remove(noAssign.size() - 1);
+            ZHLN::Test::ExpectEq(noAssign.size(), size_t {1});
+            ZHLN::Array<MoveOnlyNoAssign, 2> peer;
+            peer.emplace_back(9);
+            noAssign.swap(peer);
+            ZHLN::Test::ExpectEq(*peer[0].value, 3);
+            ZHLN::Test::ExpectEq(*noAssign[0].value, 9);
+
+            ZHLN::Array<AlignedArrayItem, 2> aligned;
+            ZHLN::Test::ExpectEq(reinterpret_cast<uintptr_t>(aligned.data()) % alignof(AlignedArrayItem), uintptr_t {0});
+            aligned.push_back(AlignedArrayItem {.value = 1});
+            aligned.push_back(AlignedArrayItem {.value = 2});
+            aligned.push_back(AlignedArrayItem {.value = 3});
+            ZHLN::Test::ExpectEq(reinterpret_cast<uintptr_t>(aligned.data()) % alignof(AlignedArrayItem), uintptr_t {0});
+            aligned.resize(1);
+            aligned.shrink_to_fit();
+            ZHLN::Test::ExpectEq(aligned.capacity(), size_t {2});
+            ZHLN::Test::ExpectEq(aligned[0].value, 1);
+
+            ZHLN::Array<int, 0> noInline;
+            ZHLN::Test::ExpectEq(noInline.capacity(), size_t {0});
+            ZHLN::Test::ExpectEq(noInline.extend_uninitialized(0).size(), size_t {0});
+            noInline.insert(noInline.begin(), 7);
+            ZHLN::Test::ExpectEq(noInline[0], 7);
+            noInline.clear();
+            noInline.shrink_to_fit();
+            ZHLN::Test::ExpectTrue(noInline.empty() && noInline.data() == nullptr);
             return {};
         }
 

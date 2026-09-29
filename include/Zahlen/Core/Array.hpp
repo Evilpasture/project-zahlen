@@ -58,7 +58,24 @@ concept AllocatorHasReallocate = requires(Alloc& alloc, T* ptr, size_t old_cap, 
 };
 
 
-template <typename T, typename Allocator = DefaultAllocator<T>>
+// Budget roughly 128 bytes for typical small values; very large values
+// still get one inline slot. InlineCap = 0 opts out of inline storage.
+template <typename T>
+consteval size_t DefaultInlineCapacity() noexcept {
+    if constexpr (sizeof(T) <= 8) {
+        return 16; // At most 128 inline bytes.
+    } else if constexpr (sizeof(T) <= 16) {
+        return 8;
+    } else if constexpr (sizeof(T) <= 32) {
+        return 4;
+    } else if constexpr (sizeof(T) <= 64) {
+        return 2;
+    } else {
+        return 1;
+    }
+}
+
+template <typename T, size_t InlineCap = DefaultInlineCapacity<T>(), typename Allocator = DefaultAllocator<T>>
 class Array {
   public:
     using value_type             = T;
@@ -134,24 +151,44 @@ class Array {
             } else {
                 clear();
             }
-            copy_construct_range(other._data, other._data + other._size, _data);
+            if (other._size != 0) {
+                copy_construct_range(other._data, other._data + other._size, _data);
+            }
             _size = other._size;
         }
         return *this;
     }
 
-    constexpr Array(Array&& other) noexcept:
-        _data(std::exchange(other._data, nullptr)), _size(std::exchange(other._size, 0)), _capacity(std::exchange(other._capacity, 0)),
+    constexpr Array(Array&& other) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<Allocator>):
         _allocator(std::move(other._allocator)) {
+        if (other.IsInline()) {
+            for (size_t i = 0; i < other._size; ++i) {
+                Traits::construct(_allocator, _data + i, std::move(other._data[i]));
+                ++_size;
+            }
+            other.clear();
+        } else {
+            _data     = std::exchange(other._data, other.InlineData());
+            _size     = std::exchange(other._size, 0);
+            _capacity = std::exchange(other._capacity, InlineCap);
+        }
     }
 
-    constexpr auto operator=(Array&& other) noexcept -> Array& {
+    constexpr auto operator=(Array&& other) noexcept(std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<Allocator>) -> Array& {
         if (this != &other) {
             clear_and_free();
-            _data      = std::exchange(other._data, nullptr);
-            _size      = std::exchange(other._size, 0);
-            _capacity  = std::exchange(other._capacity, 0);
             _allocator = std::move(other._allocator);
+            if (other.IsInline()) {
+                for (size_t i = 0; i < other._size; ++i) {
+                    Traits::construct(_allocator, _data + i, std::move(other._data[i]));
+                    ++_size;
+                }
+                other.clear();
+            } else {
+                _data     = std::exchange(other._data, other.InlineData());
+                _size     = std::exchange(other._size, 0);
+                _capacity = std::exchange(other._capacity, InlineCap);
+            }
         }
         return *this;
     }
@@ -204,13 +241,13 @@ class Array {
     }
 
     [[nodiscard]] constexpr auto end() noexcept -> iterator {
-        return _data + _size;
+        return _data == nullptr ? nullptr : _data + _size;
     }
     [[nodiscard]] constexpr auto end() const noexcept -> const_iterator {
-        return _data + _size;
+        return _data == nullptr ? nullptr : _data + _size;
     }
     [[nodiscard]] constexpr auto cend() const noexcept -> const_iterator {
-        return _data + _size;
+        return end();
     }
 
     [[nodiscard]] constexpr auto rbegin() noexcept -> reverse_iterator {
@@ -264,17 +301,17 @@ class Array {
     }
 
     constexpr void shrink_to_fit() {
-        if (_size < _capacity) {
-            if (_size == 0) {
-                clear_and_free();
-            } else {
-                reallocate(_size);
-            }
+        if (_size <= InlineCap && !IsInline()) {
+            reallocate(InlineCap); // Return small arrays to their own inline storage.
+        } else if (_size > InlineCap && _size < _capacity) {
+            reallocate(_size);
         }
     }
 
     constexpr void clear() noexcept {
-        destroy_range(_data, _data + _size);
+        if (_size != 0) {
+            destroy_range(_data, _data + _size);
+        }
         _size = 0;
     }
 
@@ -304,10 +341,80 @@ class Array {
         Traits::destroy(_allocator, _data + _size);
     }
 
+    // Unordered erase: replace the erased element with the last one.
+    constexpr void swap_remove(size_t index) noexcept(
+        std::is_nothrow_destructible_v<T> &&
+        (std::is_move_assignable_v<T> ? std::is_nothrow_move_assignable_v<T> : std::is_nothrow_move_constructible_v<T>)
+    ) requires(std::is_move_constructible_v<T>) {
+        AssertBounds(index < _size);
+        if (index != _size - 1) {
+            if constexpr (std::is_move_assignable_v<T>) {
+                _data[index] = std::move(_data[_size - 1]);
+            } else {
+                Traits::destroy(_allocator, _data + index);
+                Traits::construct(_allocator, _data + index, std::move(_data[_size - 1]));
+            }
+        }
+        pop_back();
+    }
+
+    // For trivially default-constructible, trivially copyable elements only.
+    // Starts their lifetimes without initializing their bytes. The returned
+    // region must be fully written before its contents are read.
+    [[nodiscard]] constexpr auto extend_uninitialized(size_t count) -> std::span<T>
+        requires(std::is_trivially_default_constructible_v<T> && std::is_trivially_copyable_v<T>) {
+        AssertBounds(count <= max_size() - _size);
+        if (count == 0) {
+            return {_size == 0 ? _data : _data + _size, size_t {0}};
+        }
+        if (_size + count > _capacity) {
+            reallocate(grown_capacity(_size + count));
+        }
+        pointer first = _data + _size;
+        std::uninitialized_default_construct_n(first, count);
+        _size += count;
+        return {first, count};
+    }
+
+    // Append a batch with one capacity check. Trivially copyable elements use
+    // memcpy; others are copy-constructed. Self-appends are rebased after
+    // growth so a span into our own storage cannot dangle on reallocation.
+    constexpr void append(std::span<const T> values) {
+        const size_t count = values.size();
+        if (count == 0) {
+            return;
+        }
+        AssertBounds(count <= max_size() - _size);
+
+        bool self = false;
+        size_t offset = 0;
+        if (_size != 0) {
+            const std::less<const_pointer> less {};
+            self = !less(values.data(), _data) && less(values.data(), _data + _size);
+            if (self) {
+                offset = static_cast<size_t>(values.data() - _data);
+                AssertBounds(count <= _size - offset);
+            }
+        }
+        if (_size + count > _capacity) {
+            reallocate(grown_capacity(_size + count));
+        }
+        const_pointer src = self ? _data + offset : values.data();
+        pointer dst = _data + _size;
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(static_cast<void*>(dst), static_cast<const void*>(src), count * sizeof(T));
+            _size += count;
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                Traits::construct(_allocator, dst + i, src[i]);
+                ++_size;
+            }
+        }
+    }
+
     template <typename... Args>
     constexpr auto emplace(const_iterator pos, Args&&... args) -> iterator {
-        size_t index = pos - begin();
-        AssertBounds(index <= _size);
+        const size_t index = OffsetOf(pos);
         if (_size >= _capacity) {
             grow_and_emplace(index, std::forward<Args>(args)...);
         } else {
@@ -336,11 +443,11 @@ class Array {
     }
 
     constexpr auto insert(const_iterator pos, size_t count, const T& value) -> iterator {
-        size_t index = pos - begin();
-        AssertBounds(index <= _size);
+        const size_t index = OffsetOf(pos);
         if (count == 0) {
-            return begin() + index;
+            return pos == nullptr ? nullptr : begin() + index;
         }
+        AssertBounds(count <= max_size() - _size);
 
         AssertNoAliasing(std::addressof(value));
 
@@ -368,12 +475,12 @@ class Array {
     template <typename InputIt>
         requires(std::input_iterator<InputIt>)
     constexpr auto insert(const_iterator pos, InputIt first, InputIt last) -> iterator {
-        size_t index = pos - begin();
-        AssertBounds(index <= _size);
+        const size_t index = OffsetOf(pos);
         size_t count = std::distance(first, last);
         if (count == 0) {
-            return begin() + index;
+            return pos == nullptr ? nullptr : begin() + index;
         }
+        AssertBounds(count <= max_size() - _size);
 
         if (_size + count > _capacity) {
             grow_and_insert_range(index, first, count);
@@ -404,11 +511,11 @@ class Array {
     }
 
     constexpr auto erase(const_iterator first, const_iterator last) noexcept -> iterator {
-        size_t index = first - begin();
-        size_t count = last - first;
+        const size_t index = OffsetOf(first);
+        const size_t count = first == last ? 0 : static_cast<size_t>(last - first);
         AssertBounds(index + count <= _size);
         if (count == 0) {
-            return begin() + index;
+            return first == nullptr ? nullptr : begin() + index;
         }
 
         destroy_range(_data + index, _data + index + count);
@@ -466,7 +573,9 @@ class Array {
         } else {
             clear();
         }
-        copy_construct_range_value(_data, _data + count, value);
+        if (count != 0) {
+            copy_construct_range_value(_data, _data + count, value);
+        }
         _size = count;
     }
 
@@ -491,14 +600,27 @@ class Array {
         assign(list.begin(), list.end());
     }
 
-    constexpr void swap(Array& other) noexcept {
-        std::swap(_data, other._data);
-        std::swap(_size, other._size);
-        std::swap(_capacity, other._capacity);
-        std::swap(_allocator, other._allocator);
+    constexpr void swap(Array& other) noexcept(
+        std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_constructible_v<Allocator> &&
+        std::is_nothrow_move_assignable_v<Allocator> && std::is_nothrow_swappable_v<Allocator>
+    ) {
+        if (this == &other) {
+            return;
+        }
+        if (!IsInline() && !other.IsInline()) {
+            std::swap(_data, other._data);
+            std::swap(_size, other._size);
+            std::swap(_capacity, other._capacity);
+            std::swap(_allocator, other._allocator);
+        } else {
+            // A pointer into this object's inline bytes cannot be exchanged.
+            Array temp(std::move(*this));
+            *this = std::move(other);
+            other = std::move(temp);
+        }
     }
 
-    friend constexpr void swap(Array& lhs, Array& rhs) noexcept {
+    friend constexpr void swap(Array& lhs, Array& rhs) noexcept(noexcept(lhs.swap(rhs))) {
         lhs.swap(rhs);
     }
 
@@ -519,10 +641,44 @@ class Array {
     }
 
   private:
-    pointer                              _data     = nullptr;
-    size_t                               _size     = 0;
-    size_t                               _capacity = 0;
+    static_assert(InlineCap <= std::numeric_limits<size_t>::max() / sizeof(T));
+
+    // Keep storage in the array object, not in the allocator: a heap allocation
+    // can be stolen on move, but a pointer into another object's inline bytes
+    // must never be stolen or deallocated.
+    alignas(T) std::byte _inlineStorage[InlineCap == 0 ? 1 : InlineCap * sizeof(T)];
+    pointer             _data     = InlineData();
+    size_t              _size     = 0;
+    size_t              _capacity = InlineCap;
     [[no_unique_address]] allocator_type _allocator;
+
+    [[nodiscard]] constexpr auto InlineData() noexcept -> pointer {
+        if constexpr (InlineCap == 0) {
+            return nullptr;
+        } else {
+            return reinterpret_cast<pointer>(_inlineStorage);
+        }
+    }
+
+    [[nodiscard]] constexpr auto InlineData() const noexcept -> const_pointer {
+        if constexpr (InlineCap == 0) {
+            return nullptr;
+        } else {
+            return reinterpret_cast<const_pointer>(_inlineStorage);
+        }
+    }
+
+    [[nodiscard]] constexpr auto IsInline() const noexcept -> bool { return _data == InlineData(); }
+
+    [[nodiscard]] constexpr auto OffsetOf(const_iterator pos) const noexcept -> size_t {
+        if (_size == 0) {
+            AssertBounds(pos == _data);
+            return 0; // Do not subtract two null pointers for Array<T, 0>.
+        }
+        const size_t index = static_cast<size_t>(pos - _data);
+        AssertBounds(index <= _size);
+        return index;
+    }
 
     [[gnu::always_inline]] static constexpr void AssertBounds(bool condition) noexcept {
         if (!condition) [[unlikely]] {
@@ -544,125 +700,106 @@ class Array {
     }
 
     constexpr void allocate_storage(size_t cap) {
-        if (cap == 0) {
-            return;
+        AssertBounds(cap <= max_size());
+        if (cap > InlineCap) {
+            _data     = Traits::allocate(_allocator, cap);
+            _capacity = cap;
         }
-        _data     = Traits::allocate(_allocator, cap);
-        _capacity = cap;
     }
 
     constexpr void clear_and_free() noexcept {
-        if (_data != nullptr) {
-            clear();
+        clear();
+        if (!IsInline()) {
             Traits::deallocate(_allocator, _data, _capacity);
-            _data     = nullptr;
-            _capacity = 0;
+            _data     = InlineData();
+            _capacity = InlineCap;
         }
+    }
+
+    // Returns a capacity large enough for a batch without making each append
+    // allocate separately. Use the allocator's reallocate only for heap-backed,
+    // trivially copyable elements; it must never receive inline storage.
+    [[nodiscard]] constexpr auto grown_capacity(size_t needed) const noexcept -> size_t {
+        AssertBounds(needed <= max_size());
+        size_t cap = _capacity == 0 ? std::min<size_t>(8, max_size()) : _capacity;
+        while (cap < needed) {
+            cap = cap > max_size() / 2 ? max_size() : cap * 2;
+        }
+        return cap;
     }
 
     constexpr void grow() {
-        size_t new_cap = _capacity == 0 ? 8 : _capacity * 2;
-        reallocate(new_cap);
+        AssertBounds(_size < max_size());
+        reallocate(grown_capacity(_size + 1));
+    }
+
+    constexpr void relocate_elements(pointer dst, pointer src, size_t count) {
+        if (count == 0) {
+            return;
+        }
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(static_cast<void*>(dst), static_cast<const void*>(src), count * sizeof(T));
+        } else {
+            for (size_t i = 0; i < count; ++i) {
+                Traits::construct(_allocator, dst + i, std::move(src[i]));
+            }
+            destroy_range(src, src + count);
+        }
     }
 
     constexpr void reallocate(size_t new_cap) {
-        if (new_cap == 0) {
-            clear_and_free();
+        AssertBounds(new_cap >= _size && new_cap <= max_size());
+        if (new_cap <= InlineCap) {
+            if constexpr (InlineCap == 0) {
+                clear_and_free();
+            } else if (!IsInline()) {
+                pointer target = InlineData();
+                relocate_elements(target, _data, _size);
+                Traits::deallocate(_allocator, _data, _capacity);
+                _data     = target;
+                _capacity = InlineCap;
+            }
             return;
         }
 
-        pointer new_data = nullptr;
-
-        if constexpr (AllocatorHasReallocate<allocator_type, T>) {
-            if (_data != nullptr) [[likely]] {
-                new_data = _allocator.reallocate(_data, _capacity, new_cap);
-            } else {
-                new_data = Traits::allocate(_allocator, new_cap);
-            }
-        } else {
-            new_data = Traits::allocate(_allocator, new_cap);
-            if (_data != nullptr) {
-                if constexpr (std::is_trivially_move_constructible_v<T> && std::is_trivially_destructible_v<T>) {
-                    std::memcpy(new_data, _data, _size * sizeof(T));
-                } else {
-                    for (size_t i = 0; i < _size; ++i) {
-                        Traits::construct(_allocator, &new_data[i], std::move(_data[i]));
-                        Traits::destroy(_allocator, &_data[i]);
-                    }
-                }
-                Traits::deallocate(_allocator, _data, _capacity);
+        if constexpr (AllocatorHasReallocate<allocator_type, T> && std::is_trivially_copyable_v<T>) {
+            if (!IsInline()) {
+                _data     = _allocator.reallocate(_data, _capacity, new_cap);
+                _capacity = new_cap;
+                return;
             }
         }
 
-        _data     = new_data;
+        pointer target = Traits::allocate(_allocator, new_cap);
+        relocate_elements(target, _data, _size);
+        if (!IsInline()) {
+            Traits::deallocate(_allocator, _data, _capacity);
+        }
+        _data     = target;
         _capacity = new_cap;
     }
 
     template <typename ConstructFn>
     constexpr void relocate_reallocate(size_t insert_index, size_t insert_count, ConstructFn&& construct_fn) {
-        size_t new_cap = _capacity == 0 ? 8 : _capacity * 2;
-        while (new_cap < _size + insert_count) {
-            new_cap *= 2;
+        AssertBounds(insert_count <= max_size() - _size);
+        const size_t new_cap = grown_capacity(_size + insert_count);
+        pointer target = Traits::allocate(_allocator, new_cap);
+
+        // Construct inserted elements first: their arguments may refer to an
+        // element in the old storage, which the following moves destroy.
+        std::forward<ConstructFn>(construct_fn)(target + insert_index);
+        if (insert_index != 0) {
+            relocate_elements(target, _data, insert_index);
         }
-
-        pointer new_data = nullptr;
-
-        if constexpr (AllocatorHasReallocate<allocator_type, T>) {
-            if (_data != nullptr) [[likely]] {
-                new_data = _allocator.reallocate(_data, _capacity, new_cap);
-            } else {
-                new_data = Traits::allocate(_allocator, new_cap);
-            }
-            _data     = new_data;
-            _capacity = new_cap;
-
-            if (insert_index < _size) {
-                if constexpr (std::is_trivially_copyable_v<T>) {
-                    std::memmove(_data + insert_index + insert_count, _data + insert_index, (_size - insert_index) * sizeof(T));
-                } else {
-                    for (size_t i = _size; i > insert_index; --i) {
-                        size_t srcIdx = i - 1;
-                        size_t dstIdx = srcIdx + insert_count;
-                        Traits::construct(_allocator, _data + dstIdx, std::move(_data[srcIdx]));
-                        Traits::destroy(_allocator, _data + srcIdx);
-                    }
-                }
-            }
-
-            std::forward<ConstructFn>(construct_fn)(_data + insert_index);
-            _size += insert_count;
-        } else {
-            new_data = Traits::allocate(_allocator, new_cap);
-
-            if (_data != nullptr) {
-                if constexpr (std::is_trivially_copyable_v<T>) {
-                    std::memcpy(new_data, _data, insert_index * sizeof(T));
-                } else {
-                    for (size_t i = 0; i < insert_index; ++i) {
-                        Traits::construct(_allocator, &new_data[i], std::move(_data[i]));
-                        Traits::destroy(_allocator, &_data[i]);
-                    }
-                }
-            }
-
-            std::forward<ConstructFn>(construct_fn)(new_data + insert_index);
-
-            if (_data != nullptr) {
-                if constexpr (std::is_trivially_copyable_v<T>) {
-                    std::memcpy(new_data + insert_index + insert_count, _data + insert_index, (_size - insert_index) * sizeof(T));
-                } else {
-                    for (size_t i = insert_index; i < _size; ++i) {
-                        Traits::construct(_allocator, &new_data[i + insert_count], std::move(_data[i]));
-                        Traits::destroy(_allocator, &_data[i]);
-                    }
-                }
-                Traits::deallocate(_allocator, _data, _capacity);
-            }
-
-            _data     = new_data;
-            _capacity = new_cap;
-            _size += insert_count;
+        if (insert_index != _size) {
+            relocate_elements(target + insert_index + insert_count, _data + insert_index, _size - insert_index);
         }
+        if (!IsInline()) {
+            Traits::deallocate(_allocator, _data, _capacity);
+        }
+        _data     = target;
+        _capacity = new_cap;
+        _size += insert_count;
     }
 
     template <typename... Args>
@@ -698,7 +835,10 @@ class Array {
     }
 
     constexpr void copy_construct_range(const_pointer start, const_pointer end, pointer dst) {
-        if constexpr (std::is_trivially_copy_constructible_v<T>) {
+        if (start == end) {
+            return;
+        }
+        if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(static_cast<void*>(dst), static_cast<const void*>(start), (end - start) * sizeof(T));
         } else {
             while (start != end) {
@@ -710,6 +850,9 @@ class Array {
     }
 
     constexpr void copy_construct_range_value(pointer start, pointer end, const T& value) {
+        if (start == end) {
+            return;
+        }
         if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) == 1) {
             unsigned char byte_val = 0;
             std::memcpy(&byte_val, std::addressof(value), 1);
