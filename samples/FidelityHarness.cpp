@@ -44,6 +44,7 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -86,8 +87,8 @@ constexpr uint32_t kDevicePixelRatio = 2;
 
 // The fidelity suite defines each test case as a scenario (a JSON object). The
 // fields the harness consumes are quoted below. `lighting` is the radiance
-// asset (raw .hdr or cooked ZRD1) the engine bakes IBL from. `renderSkybox`
-// defaults to false: the background is omitted (alpha 0) unless the scenario
+// asset (raw .hdr, LDR .jpg, or cooked ZRD1) the engine bakes IBL from.
+// `renderSkybox` defaults to false: the background is omitted (alpha 0) unless the scenario
 // asks for the panorama as a skybox.
 struct Vector3D {
     float x = 0.0f;
@@ -605,10 +606,11 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
-        // A missing panorama used to die inside the frame, and Present swallows
-        // that error, so the capture succeeded unlit. Fail here instead.
-        if (std::ifstream probe {scenario.lighting, std::ios::binary}; !probe) {
-            ZHLN::Log("[Fidelity] Cannot open lighting '{}'.", scenario.lighting);
+        // Validate the decoded panorama, not just its existence. In particular,
+        // Khronos' LDR case is a JPEG: a file probe succeeds even if the IBL
+        // loader cannot decode it. Reuse this cached map in the render ticks.
+        if (auto radiance = ZHLN::LoadRadianceMap(engine->GetAssetManager(), scenario.lighting); !radiance) {
+            ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, radiance.error());
             return EXIT_FAILURE;
         }
         auto& registry = engine->GetRegistry();
@@ -664,9 +666,18 @@ auto main(int argc, char* argv[]) -> int {
         // settle ticks in case a system resets the view on the first frames.
         SetFidelityCamera(engine->GetCamera(), scenario);
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            break;
+        if (status != ZHLN::GameplayStatus::OK) {
+            ZHLN::Log("[Fidelity] Render tick stopped with status {}; refusing an incomplete capture.", static_cast<int>(status));
+            return EXIT_FAILURE;
         }
+    }
+    if (!engine->IsRunning()) {
+        ZHLN::Log("[Fidelity] Render host stopped before capture.");
+        return EXIT_FAILURE;
+    }
+    if (const uint32_t errors = ZHLN::RenderContext::ValidationErrorCount(); errors != 0) {
+        ZHLN::Log("[Fidelity] {} Vulkan validation errors; refusing to publish an invalid capture.", errors);
+        return EXIT_FAILURE;
     }
 
     const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(outputPath);

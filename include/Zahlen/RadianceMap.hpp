@@ -33,6 +33,7 @@ enum class RadianceAssetError : uint8_t {
     BadDimensions ZHLN_ANNOTATION(ZHLN::Description<"radiance dimensions are missing, inconsistent, or too large"> {}),
     RleCorrupt ZHLN_ANNOTATION(ZHLN::Description<"Radiance RLE scanline is truncated or inconsistent"> {}),
     PathTooLong ZHLN_ANNOTATION(ZHLN::Description<"radiance path does not fit in String256"> {}),
+    LdrDecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"LDR JPEG radiance image could not be decoded"> {}),
 };
 
 struct RadianceMap {
@@ -50,6 +51,8 @@ struct RadianceMap {
     return hash == 0 ? 1 : hash;
 }
 
+// Accepts RGBE .hdr, cooked ZRD1, and sRGB LDR JPEG environments (linearized
+// to float4 for the same IBL bake). Format detection is by file signature.
 [[nodiscard]] auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode>;
 
 [[nodiscard]] auto EncodeCookedRadiance(const RadianceMap& map) -> std::vector<std::byte>;

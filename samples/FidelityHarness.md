@@ -65,12 +65,15 @@ this harness builds none of them. Specifically:
 
 Exit codes: `0` captured; `1` usage/scenario/capture error.
 
-## Known divergences from the Khronos contract (i.e. the work left)
+## Environment wiring and remaining fidelity approximations
 
-1. **HDR environment lighting is the scenario's `.hdr`.** `EnvironmentMapComponent`
-   names the asset; the engine decodes it (raw Radiance or cooked `ZRD1`) and
-   `RenderSystem` passes the floats to `SetEnvironmentRadiance`. The bake
-   samples the equirect for SH and the specular prefilter. `ambientExposure`
+1. **Environment lighting comes from the scenario asset.** `EnvironmentMapComponent`
+   names it; the engine decodes raw Radiance `.hdr`, cooked `ZRD1`, or an LDR
+   JPEG equirect (linearizing its sRGB bytes before the bake). In particular,
+   `khronos-MetalRoughSpheres-LDR` uses `spruit_sunrise_1k_LDR.jpg`, not the
+   HDR version. The harness preflights the decoder before its first frame and
+   reuses the cached map. `RenderSystem` passes the floats to
+   `SetEnvironmentRadiance` for SH and specular prefiltering. `ambientExposure`
    is applied at shade time, not in the bake. An unauthored fallback sun is
    suppressed while that component is set, so the panorama is the only light.
 2. **Specular LOD.** The reflection pass samples `roughness * 5.0` of the 6

@@ -782,27 +782,25 @@ enum class ScreenshotError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
     ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
     DestinationNotRecorded
-        ZHLN_ANNOTATION(ZHLN::Description<"The frame's destination was never drawn into; the image holds the background fill, not a frame"> {}),
+        ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
 
     if (!impl->presenter.swapchain.Valid()) {
-        VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
-        VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
-        VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        if (const auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->acquired) {
-            const auto& frameImage = *dest->acquired;
-            if (!frameImage.drawn) {
-                ZHLN::Log("[Test Capture] Window image was not drawn into this frame (only the background fill); capture refused.");
-                return std::unexpected(ScreenshotError::DestinationNotRecorded);
-            }
-            source = frameImage.image.Handle();
-            extent = frameImage.image.Extent2D();
-            sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
+        const auto* dest = impl->destinations.Find(impl->presentationTarget);
+        if (impl->frameOpen || dest == nullptr || !dest->acquired || !dest->acquired->drawn) {
+            // A headless target starts UNDEFINED. If rendering failed before
+            // acquisition, treating it as COLOR_ATTACHMENT here makes the
+            // readback barrier invalid and writes a black success image.
+            ZHLN::Log("[Test Capture] No completed headless frame was drawn; capture refused.");
+            return std::unexpected(ScreenshotError::DestinationNotRecorded);
         }
+        const auto& frameImage = *dest->acquired;
+        VkImage       source       = frameImage.image.Handle();
+        VkExtent2D    extent       = frameImage.image.Extent2D();
+        VkImageLayout sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
 
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 

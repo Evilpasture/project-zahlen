@@ -3,11 +3,15 @@
 
 #include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/AssetManager.hpp>
+#include <stb_image.h>
 
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -322,6 +326,63 @@ auto DecodeCooked(std::span<const std::byte> bytes) -> std::expected<RadianceMap
     return map;
 }
 
+// Khronos' MetalRoughSpheres-LDR intentionally names a JPEG equirect instead
+// of an HDR file. Convert its display-space sRGB texels to the linear float4
+// data consumed by the same IBL bake as RGBE/ZRD1; do not substitute the HDR
+// panorama, which would change what that fidelity scenario measures.
+auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
+    if (bytes.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    }
+    const auto* data = reinterpret_cast<const stbi_uc*>(bytes.data());
+    const int   length = static_cast<int>(bytes.size());
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    if (!stbi_info_from_memory(data, length, &width, &height, &channels)) {
+        return std::unexpected(RadianceAssetError::LdrDecodeFailed);
+    }
+    if (width <= 0 || height <= 0 || width > static_cast<int>(kMaxRadianceExtent) || height > static_cast<int>(kMaxRadianceExtent) ||
+        static_cast<size_t>(width) * static_cast<size_t>(height) > kMaxRadianceFileBytes / (4u * sizeof(float))) {
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    }
+
+    int decodedWidth = 0;
+    int decodedHeight = 0;
+    int decodedChannels = 0;
+    auto pixels = std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> {
+        stbi_load_from_memory(data, length, &decodedWidth, &decodedHeight, &decodedChannels, 3), &stbi_image_free
+    };
+    if (!pixels || decodedWidth != width || decodedHeight != height) {
+        return std::unexpected(RadianceAssetError::LdrDecodeFailed);
+    }
+
+    // stb_image's float LDR path defaults to gamma 2.2, not the piecewise
+    // sRGB transfer function. Decode bytes and linearize explicitly instead.
+    static const auto srgbToLinear = [] {
+        std::array<float, 256> table {};
+        for (size_t i = 0; i < table.size(); ++i) {
+            const float s = static_cast<float>(i) / 255.0f;
+            table[i] = s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+        }
+        return table;
+    }();
+
+    RadianceMap map;
+    map.width = static_cast<uint32_t>(width);
+    map.height = static_cast<uint32_t>(height);
+    const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    map.rgba.resize(count * 4u);
+    for (size_t i = 0; i < count; ++i) {
+        for (size_t c = 0; c < 3; ++c) {
+            map.rgba[i * 4u + c] = srgbToLinear[pixels.get()[i * 3u + c]];
+        }
+        map.rgba[i * 4u + 3u] = 1.0f;
+    }
+    map.contentHash = HashRadiancePixels(map.rgba.data(), map.width, map.height);
+    return map;
+}
+
 auto ReadAssetBytes(AssetManager& assets, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
     const size_t vfsSize = assets.ReadFile(path, nullptr, 0);
     if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
@@ -361,6 +422,9 @@ auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<RadianceM
         if (magic == kCookedRadianceMagic) {
             return DecodeCooked(bytes);
         }
+    }
+    if (bytes.size() >= 3 && bytes[0] == std::byte {0xff} && bytes[1] == std::byte {0xd8} && bytes[2] == std::byte {0xff}) {
+        return DecodeLdrJpeg(bytes);
     }
     return DecodeRgbe(bytes);
 }

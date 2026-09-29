@@ -171,6 +171,14 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(engine != nullptr);
             engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
+
+            // Before the first presented frame, the headless image is still
+            // UNDEFINED. A screenshot must fail without submitting an invalid
+            // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
+            const auto errorsBefore = ZHLN::RenderContext::ValidationErrorCount();
+            const auto emptyCapture = engine->GetRenderContext().CaptureScreenshotPPM("test_no_completed_frame.ppm");
+            ZHLN::Test::ExpectFalse(emptyCapture.has_value());
+            ZHLN::Test::ExpectEq(ZHLN::RenderContext::ValidationErrorCount(), errorsBefore);
             return {};
         }
 
