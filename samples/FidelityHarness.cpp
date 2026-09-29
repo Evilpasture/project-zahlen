@@ -532,17 +532,15 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     const auto scenarioBytes = ReadFileBytes(scenarioPath);
     if (!scenarioBytes) {
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
     const std::optional<FidelityScenario> parsed =
         ParseScenario(std::string_view(reinterpret_cast<const char*>(scenarioBytes->data()), scenarioBytes->size()));
     if (!parsed) {
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
     const FidelityScenario scenario = *parsed;
@@ -560,7 +558,6 @@ auto main(int argc, char* argv[]) -> int {
     );
     if (!engineRes) {
         ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
@@ -606,21 +603,18 @@ auto main(int argc, char* argv[]) -> int {
     if (!scenario.lighting.empty()) {
         if (scenario.lighting.size() > ZHLN::String256::kMaxTextLength) {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
-            ZHLN::TaskSystem::Shutdown();
             return EXIT_FAILURE;
         }
         // A missing panorama used to die inside the frame, and Present swallows
         // that error, so the capture succeeded unlit. Fail here instead.
         if (std::ifstream probe {scenario.lighting, std::ios::binary}; !probe) {
             ZHLN::Log("[Fidelity] Cannot open lighting '{}'.", scenario.lighting);
-            ZHLN::TaskSystem::Shutdown();
             return EXIT_FAILURE;
         }
         auto& registry = engine->GetRegistry();
         const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settingsEnt == ZHLN::Entity::Null()) {
             ZHLN::Log("[Fidelity] No global-settings entity; the environment has nowhere to go.");
-            ZHLN::TaskSystem::Shutdown();
             return EXIT_FAILURE;
         }
         ZHLN::Components::EnvironmentMapComponent env;
@@ -634,7 +628,6 @@ auto main(int argc, char* argv[]) -> int {
     if (!std::isfinite(camera.position.GetX()) || !std::isfinite(camera.position.GetY()) || !std::isfinite(camera.position.GetZ()) ||
         !std::isfinite(camera.yaw) || !std::isfinite(camera.pitch)) {
         ZHLN::Log("[Fidelity] Invalid camera for '{}'; refusing an empty capture.", scenario.name);
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
@@ -649,12 +642,10 @@ auto main(int argc, char* argv[]) -> int {
     const auto modelBytes = ReadFileBytes(scenario.model);
     if (!modelBytes) {
         ZHLN::Log("[Fidelity] Model load failed; nothing to render.");
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
     if (ImportModel(*engine, *modelBytes, scenario.model) == 0) {
         ZHLN::Log("[Fidelity] Model import produced no geometry; nothing to render.");
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
     // Prefab spawn attaches a point light to an emissive part. That is not
@@ -681,11 +672,9 @@ auto main(int argc, char* argv[]) -> int {
     const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(outputPath);
     if (!capture) {
         ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
     ZHLN::Log("[Fidelity] Wrote {}.", outputPath);
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

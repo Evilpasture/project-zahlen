@@ -1476,7 +1476,7 @@ auto main(int argc, char* argv[]) -> int {
     // slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
@@ -1491,7 +1491,6 @@ auto main(int argc, char* argv[]) -> int {
     );
     if (!engineRes) {
         ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
@@ -1627,7 +1626,5 @@ auto main(int argc, char* argv[]) -> int {
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();
     }
-
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

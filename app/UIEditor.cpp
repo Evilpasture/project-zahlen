@@ -886,7 +886,7 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     // The editor edits a UINode tree, not a 3D world: no World, no physics, no
     // frame scheduler. A bare registry holds the input/GUI singletons that the
@@ -936,7 +936,6 @@ auto main(int argc, char* argv[]) -> int {
     );
     if (!kernelRes) {
         ZHLN::Log("FATAL: Failed to initialize Kernel: {}", kernelRes.error());
-        ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
@@ -1067,6 +1066,5 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     StopPreview(*kernel, session);
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

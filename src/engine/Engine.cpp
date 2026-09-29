@@ -608,7 +608,9 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     -> std::expected<void, ErrorCode> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
-    TaskSystem::Init();
+    // Construct before the engine so its destructor (and any cleanup tasks)
+    // finishes before the worker threads and fibers are retired.
+    TaskSystem::Scope tasks;
 
     uint32_t w = options.fullscreen ? 0 : 1280;
     uint32_t h = options.fullscreen ? 0 : 720;
@@ -630,7 +632,6 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
-        TaskSystem::Shutdown();
         return std::unexpected(engine_res.error());
     }
 
@@ -695,7 +696,6 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
         }
     }
 
-    TaskSystem::Shutdown();
     return {};
 }
 

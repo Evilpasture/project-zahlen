@@ -7,7 +7,11 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <expected>
+#include <latch>
+#include <thread>
+#include <type_traits>
 #include <vector>
 
 // ============================================================================
@@ -17,25 +21,121 @@
 enum class TaskSystemError : uint32_t {
     DispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Dispatched tasks failed to execute or update shared memory.">{}) = 1,
     ParallelForFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{}),
-    ParallelInvokeFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelInvoke returned before its tasks completed.">{})
+    ParallelInvokeFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelInvoke returned before its tasks completed.">{}),
+    LifecycleFailed ZHLN_ANNOTATION(ZHLN::Description<"Task system lifecycle did not serialize or restart cleanly.">{})
 };
+
+static_assert(!std::is_copy_constructible_v<ZHLN::TaskSystem::Scope> && !std::is_copy_assignable_v<ZHLN::TaskSystem::Scope>);
+static_assert(!std::is_move_constructible_v<ZHLN::TaskSystem::Scope> && !std::is_move_assignable_v<ZHLN::TaskSystem::Scope>);
 
 // ============================================================================
 // Test Suite Class
 // ============================================================================
 
 struct TaskSystemTestSuite {
-    TaskSystemTestSuite() {
-        // Setup: Initialize the fiber scheduling environment with the guarded minimum stack.
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
-    }
-
-    ~TaskSystemTestSuite() {
-        // Teardown: Reclaim all scheduler resources
-        ZHLN::TaskSystem::Shutdown();
-    }
+    // Constructed before the runner's Tests object and retired when the suite
+    // exits, never from a process-exit static destructor.
+    ZHLN::TaskSystem::Scope _tasks {2, 32, ZHLN::kMinimumFiberStackSize};
 
     struct Tests {
+        std::expected<void, ZHLN::ErrorCode> lifecycle_is_idempotent_and_can_restart() {
+            namespace tasks = ZHLN::TaskSystem;
+            constexpr uint32_t workerThreads = 2;
+            constexpr uint32_t fibers = 32;
+
+            // Reinitializing an active scheduler leaves its configuration alone.
+            tasks::Init(4, 64, ZHLN::kMinimumFiberStackSize);
+            const uint32_t initialCount = tasks::GetWorkerCount();
+            tasks::Shutdown();
+            tasks::Shutdown();
+            const uint32_t firstStopCount = tasks::GetWorkerCount();
+
+            // Each wave starts together; only one caller may construct or
+            // destroy the worker threads/fiber pool at a time.
+            std::latch initStart {4};
+            std::array<std::thread, 4> initCallers;
+            for (auto& thread: initCallers) {
+                thread = std::thread([&] {
+                    initStart.arrive_and_wait();
+                    tasks::Init(workerThreads, fibers, ZHLN::kMinimumFiberStackSize);
+                });
+            }
+            for (auto& thread: initCallers) {
+                thread.join();
+            }
+            const uint32_t concurrentInitCount = tasks::GetWorkerCount();
+
+            std::atomic<uint32_t> completed {0};
+            const auto add = [](void* raw) { static_cast<std::atomic<uint32_t>*>(raw)->fetch_add(1, std::memory_order_relaxed); };
+            std::array<tasks::Task, 4> work;
+            for (auto& task: work) {
+                task = {.func = add, .arg = &completed};
+            }
+            if (concurrentInitCount == workerThreads + 1) {
+                tasks::Counter counter;
+                tasks::Dispatch(work, &counter);
+                tasks::Wait(&counter);
+            }
+
+            std::latch shutdownStart {4};
+            std::array<std::thread, 4> shutdownCallers;
+            for (auto& thread: shutdownCallers) {
+                thread = std::thread([&] {
+                    shutdownStart.arrive_and_wait();
+                    tasks::Shutdown();
+                });
+            }
+            for (auto& thread: shutdownCallers) {
+                thread.join();
+            }
+            const uint32_t concurrentStopCount = tasks::GetWorkerCount();
+
+            // Init and Shutdown may also overlap. Whichever transition wins
+            // last determines the state, but a partial pool is never visible.
+            std::latch mixedStart {4};
+            std::array<std::thread, 4> mixedCallers;
+            for (size_t i = 0; i < mixedCallers.size(); ++i) {
+                mixedCallers[i] = std::thread([&, i] {
+                    mixedStart.arrive_and_wait();
+                    if (i % 2 == 0) {
+                        tasks::Init(workerThreads, fibers, ZHLN::kMinimumFiberStackSize);
+                    } else {
+                        tasks::Shutdown();
+                    }
+                });
+            }
+            for (auto& thread: mixedCallers) {
+                thread.join();
+            }
+            const uint32_t mixedCount = tasks::GetWorkerCount();
+            tasks::Shutdown();
+            const uint32_t mixedStopCount = tasks::GetWorkerCount();
+
+            // Restore the suite's scheduler for the remaining tests, and
+            // exercise both work queues after the wake/reset/join sequence.
+            tasks::Init(workerThreads, fibers, ZHLN::kMinimumFiberStackSize);
+            const uint32_t restartCount = tasks::GetWorkerCount();
+            if (restartCount == workerThreads + 1) {
+                tasks::Counter counter;
+                tasks::Dispatch(work, &counter);
+                tasks::Wait(&counter);
+            }
+
+            bool ok = true;
+            ok = ZHLN::Test::ExpectEq(initialCount, 3u) && ok;
+            ok = ZHLN::Test::ExpectEq(firstStopCount, 0u) && ok;
+            ok = ZHLN::Test::ExpectEq(concurrentInitCount, 3u) && ok;
+            ok = ZHLN::Test::ExpectEq(concurrentStopCount, 0u) && ok;
+            ok = ZHLN::Test::ExpectTrue(mixedCount == 0u || mixedCount == 3u) && ok;
+            ok = ZHLN::Test::ExpectEq(mixedStopCount, 0u) && ok;
+            ok = ZHLN::Test::ExpectEq(restartCount, 3u) && ok;
+            ok = ZHLN::Test::ExpectEq(completed.load(std::memory_order::relaxed), 8u) && ok;
+            if (!ok) {
+                return std::unexpected(TaskSystemError::LifecycleFailed);
+            }
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> fiber_metadata_alignment() {
             auto         noop    = [](void*) {};
             ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(ZHLN::kMinimumFiberStackSize, noop, nullptr);

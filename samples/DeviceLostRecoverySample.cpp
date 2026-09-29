@@ -170,7 +170,7 @@ auto main(int argc, char* argv[]) -> int {
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
          .render  = {
@@ -283,7 +283,5 @@ auto main(int argc, char* argv[]) -> int {
             break;
         }
     }
-
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

@@ -654,7 +654,7 @@ auto main(int argc, char* argv[]) -> int {
 #else
                 ZHLN::Platform::Init();
                 ZHLN::SetupSignalHandler(crashState);
-                ZHLN::TaskSystem::Init();
+                ZHLN::TaskSystem::Scope taskScope;
                 uint32_t w = options.fullscreen ? 0 : 1280;
                 uint32_t h = options.fullscreen ? 0 : 720;
 
@@ -674,7 +674,6 @@ auto main(int argc, char* argv[]) -> int {
 
                 auto engine_res = ZHLN::Engine::Create(config);
                 if (!engine_res) {
-                    ZHLN::TaskSystem::Shutdown();
                     return std::unexpected(engine_res.error());
                 }
 
@@ -693,8 +692,6 @@ auto main(int argc, char* argv[]) -> int {
                 engine->InitializeDefaultScene();
 
                 RunWorldEditor(*engine, options);
-
-                ZHLN::TaskSystem::Shutdown();
                 return {};
 #endif
             }

@@ -27,9 +27,26 @@ struct Counter {
     ZHLN::Atomic<uint32_t> value {0};
 };
 
+// Lifecycle transitions are serialized and redundant calls are no-ops. Call
+// Shutdown from an application control thread after all dispatched work has
+// completed; do not race task submission/Wait against a lifecycle transition.
 void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
-
 void Shutdown();
+
+// Declare before resources that may schedule tasks during their destruction.
+// A Scope owns the process-global scheduler lifetime; do not overlap it with
+// another owner that may shut the scheduler down while those resources live.
+struct Scope final {
+    explicit Scope(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize) {
+        Init(numThreads, numFibers, stackSize);
+    }
+    ~Scope() { Shutdown(); }
+
+    Scope(const Scope&)                    = delete;
+    auto operator=(const Scope&) -> Scope& = delete;
+    Scope(Scope&&)                         = delete;
+    auto operator=(Scope&&) -> Scope&      = delete;
+};
 
 void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 

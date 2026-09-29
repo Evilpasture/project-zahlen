@@ -7,11 +7,10 @@
 // up before any engine or ECS work: the fiber/task system, and Jolt's
 // allocator + type registry.
 //
-// Nine CPU suites and every GPU suite opened with the same
-// Fiber::InitMainThread() + TaskSystem::Init(2, 32, kMinimumFiberStackSize)
-// and closed with TaskSystem::Shutdown(). As a fixture member the pairing
-// cannot be forgotten on an early return, and a suite that needs Jolt composes
-// the second scope instead of re-spelling the factory dance.
+// CPU and GPU suites share a TaskSystem::Scope with test-specific worker/fiber
+// defaults. As a fixture member the pairing cannot be forgotten on an early
+// return, and a suite that needs Jolt composes the second scope instead of
+// re-spelling the factory dance.
 //
 // These are process-wide singletons, so the scopes are non-copyable and
 // non-movable, and a binary must not nest two of the same kind.
@@ -19,7 +18,6 @@
 #pragma once
 
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
 #include <cstdint>
 
 // clang-format off
@@ -36,19 +34,18 @@ namespace ZHLN::Test::Fixture {
 // stack. Raise them only for a suite that genuinely saturates the pool.
 class TaskSystemScope {
   public:
-    explicit TaskSystemScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(workerThreads, maxFibers, ZHLN::kMinimumFiberStackSize);
-    }
+    explicit TaskSystemScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32)
+        : _tasks(workerThreads, maxFibers, ZHLN::kMinimumFiberStackSize) {}
 
-    ~TaskSystemScope() {
-        ZHLN::TaskSystem::Shutdown();
-    }
+    ~TaskSystemScope() = default;
 
     TaskSystemScope(const TaskSystemScope&)            = delete;
     TaskSystemScope& operator=(const TaskSystemScope&) = delete;
     TaskSystemScope(TaskSystemScope&&)                 = delete;
     TaskSystemScope& operator=(TaskSystemScope&&)      = delete;
+
+  private:
+    ZHLN::TaskSystem::Scope _tasks;
 };
 
 // Registers Jolt's default allocator, factory and type registry; undoes them.

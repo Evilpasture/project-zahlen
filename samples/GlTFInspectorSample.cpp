@@ -43,7 +43,7 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
@@ -83,7 +83,5 @@ auto main(int argc, char* argv[]) -> int {
             break;
         }
     }
-
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

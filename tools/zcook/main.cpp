@@ -5,7 +5,6 @@
 #include "Cook.hpp"
 #include "Ninja.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
 #include <cstdio>
 #include <print>
 #include <string_view>
@@ -35,8 +34,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    ZHLN::Fiber::InitMainThread();
-    ZHLN::TaskSystem::Init(0);
+    ZHLN::TaskSystem::Scope taskScope;
 
     int result = 0;
     if (cmd == "mesh")
@@ -53,8 +51,6 @@ int main(int argc, char** argv) {
         result = ZHLN::PackArchive(argc - 2, argv + 2);
     else if (cmd == "ninja")
         result = ZHLN::GenerateAssetNinja(argc - 2, argv + 2);
-
-    ZHLN::TaskSystem::Shutdown();
 
     return result;
 }
