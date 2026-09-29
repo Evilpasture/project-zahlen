@@ -10,11 +10,11 @@
 namespace ZHLN::ALife {
 
 SpatialGrid::SpatialGrid(uint32_t w, uint32_t h, float cell_size): _width(w), _height(h), _cellSize(cell_size) {
-    _cellHeads.resize(static_cast<size_t>(w) * h, END_OF_LIST);
+    _cellHeads.resize(static_cast<size_t>(w) * h, Entity::Null());
 }
 
 void SpatialGrid::Clear() noexcept {
-    std::ranges::fill(_cellHeads, END_OF_LIST);
+    std::ranges::fill(_cellHeads, Entity::Null());
 }
 
 auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
@@ -43,25 +43,23 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
         comp->self_entity = handle;
     }
 
-    int32_t old_idx = GetCellIndex(old_pos);
-    int32_t new_idx = GetCellIndex(comp->position);
+    const int32_t old_idx = GetCellIndex(old_pos);
+    const int32_t new_idx = GetCellIndex(comp->position);
 
     if (old_idx == new_idx) {
         return;
     }
 
-    // 1. Unlink from old cell list
+    // Unlink using the full generational handle. Index-only lookups used to
+    // fabricate generation 0, which SparseSet::Get correctly rejects.
     if (old_idx != -1) {
-        uint32_t* curr = &_cellHeads[old_idx];
-        while (*curr != END_OF_LIST) {
-            if (*curr == handle.index) {
-                Entity dummy {.index = *curr, .generation = 0};
-                auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
-                *curr            = (curr_comp != nullptr) ? curr_comp->next_in_grid : END_OF_LIST;
+        Entity* curr = &_cellHeads[old_idx];
+        while (*curr != Entity::Null()) {
+            if (*curr == handle) {
+                *curr = comp->next_in_grid;
                 break;
             }
-            Entity dummy {.index = *curr, .generation = 0};
-            auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
+            auto* curr_comp = reg.Get<ALifeComponent>(*curr);
             if (curr_comp == nullptr) {
                 break;
             }
@@ -69,10 +67,10 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
         }
     }
 
-    // 2. Link to new cell list
+    comp->next_in_grid = Entity::Null();
     if (new_idx != -1) {
         comp->next_in_grid  = _cellHeads[new_idx];
-        _cellHeads[new_idx] = handle.index;
+        _cellHeads[new_idx] = handle;
     }
 }
 
@@ -82,23 +80,16 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
         return;
     }
 
-    int32_t idx = GetCellIndex(comp->position);
+    const int32_t idx = GetCellIndex(comp->position);
     if (idx != -1) {
-        uint32_t* curr = &_cellHeads[idx];
-        while (*curr != END_OF_LIST) {
-            if (*curr == handle.index) {
-                Entity dummy {.index = handle.index, .generation = 0};
-                auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
-
-                *curr = (curr_comp != nullptr) ? curr_comp->next_in_grid : END_OF_LIST;
-
-                if (curr_comp != nullptr) {
-                    curr_comp->next_in_grid = END_OF_LIST;
-                }
+        Entity* curr = &_cellHeads[idx];
+        while (*curr != Entity::Null()) {
+            if (*curr == handle) {
+                *curr = comp->next_in_grid;
+                comp->next_in_grid = Entity::Null();
                 break;
             }
-            Entity dummy {.index = *curr, .generation = 0};
-            auto*  curr_comp = reg.Get<ALifeComponent>(dummy);
+            auto* curr_comp = reg.Get<ALifeComponent>(*curr);
             if (curr_comp == nullptr) {
                 break;
             }
@@ -127,23 +118,20 @@ auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radiu
                 continue;
             }
 
-            uint32_t slot_idx = _cellHeads[(z * static_cast<int32_t>(_width)) + x];
-            while (slot_idx != END_OF_LIST) {
-                // Generational bypass: we can lookup safely by index only
-                Entity dummy {.index = slot_idx, .generation = 0};
-                auto*  comp = reg.Get<ALifeComponent>(dummy);
+            Entity current = _cellHeads[(z * static_cast<int32_t>(_width)) + x];
+            while (current != Entity::Null()) {
+                const auto* comp = reg.Get<ALifeComponent>(current);
                 if (comp == nullptr) {
-                    break;
+                    break; // A destroyed component cannot supply the next link.
                 }
 
-                float dist_sq = (comp->position - pos).LengthSq();
+                const float dist_sq = (comp->position - pos).LengthSq();
                 if (dist_sq <= radius_sq) {
-                    // Fetch actual entity with correct generation from the component
-                    out_buffer.push_back(comp->self_entity);
+                    out_buffer.push_back(current);
                     count++;
                 }
 
-                slot_idx = comp->next_in_grid;
+                current = comp->next_in_grid;
             }
         }
     }

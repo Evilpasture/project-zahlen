@@ -174,13 +174,15 @@ struct DescriptorHeapsSuite {
                 const uint32_t texel = (static_cast<uint32_t>(palette[i][0]) << 0) | (static_cast<uint32_t>(palette[i][1]) << 8) |
                                        (static_cast<uint32_t>(palette[i][2]) << 16) | 0xFF000000u;
 
-                // CreateProceduralTexture consumes width*height pixels: fill a
-                // small 8x8 block with the solid color.
+                // These palette bytes are display-space sRGB. The full-bright
+                // shader samples linear color and the headless SRGB target
+                // encodes it again. Uploading UNORM instead double-encodes
+                // midtones, so no screenshot pixel matches the byte palette.
                 std::array<uint32_t, 8 * 8> texelBlock {};
                 texelBlock.fill(texel);
 
                 const std::string   texName = std::format("dheap_tex_{:02}", i);
-                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, false);
+                ZHLN::TextureHandle tex     = rc.CreateProceduralTexture(texName, {8, 8}, texelBlock, true);
                 if (tex == ZHLN::TextureHandle::Invalid) {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }

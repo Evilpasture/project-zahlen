@@ -254,6 +254,8 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
+// Transfer clear only: image must have VK_IMAGE_USAGE_TRANSFER_DST_BIT.
+// For presentation images, clear through a color attachment load op instead.
 void ClearColorImage(
     VkCommandBuffer     cmd,
     VkImage             image,

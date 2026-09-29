@@ -25,6 +25,7 @@ class ZHLN_API SpatialGrid {
 
     void Clear() noexcept;
     void UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos);
+    // Unlink before destroying the ECS component: its next link lives there.
     void RemoveEntity(ECS::Registry& reg, Entity handle);
 
     // Returns number of items found and populates out_buffer
@@ -32,10 +33,10 @@ class ZHLN_API SpatialGrid {
 
     [[nodiscard]] auto GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t;
 
-    std::vector<uint32_t> _cellHeads;
-    uint32_t              _width;
-    uint32_t              _height;
-    float                 _cellSize;
+    std::vector<Entity> _cellHeads;
+    uint32_t            _width;
+    uint32_t            _height;
+    float               _cellSize;
 };
 
 } // namespace ZHLN::ALife

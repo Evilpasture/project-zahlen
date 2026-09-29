@@ -887,9 +887,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     constexpr uint32_t         kTotalFrames = 120;
     const double               avgLimitPct  = (mode == ZHLN::ValidationMode::On) ? 20.0 : 35.0;
     const std::string          testName     = (mode == ZHLN::ValidationMode::On) ? "render.master.val_on" : "render.master.val_off";
-    ZHLN::Test::BenchmarkTimer masterTimer;
-
-    auto stats = ZHLN::Test::BenchmarkFrames(testName)
+    // The per-machine frame baseline below is the throughput gate. An
+    // absolute FPS minimum would grade the host GPU (including Lavapipe CI)
+    // rather than detect a regression in this renderer.
+    const auto stats = ZHLN::Test::BenchmarkFrames(testName)
                      .Warmup(0)
                      .Frames(kTotalFrames)
                      .AvgLimit(avgLimitPct)
@@ -913,8 +914,6 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                          engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
                      });
 
-    double totalDurationSec = masterTimer.ElapsedSeconds();
-
     // 10. Frame Screenshot Verification
     const std::string ppmPath    = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
     const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
@@ -933,13 +932,14 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         }
     }
 
-    ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS", (kTotalFrames * 1.0) / totalDurationSec);
+    ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS (mean {:.2f} ms/frame)", stats.avgFps, stats.avgFrameMs);
     ZHLN::Println("    [Image Validation] Captured resolution: {}x{}, Shaded Pixels: {}", outputImg.width, outputImg.height, litPixels);
 
-    // Verification Gates
+    // The benchmark already checked average and p99 frame times against the
+    // last run on this machine. Keep absolute gates for rendering correctness,
+    // not a hardware-dependent 25 FPS floor.
     ZHLN::Test::ExpectTrue(outputImg.Valid());
     ZHLN::Test::ExpectGt(litPixels, 50000u);
-    ZHLN::Test::ExpectGt((kTotalFrames / totalDurationSec), 25.0);
 
     if (litPixels <= 50000u || !outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);

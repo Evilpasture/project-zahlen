@@ -1013,7 +1013,13 @@ struct DistanceStabilitySuite {
                         }
                         const uint32_t count = CountHueInColumns(frame, RingHue(i), windows[i].first, windows[i].second);
                         if (!ZHLN::Test::ExpectGe(count, 2)) {
-                            ZHLN::Println("    [FAIL] sweep frame {}: ring {} ({} m) collapsed to {} px", f, i, kRingDistances[i], count);
+                            const auto [oppositeX0, oppositeX1] = RingColumnWindow(rings[i], camX, tanH, frame.width, -mirrorSign);
+                            ZHLN::Println(
+                                "    [FAIL] sweep frame {}: ring {} ({} m), camera x {:.2f}: {} px in projected columns [{},{}), {} in opposite [{},{}), {} across frame",
+                                f, i, kRingDistances[i], camX, count, windows[i].first, windows[i].second,
+                                CountHueInColumns(frame, RingHue(i), oppositeX0, oppositeX1), oppositeX0, oppositeX1,
+                                CountHue(frame, RingHue(i))
+                            );
                             popped = true;
                         }
                     }

@@ -23,10 +23,14 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest) 
         return std::nullopt;
     }
 
-    const VkClearColorValue clear {
-        .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
-    };
-    Vk::ClearColorImage(dest.recorder.Handle(), image.image.Handle(), clear);
+    // Swapchain images are COLOR_ATTACHMENT-only (and headless presentation
+    // targets need not support TRANSFER_DST either). Clear via attachment load
+    // op rather than vkCmdClearColorImage, which requires TRANSFER_DST usage.
+    const VkCommandBuffer cmd = dest.recorder.Handle();
+    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image.image.Handle());
+    Vk::DynamicPass(image.image.Extent2D())
+        .AddColor(image.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(), VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
+        .Execute(cmd, [] {});
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 
     if (!warnedUnwrittenTarget) {

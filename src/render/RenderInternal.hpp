@@ -43,8 +43,10 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -648,11 +650,21 @@ struct RenderContext::Impl {
         // Also runs when initialization fails partway through, before a
         // RenderContext has been constructed. All explicit VMA destruction
         // below precedes the allocator member's destructor.
+        const bool traceEnabled = std::getenv("ZHLN_TRACE_TEARDOWN") != nullptr;
+        const auto start = std::chrono::steady_clock::now();
+        const auto trace = [&](const char* phase) {
+            if (traceEnabled) {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+                ZHLN::Log("[Render teardown] Impl {} (+{} ms)", phase, ms);
+            }
+        };
+        trace("wait idle");
         if (ctx.Device() != VK_NULL_HANDLE) {
             if (auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
                 ZHLN::Log("[Render] device idle wait during teardown failed: {}", waited.error());
             }
         }
+        trace("reset staging and destinations");
         stagingContext.reset();
         DestroyDestinations();
         frameOpen = false;
@@ -660,6 +672,7 @@ struct RenderContext::Impl {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
 
+        trace("retire geometry and pipelines");
         geometry.RetireAll();
         // The registry destructor runs after this body; enqueue its pipelines
         // now, before the explicit deletion-queue drain below.
@@ -668,6 +681,7 @@ struct RenderContext::Impl {
         for (auto& tlas: frames.tlas) {
             tlas = Vk::AccelerationStructure {};
         }
+        trace("destroy renderer resources");
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);
         fog.DestroyNoise(allocator);
@@ -681,6 +695,7 @@ struct RenderContext::Impl {
         for (auto& history: accumulationHistory) {
             history.Destroy(allocator);
         }
+        trace("cleanup presenter and frame buffers");
         presenter.Cleanup();
 
         auto destroyFrames = [this](auto& buffers) {
@@ -706,9 +721,11 @@ struct RenderContext::Impl {
         allocator.DestroyBuffer(morphDeltasBuffer);
         allocator.DestroyBuffer(particleBuffer);
 
+        trace("drain deletion queue");
         deletionQueue.Drain();
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
+        trace("Impl body complete; member destructors follow");
     }
 
     [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);

@@ -8,6 +8,7 @@
 #include <ALife/Graph.hpp>
 #include <ALife/SpatialGrid.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <algorithm>
 #include <expected>
 #include <memory_resource>
 
@@ -165,6 +166,28 @@ struct ALifeTestSuite {
             if (count == 1) {
                 ZHLN::Test::ExpectEq(results[0], e1);
             }
+
+            // Unlink a non-head entry, then reuse its ECS slot. A grid link
+            // must carry the generation, not accidentally find the old entity
+            // through a fabricated generation-0 handle.
+            const JPH::RVec3 movedFrom = c2.position;
+            c2.position = JPH::RVec3(103.0, 0.0, 100.0);
+            grid.UpdateEntity(reg, e2, movedFrom);
+            grid.RemoveEntity(reg, e1);
+            reg.Destroy(e1);
+            const ZHLN::Entity replacement = reg.Create();
+            auto& replacementComp = reg.Add<ZHLN::ALife::ALifeComponent>(replacement);
+            replacementComp.position = JPH::RVec3(105.0, 0.0, 100.0);
+            grid.UpdateEntity(reg, replacement, JPH::RVec3(-1, -1, -1));
+
+            results.clear();
+            count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
+            ZHLN::Test::ExpectEq(replacement.index, e1.index);
+            ZHLN::Test::ExpectNe(replacement.generation, e1.generation);
+            ZHLN::Test::ExpectEq(count, 2u);
+            ZHLN::Test::ExpectTrue(std::ranges::find(results, e2) != results.end());
+            ZHLN::Test::ExpectTrue(std::ranges::find(results, replacement) != results.end());
+            ZHLN::Test::ExpectTrue(std::ranges::find(results, e1) == results.end());
 
             return {};
         }
