@@ -17,6 +17,7 @@
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EntityCommandBuffer.hpp>
 // Engine.hpp only forward-declares SystemGraph; the scene-reset test calls
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
