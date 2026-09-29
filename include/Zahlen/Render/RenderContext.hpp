@@ -4,8 +4,6 @@
 #pragma once
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ErrorCode.hpp>
@@ -97,8 +95,12 @@ class ZHLN_API RenderContext {
 
     BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
     BufferHandle CreateStorageBuffer(size_t size);
-    BufferHandle GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles);
-    void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
+    // Persistent, renderer-owned buffers reclaimed by ReleaseEntityBuffers / ReconcileEntityBuffers.
+    // Do not also destroy them or pass them to TrackEntityBuffer.
+    [[nodiscard]] BufferHandle GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles);
+    [[nodiscard]] BufferHandle GetOrCreateParticleEmitterBuffer(Entity owner, uint32_t maxParticles);
+    [[nodiscard]] BufferHandle GetOrCreateMeshParticleEmitterBuffer(Entity owner, uint32_t maxParticles);
+    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
     // Raw byte streams declare their element stride; typed spans derive it.
@@ -182,12 +184,11 @@ class ZHLN_API RenderContext {
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
-
+    // Register an independently created buffer exactly once for owner-lifetime cleanup.
     void TrackEntityBuffer(Entity owner, BufferHandle buffer);
     void ReleaseEntityBuffers(Entity owner);
     void               ReconcileEntityBuffers(EntityAliveQuery alive);
+    // Counts all owner-lifetime registrations, including cached particle buffers.
     [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;

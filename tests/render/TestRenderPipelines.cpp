@@ -140,6 +140,80 @@ struct RenderPipelinesTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> particle_emitter_buffers_reuse_storage_and_release_with_their_owner() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("ParticleEmitterBuffers", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+
+            auto& reg = engine->GetRegistry();
+            auto& rc  = engine->GetRenderContext();
+            rc.ReconcileEntityBuffers(reg.AliveQuery());
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), size_t {0});
+            const ZHLN::Entity owner = reg.Create();
+            const ZHLN::Entity other = reg.Create();
+            constexpr uint32_t maxParticles = 8;
+
+            const auto billboard = rc.GetOrCreateParticleEmitterBuffer(owner, maxParticles);
+            const auto mesh = rc.GetOrCreateMeshParticleEmitterBuffer(owner, maxParticles);
+            const auto subresource = rc.GetOrCreateParticleBuffer(owner, 0, maxParticles);
+            const auto otherBillboard = rc.GetOrCreateParticleEmitterBuffer(other, maxParticles);
+            const auto tracked = rc.CreateStorageBuffer(64);
+            if (!ZHLN::Test::ExpectTrue(billboard != ZHLN::BufferHandle::Invalid && mesh != ZHLN::BufferHandle::Invalid &&
+                                        subresource != ZHLN::BufferHandle::Invalid && otherBillboard != ZHLN::BufferHandle::Invalid &&
+                                        tracked != ZHLN::BufferHandle::Invalid)) {
+                rc.DestroyBuffer(tracked);
+                rc.ReleaseEntityBuffers(owner);
+                rc.ReleaseEntityBuffers(other);
+                reg.Destroy(owner);
+                reg.Destroy(other);
+                return {};
+            }
+            rc.TrackEntityBuffer(owner, tracked);
+
+            // The emitter kinds and caller-supplied key 0 have separate cache
+            // identities. Each cached handle has one owning entity registration.
+            ZHLN::Test::ExpectNe(billboard, mesh);
+            ZHLN::Test::ExpectNe(billboard, subresource);
+            ZHLN::Test::ExpectNe(mesh, subresource);
+            ZHLN::Test::ExpectNe(billboard, otherBillboard);
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), size_t {5});
+            ZHLN::Test::ExpectEq(rc.GetOrCreateParticleEmitterBuffer(owner, maxParticles), billboard);
+            ZHLN::Test::ExpectEq(rc.GetOrCreateMeshParticleEmitterBuffer(owner, maxParticles), mesh);
+            ZHLN::Test::ExpectEq(rc.GetOrCreateParticleBuffer(owner, 0, maxParticles), subresource);
+
+            // Prior to the structured key, the XOR cache could alias these
+            // two different owners when their generations were equal.
+            const bool sameGeneration = owner.generation == other.generation;
+            if (sameGeneration) {
+                const auto collision = rc.GetOrCreateParticleBuffer(owner, owner.index ^ other.index, maxParticles);
+                const auto otherSubresource = rc.GetOrCreateParticleBuffer(other, 0, maxParticles);
+                ZHLN::Test::ExpectNe(collision, otherSubresource);
+                ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), size_t {7});
+            }
+
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+            ZHLN::Test::ExpectEq(rc.GetOrCreateParticleEmitterBuffer(owner, maxParticles), billboard);
+            ZHLN::Test::ExpectEq(rc.GetOrCreateMeshParticleEmitterBuffer(owner, maxParticles), mesh);
+
+            reg.Destroy(owner);
+            rc.ReconcileEntityBuffers(reg.AliveQuery());
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), size_t {sameGeneration ? 2u : 1u});
+            ZHLN::Test::ExpectEq(rc.GetOrCreateParticleEmitterBuffer(other, maxParticles), otherBillboard);
+            const ZHLN::Entity replacement = reg.Create();
+            const auto fresh = rc.GetOrCreateParticleEmitterBuffer(replacement, maxParticles);
+            ZHLN::Test::ExpectNe(fresh, billboard);
+
+            rc.ReleaseEntityBuffers(other);
+            ZHLN::Test::ExpectNe(rc.GetOrCreateParticleEmitterBuffer(other, maxParticles), otherBillboard);
+            rc.ReleaseEntityBuffers(other);
+            rc.ReleaseEntityBuffers(replacement);
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), size_t {0});
+            reg.Destroy(other);
+            reg.Destroy(replacement);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> stale_skinned_scratch_skips_draw_and_csg() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("StaleSkinnedScratch", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

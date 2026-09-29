@@ -6,8 +6,11 @@
 #include "DrawCommands.hpp"
 #include "GenerationalPool.hpp"
 #include "Rendering.hpp"
+#include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/Types.hpp>
@@ -15,9 +18,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <unordered_map>
 #include <utility>
 
 namespace ZHLN {
+
+// Distinct cache domains keep built-in emitters independent of caller-keyed
+// subresources, even when they belong to the same entity.
+enum class ParticleBufferKind : uint8_t { Subresource, BillboardEmitter, MeshEmitter };
 
 class GeometryManager {
   public:
@@ -70,16 +78,11 @@ class GeometryManager {
     }
     void ClearMaterials() noexcept { _materials.Clear(); }
 
-    void ReleaseParticleBuffers();
-    void ReleaseLedgers();
+    void ClearParticleBufferCache() noexcept;
+    void ReleaseTrackedEntityBuffers();
 
 
-    void TrackEmitter2D(uint64_t packedOwner, BufferHandle buffer) { _emitters2D.push_back({packedOwner, buffer}); }
-    void TrackEmitter3D(uint64_t packedOwner, BufferHandle buffer) { _emitters3D.push_back({packedOwner, buffer}); }
     void TrackEntityBuffer(uint64_t packedOwner, BufferHandle buffer) { _entityBuffers.push_back({packedOwner, buffer}); }
-
-    [[nodiscard]] auto Emitters2D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters2D; }
-    [[nodiscard]] auto Emitters3D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters3D; }
     [[nodiscard]] auto EntityBufferCount() const noexcept -> size_t { return _entityBuffers.size(); }
 
     void ReleaseOwner(uint64_t packedOwner);
@@ -87,8 +90,9 @@ class GeometryManager {
     void Reconcile(EntityAliveQuery alive);
 
 
-    [[nodiscard]] auto GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle;
-    void             ClearParticleBuffers();
+    [[nodiscard]] auto GetOrCreateParticleBuffer(
+        uint64_t packedOwner, uint32_t subresourceKey, ParticleBufferKind kind, size_t byteSize, Vk::BufferUsage usage
+    ) -> BufferHandle;
 
 
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
@@ -97,7 +101,23 @@ class GeometryManager {
 
   private:
     template <typename DeadFn>
-    void SweepLedgers(DeadFn&& isDead);
+    void SweepOwnedBuffers(DeadFn&& isDead);
+
+    struct ParticleBufferKey {
+        uint64_t           owner;
+        uint32_t           subresourceKey;
+        ParticleBufferKind kind;
+        constexpr bool operator==(const ParticleBufferKey&) const noexcept = default;
+    };
+
+    struct ParticleBufferKeyHash {
+        [[nodiscard]] auto operator()(const ParticleBufferKey& key) const noexcept -> size_t {
+            size_t hash = static_cast<size_t>(key.owner);
+            HashCombine(hash, key.subresourceKey);
+            HashCombine(hash, static_cast<size_t>(key.kind));
+            return hash;
+        }
+    };
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
@@ -110,12 +130,9 @@ class GeometryManager {
     ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;
 
-    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> _particleBuffers;
-
+    // Lookup only; every cached handle has exactly one owning registration below.
+    std::unordered_map<ParticleBufferKey, BufferHandle, ParticleBufferKeyHash> _particleBuffers;
     ZHLN::HashMap<uint64_t, BufferHandle> _skinnedScratch;
-
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters2D;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters3D;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _entityBuffers;
 };
 

@@ -4,7 +4,6 @@
 #include "ParticleSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
@@ -12,28 +11,8 @@ namespace ZHLN {
 
 void ParticleSystem::Update(ECS::Query<const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent> query,
                             ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
-    using namespace ZHLN::Ranges;
     auto& rc = *render;
     const auto& cam = *camera;
-
-    auto& active2D = rc.GetTracked2DEmitters();
-    auto& active3D = rc.GetTracked3DEmitters();
-
-    active2D | EraseIf([&](const auto& pair) {
-        if (!query.IsAlive(Entity::Unpack(pair.first))) {
-            rc.DestroyBuffer(pair.second);
-            return true;
-        }
-        return false;
-    });
-
-    active3D | EraseIf([&](const auto& pair) {
-        if (!query.IsAlive(Entity::Unpack(pair.first))) {
-            rc.DestroyBuffer(pair.second);
-            return true;
-        }
-        return false;
-    });
 
     auto entities = query.Entities<Components::ParticleEmitterComponent>();
     auto emitters = query.Raw<Components::ParticleEmitterComponent>();
@@ -44,12 +23,7 @@ void ParticleSystem::Update(ECS::Query<const Components::ParticleEmitterComponen
             continue;
         }
 
-        Entity       e      = entities[i];
-        BufferHandle buffer = BufferHandle::Invalid;
-
-        auto packId = e.Pack();
-
-        buffer = active2D | FindOrInsert(packId, [&] { return rc.CreateStorageBuffer(emitter.maxParticles * sizeof(Particle)); });
+        const BufferHandle buffer = rc.GetOrCreateParticleEmitterBuffer(entities[i], emitter.maxParticles);
 
         ParticleEmitterParams params = emitter.params;
         if (emitter.attachToCamera) {
@@ -68,12 +42,7 @@ void ParticleSystem::Update(ECS::Query<const Components::ParticleEmitterComponen
             continue;
         }
 
-        Entity       e      = mesh_entities[i];
-        BufferHandle buffer = BufferHandle::Invalid;
-
-        auto packId = e.Pack();
-
-        buffer = active3D | FindOrInsert(packId, [&] { return rc.CreateStorageBuffer(emitter.maxParticles * sizeof(Particle3D)); });
+        const BufferHandle buffer = rc.GetOrCreateMeshParticleEmitterBuffer(mesh_entities[i], emitter.maxParticles);
 
         rc.SubmitMeshParticleEmitter(buffer, emitter.maxParticles, emitter.params, emitter.meshAsset, emitter.materialAsset);
     }

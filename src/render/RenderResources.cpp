@@ -76,9 +76,30 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
     if (owner == Entity::Null()) {
         return BufferHandle::Invalid;
     }
+    return _impl->geometry.GetOrCreateParticleBuffer(
+        owner.Pack(), subresourceKey, ParticleBufferKind::Subresource, static_cast<size_t>(maxParticles) * sizeof(Particle),
+        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+    );
+}
 
-    const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    return _impl->geometry.GetOrCreateParticleBuffer(cacheKey, owner.Pack(), maxParticles * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
+auto RenderContext::GetOrCreateParticleEmitterBuffer(Entity owner, uint32_t maxParticles) -> BufferHandle {
+    if (owner == Entity::Null()) {
+        return BufferHandle::Invalid;
+    }
+    return _impl->geometry.GetOrCreateParticleBuffer(
+        owner.Pack(), 0, ParticleBufferKind::BillboardEmitter, static_cast<size_t>(maxParticles) * sizeof(Particle),
+        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+    );
+}
+
+auto RenderContext::GetOrCreateMeshParticleEmitterBuffer(Entity owner, uint32_t maxParticles) -> BufferHandle {
+    if (owner == Entity::Null()) {
+        return BufferHandle::Invalid;
+    }
+    return _impl->geometry.GetOrCreateParticleBuffer(
+        owner.Pack(), 0, ParticleBufferKind::MeshEmitter, static_cast<size_t>(maxParticles) * sizeof(Particle3D),
+        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+    );
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
@@ -123,8 +144,8 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->geometry.ClearMaterials();
 
     _impl->geometry.ReleaseSkinnedScratchBuffers();
-    _impl->geometry.ReleaseParticleBuffers();
-    _impl->geometry.ReleaseLedgers();
+    _impl->geometry.ReleaseTrackedEntityBuffers();
+    _impl->geometry.ClearParticleBufferCache();
 
     for (const auto& entry: _impl->renderTextures) {
         _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
@@ -133,14 +154,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->textureManager.Clear();
 
     _impl->deletionQueue.Drain();
-}
-
-auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->geometry.Emitters2D();
-}
-
-auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->geometry.Emitters3D();
 }
 
 void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {

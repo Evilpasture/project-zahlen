@@ -106,15 +106,21 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     });
 }
 
-auto GeometryManager::GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle {
-    const auto* existing = _particleBuffers.Find(cacheKey);
-    if (existing != nullptr && existing->second != BufferHandle::Invalid) {
-        return existing->second;
+auto GeometryManager::GetOrCreateParticleBuffer(
+    uint64_t packedOwner, uint32_t subresourceKey, ParticleBufferKind kind, size_t byteSize, Vk::BufferUsage usage
+) -> BufferHandle {
+    if (byteSize == 0) {
+        return BufferHandle::Invalid;
+    }
+    const ParticleBufferKey key {packedOwner, subresourceKey, kind};
+    if (const auto it = _particleBuffers.find(key); it != _particleBuffers.end()) {
+        return it->second;
     }
 
-    BufferHandle handle = CreateStorageBuffer(byteSize, usage);
+    const BufferHandle handle = CreateStorageBuffer(byteSize, usage);
     if (handle != BufferHandle::Invalid) {
-        _particleBuffers.Insert(cacheKey, {packedOwner, handle});
+        _particleBuffers.emplace(key, handle);
+        TrackEntityBuffer(packedOwner, handle);
     }
     return handle;
 }
@@ -164,55 +170,45 @@ void GeometryManager::ReleaseMeshBuffers() {
     _meshes.Clear();
 }
 
-void GeometryManager::ReleaseParticleBuffers() {
-    _particleBuffers.ForEach([this](uint64_t , const auto& tracked) -> void { Destroy(tracked.second); });
-    _particleBuffers.Clear();
+void GeometryManager::ClearParticleBufferCache() noexcept {
+    // The matching TrackEntityBuffer registrations own these handles.
+    _particleBuffers.clear();
 }
 
-void GeometryManager::ReleaseLedgers() {
-    for (auto* ledger: {&_emitters2D, &_emitters3D, &_entityBuffers}) {
-        for (const auto& tracked: *ledger) {
-            Destroy(tracked.second);
-        }
-        ledger->clear();
+void GeometryManager::ReleaseTrackedEntityBuffers() {
+    for (const auto& tracked: _entityBuffers) {
+        Destroy(tracked.second);
     }
+    _entityBuffers.clear();
 }
 
 template <typename DeadFn>
-void GeometryManager::SweepLedgers(DeadFn&& isDead) {
+void GeometryManager::SweepOwnedBuffers(DeadFn&& isDead) {
     using namespace ZHLN::Ranges;
 
-    auto sweep = [this, &isDead](auto& ledger) {
-        ledger | EraseIf([this, &isDead](const auto& tracked) {
-            if (isDead(tracked.first)) {
-                Destroy(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
-    sweep(_emitters2D);
-    sweep(_emitters3D);
-    sweep(_entityBuffers);
-
-    ZHLN::Array<uint64_t> deadKeys;
-    _particleBuffers.ForEach([&](uint64_t key, const auto& tracked) {
+    _entityBuffers | EraseIf([this, &isDead](const auto& tracked) {
         if (isDead(tracked.first)) {
             Destroy(tracked.second);
-            deadKeys.push_back(key);
+            return true;
         }
+        return false;
     });
-    for (const uint64_t key: deadKeys) {
-        _particleBuffers.Erase(key);
+
+    for (auto it = _particleBuffers.begin(); it != _particleBuffers.end();) {
+        if (isDead(it->first.owner)) {
+            it = _particleBuffers.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
 void GeometryManager::ReleaseOwner(uint64_t packedOwner) {
-    SweepLedgers([packedOwner](uint64_t owner) noexcept { return owner == packedOwner; });
+    SweepOwnedBuffers([packedOwner](uint64_t owner) noexcept { return owner == packedOwner; });
 }
 
 void GeometryManager::Reconcile(EntityAliveQuery alive) {
-    SweepLedgers([alive](uint64_t owner) { return !alive(Entity::Unpack(owner)); });
+    SweepOwnedBuffers([alive](uint64_t owner) { return !alive(Entity::Unpack(owner)); });
 }
 
 void GeometryManager::Destroy(BufferHandle handle) {
