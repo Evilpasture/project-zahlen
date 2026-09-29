@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_buffer;
 import sampling;
 
 public struct IBLBakePush {
@@ -108,13 +109,13 @@ void SHMain(uint3 tid: SV_DispatchThreadID, uint gtid: SV_GroupThreadID) {
     GroupMemoryBarrierWithGroupSync();
 
     if (gtid == 0) {
-        float4* sh = (float4*) pc.outAddr;
+        GPUBuffer<float4> sh = GPUBuffer<float4>(pc.outAddr);
         [unroll]
         for (int c = 0; c < 9; ++c) {
             float3 acc = float3(0.0f, 0.0f, 0.0f);
             for (uint t = 0; t < 64u; ++t)
                 acc += gSH[c][t];
-            sh[c] = float4(acc, 0.0f);
+            sh.store(c, float4(acc, 0.0f));
         }
     }
 }

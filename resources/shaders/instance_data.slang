@@ -5,6 +5,7 @@ module instance_data;
 
 import vertex_format;
 import cxx_abi;
+import gpu_buffer;
 
 public struct InstanceData {
     public float4x4 world;
@@ -243,23 +244,21 @@ public extension InstanceData {
     public uint fetchIndex(uint indexId) {
         if (this.iboAddress == 0)
             return indexId;
-        uint* indices = (uint*) this.iboAddress;
-        return indices[indexId];
+        return GPUBuffer<uint>(this.iboAddress).load(indexId);
     }
 
     [ForceInline]
     public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0)
             return float3(0.0f);
-        float* values    = (float*) this.posAddress;
+        GPUBuffer<float> values = GPUBuffer<float>(this.posAddress);
         uint valueOffset = vertexId * 3u;
-        return float3(values[valueOffset], values[valueOffset + 1u], values[valueOffset + 2u]);
+        return float3(values.load(valueOffset), values.load(valueOffset + 1u), values.load(valueOffset + 2u));
     }
 
     [ForceInline]
     public VertexAttributes fetchAttributes(uint vertexId) {
-        VertexAttributes* attributes = (VertexAttributes*) this.attrAddress;
-        return attributes[vertexId];
+        return GPUBuffer<VertexAttributes>(this.attrAddress).load(vertexId);
     }
 
     [ForceInline]
@@ -269,46 +268,45 @@ public extension InstanceData {
 
     [ForceInline]
     public GPUMeshlet fetchMeshlet(uint meshletIndex) {
-        uint* words = (uint*) this.meshletAddress;
-        uint base   = meshletIndex * 16u;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletAddress);
+        uint base = meshletIndex * 16u;
 
         GPUMeshlet m;
-        m.vertexOffset   = words[base + 0u];
-        m.triangleOffset = words[base + 1u];
-        m.vertexCount    = words[base + 2u];
-        m.triangleCount  = words[base + 3u];
-        m.sphereCenter   = float3(asfloat(words[base + 4u]), asfloat(words[base + 5u]), asfloat(words[base + 6u]));
-        m.sphereRadius   = asfloat(words[base + 7u]);
-        m.coneApex       = float3(asfloat(words[base + 8u]), asfloat(words[base + 9u]), asfloat(words[base + 10u]));
-        m.coneAxis       = float3(asfloat(words[base + 11u]), asfloat(words[base + 12u]), asfloat(words[base + 13u]));
-        m.coneCutoff     = asfloat(words[base + 14u]);
+        m.vertexOffset   = words.load(base + 0u);
+        m.triangleOffset = words.load(base + 1u);
+        m.vertexCount    = words.load(base + 2u);
+        m.triangleCount  = words.load(base + 3u);
+        m.sphereCenter   = float3(asfloat(words.load(base + 4u)), asfloat(words.load(base + 5u)), asfloat(words.load(base + 6u)));
+        m.sphereRadius   = asfloat(words.load(base + 7u));
+        m.coneApex       = float3(asfloat(words.load(base + 8u)), asfloat(words.load(base + 9u)), asfloat(words.load(base + 10u)));
+        m.coneAxis       = float3(asfloat(words.load(base + 11u)), asfloat(words.load(base + 12u)), asfloat(words.load(base + 13u)));
+        m.coneCutoff     = asfloat(words.load(base + 14u));
         return m;
     }
 
     [ForceInline]
     public uint fetchMeshletVertex(uint vertexOffset, uint local) {
-        uint* indices = (uint*) this.meshletVertexAddress;
-        return indices[vertexOffset + local];
+        return GPUBuffer<uint>(this.meshletVertexAddress).load(vertexOffset + local);
     }
 
     [ForceInline]
     public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
-        uint* words   = (uint*) this.meshletTriAddress;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletTriAddress);
         uint byteBase = triangleOffset + (triangleIndex * 3u);
 
-        uint b0 = (words[(byteBase + 0u) >> 2u] >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
-        uint b1 = (words[(byteBase + 1u) >> 2u] >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
-        uint b2 = (words[(byteBase + 2u) >> 2u] >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
+        uint b0 = (words.load((byteBase + 0u) >> 2u) >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
+        uint b1 = (words.load((byteBase + 1u) >> 2u) >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
+        uint b2 = (words.load((byteBase + 2u) >> 2u) >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
         return uint3(b0, b1, b2);
     }
 
     [ForceInline]
     public SkinVertex fetchSkin(uint vertexId) {
-        uint* words     = (uint*) this.skinAddress;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.skinAddress);
         uint wordOffset = vertexId * 3u;
         SkinVertex result;
-        result.joints  = uint2(words[wordOffset], words[wordOffset + 1u]);
-        result.weights = words[wordOffset + 2u];
+        result.joints  = uint2(words.load(wordOffset), words.load(wordOffset + 1u));
+        result.weights = words.load(wordOffset + 2u);
         return result;
     }
 }

@@ -1,5 +1,6 @@
 
 import common;
+import gpu_buffer;
 import material_model;
 import math.transform;
 import pbr_helpers;
@@ -72,8 +73,8 @@ struct PSOutput {
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
     VSOutput output;
 
-    Particle3D* particles = (Particle3D*) mp_pc.particleBufferAddr;
-    Particle3D p          = particles[instanceId];
+    GPUBuffer<Particle3D> particles = GPUBuffer<Particle3D>(mp_pc.particleBufferAddr);
+    Particle3D p = particles.load(instanceId);
 
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
         output.pos             = float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -96,16 +97,16 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
 
     uint actualVertexId = vertexId;
     if (mp_pc.iboAddress != 0) {
-        uint* indices  = (uint*) mp_pc.iboAddress;
-        actualVertexId = indices[vertexId];
+        GPUBuffer<uint> indices = GPUBuffer<uint>(mp_pc.iboAddress);
+        actualVertexId = indices.load(vertexId);
     }
 
-    float* positionValues = (float*) mp_pc.posAddress;
-    uint positionOffset   = actualVertexId * 3u;
-    float3 localPos       = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
-    float3 scaledPos      = localPos * p.position.w;
-    float3 rotatedPos     = Quaternion(p.rotation).rotate(scaledPos);
-    float3 worldPos       = rotatedPos + p.position.xyz;
+    GPUBuffer<float> positionValues = GPUBuffer<float>(mp_pc.posAddress);
+    uint positionOffset = actualVertexId * 3u;
+    float3 localPos = float3(positionValues.load(positionOffset), positionValues.load(positionOffset + 1u), positionValues.load(positionOffset + 2u));
+    float3 scaledPos = localPos * p.position.w;
+    float3 rotatedPos = Quaternion(p.rotation).rotate(scaledPos);
+    float3 worldPos = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
     output.pos      = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
@@ -120,8 +121,8 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
 #endif
 
     if (mp_pc.attrAddress != 0) {
-        VertexAttributes* attributes        = (VertexAttributes*) mp_pc.attrAddress;
-        VertexAttributes attributesAtVertex = attributes[actualVertexId];
+        GPUBuffer<VertexAttributes> attributes = GPUBuffer<VertexAttributes>(mp_pc.attrAddress);
+        VertexAttributes attributesAtVertex = attributes.load(actualVertexId);
         Quaternion rotation                 = Quaternion(p.rotation);
 
         float3 localNormal = attributesAtVertex.unpackedNormal.xyz;

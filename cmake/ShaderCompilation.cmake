@@ -39,6 +39,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/vertex_format.slang"
     "${SHADER_SRC_DIR}/particles.slang"
     "${SHADER_SRC_DIR}/material_model.slang"
+    "${SHADER_SRC_DIR}/gpu_buffer.slang"
     "${SHADER_SRC_DIR}/math/math.slang"
     "${SHADER_SRC_DIR}/math/phase.slang"
     "${SHADER_SRC_DIR}/math/transform.slang"

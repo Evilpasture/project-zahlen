@@ -21,6 +21,14 @@ coat and anisotropy layers); forward and mesh-particle fragments use
 shader-local, not a host material ABI or runtime material-type dispatch.
 Forward transmission retains its separate refractive shading path.
 
+`gpu_buffer.slang` supplies `GPUBuffer<T>` for typed loads, stores and uint
+atomics through buffer device addresses. It is a non-owning, unchecked shader
+view; callers must retain their existing zero-address and bounds guards.
+Host-visible `uint64_t` addresses stay scalar in push data, instance data and
+heap layouts, so this wrapper adds no descriptor or host ABI fields. Meshlets
+and packed skin data still use word buffers with their existing byte strides.
+The intentional invalid-pointer diagnostic in `hang_gpu.slang` stays raw.
+
 Descriptor binding authority lives in the shaders: the C++ side reflects
 the compiled SPIR-V (`ReflectedLayout`) instead of declaring static
 layouts. Keep `GlobalSceneRegistry` member order stable in `common.slang` —

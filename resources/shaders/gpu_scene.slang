@@ -4,6 +4,7 @@
 module gpu_scene;
 
 import common;
+import gpu_buffer;
 import uniforms;
 
 public struct GPUDrawIndirectCommand {
@@ -38,38 +39,37 @@ void CompactMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pc.srcCount)
         return;
 
-    InstanceData* src = (InstanceData*) pc.srcInstancesAddr;
-    InstanceData inst = src[tid.x];
+    GPUBuffer<InstanceData> src = GPUBuffer<InstanceData>(pc.srcInstancesAddr);
+    InstanceData inst = src.load(tid.x);
 
     bool visible = inst.vertexCount > 0 && inst.cullRadius > 0.0f;
     if (!visible)
         return;
 
-    uint* counter = (uint*) pc.counterAddr;
-    uint slot     = 0;
-    InterlockedAdd(counter[0], 1, slot);
+    GPUBuffer<uint> counter = GPUBuffer<uint>(pc.counterAddr);
+    uint slot = counter.atomicAdd(0u, 1u);
     if (slot >= pc.maxDstCount)
         return;
 
-    InstanceData* dst = (InstanceData*) pc.dstInstancesAddr;
-    dst[slot]         = inst;
+    GPUBuffer<InstanceData> dst = GPUBuffer<InstanceData>(pc.dstInstancesAddr);
+    dst.store(slot, inst);
 
-    if (pc.drawCmdsAddr != 0) {
-        GPUDrawIndirectCommand* cmds = (GPUDrawIndirectCommand*) pc.drawCmdsAddr;
+    GPUBuffer<GPUDrawIndirectCommand> cmds = GPUBuffer<GPUDrawIndirectCommand>(pc.drawCmdsAddr);
+    if (cmds.isValid()) {
         GPUDrawIndirectCommand cmd;
         cmd.vertexCount   = (inst.indexCount > 0) ? inst.indexCount : inst.vertexCount;
         cmd.instanceCount = 1;
         cmd.firstVertex   = 0;
         cmd.firstInstance = slot;
-        cmds[slot]        = cmd;
+        cmds.store(slot, cmd);
     }
 
-    if (pc.meshCmdsAddr != 0 && inst.meshletCount > 0) {
-        GPUMeshTasksIndirectCommand* meshCmds = (GPUMeshTasksIndirectCommand*) pc.meshCmdsAddr;
+    GPUBuffer<GPUMeshTasksIndirectCommand> meshCmds = GPUBuffer<GPUMeshTasksIndirectCommand>(pc.meshCmdsAddr);
+    if (meshCmds.isValid() && inst.meshletCount > 0) {
         GPUMeshTasksIndirectCommand meshCmd;
         meshCmd.groupCountX = (inst.meshletCount + 31u) / 32u;
         meshCmd.groupCountY = 1;
         meshCmd.groupCountZ = 1;
-        meshCmds[slot]      = meshCmd;
+        meshCmds.store(slot, meshCmd);
     }
 }

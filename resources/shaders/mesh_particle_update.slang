@@ -1,5 +1,6 @@
 
 import common;
+import gpu_buffer;
 import math.transform;
 import particles;
 import uniforms;
@@ -20,9 +21,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (idx >= pc.particleCount)
         return;
 
-    Particle3D* particleList = (Particle3D*) pc.particleBufferAddr;
-    Particle3D p             = particleList[idx];
-    float dt              = pc.deltaTime;
+    GPUBuffer<Particle3D> particleList = GPUBuffer<Particle3D>(pc.particleBufferAddr);
+    Particle3D p = particleList.load(idx);
+    float dt = pc.deltaTime;
 
     if (p.params.y <= 0.0f) {
         float3 seed = float3(idx, scene.frame.camPos.w, pc.p.scaleMin);
@@ -70,5 +71,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         p.color      = pc.p.startColor;
     }
 
-    particleList[idx] = p;
+    particleList.store(idx, p);
 }

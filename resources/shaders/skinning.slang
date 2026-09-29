@@ -1,3 +1,4 @@
+import gpu_buffer;
 
 struct VertexAttributes {
     uint normal;
@@ -47,17 +48,17 @@ uint PackNormal(float3 n, float w) {
     return (ws << 30) | (zs << 20) | (ys << 10) | xs;
 }
 
-float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset, GPUJoint* jointsPool) {
+float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOffset, GPUBuffer<GPUJoint> jointsPool) {
     float wSum = weights.x + weights.y + weights.z + weights.w;
     if (wSum < 1e-4f) {
         return position;
     }
     weights /= wSum;
 
-    GPUJoint j0 = jointsPool[jointOffset + joints.x];
-    GPUJoint j1 = jointsPool[jointOffset + joints.y];
-    GPUJoint j2 = jointsPool[jointOffset + joints.z];
-    GPUJoint j3 = jointsPool[jointOffset + joints.w];
+    GPUJoint j0 = jointsPool.load(jointOffset + joints.x);
+    GPUJoint j1 = jointsPool.load(jointOffset + joints.y);
+    GPUJoint j2 = jointsPool.load(jointOffset + joints.z);
+    GPUJoint j3 = jointsPool.load(jointOffset + joints.w);
 
     float4 pos = (j0.col0 * position.x + j0.col1 * position.y + j0.col2 * position.z + j0.col3 * position.w) * weights.x +
                  (j1.col0 * position.x + j1.col1 * position.y + j1.col2 * position.z + j1.col3 * position.w) * weights.y +
@@ -66,17 +67,17 @@ float4 SkinPosition(float4 position, uint4 joints, float4 weights, uint jointOff
     return pos;
 }
 
-float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset, GPUJoint* jointsPool) {
+float3 SkinDirection(float3 direction, uint4 joints, float4 weights, uint jointOffset, GPUBuffer<GPUJoint> jointsPool) {
     float wSum = weights.x + weights.y + weights.z + weights.w;
     if (wSum < 1e-4f) {
         return direction;
     }
     weights /= wSum;
 
-    GPUJoint j0 = jointsPool[jointOffset + joints.x];
-    GPUJoint j1 = jointsPool[jointOffset + joints.y];
-    GPUJoint j2 = jointsPool[jointOffset + joints.z];
-    GPUJoint j3 = jointsPool[jointOffset + joints.w];
+    GPUJoint j0 = jointsPool.load(jointOffset + joints.x);
+    GPUJoint j1 = jointsPool.load(jointOffset + joints.y);
+    GPUJoint j2 = jointsPool.load(jointOffset + joints.z);
+    GPUJoint j3 = jointsPool.load(jointOffset + joints.w);
 
     float3 dir = (j0.col0.xyz * direction.x + j0.col1.xyz * direction.y + j0.col2.xyz * direction.z) * weights.x +
                  (j1.col0.xyz * direction.x + j1.col1.xyz * direction.y + j1.col2.xyz * direction.z) * weights.y +
@@ -100,17 +101,17 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (tid.x >= pcs.vertexCount)
         return;
 
-    float* inPosValues            = (float*) pcs.inPosAddr;
-    VertexAttributes* inAttrPool  = (VertexAttributes*) pcs.inAttrAddr;
-    float* outPosValues           = (float*) pcs.outPosAddr;
-    VertexAttributes* outAttrPool = (VertexAttributes*) pcs.outAttrAddr;
-    GPUJoint* jointsPool          = (GPUJoint*) pcs.jointsAddr;
-    float4* morphDeltasPool       = (float4*) pcs.morphDeltasAddr;
+    GPUBuffer<float> inPosValues = GPUBuffer<float>(pcs.inPosAddr);
+    GPUBuffer<VertexAttributes> inAttrPool = GPUBuffer<VertexAttributes>(pcs.inAttrAddr);
+    GPUBuffer<float> outPosValues = GPUBuffer<float>(pcs.outPosAddr);
+    GPUBuffer<VertexAttributes> outAttrPool = GPUBuffer<VertexAttributes>(pcs.outAttrAddr);
+    GPUBuffer<GPUJoint> jointsPool = GPUBuffer<GPUJoint>(pcs.jointsAddr);
+    GPUBuffer<float4> morphDeltasPool = GPUBuffer<float4>(pcs.morphDeltasAddr);
 
     uint posOffset  = tid.x * 3u;
-    float3 localPos = float3(inPosValues[posOffset], inPosValues[posOffset + 1u], inPosValues[posOffset + 2u]);
+    float3 localPos = float3(inPosValues.load(posOffset), inPosValues.load(posOffset + 1u), inPosValues.load(posOffset + 2u));
 
-    VertexAttributes attr = inAttrPool[tid.x];
+    VertexAttributes attr = inAttrPool.load(tid.x);
     uint normalRaw        = attr.normal;
     uint tangentRaw       = attr.tangent;
     uint uvRaw            = attr.uv;
@@ -120,10 +121,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
     if (pcs.inSkinAddr != 0) {
-        uint* skinWords = (uint*) pcs.inSkinAddr;
+        GPUBuffer<uint> skinWords = GPUBuffer<uint>(pcs.inSkinAddr);
         uint skinOffset = tid.x * 3u;
-        joints          = UnpackJoints(uint2(skinWords[skinOffset], skinWords[skinOffset + 1u]));
-        weights         = UnpackWeights(skinWords[skinOffset + 2u]);
+        joints          = UnpackJoints(uint2(skinWords.load(skinOffset), skinWords.load(skinOffset + 1u)));
+        weights         = UnpackWeights(skinWords.load(skinOffset + 2u));
     }
 
     if (pcs.activeMorphCount > 0) {
@@ -134,7 +135,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             uint deltaIndex = pcs.morphOffset + (i * pcs.vertexCount) + tid.x;
 
             float weight = pcs.morphWeights[i];
-            float3 delta = morphDeltasPool[deltaIndex].xyz;
+            float3 delta = morphDeltasPool.load(deltaIndex).xyz;
             localPos += delta * weight;
         }
     }
@@ -145,11 +146,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 tangUnpack  = UnpackNormal(tangentRaw);
     float3 skinnedTang = normalize(SkinDirection(tangUnpack.xyz, joints, weights, pcs.jointOffset, jointsPool));
 
-    outPosValues[posOffset + 0u] = skinnedPos.x;
-    outPosValues[posOffset + 1u] = skinnedPos.y;
-    outPosValues[posOffset + 2u] = skinnedPos.z;
+    outPosValues.store(posOffset + 0u, skinnedPos.x);
+    outPosValues.store(posOffset + 1u, skinnedPos.y);
+    outPosValues.store(posOffset + 2u, skinnedPos.z);
 
     uint outNorm       = PackNormal(skinnedNorm, normUnpack.w);
     uint outTang       = PackNormal(skinnedTang, tangUnpack.w);
-    outAttrPool[tid.x] = { outNorm, outTang, uvRaw, colorRaw };
+    VertexAttributes outAttr = { outNorm, outTang, uvRaw, colorRaw };
+    outAttrPool.store(tid.x, outAttr);
 }

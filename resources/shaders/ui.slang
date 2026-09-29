@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_buffer;
 import instance_data;
 import vertex_format;
 
@@ -33,11 +34,11 @@ struct UIVSOutput {
 UIVSOutput VSMain(uint vertexId: SV_VertexID) {
     UIVSOutput output;
 
-    float3* posPool            = (float3*) uiObj.posAddress;
-    VertexAttributes* attrPool = (VertexAttributes*) uiObj.attrAddress;
+    GPUBuffer<float3> posPool = GPUBuffer<float3>(uiObj.posAddress);
+    GPUBuffer<VertexAttributes> attrPool = GPUBuffer<VertexAttributes>(uiObj.attrAddress);
 
-    float3 position       = posPool[vertexId];
-    VertexAttributes attr = attrPool[vertexId];
+    float3 position = posPool.load(vertexId);
+    VertexAttributes attr = attrPool.load(vertexId);
 
     output.pos   = mul(uiObj.orthoMatrix, float4(position, 1.0f));
     output.uv    = attr.unpackedUV;
