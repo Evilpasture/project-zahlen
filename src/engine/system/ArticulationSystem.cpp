@@ -8,6 +8,7 @@
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -87,8 +88,8 @@ bool ArticulationSystem::AttachRagdoll(
 
     BindSkeleton(jointOffset, skeleton);
 
-    reg.Add(
-        rootEntity, Components::RagdollComponent {
+    SceneResources::Attach(
+        pc, reg, rootEntity, Components::RagdollComponent {
                         .ragdollHandle    = ragdollHandle,
                         .skeletonAsset    = InvalidAssetID,
                         .state            = RagdollState::Inactive,

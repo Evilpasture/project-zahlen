@@ -368,6 +368,35 @@ export struct CraterDecalComponent {
 
 export class ExplosionSystem {
   public:
+    static void Release(Engine& engine, ExplosionComponent& exp) {
+        auto& render = engine.GetRenderContext();
+        render.DestroyBuffer(std::exchange(exp.fireBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.smokeBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.shockwaveBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.groundRingBuffer, BufferHandle::Invalid));
+    }
+
+    static void Detach(Engine& engine, Entity entity) {
+        if (auto* exp = engine.GetRegistry().Get<ExplosionComponent>(entity)) {
+            Release(engine, *exp);
+            engine.GetRegistry().Remove<ExplosionComponent>(entity);
+        }
+    }
+
+    static void Cleanup(Engine& engine, bool all) {
+        auto& reg = engine.GetRegistry();
+        const auto entities = reg.GetEntitiesWith<ExplosionComponent>();
+        if (entities.empty()) {
+            return;
+        }
+        auto explosions = reg.GetRawArray<ExplosionComponent>();
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (all || reg.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+                Release(engine, explosions[i]);
+            }
+        }
+    }
+
     static void Init(Engine& engine) {
         auto& rc  = engine.GetRenderContext();
         auto& reg = engine.GetRegistry();
@@ -376,13 +405,7 @@ export class ExplosionSystem {
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
         reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
 
-        if (reg.ObserveRemoval<ExplosionComponent>([&engine](Entity, ExplosionComponent& exp) {
-                auto& render = engine.GetRenderContext();
-                render.DestroyBuffer(std::exchange(exp.fireBuffer, BufferHandle::Invalid));
-                render.DestroyBuffer(std::exchange(exp.smokeBuffer, BufferHandle::Invalid));
-                render.DestroyBuffer(std::exchange(exp.shockwaveBuffer, BufferHandle::Invalid));
-                render.DestroyBuffer(std::exchange(exp.groundRingBuffer, BufferHandle::Invalid));
-            })) {
+        if (engine.AddSceneCleanupPass(&Cleanup)) {
             engine.AddDeviceLostCallback([](Engine& owner) {
                 for (auto& exp: owner.GetRegistry().GetRawArray<ExplosionComponent>()) {
                     exp.fireBuffer       = BufferHandle::Invalid;
@@ -443,6 +466,12 @@ export class ExplosionSystem {
                                      .value_or(Material {});
             rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
         }
+    }
+
+    static void Attach(Engine& engine, Entity entity, ExplosionComponent component) {
+        Init(engine);
+        Detach(engine, entity);
+        engine.GetRegistry().Add(entity, std::move(component));
     }
 
     static Entity Spawn(Engine& engine, const JPH::Vec3& origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
@@ -563,6 +592,9 @@ export class ExplosionSystem {
             for (size_t i = 0; i < expEntities.size(); ++i) {
                 Entity              e   = expEntities[i];
                 ExplosionComponent& exp = explosions[i];
+                if (reg.Get<Components::PendingDestroy>(e) != nullptr) {
+                    continue;
+                }
                 exp.age += dt;
 
                 // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
@@ -636,6 +668,9 @@ export class ExplosionSystem {
             for (size_t i = 0; i < craterEntities.size(); ++i) {
                 Entity                craterEnt = craterEntities[i];
                 CraterDecalComponent& crater    = craters[i];
+                if (reg.Get<Components::PendingDestroy>(craterEnt) != nullptr) {
+                    continue;
+                }
                 crater.age += dt;
 
                 // Handle smooth dissolution over the final fadeDuration seconds

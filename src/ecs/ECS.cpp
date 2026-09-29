@@ -124,9 +124,6 @@ void SparseSet::Insert(Entity entity, const void* data) {
         if (_dense[denseIdx] != entity) {
             ZHLN::Panic("ECS: cannot replace a component through a stale entity handle");
         }
-        if (_onRemove) {
-            _onRemove(entity, _data + (denseIdx * _elementSize));
-        }
     }
     std::memcpy(_data + (denseIdx * _elementSize), data, _elementSize);
 }
@@ -151,9 +148,6 @@ auto SparseSet::InsertEmpty(Entity entity) -> void* {
             ZHLN::Panic("ECS: cannot replace a component through a stale entity handle");
         }
         void* component = _data + (denseIdx * _elementSize);
-        if (_onRemove) {
-            _onRemove(entity, component);
-        }
         if (_destructor != nullptr) {
             _destructor(component);
         }
@@ -167,9 +161,6 @@ void SparseSet::Remove(Entity entity) {
     }
     uint32_t denseIdx = _sparse[entity.index];
     void* component = _data + (denseIdx * _elementSize);
-    if (_onRemove) {
-        _onRemove(entity, component);
-    }
     if (_destructor != nullptr) {
         _destructor(component);
     }
@@ -203,9 +194,6 @@ void SparseSet::Clear() noexcept {
     if (_data != nullptr) {
         for (size_t i = 0; i < _count; ++i) {
             void* component = _data + (i * _elementSize);
-            if (_onRemove) {
-                _onRemove(_dense[i], component);
-            }
             if (_destructor != nullptr) {
                 _destructor(component);
             }
@@ -252,8 +240,8 @@ Registry::Registry() {
 }
 
 Registry::~Registry() {
-    // Storage destruction runs component destructors, not removal observers.
-    // Owners must Clear() explicitly while observer dependencies are alive.
+    // Storage destruction only runs component destructors. External handles
+    // belong to the scene cleanup pass, not the registry.
     for (size_t i = 0; i < _compCapacity; ++i) {
         SparseSet* set = _components[i];
         _components[i] = nullptr;
@@ -351,32 +339,38 @@ void Registry::Clear() {
 auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t {
     uint32_t id = GetFamilyIDFromName(name);
     if (id != 0xFFFFFFFF) {
+        // A registered C++ family must never be converted into unconstructed
+        // script storage. AddDynamic below also enforces this at insertion.
+        if (id < _compCapacity && _components[id] != nullptr && !_typeInfo[id].isDynamic) {
+            return 0xFFFFFFFF;
+        }
         return id;
     }
     ZHLN::Lock(sync.shadowLock, [&] -> void {
-        uint32_t typeHash = HashTypeName(name);
-        id                = ComponentFamily::ResolveDenseID(typeHash);
-        MapNameToFamilyID(name, id);
-
+        id = ComponentFamily::ResolveDenseID(HashTypeName(name));
         EnsureComponentCapacity(id);
-        if (_components[id] == nullptr) {
-            _components[id] = new SparseSet(size, alignment, &this->sync);
+        if (_components[id] != nullptr) {
+            id = 0xFFFFFFFF;
+            return;
         }
-
-        _typeInfo[id] = {.name = name, .size = size, .alignment = alignment, .debugDump = [](const void*, std::string& out) -> void {
-                             out += "{}";
-                         }};
+        MapNameToFamilyID(name, id);
+        _components[id] = new SparseSet(size, alignment, &this->sync);
+        _typeInfo[id] = {
+            .name      = name,
+            .size      = size,
+            .alignment = alignment,
+            .debugDump = [](const void*, std::string& out) -> void { out += "{}"; },
+            .isDynamic = true,
+        };
     });
     return id;
 }
 
 auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     return ZHLN::Lock(sync.shadowLock, [&] -> void* {
-        if (!IsAlive(entity)) {
-            return nullptr;
-        }
-        EnsureComponentCapacity(familyID);
-        if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
+        // Do not grow the registry for unknown (or sentinel) family IDs.
+        // InsertEmpty cannot construct typed components or release handles.
+        if (!IsAlive(entity) || familyID >= _compCapacity || _components[familyID] == nullptr || !_typeInfo[familyID].isDynamic) {
             return nullptr;
         }
         return _components[familyID]->InsertEmpty(entity);

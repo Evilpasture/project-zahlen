@@ -239,6 +239,7 @@ class ZHLN_API PhysicsContext {
     // Physics owns the Jolt instance; ECS components borrow a generational handle.
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> Physics::RagdollHandle;
     void DestroyRagdoll(Physics::RagdollHandle handle) noexcept;
+    void DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept;
     // Borrowed until DestroyRagdoll; use only while the owning component is live.
     [[nodiscard]] auto GetRagdoll(Physics::RagdollHandle handle) const noexcept -> JPH::Ragdoll*;
     void ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
@@ -255,6 +256,9 @@ class ZHLN_API PhysicsContext {
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
 
     void DestroyBody(Physics::BodyHandle handle);
+    // Queue an entire scene cleanup under one shadow lock. Stale, null and
+    // duplicate handles are ignored using the same validation as DestroyBody.
+    void DestroyBodies(std::span<const Physics::BodyHandle> handles);
 
     void SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);

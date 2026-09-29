@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -26,10 +27,12 @@ class Registry;
 
 namespace ZHLN::PrefabFactory {
 
-// Standalone Registry+RenderContext spawners install the mesh removal observer
-// here; keep ctx alive until reg is cleared. Engine installs its own observer
-// so device-loss recreation always uses the current renderer instead.
-void InstallMeshOwnerCleanup(RenderContext& ctx, ECS::Registry& reg);
+// Standalone Registry+RenderContext scenes must release generated meshes
+// before removing components or clearing the registry. Engine scenes use
+// DespawnEntity, Engine::ClearScene and SceneResources::Attach/Detach instead.
+void AttachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component);
+void DetachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity);
+void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg);
 
 // Standalone builders return caller-owned buffers: use DestroyMesh after their
 // last draw. Entity spawners below attach scene-owned cleanup instead.

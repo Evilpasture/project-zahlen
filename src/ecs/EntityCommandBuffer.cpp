@@ -24,7 +24,11 @@ void EntityCommandBuffer::Playback() {
                 break;
             }
             case CommandType::Destroy: {
-                _registry->Destroy(target);
+                if (_destroy != nullptr) {
+                    _destroy(*_registry, target);
+                } else {
+                    _registry->Destroy(target);
+                }
                 break;
             }
             case CommandType::AddComponent: {

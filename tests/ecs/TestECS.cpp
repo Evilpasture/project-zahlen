@@ -28,7 +28,7 @@ struct FlagComponent {
     bool active = true;
 };
 
-struct ObservedComponent {
+struct PayloadComponent {
     uint32_t resource = 0;
 };
 
@@ -155,93 +155,80 @@ struct ECSTestSuite {
             return {};
         }
 
-        // Removal observers run on explicit ECS operations (including
-        // replacement, deferred destruction and scene reset), not teardown.
-        std::expected<void, ZHLN::ErrorCode> component_removal_observers_follow_component_lifetime() {
+        // Plain ECS stays immediate: it owns only component storage, not the
+        // resources a scene's component handles may refer to.
+        std::expected<void, ZHLN::ErrorCode> data_only_registry_lifecycle_is_immediate() {
             ZHLN::ECS::Registry reg;
-            reg.RegisterComponent<ObservedComponent>("ObservedComponent");
-            std::vector<uint32_t> released;
-            ZHLN::Test::ExpectTrue(reg.ObserveRemoval<ObservedComponent>([&](ZHLN::Entity, ObservedComponent& comp) {
-                released.push_back(comp.resource);
-                comp.resource = 0;
-            }));
-            ZHLN::Test::ExpectFalse(reg.ObserveRemoval<ObservedComponent>([](ZHLN::Entity, ObservedComponent&) {}));
-
-            const auto a = reg.Create(ObservedComponent {.resource = 1});
-            const auto b = reg.Create(ObservedComponent {.resource = 2});
-            reg.Add(a, ObservedComponent {.resource = 3});
-            if (ZHLN::Test::ExpectEq(released.size(), size_t {1})) {
-                ZHLN::Test::ExpectEq(released[0], 1u);
-            }
-            reg.Remove<ObservedComponent>(a);
-            reg.Remove<ObservedComponent>(a);
-            if (ZHLN::Test::ExpectEq(released.size(), size_t {2})) {
-                ZHLN::Test::ExpectEq(released[1], 3u);
-            }
-
-            // Removal compacts the sparse set; b's resource remains its own.
-            ZHLN::Test::ExpectEq(reg.Get<ObservedComponent>(b)->resource, 2u);
+            const auto a = reg.Create(PayloadComponent {.resource = 1});
+            const auto b = reg.Create(PayloadComponent {.resource = 2});
+            reg.Add(a, PayloadComponent {.resource = 3});
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(a)->resource, 3u);
+            reg.Remove<PayloadComponent>(a);
+            ZHLN::Test::ExpectTrue(reg.Get<PayloadComponent>(a) == nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(b)->resource, 2u);
             reg.Destroy(b);
-            if (ZHLN::Test::ExpectEq(released.size(), size_t {3})) {
-                ZHLN::Test::ExpectEq(released[2], 2u);
-            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(b));
 
-            const auto recycled = reg.Create(ObservedComponent {.resource = 4});
-            reg.Remove<ObservedComponent>(b); // a stale generation cannot remove recycled's component
-            ZHLN::Test::ExpectTrue(reg.Get<ObservedComponent>(b) == nullptr);
-            ZHLN::Test::ExpectEq(reg.Get<ObservedComponent>(recycled)->resource, 4u);
+            const auto recycled = reg.Create(PayloadComponent {.resource = 4});
+            reg.Remove<PayloadComponent>(b); // stale generation cannot affect the recycled entity
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(recycled)->resource, 4u);
             reg.Clear();
-            reg.Clear();
-            if (ZHLN::Test::ExpectEq(released.size(), size_t {4})) {
-                ZHLN::Test::ExpectEq(released[3], 4u);
-            }
-
-            // Nontrivial components also invoke the observer before destruction.
-            std::string removedTag;
-            reg.RegisterComponent<TagComponent>("TagComponent");
-            ZHLN::Test::ExpectTrue(reg.ObserveRemoval<TagComponent>([&](ZHLN::Entity, TagComponent& tag) { removedTag = tag.tag; }));
-            const auto tagged = reg.Create(TagComponent {.tag = "first"});
-            reg.Add(tagged, TagComponent {.tag = "second"});
-            ZHLN::Test::ExpectEq(removedTag, std::string("first"));
-            reg.Destroy(tagged);
-            ZHLN::Test::ExpectEq(removedTag, std::string("second"));
-
-            {
-                ZHLN::ECS::Registry extra;
-                extra.RegisterComponent<ObservedComponent>("ObservedComponent");
-                static_cast<void>(extra.ObserveRemoval<ObservedComponent>([&](ZHLN::Entity, ObservedComponent& comp) {
-                    released.push_back(comp.resource);
-                }));
-                const auto deferred = extra.Create(ObservedComponent {.resource = 9});
-                ZHLN::ECS::EntityCommandBuffer ecb(extra);
-                ecb.DestroyEntity(deferred);
-                ecb.Playback();
-                extra.Create(ObservedComponent {.resource = 10});
-                extra.Clear(); // Explicit cleanup runs observers while dependencies live.
-                extra.Create(ObservedComponent {.resource = 11}); // Dummy value left live to exercise teardown.
-            } // The remaining component's observer must not run in ~SparseSet.
-            if (ZHLN::Test::ExpectEq(released.size(), size_t {6})) {
-                ZHLN::Test::ExpectEq(released[4], 9u);
-                ZHLN::Test::ExpectEq(released[5], 10u);
-            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(recycled));
             return {};
         }
 
-        // Destruction still runs nontrivial component destructors, without
-        // dispatching observers that may capture already-destroyed services.
-        std::expected<void, ZHLN::ErrorCode> registry_teardown_does_not_notify_removal_observers() {
-            uint32_t destructions   = 0;
-            uint32_t removals       = 0;
+        std::expected<void, ZHLN::ErrorCode> dynamic_add_cannot_overwrite_typed_owners() {
+            ZHLN::ECS::Registry reg;
+            reg.RegisterComponent<PositionComponent>("PositionComponent");
+            const auto entity = reg.Create(PositionComponent {.x = 9.0f});
+            const auto typedFamily = ZHLN::ECS::ComponentFamily::GetTypeID<PositionComponent>();
+            ZHLN::Test::ExpectTrue(reg.AddDynamic(entity, typedFamily) == nullptr);
+            ZHLN::Test::ExpectTrue(reg.AddDynamic(entity, 0xFFFFFFFFu) == nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PositionComponent>(entity)->x, 9.0f);
+            ZHLN::Test::ExpectEq(reg.RegisterComponentDynamic("PositionComponent", sizeof(PositionComponent), alignof(PositionComponent)), 0xFFFFFFFFu);
+
+            const auto dynamicFamily = reg.RegisterComponentDynamic("ECSDynamicDataOnlyTest", sizeof(uint32_t), alignof(uint32_t));
+            void* data = reg.AddDynamic(entity, dynamicFamily);
+            ZHLN::Test::ExpectTrue(data != nullptr);
+            ZHLN::Test::ExpectEq(reg.GetRawByFamily(entity, dynamicFamily), data);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> command_buffer_destroy_policy_keeps_components_for_cleanup() {
+            struct Marked {};
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::EntityCommandBuffer ecb(reg, [](ZHLN::ECS::Registry& registry, ZHLN::Entity entity) {
+                if (registry.IsAlive(entity) && registry.Get<Marked>(entity) == nullptr) {
+                    registry.Add(entity, Marked {});
+                }
+            });
+            const auto owner = reg.Create(PayloadComponent {.resource = 42});
+            ecb.DestroyEntity(owner);
+            ecb.DestroyEntity(owner);
+            ecb.Playback();
+            ZHLN::Test::ExpectTrue(reg.IsAlive(owner));
+            ZHLN::Test::ExpectTrue(reg.Get<Marked>(owner) != nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(owner)->resource, 42u);
+
+            // A batch system can inspect every marked component before it
+            // reclaims the entities. Snapshot because Destroy compacts sets.
+            const auto marked = reg.GetEntitiesWith<Marked>();
+            std::vector<ZHLN::Entity> pending(marked.begin(), marked.end());
+            for (auto entity: pending) {
+                reg.Destroy(entity);
+            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(owner));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> registry_teardown_runs_component_destructors() {
+            uint32_t destructions = 0;
             uint32_t beforeTeardown = 0;
             {
                 ZHLN::ECS::Registry reg;
-                ZHLN::Test::ExpectTrue(reg.ObserveRemoval<CountedComponent>([&](ZHLN::Entity, CountedComponent&) {
-                    ++removals;
-                }));
                 reg.Create(CountedComponent {.destructions = &destructions});
                 beforeTeardown = destructions; // Account for the Add temporary.
             }
-            ZHLN::Test::ExpectEq(removals, 0u);
             ZHLN::Test::ExpectEq(destructions, beforeTeardown + 1);
             return {};
         }

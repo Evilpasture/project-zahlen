@@ -10,6 +10,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -28,6 +29,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct RenderPipelinesTestSuite {
     RenderPipelinesTestSuite() {
@@ -196,16 +198,21 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(rebound->posBuffer, handle);
             }
 
-            // Raw component removal uses the same owner cleanup as despawn.
-            reg.Remove<ZHLN::Components::OwnedMeshComponent>(entity);
+            // Direct component removal uses a typed owner-aware helper.
+            ZHLN::Test::ExpectTrue(ZHLN::SceneResources::Detach<ZHLN::Components::OwnedMeshComponent>(*engine, entity));
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
-            reg.Destroy(entity);
+            reg.Destroy(entity); // now data-only
 
             const auto plane = ZHLN::PrefabFactory::CreatePlane(*engine, 2.0f);
             const auto* planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
             if (ZHLN::Test::ExpectTrue(planeOwner != nullptr)) {
                 const auto planeID = planeOwner->meshAsset;
-                reg.Destroy(plane);
+                ZHLN::DespawnEntity(*engine, plane);
+                ZHLN::Test::ExpectTrue(reg.IsAlive(plane));
+                ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(plane) != nullptr);
+                ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::OwnedMeshComponent>(plane) != nullptr);
+                engine->ProcessPendingDestroy();
+                ZHLN::Test::ExpectFalse(reg.IsAlive(plane));
                 ZHLN::Test::ExpectFalse(rc.GetGPUMesh(planeID).has_value());
             }
 
@@ -213,17 +220,18 @@ struct RenderPipelinesTestSuite {
             const auto* sphereOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(sphere);
             if (ZHLN::Test::ExpectTrue(sphereOwner != nullptr)) {
                 const auto sphereID = sphereOwner->meshAsset;
-                reg.Clear();
+                engine->ClearScene();
                 ZHLN::Test::ExpectFalse(rc.GetGPUMesh(sphereID).has_value());
             }
 
-            // The overload that accepts an independent Registry installs its
-            // own observer; it cannot rely on Engine's world setup.
+            // An independent Registry has no Engine cleanup system. Release
+            // its owned meshes explicitly before clearing its data-only ECS.
             ZHLN::ECS::Registry standalone;
             const auto loose = ZHLN::PrefabFactory::CreateBox(rc, standalone, nullptr, JPH::Vec3(0.25f, 0.25f, 0.25f));
             const auto* looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
             if (ZHLN::Test::ExpectTrue(looseOwner != nullptr)) {
                 const auto looseID = looseOwner->meshAsset;
+                ZHLN::PrefabFactory::ReleaseOwnedMeshes(rc, standalone);
                 standalone.Clear();
                 ZHLN::Test::ExpectFalse(rc.GetGPUMesh(looseID).has_value());
             }
@@ -293,13 +301,13 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer, spriteBuffer);
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity)->gpuBuffer, meshBuffer);
 
-            reg.Add(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles}); // overwrite releases old buffer
+            ZHLN::SceneResources::Attach(*engine, entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 1);
             const auto overwrittenSprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer;
             ZHLN::Test::ExpectNe(overwrittenSprite, spriteBuffer);
 
-            reg.Remove<ZHLN::Components::ParticleEmitterComponent>(entity);
-            reg.Add(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            ZHLN::SceneResources::Detach<ZHLN::Components::ParticleEmitterComponent>(*engine, entity);
+            ZHLN::SceneResources::Attach(*engine, entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             reg.Patch<ZHLN::Components::MeshParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             ZHLN::Test::Headless::TickFrames(*engine, 1);
             const auto renewedSprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer;
@@ -307,13 +315,18 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectNe(renewedSprite, overwrittenSprite);
             ZHLN::Test::ExpectNe(renewedMesh, meshBuffer);
 
-            // Raw Registry::Destroy immediately reclaims both buffers, with no
-            // renderer-side sweep and no duplication between emitter kinds.
-            reg.Destroy(entity);
+            // The scene system releases both emitter kinds in one cleanup
+            // pass; their data is still available until that pass runs.
+            ZHLN::DespawnEntity(*engine, entity);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(entity));
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer, renewedSprite);
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(entity));
             const auto replacement = reg.Create(ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
             ZHLN::Test::Headless::TickFrames(*engine, 1);
             ZHLN::Test::ExpectNe(reg.Get<ZHLN::Components::ParticleEmitterComponent>(replacement)->gpuBuffer, renewedSprite);
-            reg.Destroy(replacement);
+            ZHLN::DespawnEntity(*engine, replacement);
+            engine->ProcessPendingDestroy();
 
             // Skinned scratch is likewise owned by the component rather than
             // by an entity-keyed cache inside the renderer.
@@ -324,12 +337,68 @@ struct RenderPipelinesTestSuite {
                     comp.skinnedScratch = firstScratch;
                     comp.scratchVertexCount = 3;
                 });
-                reg.Remove<ZHLN::Components::SkeletalMeshComponent>(skinned);
+                ZHLN::SceneResources::Detach<ZHLN::Components::SkeletalMeshComponent>(*engine, skinned);
                 const auto secondScratch = rc.CreateSkinnedScratchBuffer(3);
                 ZHLN::Test::ExpectNe(secondScratch, firstScratch);
                 rc.DestroyBuffer(secondScratch);
             }
             reg.Destroy(skinned);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> engine_ecb_marks_hierarchies_before_batched_physics_cleanup() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("BatchSceneCleanup", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+            auto& reg = engine->GetRegistry();
+            auto& physics = engine->GetPhysicsContext();
+            const auto shape = physics.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
+            const ZHLN::Entity parent = reg.Create<ZHLN::Components::TransformComponent>();
+            std::vector<ZHLN::Entity> children;
+            std::vector<ZHLN::Physics::BodyHandle> handles;
+            for (int i = 0; i < 12; ++i) {
+                const auto handle = physics.CreateRigidBody(
+                    shape, JPH::RVec3(i, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
+                );
+                handles.push_back(handle);
+                children.push_back(reg.Create(
+                    ZHLN::Components::HierarchyComponent {.parent = parent},
+                    ZHLN::Components::PhysicsComponent {.physicsHandle = handle, .isStatic = false}
+                ));
+            }
+
+            engine->GetMainECB().DestroyEntity(parent);
+            engine->GetMainECB().DestroyEntity(parent); // duplicate mark is idempotent
+            engine->GetMainECB().Playback();
+            ZHLN::Test::ExpectTrue(reg.IsAlive(parent));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(parent) != nullptr);
+            for (size_t i = 0; i < children.size(); ++i) {
+                ZHLN::Test::ExpectTrue(reg.IsAlive(children[i]));
+                ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::PhysicsComponent>(children[i])->physicsHandle, handles[i]);
+            }
+            // A child attached after the ECB marked its root must also be
+            // discovered by the cleanup system before components are erased.
+            const auto lateHandle = physics.CreateRigidBody(
+                shape, JPH::RVec3(15, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
+            );
+            const auto lateChild = reg.Create(
+                ZHLN::Components::HierarchyComponent {.parent = parent},
+                ZHLN::Components::PhysicsComponent {.physicsHandle = lateHandle, .isStatic = false}
+            );
+            children.push_back(lateChild);
+            handles.push_back(lateHandle);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(lateChild) == nullptr);
+
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(parent));
+            for (auto child: children) {
+                ZHLN::Test::ExpectFalse(reg.IsAlive(child));
+            }
+            physics.Step(1.0f / 60.0f);
+            for (auto handle: handles) {
+                ZHLN::Test::ExpectFalse(physics.IsBodyDynamic(handle));
+            }
             return {};
         }
 

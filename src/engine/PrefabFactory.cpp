@@ -9,6 +9,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -63,16 +64,21 @@ auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& ow
 
 }
 
-void InstallMeshOwnerCleanup(RenderContext& ctx, ECS::Registry& reg) {
-    // Engine registries already have an observer which resolves the current
-    // renderer dynamically across device loss. This is for standalone scenes.
-    static_cast<void>(reg.ObserveRemoval<Components::OwnedMeshComponent>([&ctx](Entity, auto& owned) {
-        if (owned.meshAsset != InvalidAssetID) {
-            ctx.UnregisterGPUMesh(owned.meshAsset);
-        }
-        ctx.DestroyMesh(std::exchange(owned.mesh, Mesh {}));
-        owned.meshAsset = InvalidAssetID;
-    }));
+void DetachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity) {
+    SceneResources::Detach<Components::OwnedMeshComponent>(ctx, reg, entity);
+}
+
+void AttachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component) {
+    SceneResources::Attach(ctx, reg, entity, std::move(component));
+}
+
+void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg) {
+    if (reg.GetEntitiesWith<Components::OwnedMeshComponent>().empty()) {
+        return;
+    }
+    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
+        SceneResources::Release(ctx, owned);
+    }
 }
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
@@ -434,7 +440,6 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
 }
 
 auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
-    InstallMeshOwnerCleanup(ctx, reg);
     JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
                              JPH::Vec4(
                                  params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
@@ -512,7 +517,6 @@ auto SpawnPrimitive(
     float            physP2,
     const SpawnParams& params
 ) -> Entity {
-    InstallMeshOwnerCleanup(ctx, reg);
     const JPH::Vec4 shapeColor = (params.color.GetW() >= 0.0f) ? params.color : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
 
     Material mat;
@@ -611,7 +615,6 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 }
 
 auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
-    InstallMeshOwnerCleanup(ctx, reg);
     Mesh mesh = CreatePlaneMesh(ctx, extent, color);
 
     Material mat;

@@ -186,6 +186,43 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# Terrain's heightmap slots are external resources even without GPU meshes.
+# Exercise explicit release for standalone ECS scenes on a CPU-only runner.
+set(TARGET_NAME TestTerrainLifecycle)
+add_executable(${TARGET_NAME} TestTerrainLifecycle.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_terrain
+)
+
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})
+
 # --- ALife Test Suite ---
 set(TARGET_NAME TestALife)
 add_executable(${TARGET_NAME} TestALife.cpp)

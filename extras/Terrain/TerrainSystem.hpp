@@ -40,6 +40,13 @@ class TerrainSystem {
     static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;
     static void               UnregisterTerrainData(TerrainHandle handle) noexcept;
 
+    // Explicit ownership operations for TerrainComponent's heightmap slot.
+    static void Attach(Engine& engine, Entity entity, TerrainComponent component);
+    static void Detach(Engine& engine, Entity entity);
+    static void ReleaseTerrainData(ECS::Registry& registry); // standalone registry before Clear
+    static void RegisterCleanup(Engine& engine);
+    static void Cleanup(Engine& engine, bool all);
+
     static float SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept;
 };
 

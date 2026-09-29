@@ -67,6 +67,10 @@ export auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPo
 
 export auto Update(Engine& engine, float dt) -> void;
 
+// Explicit replacement/removal of a resource-owning LightningComponent.
+export void Attach(Engine& engine, Entity entity, LightningComponent component);
+export void Detach(Engine& engine, Entity entity);
+
 } // namespace Lightning
 
 } // namespace ZHLN

@@ -34,6 +34,10 @@ enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic }
 
 struct Components {
 
+    // Engine scene destruction is two-phase: mark now, release external handles
+    // while the other components are still accessible, then reclaim the entity.
+    struct PendingDestroy {};
+
     struct PBRComponent {
         float roughness = 0.5f;
         float metallic  = 0.0f;
@@ -67,9 +71,9 @@ struct Components {
     };
 
     // Scene-owned buffers for a generated mesh. MeshComponent only references
-    // its AssetID; the Engine removal observer unregisters and releases these
-    // buffers on component replacement, entity destruction, or registry clear.
-    // Cached model parts instead belong to AssetManager and are not copied here.
+    // its AssetID; Engine scene cleanup releases these buffers on despawn or
+    // ClearScene. Use SceneResources::Attach/Detach for direct replacement or
+    // removal. Cached model parts belong to AssetManager, not this component.
     struct OwnedMeshComponent {
         enum class Shape : uint8_t { None, Box, Plane, Sphere, Cylinder, Cone };
 
@@ -406,8 +410,9 @@ struct Components {
         int32_t    shadowLayer = -1;
     };
 
-    // GPU handles live with their ECS components; the engine's removal
-    // observers release them on Remove, Destroy, and Clear.
+    // GPU handles live with their ECS components. Scene cleanup releases
+    // them before reclaiming marked entities; use SceneResources::Detach or
+    // Attach for direct component mutations.
     struct ParticleEmitterComponent {
         ParticleEmitterParams params;
         TextureHandle         textureAsset   = TextureHandle::Invalid;

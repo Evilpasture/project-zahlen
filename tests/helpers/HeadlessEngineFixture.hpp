@@ -172,7 +172,7 @@ private:
 // InitializeDefaultScene, the font atlas so far, is built once by the engine
 // and copied into the new scene rather than remade here.
 inline void ResetScene(ZHLN::Engine& engine) {
-    engine.GetRegistry().Clear();
+    engine.ClearScene();
     engine.InitializeDefaultScene();
 
     // The camera is engine state, not an entity, so Clear does not touch it.

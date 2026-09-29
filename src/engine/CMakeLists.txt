@@ -30,6 +30,8 @@ set(RAW_ENGINE_SOURCES
     system/PhysicsSystem.cpp
     system/LODSystem.cpp
     system/ParticleSystem.cpp
+    system/SceneResources.cpp
+    system/SceneCleanupSystem.cpp
     CommandLine.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp

@@ -33,6 +33,7 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -279,6 +280,21 @@ PhysicsContext::~PhysicsContext() {
             }
             slot.instance = nullptr;
         }
+    }
+    // Engine::ClearScene may queue the final body's release after the last
+    // simulation step. Drain that batch while Jolt and the character maps are
+    // still alive, instead of dropping the pending commands on Shutdown.
+    auto& world = _impl->world;
+    size_t queued = 0;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        queued = world.commandCount;
+        if (queued != 0) {
+            world.commandQueue.swap(world.commandQueueSpare);
+            world.commandCount = 0;
+        }
+    });
+    if (queued != 0) {
+        world.FlushCommands(world.commandQueueSpare.data(), queued, _impl->characterMap, _impl->activeCharacters);
     }
     for (auto& character: _impl->characterMap) {
         if (character != nullptr) {
@@ -796,19 +812,28 @@ auto PhysicsContext::RegisterRagdoll(JPH::Ref<JPH::Ragdoll> ragdoll) -> Physics:
 }
 
 void PhysicsContext::DestroyRagdoll(Physics::RagdollHandle handle) noexcept {
+    DestroyRagdolls(std::span {&handle, 1});
+}
+
+void PhysicsContext::DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept {
+    if (handles.empty()) {
+        return;
+    }
     auto& world = _impl->world;
     ZHLN::Lock(world.sync.shadowLock, [&] {
-        auto* slot = _impl->FindRagdollSlot(handle);
-        if (slot == nullptr) {
-            return;
+        for (const auto handle: handles) {
+            auto* slot = _impl->FindRagdollSlot(handle);
+            if (slot == nullptr) {
+                continue;
+            }
+            if (slot->active) {
+                slot->instance->RemoveFromPhysicsSystem();
+                slot->active = false;
+            }
+            slot->instance = nullptr;
+            ++slot->generation;
+            _impl->freeRagdollSlots.push_back(static_cast<uint32_t>(static_cast<uint64_t>(handle)));
         }
-        if (slot->active) {
-            slot->instance->RemoveFromPhysicsSystem();
-            slot->active = false;
-        }
-        slot->instance = nullptr;
-        ++slot->generation;
-        _impl->freeRagdollSlots.push_back(static_cast<uint32_t>(static_cast<uint64_t>(handle)));
     });
 }
 
@@ -1010,8 +1035,25 @@ void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Physics::BodyHandle ha
 } // namespace
 
 void PhysicsContext::DestroyBody(Physics::BodyHandle handle) {
+    DestroyBodies(std::span {&handle, 1});
+}
+
+void PhysicsContext::DestroyBodies(std::span<const Physics::BodyHandle> handles) {
+    if (handles.empty()) {
+        return;
+    }
     auto& world = _impl->world;
-    ZHLN::Lock(world.sync.shadowLock, [&] { QueueDestroyBodyLocked(world, handle); });
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        const size_t required = world.commandCount + handles.size();
+        if (required > world.commandQueue.size()) {
+            const size_t capacity = std::max({required, size_t {64}, world.commandQueue.size() * 2});
+            world.commandQueue.resize(capacity);
+            world.commandQueueSpare.resize(capacity);
+        }
+        for (const auto handle: handles) {
+            QueueDestroyBodyLocked(world, handle);
+        }
+    });
 }
 
 void PhysicsContext::RegisterMaterial(uint32_t id, float friction, float restitution) {

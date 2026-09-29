@@ -431,21 +431,23 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
 }
 
 // Khronos fidelity is the environment and nothing else. Copy the handles
-// before Destroy: it mutates the dense array the span views.
-void StripSceneLights(ZHLN::ECS::Registry& registry) {
+// before marking: cleanup compacts the dense arrays the spans view. These are
+// normally data-only lights, but the Engine path also safely releases any
+// owners attached to a light entity.
+void StripSceneLights(ZHLN::Engine& engine) {
+    auto& registry = engine.GetRegistry();
     const auto lightSpan = registry.GetEntitiesWith<ZHLN::Components::LightComponent>();
     const auto sunSpan   = registry.GetEntitiesWith<ZHLN::Components::SunTagComponent>();
     const auto lights    = std::vector<ZHLN::Entity>(lightSpan.begin(), lightSpan.end());
     const auto suns      = std::vector<ZHLN::Entity>(sunSpan.begin(), sunSpan.end());
     for (const ZHLN::Entity e: lights) {
-        registry.Destroy(e);
+        ZHLN::DespawnEntity(engine, e);
     }
     for (const ZHLN::Entity e: suns) {
-        if (registry.IsAlive(e)) {
-            registry.Destroy(e);
-        }
+        ZHLN::DespawnEntity(engine, e);
     }
     if (!lights.empty() || !suns.empty()) {
+        engine.ProcessPendingDestroy();
         ZHLN::Log("[Fidelity] Removed {} light(s) and {} sun tag(s). The panorama is the only light.", lights.size(), suns.size());
     }
 }
@@ -589,7 +591,7 @@ auto main(int argc, char* argv[]) -> int {
         }
         // Before the import, so a light the default scene attached cannot
         // light the first frames. The import is stripped again below.
-        StripSceneLights(registry);
+        StripSceneLights(*engine);
     }
 
     // Conformance settings and the authored camera, before the import: the
@@ -657,7 +659,7 @@ auto main(int argc, char* argv[]) -> int {
     }
     // Prefab spawn attaches a point light to an emissive part. That is not
     // in the Khronos contract; the panorama is the only light.
-    StripSceneLights(engine->GetRegistry());
+    StripSceneLights(*engine);
 
     // Tick several frames so descriptor sets, async uploads and any late
     // resource publishes settle before the capture — the same settle pattern

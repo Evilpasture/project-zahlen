@@ -13,7 +13,6 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
-#include <functional>
 #include <source_location>
 #include <span>
 #include <string>
@@ -37,6 +36,7 @@ struct ComponentTypeInfo {
     size_t           size                        = 0;
     size_t           alignment                   = 0;
     void (*debugDump)(const void*, std::string&) = nullptr;
+    bool            isDynamic                   = false;
 };
 
 constexpr auto HashTypeName(std::string_view str) -> uint32_t {
@@ -66,7 +66,6 @@ constexpr auto BoxedName() -> std::string_view {
 class ZHLN_API SparseSet {
   public:
     using DestructorFn = void (*)(void*);
-    using RemovalFn = std::function<void(Entity, void*)>;
     SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor = nullptr);
     ~SparseSet();
 
@@ -79,12 +78,6 @@ class ZHLN_API SparseSet {
     [[nodiscard]] auto Contains(Entity entity) const noexcept -> bool;
     [[nodiscard]] auto Get(Entity entity) const noexcept -> void*;
     void               Clear() noexcept;
-
-    // Explicit replacement, removal and Clear invoke the observer before
-    // destroying components; ~SparseSet never does. Dense-slot moves do not
-    // trigger removal. Captured services must outlive explicit cleanup.
-    void SetRemovalObserver(RemovalFn observer) { _onRemove = std::move(observer); }
-    [[nodiscard]] auto HasRemovalObserver() const noexcept -> bool { return static_cast<bool>(_onRemove); }
 
     auto GetBufferView(const void* owner, const char* format) const noexcept -> BufferView;
     auto GetEntityView(const void* owner) const noexcept -> BufferView;
@@ -114,7 +107,6 @@ class ZHLN_API SparseSet {
 
     BufferSync*  _sync;
     DestructorFn _destructor = nullptr;
-    RemovalFn    _onRemove;
 
     void ResizeSparse(uint32_t required);
     void ResizeDense();
@@ -176,6 +168,8 @@ class ZHLN_API Registry {
         });
     }
 
+    // Immediate, data-only ECS destruction. Engine scene entities that own
+    // external handles must use DespawnEntity/Engine cleanup instead.
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
 
@@ -188,9 +182,13 @@ class ZHLN_API Registry {
         };
     }
 
+    // Data-only reset: component destructors run, but external resources are
+    // not released. Use Engine::ClearScene for Engine-owned scenes.
     void               Clear();
 
     auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;
+    // Only families registered with RegisterComponentDynamic; typed families
+    // require constructed components and (when resource-owning) explicit release.
     auto AddDynamic(Entity entity, uint32_t familyID) -> void*;
 
     static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
@@ -270,27 +268,6 @@ class ZHLN_API Registry {
         if (id < _compCapacity && _components[id]) {
             _components[id]->Remove(entity);
         }
-    }
-
-    // One observer per component family. It runs before Remove, Destroy,
-    // Clear, or replacement by Add, but never from a registry destructor.
-    // Install it before components acquire external resources and call Clear()
-    // while captured services are still alive. Returns true only for the first
-    // installation so clients can register companion lifecycle hooks once.
-    template <typename T, typename Fn>
-    [[nodiscard]] auto ObserveRemoval(Fn&& callback) -> bool {
-        const uint32_t id = ComponentFamily::GetTypeID<T>();
-        EnsureComponentCapacity(id);
-        if (_components[id] == nullptr) {
-            RegisterComponent<T>(BoxedName<T>());
-        }
-        if (_components[id]->HasRemovalObserver()) {
-            return false;
-        }
-        _components[id]->SetRemovalObserver([fn = std::forward<Fn>(callback)](Entity entity, void* ptr) mutable {
-            fn(entity, *static_cast<T*>(ptr));
-        });
-        return true;
     }
 
     template <typename T>

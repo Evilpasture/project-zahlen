@@ -10,6 +10,7 @@
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Skeleton/Skeleton.h>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -119,55 +120,64 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> ecs_removal_releases_body_without_liveness_sweep() {
+        std::expected<void, ZHLN::ErrorCode> explicit_body_detach_and_batched_destruction() {
+            using Body = ZHLN::Components::PhysicsComponent;
+            using Handle = ZHLN::Physics::BodyHandle;
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry; // destroyed before pc
-            ZHLN::Test::ExpectTrue(registry.ObserveRemoval<ZHLN::Components::PhysicsComponent>([&pc](ZHLN::Entity, auto& component) {
-                pc.DestroyBody(component.physicsHandle);
-                component.physicsHandle = ZHLN::Physics::BodyHandle::Null();
-            }));
             const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
             auto createBody = [&] {
                 return pc.CreateRigidBody(shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             };
 
             const auto firstBody = createBody();
-            const auto owner = registry.Create(ZHLN::Components::PhysicsComponent {.physicsHandle = firstBody});
-            registry.Remove<ZHLN::Components::PhysicsComponent>(owner);
-            registry.Remove<ZHLN::Components::PhysicsComponent>(owner);
+            const auto owner = registry.Create(Body {.physicsHandle = firstBody});
+            ZHLN::Test::ExpectTrue(ZHLN::SceneResources::Detach<Body>(pc, registry, owner));
+            ZHLN::Test::ExpectFalse(ZHLN::SceneResources::Detach<Body>(pc, registry, owner));
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
             ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(firstBody));
 
             const auto secondBody = createBody();
-            registry.Add(owner, ZHLN::Components::PhysicsComponent {.physicsHandle = secondBody});
+            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsHandle = secondBody});
             const auto thirdBody = createBody();
-            registry.Add(owner, ZHLN::Components::PhysicsComponent {.physicsHandle = thirdBody}); // replacement
+            ZHLN::SceneResources::Attach(pc, registry, owner, Body {.physicsHandle = thirdBody}); // releases second
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(secondBody));
             ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(thirdBody));
-            registry.Destroy(owner);
+
+            // A scene query observes intact components; a single batched call
+            // queues the releases before the registry reclaims their entities.
+            const auto otherBody = createBody();
+            const auto other = registry.Create(Body {.physicsHandle = otherBody});
+            registry.Add(owner, ZHLN::Components::PendingDestroy {});
+            registry.Add(other, ZHLN::Components::PendingDestroy {});
+            ZHLN::Test::ExpectEq(registry.Get<Body>(owner)->physicsHandle, thirdBody);
+            const std::vector<Handle> batch {thirdBody, otherBody, thirdBody, Handle::Null(), secondBody};
+            pc.DestroyBodies(batch); // duplicate, null and stale handles are safe
+            const auto marked = registry.GetEntitiesWith<ZHLN::Components::PendingDestroy>();
+            const std::vector<ZHLN::Entity> pending(marked.begin(), marked.end());
+            for (auto entity: pending) {
+                registry.Destroy(entity);
+            }
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
 
             const auto lastBody = createBody();
-            registry.Create(ZHLN::Components::PhysicsComponent {.physicsHandle = lastBody});
-            registry.Clear();
+            registry.Create(Body {.physicsHandle = lastBody});
+            pc.DestroyBodies(std::span {&lastBody, 1});
+            registry.Clear(); // data-only storage reset after explicit release
             pc.Step(1.0f / 60.0f);
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
             ZHLN::Test::ExpectFalse(pc.IsBodyDynamic(lastBody));
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> ragdoll_handles_are_released_by_component_removal() {
+        std::expected<void, ZHLN::ErrorCode> ragdoll_handles_are_released_explicitly() {
             ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry registry;
-            static_cast<void>(registry.ObserveRemoval<ZHLN::Components::RagdollComponent>([&pc](ZHLN::Entity, auto& ragdoll) {
-                pc.DestroyRagdoll(ragdoll.ragdollHandle);
-                ragdoll.ragdollHandle = ZHLN::Physics::RagdollHandle::Invalid;
-            }));
 
             JPH::Ref<JPH::Skeleton> skeleton = new JPH::Skeleton();
             skeleton->AddJoint("root", "");
@@ -181,13 +191,14 @@ struct PhysicsTestSuite {
             }
             const auto owner = registry.Create(ZHLN::Components::RagdollComponent {.ragdollHandle = first});
             ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) != nullptr);
-            registry.Remove<ZHLN::Components::RagdollComponent>(owner);
+            ZHLN::SceneResources::Detach<ZHLN::Components::RagdollComponent>(pc, registry, owner);
             ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) == nullptr);
 
             const auto second = pc.CreateSkeletalRagdoll(skeleton, parts);
             ZHLN::Test::ExpectTrue(second != first);
-            ZHLN::Test::ExpectTrue(pc.GetRagdoll(second) != nullptr);
-            registry.Add(owner, ZHLN::Components::RagdollComponent {.ragdollHandle = second});
+            ZHLN::SceneResources::Attach(pc, registry, owner, ZHLN::Components::RagdollComponent {.ragdollHandle = second});
+            const std::vector<ZHLN::Physics::RagdollHandle> handles {second, first, second};
+            pc.DestroyRagdolls(handles);
             registry.Clear();
             ZHLN::Test::ExpectTrue(pc.GetRagdoll(second) == nullptr);
             pc.DestroyRagdoll(second); // stale generations and repeated release are safe

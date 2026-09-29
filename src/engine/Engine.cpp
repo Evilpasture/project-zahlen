@@ -7,6 +7,7 @@
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
+#include "SceneCleanupSystem.hpp"
 #include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -68,6 +69,7 @@ struct EngineImpl {
     Engine::FreeCamSpeedQuery                    freeCamSpeedQuery     = nullptr;
     BonePosePostProcessor                        bonePosePostProcessor = nullptr;
     std::vector<Engine::TeardownHook>            teardownHooks;
+    std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
@@ -210,7 +212,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
     _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
-    auto world_res = World::Create(cfg.physics);
+    auto world_res = World::Create(cfg.physics, true);
     if (!world_res) {
         return std::unexpected(world_res.error());
     }
@@ -260,46 +262,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->kernel = std::move(kernel_res.value());
 
-    // Buffer lifetime belongs to the ECS component, not a renderer-side
-    // entity ledger. These observers also run on raw Registry::Destroy and
-    // Registry::Clear, not just through the Engine's despawn helper.
-    auto& reg = _impl->world->GetRegistry();
-    static_cast<void>(reg.ObserveRemoval<Components::PhysicsComponent>([this](Entity, auto& body) {
-        GetPhysicsContext().DestroyBody(std::exchange(body.physicsHandle, Physics::BodyHandle::Null()));
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::AudioSourceComponent>([this](Entity, auto& audio) {
-        GetAudioContext().StopVoice(std::exchange(audio.voiceHandle, AudioHandle::Invalid), audio.fadeOut);
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::LoopSynthComponent>([this](Entity, auto& synth) {
-        GetAudioContext().StopLoopSynth(std::exchange(synth.synthHandle, SynthHandle::Invalid), synth.fadeOut);
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::RagdollComponent>([this](Entity, auto& ragdoll) {
-        // The physics pool knows whether this instance is active, so removal is
-        // safe even after an Inactive transition or a previous shutdown call.
-        GetPhysicsContext().DestroyRagdoll(std::exchange(ragdoll.ragdollHandle, Physics::RagdollHandle::Invalid));
-        ragdoll.isAddedToPhysics = false;
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::OwnedMeshComponent>([this](Entity, auto& owned) {
-        auto& render = GetRenderContext();
-        if (owned.meshAsset != InvalidAssetID) {
-            render.UnregisterGPUMesh(owned.meshAsset);
-        }
-        render.DestroyMesh(std::exchange(owned.mesh, Mesh {}));
-        owned.meshAsset = InvalidAssetID;
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::ParticleEmitterComponent>([this](Entity, auto& emitter) {
-        GetRenderContext().DestroyBuffer(std::exchange(emitter.gpuBuffer, BufferHandle::Invalid));
-        emitter.bufferCapacity = 0;
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::MeshParticleEmitterComponent>([this](Entity, auto& emitter) {
-        GetRenderContext().DestroyBuffer(std::exchange(emitter.gpuBuffer, BufferHandle::Invalid));
-        emitter.bufferCapacity = 0;
-    }));
-    static_cast<void>(reg.ObserveRemoval<Components::SkeletalMeshComponent>([this](Entity, auto& skeleton) {
-        GetRenderContext().DestroyBuffer(std::exchange(skeleton.skinnedScratch, BufferHandle::Invalid));
-        skeleton.scratchVertexCount = 0;
-    }));
-
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     if (_impl->config.crashState != nullptr) {
@@ -348,9 +310,9 @@ Engine::~Engine() {
             hook(*this);
         }
 
-        // Observers release physics/ragdolls/audio while the World and Kernel
-        // contexts are still alive; World::~World can safely Clear again.
-        _impl->world->GetRegistry().Clear();
+        // Release external handles while both the World and Kernel still live.
+        // The World destructor can safely clear its already-empty registry.
+        ClearScene();
     }
 
     _impl->world.reset();
@@ -490,6 +452,29 @@ auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
 }
+
+void Engine::ProcessPendingDestroy() {
+    SceneCleanupSystem::ProcessPending(*this);
+}
+
+void Engine::ClearScene() {
+    SceneCleanupSystem::ClearAll(*this);
+}
+
+auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
+    if (pass == nullptr || std::find(_impl->sceneCleanupPasses.begin(), _impl->sceneCleanupPasses.end(), pass) != _impl->sceneCleanupPasses.end()) {
+        return false;
+    }
+    _impl->sceneCleanupPasses.push_back(pass);
+    return true;
+}
+
+void Engine::RunSceneCleanupPasses(bool all) {
+    for (const auto pass: _impl->sceneCleanupPasses) {
+        pass(*this, all);
+    }
+}
+
 auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
 }

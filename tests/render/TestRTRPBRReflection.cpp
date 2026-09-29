@@ -390,7 +390,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgC) {
                 return std::unexpected(imgC.error());
             }
-            reg.Destroy(chrome);
+            ZHLN::DespawnEntity(*s.engine, chrome);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity gold = SpawnMirror(*s.engine, *goldRes);
             auto               imgG = CaptureRTR(s, "headless_rtr_pbr_f0_gold.ppm");
@@ -398,7 +399,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgG.error());
             }
             (void) gold;
-            reg.Destroy(gold);
+            ZHLN::DespawnEntity(*s.engine, gold);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *dielRes);
             auto imgD = CaptureRTR(s, "headless_rtr_pbr_f0_diel.ppm");
@@ -462,7 +464,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgS) {
                 return std::unexpected(imgS.error());
             }
-            reg.Destroy(eSmooth);
+            ZHLN::DespawnEntity(*s.engine, eSmooth);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity eMid = SpawnMirror(*s.engine, *mid);
             auto               imgM = CaptureRTR(s, "headless_rtr_pbr_rough_m.ppm");
@@ -470,7 +473,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgM.error());
             }
             (void) eMid;
-            reg.Destroy(eMid);
+            ZHLN::DespawnEntity(*s.engine, eMid);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *rough);
             auto imgR = CaptureRTR(s, "headless_rtr_pbr_rough_r.ppm");
@@ -642,7 +646,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgSil) {
                 return std::unexpected(imgSil.error());
             }
-            reg.Destroy(eSil);
+            ZHLN::DespawnEntity(*s.engine, eSil);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity eAu   = SpawnMirror(*s.engine, *gold);
             auto               imgAu = CaptureRTR(s, "headless_rtr_pbr_gold.ppm");
@@ -650,7 +655,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgAu.error());
             }
             (void) eAu;
-            reg.Destroy(eAu);
+            ZHLN::DespawnEntity(*s.engine, eAu);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *copper);
             auto imgCu = CaptureRTR(s, "headless_rtr_pbr_copper.ppm");

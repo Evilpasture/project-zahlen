@@ -38,6 +38,9 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
 
 // Spawns a terrain entity from caller-provided height/color data: mesh,
 // material, TerrainComponent, and (optionally) a static heightfield body.
+// For a standalone Registry, release TerrainData and OwnedMesh before Clear
+// (TerrainSystem::ReleaseTerrainData, PrefabFactory::ReleaseOwnedMeshes), and
+// release any PhysicsComponent body through the supplied PhysicsContext.
 auto CreateTerrainFromData(
     RenderContext&                             ctx,
     ECS::Registry&                             reg,

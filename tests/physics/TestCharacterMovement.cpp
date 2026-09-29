@@ -75,9 +75,6 @@ struct CPUPipelineHarness {
 
     explicit CPUPipelineHarness(const ZHLN::PhysicsConfig& cfg, JPH::RVec3Arg spawnPos = JPH::RVec3(0, 0, 0), const ZHLN::Physics::DualShapeConfig& hull = {}):
         pc(cfg) {
-        static_cast<void>(reg.ObserveRemoval<ZHLN::Components::PhysicsComponent>([this](ZHLN::Entity, auto& component) {
-            pc.DestroyBody(component.physicsHandle);
-        }));
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
         pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
@@ -103,6 +100,15 @@ struct CPUPipelineHarness {
         cam.position = JPH::Vec3(spawnPos) + JPH::Vec3(0.0f, 1.5f, -5.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = 0.0f;
+    }
+
+    ~CPUPipelineHarness() {
+        std::vector<ZHLN::Physics::BodyHandle> handles;
+        for (const auto& component: reg.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
+            handles.push_back(component.physicsHandle);
+        }
+        pc.DestroyBodies(handles);
+        reg.Clear();
     }
 
     void Settle(int frames = 15) {

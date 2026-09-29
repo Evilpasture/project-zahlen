@@ -96,6 +96,10 @@ void CommandPlayback(Engine& engine, float , FrameContext& ) {
     engine.GetMainECB().Playback();
 }
 
+void CleanupScene(Engine& engine, float , FrameContext& ) {
+    engine.ProcessPendingDestroy();
+}
+
 void Camera(Engine& engine, float dt, FrameContext& ) {
     static CameraSystem camSys;
     camSys.Update(engine, dt, engine.GetCurrentAlpha());
@@ -145,6 +149,7 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
+    scheduler.Add(Phase::Simulation, "SceneCleanup", Steps::CleanupScene);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
     scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
     scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);

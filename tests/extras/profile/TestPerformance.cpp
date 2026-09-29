@@ -16,6 +16,7 @@
 #include <Zahlen/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -612,9 +613,16 @@ struct PerformanceTestSuite {
             ZHLN::ECS::Registry  registry;
             ZHLN::AudioContext   audio;
             ZHLN::Camera         mainCamera;
-            static_cast<void>(registry.ObserveRemoval<ZHLN::Components::PhysicsComponent>([&physicsContext](ZHLN::Entity, auto& body) {
-                physicsContext.DestroyBody(body.physicsHandle);
-            }));
+            ZHLN::defer _([&] {
+                std::vector<ZHLN::Physics::BodyHandle> handles;
+                if (!registry.GetEntitiesWith<ZHLN::Components::PhysicsComponent>().empty()) {
+                    for (const auto& body: registry.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
+                        handles.push_back(body.physicsHandle);
+                    }
+                }
+                physicsContext.DestroyBodies(handles);
+                registry.Clear();
+            });
 
             mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;

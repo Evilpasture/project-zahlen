@@ -174,8 +174,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     engine.SetUICallback(nullptr);
 
     // 2. Clear ECS entities and Command Buffer
-    reg.Clear();
-    engine.GetMainECB().Reset();
+    engine.ClearScene();
 
     // 3. Clear System Graphs before rebuilding default scene
     engine.GetUpdateGraph().Clear();

@@ -10,6 +10,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -85,10 +86,8 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                             container->slots[container->count++] = triggerEnt;
                             pickup->isPickedUp                   = 1;
 
-                            if (auto* phys = query.Get<Components::PhysicsComponent>(triggerEnt)) {
-                                // FIXED: Use physics context instance method
-                                if (physics) physics->DestroyBody(phys->physicsHandle);
-                                registry.Remove<Components::PhysicsComponent>(triggerEnt);
+                            if (physics != nullptr) {
+                                SceneResources::Detach<Components::PhysicsComponent>(*physics, registry, triggerEnt);
                             }
                             if (query.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
                                 registry.Remove<Components::MeshComponent>(triggerEnt);

@@ -174,22 +174,38 @@ auto EvaluateHeidler(float tUs, float i0, float t1, float t2) noexcept -> float 
     return (i0 / ec) * (x / (1.0f + x)) * std::exp(-tUs / t2);
 }
 
-} // namespace
+void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
+    auto& render = engine.GetRenderContext();
+    if (bolt.meshAssetId != InvalidAssetID) {
+        render.UnregisterGPUMesh(bolt.meshAssetId);
+    }
+    if (bolt.matAssetId != InvalidMaterialID) {
+        render.UnregisterGPUMaterial(bolt.matAssetId);
+    }
+    render.DestroyMesh(Mesh {.posBuffer = std::exchange(bolt.vboPos, BufferHandle::Invalid),
+                             .attrBuffer = std::exchange(bolt.vboAttr, BufferHandle::Invalid)});
+    bolt.meshAssetId = InvalidAssetID;
+    bolt.matAssetId  = InvalidMaterialID;
+}
 
-namespace Lightning {
-
-auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg) -> Entity {
+void CleanupLightning(Engine& engine, bool all) {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    const auto entities = reg.GetEntitiesWith<LightningComponent>();
+    if (entities.empty()) {
+        return;
+    }
+    auto bolts = reg.GetRawArray<LightningComponent>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        if (all || reg.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+            ReleaseLightning(engine, bolts[i]);
+        }
+    }
+}
 
+void RegisterCleanup(Engine& engine) {
+    auto& reg = engine.GetRegistry();
     reg.RegisterComponent<LightningComponent>("LightningComponent");
-    if (reg.ObserveRemoval<LightningComponent>([&engine](Entity, LightningComponent& bolt) {
-            auto& render = engine.GetRenderContext();
-            render.UnregisterGPUMesh(bolt.meshAssetId);
-            render.UnregisterGPUMaterial(bolt.matAssetId);
-            render.DestroyMesh(Mesh {.posBuffer = std::exchange(bolt.vboPos, BufferHandle::Invalid),
-                                     .attrBuffer = std::exchange(bolt.vboAttr, BufferHandle::Invalid)});
-        })) {
+    if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
             for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
                 bolt.vboPos  = BufferHandle::Invalid;
@@ -197,6 +213,30 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
             }
         });
     }
+}
+
+} // namespace
+
+namespace Lightning {
+
+void Detach(Engine& engine, Entity entity) {
+    if (auto* bolt = engine.GetRegistry().Get<LightningComponent>(entity)) {
+        ReleaseLightning(engine, *bolt);
+        engine.GetRegistry().Remove<LightningComponent>(entity);
+    }
+}
+
+void Attach(Engine& engine, Entity entity, LightningComponent component) {
+    RegisterCleanup(engine);
+    Detach(engine, entity);
+    engine.GetRegistry().Add(entity, std::move(component));
+}
+
+auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg) -> Entity {
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
+
+    RegisterCleanup(engine);
 
     float      baseExposure = 4.5f;
     const auto existingEnts = reg.GetEntitiesWith<LightningComponent>();
@@ -309,7 +349,7 @@ auto Update(Engine& engine, float dt) -> void {
         const Entity        e    = ents[i];
         LightningComponent& bolt = bolts[i];
 
-        if (bolt.phase == LightningPhase::Idle) {
+        if (bolt.phase == LightningPhase::Idle || reg.Get<Components::PendingDestroy>(e) != nullptr) {
             continue;
         }
 
@@ -340,7 +380,6 @@ auto Update(Engine& engine, float dt) -> void {
             }
         }
 
-        hasActiveBolts        = true;
         unflashedBaseExposure = bolt.baseAmbientExposure;
 
         const float dtReal = dt / bolt.config.timeDilation;
@@ -397,6 +436,7 @@ auto Update(Engine& engine, float dt) -> void {
                 break;
         }
 
+        hasActiveBolts = true;
         peakLuminanceThisFrame = std::max(peakLuminanceThisFrame, bolt.flashLuminance);
 
         if (auto gpuMatOpt = rc.GetGPUMaterial(bolt.matAssetId)) {
@@ -431,13 +471,12 @@ auto Update(Engine& engine, float dt) -> void {
     }
 
     for (const Entity deadEnt: deadEntities) {
-        // Light entities are HierarchyComponent children of the bolt. The
-        // explicit pipeline tears them down first and releases the tracked VBOs
-        // while the LightningComponent is still inspectable.
+        // The scene cleanup pass releases VBOs and child lights after the
+        // simulation step, while the LightningComponent is still inspectable.
         DespawnEntity(engine, deadEnt);
     }
 
-    if (reg.GetEntitiesWith<LightningComponent>().empty() && !settingsEnts.empty()) {
+    if (!hasActiveBolts && !settingsEnts.empty()) {
         reg.Patch<Components::PostProcessSettingsComponent>(settingsEnts[0], [&](auto& pp) { pp.ambientExposure = unflashedBaseExposure; });
     }
 }

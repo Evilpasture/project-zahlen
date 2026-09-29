@@ -16,6 +16,7 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
@@ -479,8 +480,12 @@ void InitComponentRegistry() {
 
         s_ComponentRegistry[name] = ComponentRegistryEntry {
             .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
-                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                    return nullptr; // Read-only physics handle
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent> || std::is_same_v<Comp, Components::RagdollComponent>) {
+                    return nullptr; // Physics handles are created by their owning contexts.
+                } else if constexpr (SceneResources::OwnsExternalResource<Comp> && std::is_default_constructible_v<Comp>) {
+                    // A fresh, handle-free component is safe; replacing an
+                    // existing owner requires SceneResources::Attach.
+                    return reg.template Get<Comp>(entity) == nullptr ? &reg.template Add<Comp>(entity, Comp {}) : nullptr;
                 } else if constexpr (std::is_default_constructible_v<Comp>) {
                     return &reg.template Add<Comp>(entity, Comp {});
                 } else {
@@ -947,7 +952,7 @@ void RegisterAudioCommands() {
                     AudioHandle handle = engine->GetAudioContext().CreateVoice(a.filepath, a.spatialized != 0, a.looping != 0, a.volume);
                     if (handle != AudioHandle::Invalid) {
                         // The component, not AudioContext, owns this voice's ECS lifetime.
-                        registry.Add(owner, Components::AudioSourceComponent {
+                        SceneResources::Attach(*engine, owner, Components::AudioSourceComponent {
                             .filepath      = String128(a.filepath),
                             .volume        = a.volume,
                             .isLooping     = a.looping != 0,
@@ -1005,11 +1010,15 @@ void RegisterECSCommands() {
                     void*            ptr = nullptr;
 
                     auto it = s_ComponentRegistry.find(name);
-                    if (it != s_ComponentRegistry.end() && it->second.add != nullptr) {
-                        ptr = it->second.add(reg, entity);
+                    if (it != s_ComponentRegistry.end()) {
+                        if (it->second.add != nullptr) {
+                            ptr = it->second.add(reg, entity);
+                        }
                     } else {
                         uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);
                         if (familyID != 0xFFFFFFFF) {
+                            // The registry rejects C++ families, including
+                            // extras owners that are not in the Lua type map.
                             ptr = reg.AddDynamic(entity, familyID);
                         }
                     }
@@ -1099,7 +1108,7 @@ void RegisterSystemCommands() {
                         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
                     };
                     ZHLN::Physics::BodyHandle charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), characterParams);
-                    reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
+                    SceneResources::Attach(*engine, playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
                     if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(

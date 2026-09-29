@@ -39,9 +39,10 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
 
 #### 4. External Resource Lifecycle
-* Components describe resources but do not execute lifecycle callbacks. The owning resource system/context MUST track its external handles with their ECS owner and reconcile dead owners.
-* Use `DespawnEntity` for immediate child-before-parent teardown and resource notification; ordinary `Registry::Destroy` is reclaimed at the owning system's reconciliation point.
-* Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+* Components store plain generational handles. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
+* In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics handles for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned handles (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
+* Raw `Registry::Destroy` and `Registry::Clear` remain **immediate, data-only** primitives. Generic ECBs (including standalone `World` ECBs) likewise destroy immediately; only the Engine opts its ECB into deferred destruction. Never use raw destruction on an Engine scene with external-resource components: use `DespawnEntity` and `Engine::ClearScene` instead. `Engine::ProcessPendingDestroy` allows an explicit synchronous cleanup before the next frame. Standalone registries must explicitly release their owned resources before raw removal/clear (e.g. `PrefabFactory::ReleaseOwnedMeshes` and `TerrainSystem::ReleaseTerrainData`).
+* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; extras supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
@@ -78,9 +79,9 @@ struct LightningComponent {
     BufferHandle vboPos  = BufferHandle::Invalid;
     BufferHandle vboAttr = BufferHandle::Invalid;
 
-    // Component state only. Spawn records the VBOs with RenderContext using
-    // the owning entity; its render lifecycle reconciles them after ordinary
-    // Registry::Destroy, while DespawnEntity releases them immediately.
+    // Component state only. The renderer sees non-owning mesh registrations;
+    // Engine scene cleanup frees these buffers before destroying the component.
+    // Direct replacement/removal must release them explicitly first.
 };
 
 // GOOD: Stateless System Function

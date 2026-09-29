@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cmath>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Terrain {
@@ -99,13 +100,56 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
     });
 }
 
+void TerrainSystem::RegisterCleanup(Engine& engine) {
+    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
+}
+
+void TerrainSystem::Detach(Engine& engine, Entity entity) {
+    auto& registry = engine.GetRegistry();
+    if (auto* terrain = registry.Get<TerrainComponent>(entity)) {
+        UnregisterTerrainData(std::exchange(terrain->terrainHandle, TerrainHandle::Invalid));
+        registry.Remove<TerrainComponent>(entity);
+    }
+}
+
+void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
+    RegisterCleanup(engine);
+    Detach(engine, entity);
+    engine.GetRegistry().Add(entity, std::move(component));
+}
+
+void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
+    if (registry.GetEntitiesWith<TerrainComponent>().empty()) {
+        return;
+    }
+    for (auto& terrain: registry.GetRawArray<TerrainComponent>()) {
+        UnregisterTerrainData(std::exchange(terrain.terrainHandle, TerrainHandle::Invalid));
+    }
+}
+
+void TerrainSystem::Cleanup(Engine& engine, bool all) {
+    auto& registry = engine.GetRegistry();
+    const auto entities = registry.GetEntitiesWith<TerrainComponent>();
+    if (!entities.empty()) {
+        auto terrains = registry.GetRawArray<TerrainComponent>();
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (all || registry.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+                UnregisterTerrainData(std::exchange(terrains[i].terrainHandle, TerrainHandle::Invalid));
+            }
+        }
+    }
+    if (all) {
+        Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
+    }
+}
+
 void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
                            ECS::ResMut<RenderContext> render, ECS::Registry& registry) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
-    auto& rc  = *render;
-    PrefabFactory::InstallMeshOwnerCleanup(rc, registry);
+    auto& rc = *render;
 
     auto entities = query.Entities<TerrainComponent>();
     auto terrains = query.Raw<TerrainComponent>();
@@ -113,6 +157,9 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
         auto&  terrain  = terrains[i];
+        if (registry.Get<Components::PendingDestroy>(e) != nullptr) {
+            continue;
+        }
         auto*  meshComp = query.Get<Components::MeshComponent>(e);
 
         if (meshComp == nullptr) {
@@ -229,7 +276,7 @@ void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/
 } // namespace
 
 void Install(Engine& engine) {
-    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    TerrainSystem::RegisterCleanup(engine);
     engine.AddSystemGraphsExtension(&AddSystems);
 }
 

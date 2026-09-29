@@ -220,7 +220,7 @@ struct LightningTestSuite {
         }
 
         // ====================================================================
-        // 3. Raw registry destroy and explicit despawn both release buffers
+        // 3. Explicit despawn and component detach release buffers
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> lightning_resources_release_on_component_removal() {
             const ZHLN::EngineConfig engineCfg {
@@ -247,7 +247,12 @@ struct LightningTestSuite {
             const auto oldPos = raw->vboPos;
             const auto oldMesh = raw->meshAssetId;
             const auto oldMat = raw->matAssetId;
-            reg.Destroy(rawBolt);
+            ZHLN::DespawnEntity(*engine, rawBolt);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(rawBolt));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(rawBolt) != nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(rawBolt)->vboPos, oldPos);
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(rawBolt));
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(oldMesh).has_value());
             ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(oldMat).has_value());
             const auto reusedSlot = rc.CreateStorageBuffer(64);
@@ -264,6 +269,10 @@ struct LightningTestSuite {
             const auto meshAsset = bolt->meshAssetId;
             const auto materialAsset = bolt->matAssetId;
             ZHLN::DespawnEntity(*engine, despawnBolt);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(despawnBolt));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(flash) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(impact) != nullptr);
+            engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
             ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
             ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
@@ -276,9 +285,10 @@ struct LightningTestSuite {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
             const auto componentMesh = component->meshAssetId;
-            reg.Remove<ZHLN::LightningComponent>(componentBolt);
+            ZHLN::Lightning::Detach(*engine, componentBolt);
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(componentMesh).has_value());
             ZHLN::DespawnEntity(*engine, componentBolt);
+            engine->ProcessPendingDestroy();
 
             const ZHLN::Entity cachedBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 80, 0), JPH::RVec3(30, 0, 0));
             const auto* cached = reg.Get<ZHLN::LightningComponent>(cachedBolt);
@@ -293,7 +303,8 @@ struct LightningTestSuite {
             ZHLN::Lightning::Update(*engine, 0.01f);
             ZHLN::Test::ExpectTrue(rc.GetGPUMesh(meshID).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
-            reg.Destroy(cachedBolt);
+            ZHLN::DespawnEntity(*engine, cachedBolt);
+            engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
             return {};
         }

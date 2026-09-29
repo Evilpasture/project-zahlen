@@ -411,7 +411,6 @@ auto CreateTerrainFromData(
     const float*       colorsRGBA,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
-    PrefabFactory::InstallMeshOwnerCleanup(ctx, reg);
     Entity e = reg.Create();
 
     Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
@@ -472,6 +471,7 @@ auto CreateTerrainFromData(
 
 auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const PrefabFactory::SpawnParams& params)
     -> Entity {
+    TerrainSystem::RegisterCleanup(engine);
     return CreateTerrainFromData(
         engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
     );
@@ -487,7 +487,6 @@ auto CreateTerrain(
     TerrainType        type,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
-    PrefabFactory::InstallMeshOwnerCleanup(ctx, reg);
     Entity e = reg.Create();
 
     TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
@@ -545,6 +544,7 @@ auto CreateTerrain(
 }
 
 auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const PrefabFactory::SpawnParams& params) -> Entity {
+    TerrainSystem::RegisterCleanup(engine);
     return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 

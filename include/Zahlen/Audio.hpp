@@ -53,7 +53,8 @@ class ZHLN_API AudioContext {
     void FlushEvents() noexcept;
 
     // Returned handles borrow context-owned slots. ECS users store them in
-    // AudioSourceComponent / LoopSynthComponent for removal-time cleanup.
+    // AudioSourceComponent / LoopSynthComponent for Engine scene cleanup (or
+    // explicit SceneResources::Detach before removing a component).
     [[nodiscard]] auto CreateVoice(std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle;
     void               SetVoicePosition(AudioHandle handle, const JPH::Vec3& position);
     void               SetVoiceVolume(AudioHandle handle, float volume);

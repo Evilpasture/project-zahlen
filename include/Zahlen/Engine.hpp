@@ -69,6 +69,9 @@ class ZHLN_API Engine {
     using FreeCamSpeedQuery = std::optional<float> (*)(ECS::Registry&, Entity target);
 
     using TeardownHook = void (*)(Engine&);
+    // Bulk extension systems run while marked components still exist. `all`
+    // selects scene teardown rather than just PendingDestroy entities.
+    using SceneCleanupPass = void (*)(Engine&, bool all);
 
     using DeviceLostCallback = std::function<void(Engine&)>;
 
@@ -113,6 +116,13 @@ class ZHLN_API Engine {
     auto GetUpdateGraph() -> ECS::SystemGraph&;
     auto GetRenderGraph() -> ECS::SystemGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
+    // Run the batched cleanup pass now (normally after ECB playback each frame).
+    void ProcessPendingDestroy();
+    // Release every scene-owned resource before clearing the registry/ECB.
+    void ClearScene();
+    // Register an extra bulk cleanup system once per Engine, not per entity.
+    [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
+    void RunSceneCleanupPasses(bool all);
     [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
     auto               GetCullingSystem() -> CullingSystem&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
@@ -181,6 +191,8 @@ class ZHLN_API Engine {
     std::unique_ptr<EngineImpl> _impl;
 };
 
+// Mark an entity and its hierarchy for the Engine's batched scene cleanup.
+// Components remain readable until ProcessPendingDestroy/SceneCleanup runs.
 void DespawnEntity(Engine& engine, Entity entity);
 
 }
