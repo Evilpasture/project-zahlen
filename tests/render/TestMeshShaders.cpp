@@ -403,6 +403,9 @@ struct MeshShaderTestSuite {
 
                 ZHLN::Println("    [INFO] {}: {} verts, {} meshlets.", c.name, c.mesh.vertexCount, c.mesh.meshletCount);
             }
+            for (const auto& c: cases) {
+                rc.DestroyMesh(c.mesh); // directly inspected meshes were never registered as assets
+            }
 
             if (!allOk) {
                 return std::unexpected(MeshShaderTestError::MeshletStreamsMissing);

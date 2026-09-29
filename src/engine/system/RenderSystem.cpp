@@ -125,7 +125,16 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
         }
 
         auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
-        auto gpuMatOpt  = rc.GetGPUMaterial(meshComp->materialAsset);
+        if (!gpuMeshOpt.has_value()) {
+            // Explicit cache clears discard lookups, not scene-owned buffers.
+            // Rebind the owner's view instead of allocating another mesh.
+            if (const auto* owned = reg.Get<Components::OwnedMeshComponent>(e);
+                owned != nullptr && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferHandle::Invalid) {
+                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
+                gpuMeshOpt = owned->mesh;
+            }
+        }
+        auto gpuMatOpt = rc.GetGPUMaterial(meshComp->materialAsset);
         if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
             continue;
         }

@@ -92,6 +92,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     _impl->audioContext = std::make_unique<AudioContext>();
     _impl->assetManager = std::make_unique<AssetManager>();
+    _impl->assetManager->UseRenderContext(*_impl->renderContext);
 
     if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
         if (_impl->assetManager->MountPak(pak->string())) {
@@ -111,8 +112,10 @@ Kernel::~Kernel() {
         return;
     }
 
-    _impl->renderContext.reset();
+    // Prefab buffers belong to the asset cache; it must release them while
+    // the renderer that allocated them is still alive.
     _impl->assetManager.reset();
+    _impl->renderContext.reset();
     _impl->audioContext.reset();
     _impl->fileSystemWatcher.reset();
     _impl->secondaryWindows.clear();
@@ -218,6 +221,7 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
 }
 
 auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+    _impl->assetManager->InvalidateGPUMeshes();
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
@@ -226,6 +230,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    _impl->assetManager->UseRenderContext(*_impl->renderContext);
     return {};
 }
 

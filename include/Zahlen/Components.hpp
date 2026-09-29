@@ -66,6 +66,20 @@ struct Components {
         int32_t    nodeIndex     = -1;
     };
 
+    // Scene-owned buffers for a generated mesh. MeshComponent only references
+    // its AssetID; the Engine removal observer unregisters and releases these
+    // buffers on component replacement, entity destruction, or registry clear.
+    // Cached model parts instead belong to AssetManager and are not copied here.
+    struct OwnedMeshComponent {
+        enum class Shape : uint8_t { None, Box, Plane, Sphere, Cylinder, Cone };
+
+        AssetID   meshAsset  = InvalidAssetID;
+        Mesh      mesh       = {};
+        Shape     shape      = Shape::None;
+        JPH::Vec3 dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
+        JPH::Vec4 color      = JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
     struct SkeletalMeshComponent {
         uint32_t     jointOffset        = 0;
         int32_t      skeletonIndex      = -1;

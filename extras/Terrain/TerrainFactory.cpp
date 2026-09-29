@@ -56,6 +56,9 @@ void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const Verte
     mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
+        ctx.DestroyBuffer(mesh.meshletBuffer);
+        ctx.DestroyBuffer(mesh.meshletVertexBuffer);
+        ctx.DestroyBuffer(mesh.meshletTriBuffer);
         mesh.meshletBuffer       = BufferHandle::Invalid;
         mesh.meshletVertexBuffer = BufferHandle::Invalid;
         mesh.meshletTriBuffer    = BufferHandle::Invalid;
@@ -408,6 +411,7 @@ auto CreateTerrainFromData(
     const float*       colorsRGBA,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
+    PrefabFactory::InstallMeshOwnerCleanup(ctx, reg);
     Entity e = reg.Create();
 
     Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
@@ -443,6 +447,7 @@ auto CreateTerrainFromData(
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
+    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
     reg.Add(
         e, TerrainComponent {
@@ -482,6 +487,7 @@ auto CreateTerrain(
     TerrainType        type,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
+    PrefabFactory::InstallMeshOwnerCleanup(ctx, reg);
     Entity e = reg.Create();
 
     TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
@@ -513,6 +519,7 @@ auto CreateTerrain(
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
+    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh});
     reg.Add(e, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
     reg.Add(
         e, TerrainComponent {

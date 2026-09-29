@@ -5,7 +5,6 @@
 #include "GeometryManager.hpp"
 
 #include <Zahlen/Vertex.hpp>
-#include <array>
 #include <cstring>
 
 namespace ZHLN {
@@ -119,21 +118,6 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
             return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
         })
         .value_or(BufferHandle::Invalid);
-}
-
-void GeometryManager::ReleaseMeshBuffers() {
-    _meshes.ForEach([this](AssetID, const MeshEntry& entry) {
-        if (!entry.ownsBuffers) {
-            return;
-        }
-        const Mesh& mesh = entry.mesh;
-        const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
-                                    mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
-        for (const BufferHandle handle: buffers) {
-            Destroy(handle);
-        }
-    });
-    _meshes.Clear();
 }
 
 void GeometryManager::Destroy(BufferHandle handle) {

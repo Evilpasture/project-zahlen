@@ -185,10 +185,10 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     reg.RegisterComponent<LightningComponent>("LightningComponent");
     if (reg.ObserveRemoval<LightningComponent>([&engine](Entity, LightningComponent& bolt) {
             auto& render = engine.GetRenderContext();
-            render.UnregisterBorrowedGPUMesh(bolt.meshAssetId);
+            render.UnregisterGPUMesh(bolt.meshAssetId);
             render.UnregisterGPUMaterial(bolt.matAssetId);
-            render.DestroyBuffer(std::exchange(bolt.vboPos, BufferHandle::Invalid));
-            render.DestroyBuffer(std::exchange(bolt.vboAttr, BufferHandle::Invalid));
+            render.DestroyMesh(Mesh {.posBuffer = std::exchange(bolt.vboPos, BufferHandle::Invalid),
+                                     .attrBuffer = std::exchange(bolt.vboAttr, BufferHandle::Invalid)});
         })) {
         engine.AddDeviceLostCallback([](Engine& owner) {
             for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
@@ -230,7 +230,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
     const MaterialID     matAssetId  = HashAssetID(FormatTo(strBuf, "lightning_mat_{}", boltEntity.index));
 
-    rc.RegisterBorrowedGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
+    rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
 
     if (auto matRes =
             rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
@@ -331,7 +331,7 @@ auto Update(Engine& engine, float dt) -> void {
             needsMeshRegistration = true;
         }
         if (needsMeshRegistration && bolt.vboPos != BufferHandle::Invalid && bolt.vboAttr != BufferHandle::Invalid) {
-            rc.RegisterBorrowedGPUMesh(bolt.meshAssetId, Mesh {.posBuffer = bolt.vboPos, .attrBuffer = bolt.vboAttr, .vertexCount = bolt.visibleVertices});
+            rc.RegisterGPUMesh(bolt.meshAssetId, Mesh {.posBuffer = bolt.vboPos, .attrBuffer = bolt.vboAttr, .vertexCount = bolt.visibleVertices});
         }
         if (!rc.GetGPUMaterial(bolt.matAssetId)) {
             if (auto mat = rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2,
@@ -412,7 +412,7 @@ auto Update(Engine& engine, float dt) -> void {
         if (auto gpuMeshOpt = rc.GetGPUMesh(bolt.meshAssetId)) {
             Mesh m        = *gpuMeshOpt;
             m.vertexCount = bolt.visibleVertices;
-            rc.RegisterBorrowedGPUMesh(bolt.meshAssetId, m);
+            rc.RegisterGPUMesh(bolt.meshAssetId, m);
         }
 
         if (reg.IsAlive(bolt.flashLightEntity)) {

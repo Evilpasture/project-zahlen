@@ -3,9 +3,14 @@
 
 
 #include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 
 namespace ZHLN {
+
+AssetManager::~AssetManager() {
+    ClearCache();
+}
 
 bool AssetManager::MountPak(std::string_view pakFilePath) {
     return _vfs.MountPak(pakFilePath);
@@ -39,7 +44,50 @@ void AssetManager::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefa
     _prefabCache.Insert(hash, std::move(prefab));
 }
 
+void AssetManager::UseRenderContext(RenderContext& ctx) noexcept {
+    if (_renderContext != nullptr && _renderContext != &ctx) {
+        ReleaseCachedMeshBuffers();
+    }
+    _renderContext = &ctx;
+}
+
+void AssetManager::ReleaseCachedMeshBuffers() noexcept {
+    if (_renderContext == nullptr) {
+        return;
+    }
+    // First drop every alias, then retire buffers. Several ModelParts can
+    // reference the same compiled glTF primitive; DestroyMesh is idempotent
+    // for duplicate generational handles.
+    _prefabCache.ForEach([this](ModelPrefab& prefab) {
+        for (const auto& part: prefab.parts) {
+            if (part.meshAsset != InvalidAssetID) {
+                _renderContext->UnregisterGPUMesh(part.meshAsset);
+            }
+        }
+    });
+    _prefabCache.ForEach([this](ModelPrefab& prefab) {
+        for (auto& part: prefab.parts) {
+            _renderContext->DestroyMesh(part.mesh);
+            part.mesh = {};
+        }
+    });
+}
+
+void AssetManager::InvalidateGPUMeshes() noexcept {
+    // The old RenderContext's buffer pool is being destroyed. Do not pass its
+    // handles to the replacement renderer even if it reuses the same slots.
+    _prefabCache.ForEach([](ModelPrefab& prefab) {
+        for (auto& part: prefab.parts) {
+            part.mesh = {};
+            part.defaultMaterial.pipeline        = PipelineHandle::Invalid;
+            part.defaultMaterial.prePassPipeline = PipelineHandle::Invalid;
+        }
+    });
+    _renderContext = nullptr;
+}
+
 void AssetManager::ClearCache() noexcept {
+    ReleaseCachedMeshBuffers();
     _prefabCache.Clear();
     _radianceCache.Clear();
 }

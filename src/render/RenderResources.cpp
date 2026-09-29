@@ -62,9 +62,17 @@ auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optiona
 
 void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
 
-void RenderContext::RegisterBorrowedGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterBorrowedMesh(id, mesh); }
+void RenderContext::UnregisterGPUMesh(AssetID id) noexcept { _impl->geometry.UnregisterMesh(id); }
 
-void RenderContext::UnregisterBorrowedGPUMesh(AssetID id) noexcept { _impl->geometry.UnregisterBorrowedMesh(id); }
+void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
+    // Mesh is a view; callers must unregister all aliases before releasing
+    // shared buffers. DestroyBuffer ignores invalid/already-retired handles.
+    const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
+                                mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
+    for (const BufferHandle handle: buffers) {
+        DestroyBuffer(handle);
+    }
+}
 
 void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
@@ -113,7 +121,7 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
-    _impl->geometry.ReleaseMeshBuffers();
+    _impl->geometry.ClearMeshes();
 
     _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
         if (mat.pipeline != PipelineHandle::Invalid) {

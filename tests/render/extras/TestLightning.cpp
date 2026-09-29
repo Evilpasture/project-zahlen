@@ -285,16 +285,16 @@ struct LightningTestSuite {
             if (!ZHLN::Test::ExpectTrue(cached != nullptr)) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
-            const auto borrowedBuffer = cached->vboPos;
-            const auto borrowedMesh = cached->meshAssetId;
-            rc.ClearGPUCaches(); // borrowed mesh reference disappears, but component still owns its VBOs
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(borrowedMesh).has_value());
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, borrowedBuffer);
+            const auto componentBuffer = cached->vboPos;
+            const auto meshID = cached->meshAssetId;
+            rc.ClearGPUCaches(); // the lookup disappears, but the component still owns its VBOs
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
             ZHLN::Lightning::Update(*engine, 0.01f);
-            ZHLN::Test::ExpectTrue(rc.GetGPUMesh(borrowedMesh).has_value());
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, borrowedBuffer);
+            ZHLN::Test::ExpectTrue(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
             reg.Destroy(cachedBolt);
-            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(borrowedMesh).has_value());
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
             return {};
         }
     };

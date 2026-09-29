@@ -19,11 +19,6 @@
 namespace ZHLN {
 
 class GeometryManager {
-    struct MeshEntry {
-        Mesh mesh;
-        bool ownsBuffers;
-    };
-
   public:
     GeometryManager(
         Vk::Context&                                ctx,
@@ -59,23 +54,15 @@ class GeometryManager {
     [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> NativeMesh* { return _buffers.Resolve(handle); }
 
 
-    void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, {.mesh = mesh, .ownsBuffers = true}); }
-    void RegisterBorrowedMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, {.mesh = mesh, .ownsBuffers = false}); }
+    // AssetID lookup only: the creator of the buffers owns their lifetime.
+    void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, mesh); }
+    void UnregisterMesh(AssetID id) { _meshes.Erase(id); }
     void RegisterMaterial(MaterialID id, Material material) { _materials.Insert(id, material); }
-    void UnregisterBorrowedMesh(AssetID id) {
-        if (const auto* entry = _meshes.Find(id); entry != nullptr && !entry->ownsBuffers) {
-            _meshes.Erase(id);
-        }
-    }
     void UnregisterMaterial(MaterialID id) { _materials.Erase(id); }
 
-    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* {
-        const auto* entry = _meshes.Find(id);
-        return entry != nullptr ? &entry->mesh : nullptr;
-    }
+    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* { return _meshes.Find(id); }
     [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> const Material* { return _materials.Find(id); }
 
-    void ReleaseMeshBuffers();
     void ClearMeshes() noexcept { _meshes.Clear(); }
 
     template <typename Fn>
@@ -95,7 +82,7 @@ class GeometryManager {
 
     GenerationalPool<NativeMesh, 8192, BufferHandle> _buffers;
 
-    ZHLN::HashMap<AssetID, MeshEntry>   _meshes;
+    ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;
 };
 

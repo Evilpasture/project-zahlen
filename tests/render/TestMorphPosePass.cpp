@@ -137,7 +137,20 @@ struct MorphPosePassSuite {
     }
 
     struct BuiltPrefab {
+        ZHLN::RenderContext* context = nullptr;
         ZHLN::ModelPrefab prefab;
+
+        BuiltPrefab() = default;
+        BuiltPrefab(BuiltPrefab&&) = default;
+        BuiltPrefab(const BuiltPrefab&) = delete;
+        ~BuiltPrefab() {
+            if (context != nullptr) {
+                for (const auto& part: prefab.parts) {
+                    context->UnregisterGPUMesh(part.meshAsset);
+                    context->DestroyMesh(part.mesh);
+                }
+            }
+        }
     };
 
     // One box part under one root node, `kMorphTargets` morph targets with real
@@ -147,6 +160,7 @@ struct MorphPosePassSuite {
     // target node, keyValues but no keyTimes.
     [[nodiscard]] static auto BuildMorphPrefab(ZHLN::RenderContext& rc, bool degenerateClip) -> BuiltPrefab {
         BuiltPrefab built;
+        built.context = &rc;
 
         const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
 

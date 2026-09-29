@@ -173,6 +173,9 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         skeleton.skinnedScratch = BufferHandle::Invalid;
         skeleton.scratchVertexCount = 0;
     }
+    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
+        owned.mesh = {}; // the old context will reclaim its pool; never destroy these on the new device
+    }
 
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
@@ -261,6 +264,14 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     // entity ledger. These observers also run on raw Registry::Destroy and
     // Registry::Clear, not just through the Engine's despawn helper.
     auto& reg = _impl->world->GetRegistry();
+    static_cast<void>(reg.ObserveRemoval<Components::OwnedMeshComponent>([this](Entity, auto& owned) {
+        auto& render = GetRenderContext();
+        if (owned.meshAsset != InvalidAssetID) {
+            render.UnregisterGPUMesh(owned.meshAsset);
+        }
+        render.DestroyMesh(std::exchange(owned.mesh, Mesh {}));
+        owned.meshAsset = InvalidAssetID;
+    }));
     static_cast<void>(reg.ObserveRemoval<Components::ParticleEmitterComponent>([this](Entity, auto& emitter) {
         GetRenderContext().DestroyBuffer(std::exchange(emitter.gpuBuffer, BufferHandle::Invalid));
         emitter.bufferCapacity = 0;

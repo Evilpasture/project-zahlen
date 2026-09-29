@@ -584,6 +584,10 @@ void RegisterCreativeWorkCommands() {
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
                         ZHLN::PrefabFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
+                    // This command exposes a buffer handle, not a drawable
+                    // asset. Keep all seven mesh buffers alive in the scene
+                    // without registering an unused AssetID lookup.
+                    engine->GetRegistry().Create(ZHLN::Components::OwnedMeshComponent {.mesh = mesh});
                     return static_cast<uint64_t>(mesh.posBuffer);
                 }));
 
@@ -671,6 +675,9 @@ void RegisterCreativeWorkCommands() {
             reg.Add(
                 e, ZHLN::Components::MeshComponent {.meshAsset = entityMeshAsset, .materialAsset = entityMatAsset, .cullRadius = cullRadius, .flags = flags}
             );
+            reg.Add(e, ZHLN::Components::OwnedMeshComponent {.meshAsset = entityMeshAsset, .mesh = mesh,
+                .shape = ZHLN::Components::OwnedMeshComponent::Shape::Box,
+                .dimensions = JPH::Vec3(a.p1, a.p1, a.p1), .color = JPH::Vec4(a.r, a.g, a.b, a.a)});
 
             reg.Add(
                 e, ZHLN::Components::PhysicsComponent {

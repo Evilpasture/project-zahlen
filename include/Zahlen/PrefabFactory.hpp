@@ -26,6 +26,13 @@ class Registry;
 
 namespace ZHLN::PrefabFactory {
 
+// Standalone Registry+RenderContext spawners install the mesh removal observer
+// here; keep ctx alive until reg is cleared. Engine installs its own observer
+// so device-loss recreation always uses the current renderer instead.
+void InstallMeshOwnerCleanup(RenderContext& ctx, ECS::Registry& reg);
+
+// Standalone builders return caller-owned buffers: use DestroyMesh after their
+// last draw. Entity spawners below attach scene-owned cleanup instead.
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
 auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
 auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;

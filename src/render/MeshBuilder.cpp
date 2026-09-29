@@ -49,6 +49,9 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
     mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
+        ctx.DestroyBuffer(mesh.meshletBuffer);
+        ctx.DestroyBuffer(mesh.meshletVertexBuffer);
+        ctx.DestroyBuffer(mesh.meshletTriBuffer);
         mesh.meshletBuffer       = BufferHandle::Invalid;
         mesh.meshletVertexBuffer = BufferHandle::Invalid;
         mesh.meshletTriBuffer    = BufferHandle::Invalid;

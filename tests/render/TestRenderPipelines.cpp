@@ -5,7 +5,10 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -23,6 +26,7 @@
 #include <expected>
 #include <span>
 #include <format>
+#include <memory>
 #include <string>
 
 struct RenderPipelinesTestSuite {
@@ -137,6 +141,99 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(engine != nullptr);
             engine->InitializeDefaultScene();
             ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> registered_meshes_are_views_of_scene_owned_buffers() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("SceneMeshOwnership", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+            auto& rc  = engine->GetRenderContext();
+            auto& reg = engine->GetRegistry();
+
+            const auto entity = ZHLN::PrefabFactory::CreateBox(*engine, JPH::Vec3(0.5f, 0.5f, 0.5f));
+            const auto* owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(entity);
+            if (!ZHLN::Test::ExpectTrue(owner != nullptr && owner->mesh.posBuffer != ZHLN::BufferHandle::Invalid)) {
+                return {};
+            }
+            const auto id     = owner->meshAsset;
+            const auto handle = owner->mesh.posBuffer;
+
+            rc.UnregisterGPUMesh(id); // the lookup disappears without freeing scene-owned buffers
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
+            rc.RegisterGPUMesh(id, owner->mesh);
+            const auto rebound = rc.GetGPUMesh(id);
+            ZHLN::Test::ExpectTrue(rebound.has_value());
+            if (rebound) {
+                ZHLN::Test::ExpectEq(rebound->posBuffer, handle);
+            }
+
+            // Raw component removal uses the same owner cleanup as despawn.
+            reg.Remove<ZHLN::Components::OwnedMeshComponent>(entity);
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(id).has_value());
+            reg.Destroy(entity);
+
+            const auto plane = ZHLN::PrefabFactory::CreatePlane(*engine, 2.0f);
+            const auto* planeOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(plane);
+            if (ZHLN::Test::ExpectTrue(planeOwner != nullptr)) {
+                const auto planeID = planeOwner->meshAsset;
+                reg.Destroy(plane);
+                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(planeID).has_value());
+            }
+
+            const auto sphere = ZHLN::PrefabFactory::CreateSphere(*engine, 0.5f);
+            const auto* sphereOwner = reg.Get<ZHLN::Components::OwnedMeshComponent>(sphere);
+            if (ZHLN::Test::ExpectTrue(sphereOwner != nullptr)) {
+                const auto sphereID = sphereOwner->meshAsset;
+                reg.Clear();
+                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(sphereID).has_value());
+            }
+
+            // The overload that accepts an independent Registry installs its
+            // own observer; it cannot rely on Engine's world setup.
+            ZHLN::ECS::Registry standalone;
+            const auto loose = ZHLN::PrefabFactory::CreateBox(rc, standalone, nullptr, JPH::Vec3(0.25f, 0.25f, 0.25f));
+            const auto* looseOwner = standalone.Get<ZHLN::Components::OwnedMeshComponent>(loose);
+            if (ZHLN::Test::ExpectTrue(looseOwner != nullptr)) {
+                const auto looseID = looseOwner->meshAsset;
+                standalone.Clear();
+                ZHLN::Test::ExpectFalse(rc.GetGPUMesh(looseID).has_value());
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> cached_prefab_parts_share_one_owned_mesh() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("PrefabMeshOwnership", 320, 240);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return {};
+            }
+            auto& rc     = engine->GetRenderContext();
+            auto& assets = engine->GetAssetManager();
+            const auto mesh = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 1.0f);
+            if (!ZHLN::Test::ExpectTrue(mesh.posBuffer != ZHLN::BufferHandle::Invalid)) {
+                rc.DestroyMesh(mesh);
+                return {};
+            }
+
+            const auto firstID  = ZHLN::HashAssetID("test_prefab_mesh_shared_first");
+            const auto secondID = ZHLN::HashAssetID("test_prefab_mesh_shared_second");
+            auto prefab = std::make_unique<ZHLN::ModelPrefab>();
+            prefab->parts.resize(2);
+            prefab->parts[0].meshAsset = firstID;
+            prefab->parts[0].mesh = mesh;
+            prefab->parts[1].meshAsset = secondID;
+            prefab->parts[1].mesh = mesh;
+            assets.CachePrefab(ZHLN::HashAssetPath("test_prefab_mesh_shared"), std::move(prefab));
+            rc.RegisterGPUMesh(firstID, mesh);
+            rc.RegisterGPUMesh(secondID, mesh);
+
+            assets.ClearCache(); // unregister both aliases; release shared buffers once
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(firstID).has_value());
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(secondID).has_value());
+            const auto next = rc.CreateStorageBuffer(64);
+            ZHLN::Test::ExpectTrue(next != ZHLN::BufferHandle::Invalid);
+            rc.DestroyBuffer(next);
             return {};
         }
 

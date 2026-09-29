@@ -88,14 +88,16 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
     [[nodiscard]] std::optional<Material> GetGPUMaterial(MaterialID id) const noexcept;
-    // Ordinary asset meshes transfer buffer ownership to the renderer cache.
+    // Non-owning lookup: registration never transfers buffer ownership.
+    // Unregister before releasing the buffers; a cache clear only drops lookups.
     void                                  RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
-    // The caller retains ownership of buffers referenced by a borrowed mesh.
-    void                                  RegisterBorrowedGPUMesh(AssetID id, Mesh mesh) noexcept;
-    void                                  UnregisterBorrowedGPUMesh(AssetID id) noexcept;
+    void                                  UnregisterGPUMesh(AssetID id) noexcept;
+    // Release all buffers referenced by one mesh (but not its registration).
+    void                                  DestroyMesh(const Mesh& mesh) noexcept;
     void                                  RegisterGPUMaterial(MaterialID id, Material mat) noexcept;
     // Retire a registered material's pipelines when the scene no longer uses it.
     void                                  UnregisterGPUMaterial(MaterialID id) noexcept;
+    // Drops mesh lookups (not their caller-owned buffers), materials, and textures.
     void                                  ClearGPUCaches() noexcept;
 
     BufferHandle CreateStorageBuffer(size_t size);

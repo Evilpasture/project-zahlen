@@ -394,7 +394,21 @@ export class ExplosionSystem {
             });
         }
 
-        if (s_LastRenderContext == &rc) {
+        s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
+        s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
+
+        // Debris is shared by every explosion in this scene, not owned by any
+        // one emitter. Keep its buffers on a dedicated ECS resource entity.
+        Entity resourceEntity = Entity::Null();
+        for (const Entity e: reg.GetEntitiesWith<Components::OwnedMeshComponent>()) {
+            if (const auto* owned = reg.Get<Components::OwnedMeshComponent>(e);
+                owned != nullptr && owned->meshAsset == s_DebrisMeshAsset) {
+                resourceEntity = e;
+                break;
+            }
+        }
+        if (s_LastRenderContext == &rc && resourceEntity != Entity::Null() &&
+            rc.GetGPUMesh(s_DebrisMeshAsset).has_value() && rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
             return;
         }
         s_LastRenderContext = &rc;
@@ -407,20 +421,28 @@ export class ExplosionSystem {
         s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
         s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
-        // Debris box mesh for physical ejecta chunks
-        Mesh boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
-
-        Material debrisMat = rc.CreateMaterial({
-                                 .roughness = 0.94f,
-                                 .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
-                             })
-                                 .value_or(Material {});
-
-        s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
-        s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
-
+        Mesh boxMesh;
+        if (resourceEntity != Entity::Null()) {
+            auto& owned = *reg.Get<Components::OwnedMeshComponent>(resourceEntity);
+            boxMesh = owned.mesh;
+            if (boxMesh.posBuffer == BufferHandle::Invalid) {
+                boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
+                rc.DestroyMesh(std::exchange(owned.mesh, boxMesh));
+            }
+        } else {
+            boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
+            reg.Create(Components::OwnedMeshComponent {.meshAsset = s_DebrisMeshAsset, .mesh = boxMesh});
+        }
         rc.RegisterGPUMesh(s_DebrisMeshAsset, boxMesh);
-        rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
+
+        if (!rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
+            Material debrisMat = rc.CreateMaterial({
+                                     .roughness = 0.94f,
+                                     .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
+                                 })
+                                     .value_or(Material {});
+            rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
+        }
     }
 
     static Entity Spawn(Engine& engine, const JPH::Vec3& origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {

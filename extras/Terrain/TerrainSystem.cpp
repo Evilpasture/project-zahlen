@@ -99,12 +99,13 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
     });
 }
 
-void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&> query,
-                           ECS::ResMut<RenderContext> render) {
+void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+                           ECS::ResMut<RenderContext> render, ECS::Registry& registry) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
     auto& rc  = *render;
+    PrefabFactory::InstallMeshOwnerCleanup(rc, registry);
 
     auto entities = query.Entities<TerrainComponent>();
     auto terrains = query.Raw<TerrainComponent>();
@@ -130,12 +131,27 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
 
         const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
 
-        // 2. Lazy bake or re-bake GPU mesh if invalidated
+        // 2. Cache clears drop only the lookup. Rebind the scene-owned mesh
+        // without baking a second set of buffers; after device loss the owner
+        // has been invalidated, so rebuild from the CPU heightmap instead.
         if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
-            if (tData != nullptr && !tData->heights.empty()) {
+            auto* owned = query.Get<Components::OwnedMeshComponent>(e);
+            if (owned != nullptr && owned->meshAsset != meshComp->meshAsset) {
+                rc.UnregisterGPUMesh(owned->meshAsset);
+                owned->meshAsset = meshComp->meshAsset;
+            }
+            if (owned != nullptr && owned->mesh.posBuffer != BufferHandle::Invalid) {
+                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
+            } else if (tData != nullptr && !tData->heights.empty()) {
                 Mesh tMesh = CreateTerrainMeshFromData(
                     rc, tData->sampleCount, tData->worldSize, tData->heights.data(), tData->colors.empty() ? nullptr : tData->colors.data()
                 );
+                if (owned != nullptr) {
+                    rc.DestroyMesh(owned->mesh);
+                    owned->mesh = tMesh;
+                } else {
+                    registry.Add(e, Components::OwnedMeshComponent {.meshAsset = meshComp->meshAsset, .mesh = tMesh});
+                }
                 rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
             }
         }

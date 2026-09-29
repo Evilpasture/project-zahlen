@@ -126,10 +126,10 @@ struct EngineOptions {
 //
 // So one engine is kept alive and the *scene* is what gets thrown away between
 // tests. A suite that reuses an engine must not assume a virgin process: it
-// gets a cleared registry with a freshly seeded default scene, but the render
-// context still holds the meshes, materials and textures earlier tests
-// uploaded. Tests that measure pixels do not care; a test that needs a
-// genuinely cold device should call CreateEngine and own it.
+// gets a cleared registry with a freshly seeded default scene. That releases
+// scene-owned mesh buffers; cached prefab assets, materials and textures can
+// still persist across tests. A test that needs a genuinely cold device should
+// call CreateEngine and own it.
 
 // Non-owning handle to a pooled engine.
 //

@@ -33,8 +33,8 @@ class TerrainSystem {
     TerrainSystem(TerrainSystem&&)                 = default;
     TerrainSystem& operator=(TerrainSystem&&)      = default;
 
-    static void Update(ECS::Query<const TerrainComponent, Components::MeshComponent&> query,
-                       ECS::ResMut<RenderContext> render);
+    static void Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+                       ECS::ResMut<RenderContext> render, ECS::Registry& registry);
 
     static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
     static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;

@@ -16,6 +16,8 @@
 
 namespace ZHLN {
 
+class RenderContext;
+
 namespace TaskSystem {
 struct Counter;
 }
@@ -95,7 +97,7 @@ using AssetLoadRequest = FS::LoadRequest;
 class AssetManager {
   public:
     AssetManager() = default;
-    ~AssetManager() = default;
+    ~AssetManager();
 
     AssetManager(const AssetManager&)            = delete;
     AssetManager& operator=(const AssetManager&) = delete;
@@ -114,6 +116,8 @@ class AssetManager {
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
 
     ModelPrefab* GetCachedPrefab(uint64_t hash);
+    // Bind the uploading renderer via UseRenderContext before caching a prefab
+    // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
@@ -124,6 +128,15 @@ class AssetManager {
     RadianceMap* GetCachedRadiance(uint64_t hash);
     void CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map);
 
+    // Cached model parts own their GPU buffers, shared by all instances of
+    // each prefab. The context must outlive the cache (Kernel enforces this).
+    // Importers bind their context before caching newly uploaded parts.
+    void UseRenderContext(RenderContext& ctx) noexcept;
+    // Drop old-device handles without issuing GPU work; Kernel calls this
+    // before destroying the context during device-loss recovery.
+    void InvalidateGPUMeshes() noexcept;
+    // Evicts prefabs and releases their meshes. As with the existing raw
+    // ModelPrefab* API, first remove scene instances referencing those prefabs.
     void ClearCache() noexcept;
     void ClearFontCache() noexcept;
 
@@ -134,6 +147,11 @@ class AssetManager {
     [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem& { return _vfs; }
 
   private:
+    void ReleaseCachedMeshBuffers() noexcept;
+
+    // Borrowed from Kernel/GLTF's upload context, never a renderer-owned
+    // mesh ledger. Cleared before the context is replaced on device loss.
+    RenderContext* _renderContext = nullptr;
     FS::VirtualFileSystem _vfs;
 
     FS::AssetCache<ModelPrefab> _prefabCache;
