@@ -86,7 +86,7 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                             container->slots[container->count++] = triggerEnt;
                             pickup->isPickedUp                   = 1;
 
-                            if (physics != nullptr) {
+                            if (physics) {
                                 SceneResources::Detach<Components::PhysicsComponent>(*physics, registry, triggerEnt);
                             }
                             if (query.Get<Components::MeshComponent>(triggerEnt) != nullptr) {

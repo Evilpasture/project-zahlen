@@ -551,9 +551,9 @@ auto SpawnPrimitive(
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
-        auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
-        auto body  = pc->CreateRigidBody(
-            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+        auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        auto body      = pc->CreateRigidBody(
+            bodyShape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
             params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
