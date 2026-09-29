@@ -1,5 +1,6 @@
 
 import instance_data;
+import math.transform;
 import pbr_helpers;
 import uniforms;
 
@@ -11,24 +12,6 @@ const int ENABLE_RTR = 1;
 #else
 static const int ENABLE_RTR = 0;
 #endif
-
-float3 RotateVector(float3 V, float3 lightDir) {
-    float lenB = length(lightDir);
-    if (lenB < 0.001f) {
-        return V;
-    }
-    float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
-    float3 B     = lightDir / lenB;
-    float3 q_xyz = cross(B, A);
-    float q_w    = 1.0f + dot(A, B);
-    float q_len  = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
-    if (q_len > 0.0001f) {
-        q_xyz /= q_len;
-        q_w /= q_len;
-        return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
-    }
-    return V;
-}
 
 struct PushConstants {
     float4x4 invViewProj;

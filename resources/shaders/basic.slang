@@ -1,7 +1,7 @@
 import common;
 import material_model;
+import math.transform;
 import pbr_helpers;
-
 
 struct PSOutput {
     float4 color : SV_Target0;
@@ -239,48 +239,10 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     return output;
 }
 
-
-
-float3 RotateVector(float3 V, float3 lightDir) {
-    float lenB = length(lightDir);
-    if (lenB < 0.001f)
-        return V;
-    float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
-    float3 B     = lightDir / lenB;
-    float3 q_xyz = cross(B, A);
-    float q_w    = 1.0f + dot(A, B);
-    float q_len  = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
-    if (q_len > 0.0001f) {
-        q_xyz /= q_len;
-        q_w /= q_len;
-        return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
-    }
-    return V;
-}
-
 float3 RgbMix(float3 base, float3 layer, float3 rgbAlpha) {
     float3 w = max(rgbAlpha, 0.0f);
     float wMax = min(max(w.r, max(w.g, w.b)), 1.0f);
     return (1.0f - wMax) * base + w * layer;
-}
-
-float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, float2 uv) {
-    mapNormal = float3(mapNormal.xy * scale, mapNormal.z);
-    float3 dp1 = ddx(worldPos);
-    float3 dp2 = ddy(worldPos);
-    float2 duv1 = ddx(uv);
-    float2 duv2 = ddy(uv);
-    float3 T = dp1 * duv2.y - dp2 * duv1.y;
-    float t2 = dot(T, T);
-    if (t2 < 1.0e-8f) {
-        return N;
-    }
-    T = T * rsqrt(t2);
-    float3 B = cross(N, T);
-    if (dot(cross(T, B), N) < 0.0f) {
-        B = -B;
-    }
-    return SafeNormalize(T * mapNormal.x + B * mapNormal.y + N * mapNormal.z, N);
 }
 
 float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, bool isFrontFace) {

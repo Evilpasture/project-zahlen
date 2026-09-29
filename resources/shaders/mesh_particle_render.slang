@@ -1,5 +1,6 @@
 
 import common;
+import math.transform;
 import pbr_helpers;
 import uniforms;
 
@@ -66,19 +67,6 @@ struct PSOutput {
     float4 clearcoat : SV_Target4;
     float4 anisotropy : SV_Target5;
 };
-
-public struct Quaternion {
-    public float4 value;
-    public __init(float4 value) {
-        this.value = value;
-    }
-
-    [ForceInline]
-    public float3 rotate(float3 vector) {
-        float3 t = 2.0f * cross(this.value.xyz, vector);
-        return vector + this.value.w * t + cross(this.value.xyz, t);
-    }
-}
 
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
     VSOutput output;

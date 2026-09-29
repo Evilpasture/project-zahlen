@@ -3,26 +3,6 @@ import instance_data;
 import pbr_helpers;
 import uniforms;
 
-float3 SafeNormalizeLocal(float3 v, float3 fallback) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return fallback;
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return fallback;
-    return r;
-}
-float3 SafeNormalizeLocal(float3 v) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return float3(0.0f, 0.0f, 1.0f);
-    return r;
-}
-#define SafeNormalize SafeNormalizeLocal
-
 struct RtrHalfPushConstants {
     uint2 halfRes;
     uint2 _pad;

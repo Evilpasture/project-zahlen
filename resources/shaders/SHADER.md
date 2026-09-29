@@ -7,6 +7,12 @@ slangc; do NOT try to change matrix storage in source (no
 
 RIGHT HANDED COORDINATES, COLUMN MAJOR/VECTOR COLUMN, CCW ONLY.
 
+Resource-free helpers live in `math/math.slang` (normalization and depth),
+`math/transform.slang` (quaternions, tangents and normal mapping), and
+`math/phase.slang` (volumetric scattering). Import them by their dotted module
+names (`math.transform`, for example); the declaration inside each module is\nits simple name (`module transform;`). They carry no descriptors or push data;
+`pbr_helpers.slang` re-exports the math used by existing PBR consumers.
+
 Descriptor binding authority lives in the shaders: the C++ side reflects
 the compiled SPIR-V (`ReflectedLayout`) instead of declaring static
 layouts. Keep `GlobalSceneRegistry` member order stable in `common.slang` —

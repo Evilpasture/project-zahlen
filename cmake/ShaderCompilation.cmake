@@ -25,7 +25,7 @@ file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
 # The shared slang the entry points import: every cook and the catalog's
 # in-process replay read these, so both commands depend on them. Stated once
-# because the alternative is two thirteen-file lists drifting apart -- the
+# because the alternative is two shared-source lists drifting apart -- the
 # last file added to one and not the other is a stale catalog nobody notices.
 set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/uniforms.slang"
@@ -39,6 +39,9 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/vertex_format.slang"
     "${SHADER_SRC_DIR}/particles.slang"
     "${SHADER_SRC_DIR}/material_model.slang"
+    "${SHADER_SRC_DIR}/math/math.slang"
+    "${SHADER_SRC_DIR}/math/phase.slang"
+    "${SHADER_SRC_DIR}/math/transform.slang"
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
 )

@@ -3,6 +3,8 @@ module pbr_helpers;
 __exported import hash;
 __exported import blue_noise;
 __exported import instance_data;
+__exported import math.math;
+__exported import math.transform;
 __exported import uniforms;
 __exported import vertex_format;
 
@@ -61,30 +63,6 @@ public bool IsFiniteFloat(float x) {
 }
 public bool IsFiniteFloat3(float3 v) {
     return IsFiniteFloat(v.x) && IsFiniteFloat(v.y) && IsFiniteFloat(v.z);
-}
-
-public float3 SafeNormalize(float3 v, float3 fallback) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return fallback;
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return fallback;
-    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
-        return fallback;
-    return r;
-}
-
-public float3 SafeNormalize(float3 v) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return float3(0.0f, 0.0f, 1.0f);
-    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    return r;
 }
 
 public float SoftClamp(float x, float limit) {
@@ -221,12 +199,6 @@ public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
 public float2 AnisotropicAlphas(float roughness, float strength) {
     float alpha = max(roughness * roughness, 0.001f);
     return float2(lerp(alpha, 1.0f, saturate(strength) * saturate(strength)), alpha);
-}
-
-public float3 OrthogonalTangent(float3 N, float3 T) {
-    float3 up = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 fallback = SafeNormalize(cross(up, N), float3(1.0f, 0.0f, 0.0f));
-    return SafeNormalize(T - dot(T, N) * N, fallback);
 }
 
 // RG: octahedral world-space direction; B: strength. Zero strength is all
