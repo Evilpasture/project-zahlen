@@ -529,8 +529,20 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             const bool  isMouseDown  = state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
 
             if (isMouseDown && !wasMouseDown) {
-                auto hit                           = CastPickingRay(engine, cam, sceneViewport);
-                s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
+                const auto hit = CastPickingRay(engine, cam, sceneViewport);
+                // Physics returns a body handle, not an ECS entity. Resolve it
+                // through the components only when the editor needs a selection;
+                // unowned bodies and removed components are not selectable.
+                s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
+                if (hit.hasHit) {
+                    for (ZHLN::Entity entity: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+                        const auto* physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
+                        if (physics != nullptr && physics->physicsHandle == hit.handle) {
+                            s_NativeEditorState.selectedEntity = entity;
+                            break;
+                        }
+                    }
+                }
                 // TEMP-DIAG (camera jump investigation): what the click saw.
                 ZHLN::Log(
                     "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}",
