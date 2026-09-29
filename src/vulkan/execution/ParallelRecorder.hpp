@@ -48,7 +48,7 @@ class ParallelCommandRecorder {
     }
 
     template <typename SchedulerPolicy, typename... Callables>
-    void Record(SchedulerPolicy&& scheduler, Callables&&... callables);
+    [[nodiscard]] auto Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] constexpr auto GetCommandBuffers() const noexcept -> std::span<const VkCommandBuffer, ConcurrentSlots> {
         return _cmds;
@@ -60,7 +60,8 @@ class ParallelCommandRecorder {
 
   private:
     template <typename SchedulerPolicy, size_t... Is, typename... Callables>
-    void RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables);
+    [[nodiscard]] auto RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables)
+        -> std::expected<void, ErrorCode>;
 
     VkDevice                                                      _device = VK_NULL_HANDLE;
     std::array<CommandPool<QueueType::Graphics>, ConcurrentSlots> _pools;

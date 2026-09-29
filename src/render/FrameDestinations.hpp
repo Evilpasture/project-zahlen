@@ -35,26 +35,6 @@ enum class DestinationError : uint8_t {
 // presentation images. Offscreen textures have their own persistent ownership.
 class FrameDestinations {
   public:
-    class Recording {
-      public:
-        Recording() noexcept = default;
-        ~Recording() noexcept;
-        Recording(Recording&& other) noexcept;
-        auto operator=(Recording&& other) noexcept -> Recording&;
-        Recording(const Recording&)                    = delete;
-        auto operator=(const Recording&) -> Recording& = delete;
-
-        auto Open(VkCommandBuffer slot) noexcept -> VkCommandBuffer;
-        void Close() noexcept;
-        void Discard() noexcept;
-        [[nodiscard]] auto Command() const noexcept -> VkCommandBuffer { return cmd; }
-        [[nodiscard]] auto IsOpen() const noexcept -> bool { return open; }
-
-      private:
-        VkCommandBuffer cmd  = VK_NULL_HANDLE;
-        bool            open = false;
-    };
-
     struct Acquired {
         Vk::ImageSlice image {};
         uint32_t       imageIndex = 0;
@@ -70,7 +50,7 @@ class FrameDestinations {
         std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         std::optional<Acquired> acquired;
         uint64_t cachedGeneration = 0;
-        Recording recording;
+        Vk::CommandRecorder recorder;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool { return ownedPresenter == nullptr; }
         [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {
@@ -97,7 +77,7 @@ class FrameDestinations {
     void Detach(const PresentationTarget& target) noexcept;
     void Clear() noexcept;
     void BeginFrame() noexcept;
-    void CloseRecordings() noexcept;
+    void AbortRecordings() noexcept;
 
     void SetActive(uint64_t id) noexcept { activeWindow = id; }
     [[nodiscard]] auto Active() const noexcept -> const Window* { return Find(activeWindow); }

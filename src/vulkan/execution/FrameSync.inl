@@ -16,7 +16,10 @@ template <uint32_t N>
 	requires(N > 0 && N <= 8)
 inline FrameSync<N>::FrameSync(FrameSync&& other) noexcept
 	: _device(std::exchange(other._device, VK_NULL_HANDLE)),
-	  _frames(std::exchange(other._frames, {})) {}
+	  _frames(std::exchange(other._frames, {})),
+	  _timelineValues(std::exchange(other._timelineValues, {})),
+	  _computeValuesSubmitted(std::exchange(other._computeValuesSubmitted, {})),
+	  _submitted(std::exchange(other._submitted, {})) {}
 
 template <uint32_t N>
 	requires(N > 0 && N <= 8)
@@ -27,6 +30,9 @@ inline auto FrameSync<N>::operator=(FrameSync&& other) noexcept -> FrameSync& {
 		}
 		_device = std::exchange(other._device, VK_NULL_HANDLE);
 		_frames = std::exchange(other._frames, {});
+		_timelineValues = std::exchange(other._timelineValues, {});
+		_computeValuesSubmitted = std::exchange(other._computeValuesSubmitted, {});
+		_submitted = std::exchange(other._submitted, {});
 	}
 	return *this;
 }

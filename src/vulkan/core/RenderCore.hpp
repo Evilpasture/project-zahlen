@@ -14,6 +14,7 @@
 
 #include "FrameStorage.hpp"
 #include "RenderCore.h"
+#include "../execution/CommandRecorder.hpp"
 
 #include "../VkError.hpp"
 
@@ -169,27 +170,6 @@ class ScopedRendering {
     VkCommandBuffer _cmd;
 };
 
-class CommandBufferGuard {
-  public:
-    explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
-    CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept;
-    ~CommandBufferGuard() noexcept;
-
-    void End() noexcept;
-
-    [[nodiscard]] VkCommandBuffer get() const noexcept {
-        return cmd;
-    }
-
-    CommandBufferGuard(const CommandBufferGuard&)            = delete;
-    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
-    CommandBufferGuard(CommandBufferGuard&& other) noexcept;
-    CommandBufferGuard& operator=(CommandBufferGuard&& other) noexcept;
-
-  private:
-    VkCommandBuffer cmd {};
-};
-
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
@@ -225,10 +205,6 @@ inline void CopyBufferToImage(
 template <GpuTriviallyCopyable T>
 void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages, const T& value) noexcept;
 
-[[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
-    return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
-}
-
 inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -237,17 +213,19 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
 }
 
+// Only an ended command buffer can be submitted. The token is consumed even
+// if submission fails; the pool still owns the underlying buffer.
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
-    VkQueue                                        queue,
-    std::span<const VkCommandBufferSubmitInfo>     cmds,
-    std::span<const VkSemaphoreSubmitInfo>         waits   = {},
-    std::span<const VkSemaphoreSubmitInfo>         signals = {},
-    VkFence                                        fence   = VK_NULL_HANDLE
+    VkQueue                                queue,
+    ExecutableCommands                    cmds,
+    std::span<const VkSemaphoreSubmitInfo> waits   = {},
+    std::span<const VkSemaphoreSubmitInfo> signals = {},
+    VkFence                                fence   = VK_NULL_HANDLE
 ) noexcept;
 
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue               queue,
-    VkCommandBuffer       cmd,
+    ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
     uint64_t              waitValue       = 0,
     VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -260,7 +238,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
 template <QueueType QType>
 [[nodiscard]] inline std::expected<void, ErrorCode> QueueSubmit(
     const Context&        ctx,
-    CommandBuffer<QType>  cmd,
+    ExecutableCommands   cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
     uint64_t              waitValue       = 0,
     VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -269,7 +247,7 @@ template <QueueType QType>
     VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkFence               fence           = VK_NULL_HANDLE
 ) noexcept {
-    return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
+    return QueueSubmit(ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {

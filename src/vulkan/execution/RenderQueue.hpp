@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
 
 namespace ZHLN::Vk {
@@ -17,7 +18,7 @@ class Context;
 
 [[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(
     VkQueue               queue,
-    VkCommandBuffer       cmd,
+    ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
     uint64_t              waitValue     = 0,
     VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
@@ -163,9 +164,6 @@ template <QueueType QType>
 
 template <QueueType QType>
 [[nodiscard]] constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t;
-
-template <QueueType QType>
-[[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept;
 
 }
 

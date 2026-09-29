@@ -11,6 +11,7 @@
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
 #include "Zahlen/Profiler.hpp"
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -286,10 +287,11 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 namespace {
 
 template <typename Recorder, typename Scheduler, size_t... Is>
-void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept {
+auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept
+    -> std::expected<void, ErrorCode> {
     // Record() waits for its workers before returning. These references cannot
     // outlive the graph's pass objects or the local array of callable views.
-    rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
+    return rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
 }
@@ -332,18 +334,22 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     self.frameState.inForkSecondary = true;
 
     TaskSystemScheduler scheduler;
+    std::expected<void, ErrorCode> recorded;
     if (count == 2) {
-        RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
+        recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
     } else if constexpr (kSlots >= 3) {
         if (count == 3) {
-            RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<3> {});
+            recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<3> {});
         } else if constexpr (kSlots >= 4) {
-            RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<4> {});
+            recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<4> {});
         }
     }
 
     self.frameState.inForkSecondary = previousInheritance;
-
+    if (!recorded) {
+        ZHLN::Log("[Render] Secondary command recording failed ({}); skipping this fork.", recorded.error());
+        return;
+    }
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
 
@@ -353,16 +359,30 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
     // independently indexed, but increasing N alone does not permit additional
     // overlapping GPU frames while these history targets remain shared.
-    if (const VkResult waited = _impl->presenter.sync.Wait(Vk::PreviousFrameSlot(_impl->presenter.frameIndex)); waited != VK_SUCCESS) {
-        return std::unexpected(Vk::ToFrameError(waited));
+    auto& primarySync = _impl->presenter.sync;
+    const uint32_t slot = _impl->presenter.frameIndex;
+    // The previous frame protects shared two-state histories. The current
+    // slot's older submission must also finish before its pools are reset, even
+    // if the previous frame acquired no image and never submitted graphics.
+    for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
+        if (const VkResult waited = primarySync.Wait(frameSlot); waited != VK_SUCCESS) {
+            return std::unexpected(Vk::ToFrameError(waited));
+        }
+        // Compute can be submitted without a graphics frame (minimized or
+        // skipped acquisition), so its timeline must be waited independently.
+        if (const VkResult waited = primarySync.WaitCompute(frameSlot); waited != VK_SUCCESS) {
+            return std::unexpected(Vk::ToFrameError(waited));
+        }
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
         auto& sess = dest.Presenter();
-        if (const VkResult waited = sess.sync.Wait(Vk::PreviousFrameSlot(sess.frameIndex)); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToFrameError(waited));
+        for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(sess.frameIndex), sess.frameIndex}) {
+            if (const VkResult waited = sess.sync.Wait(frameSlot); waited != VK_SUCCESS) {
+                return std::unexpected(Vk::ToFrameError(waited));
+            }
         }
     }
 
@@ -440,7 +460,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         }
         ~EndFrameGuard() noexcept {
             if (impl != nullptr) {
-                impl->destinations.CloseRecordings();
+                impl->destinations.AbortRecordings();
                 impl->frameOpen = false;
                 impl->queues.Clear();
                 impl->frameState.Reset();
@@ -502,7 +522,7 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     if (!resolved) {
         return std::unexpected(resolved.error());
     }
-    const VkCommandBuffer cmd = resolved->window.recording.Command();
+    const VkCommandBuffer cmd = resolved->window.recorder.Handle();
     _impl->destinations.SetActive(resolved->window.id);
     _impl->sceneTarget = resolved->image;
     _impl->settings = settings;

@@ -76,8 +76,11 @@ class SwapchainPresenter {
 
     [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
 
+    // The swapchain transition must be recorded BEFORE the recorder is ended.
+    void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
+
     [[nodiscard]] auto Present(
-        VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
+        VkQueue graphicsQueue, VkQueue presentQueue, ExecutableCommands cmds, uint32_t imageIndex,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
     ) noexcept -> FrameOutcome<PresentSuboptimal>;
 

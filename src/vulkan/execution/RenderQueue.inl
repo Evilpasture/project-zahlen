@@ -85,9 +85,4 @@ constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
     }
 }
 
-template <QueueType QType>
-std::expected<void, ErrorCode> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
-    return SubmitAndWait(ResolveQueue<QType>(ctx), cmd.handle);
-}
-
 } // namespace ZHLN::Vk

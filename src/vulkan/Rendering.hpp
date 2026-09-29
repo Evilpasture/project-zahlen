@@ -44,6 +44,7 @@
 #include "pipeline/Vertex.hpp"
 #include "core/Handles.hpp"
 #include "core/Context.hpp"
+#include "execution/CommandRecorder.hpp"
 #include "execution/RenderQueue.hpp"
 #include "presentation/Swapchain.hpp"
 #include "execution/FrameSync.hpp"

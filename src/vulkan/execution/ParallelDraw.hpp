@@ -6,6 +6,9 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Log.hpp>
+#include <atomic>
+
 namespace ZHLN::Vk {
 
 namespace detail {
@@ -34,6 +37,8 @@ inline void ParallelDrawDispatch(
     }
 
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
+    std::atomic<bool> recordingFailed {false};
+    std::atomic<uint32_t> recordedCount {0};
 
     const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
         .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
@@ -72,14 +77,13 @@ inline void ParallelDrawDispatch(
     std::forward<SchedulerT>(scheduler).ParallelFor(drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) noexcept {
         VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
-        const VkCommandBufferBeginInfo begin_info = {
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext            = nullptr,
-            .flags            = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = &p_inherit
-        };
-
-        CommandBufferGuard recordGuard(sec_cmd, begin_info);
+        auto recording = CommandRecorder::Begin(
+            sec_cmd, VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &p_inherit
+        );
+        if (!recording) {
+            recordingFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
 
         if (!inheritDesc.pushDataFrameAddresses.empty()) {
             PushHeapFrameAddresses(sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
@@ -99,11 +103,24 @@ inline void ParallelDrawDispatch(
             recordFn(encoder, i);
         }
 
-        recordGuard.End();
-        secondaries[chunkIdx] = sec_cmd;
+        auto executable = std::move(*recording).End();
+        if (!executable) {
+            recordingFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
+        secondaries[chunkIdx] = executable->Handle();
+        recordedCount.fetch_add(1, std::memory_order_relaxed);
     });
 
-    Vk::ExecuteCommands(primaryCmd, secondaries);
+    if (recordingFailed.load(std::memory_order_relaxed)) {
+        ZHLN::Log("[Vk] Secondary command recording failed; skipping parallel draw batch.");
+        return;
+    }
+    // Some schedulers coalesce chunks, so execute only the buffers actually
+    // recorded (their indices are contiguous from zero).
+    if (const uint32_t count = recordedCount.load(std::memory_order_relaxed); count > 0) {
+        Vk::ExecuteCommands(primaryCmd, std::span<const VkCommandBuffer> {secondaries.data(), count});
+    }
 }
 
 }

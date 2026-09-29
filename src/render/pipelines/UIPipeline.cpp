@@ -79,7 +79,7 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         return std::unexpected(DestinationError::UnsupportedColorFormat);
     }
 
-    const VkCommandBuffer cmd = target.window.recording.Command();
+    const VkCommandBuffer cmd = target.window.recorder.Handle();
     impl.destinations.SetActive(target.window.id);
 
     const bool   firstTouch  = target.layout == Vk::AttachmentLayout::Undefined;

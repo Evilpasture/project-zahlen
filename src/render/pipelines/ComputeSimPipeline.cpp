@@ -51,18 +51,12 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     }
 }
 
-// Recording the compute frame is a function of its own, not a block inside
-// `Submit`, because `Vk::CommandBufferGuard` ends the command buffer when it
-// goes out of scope: the buffer has to leave the recording state before
-// `vkQueueSubmit2` will accept it, which means the guard has to die first.
-void RecordComputeFrame(RenderContext::Impl& impl, float dt) noexcept {
+// Record into the active Vulkan recorder; its End() transition happens in
+// Submit, before the executable token is handed to the compute queue.
+void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt) noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
-
-    Vk::CommandBufferGuard guard(impl.current_compute_cmd);
-
-    impl.BindHeapsAndPushFrame(impl.current_compute_cmd);
-
-    RebuildClusterBounds(impl, impl.current_compute_cmd, fIdx);
+    impl.BindHeapsAndPushFrame(cmd);
+    RebuildClusterBounds(impl, cmd, fIdx);
 
     // The simulation passes themselves. Every one of them is a struct that
     // names its own resources, so the graph decides what can overlap: the
@@ -90,7 +84,7 @@ void RecordComputeFrame(RenderContext::Impl& impl, float dt) noexcept {
     BindExternalReflected<ComputeResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(impl.targets.ShadowMapPrev()); });
 
     auto* diagnostics = impl.gpuDiagnostics.IsActive() ? &impl.gpuDiagnostics : nullptr;
-    computeGraph.Execute(impl.current_compute_cmd, compBinder, impl.presenter.frameIndex, &impl.gpuProfiler, diagnostics);
+    computeGraph.Execute(cmd, compBinder, impl.presenter.frameIndex, &impl.gpuProfiler, diagnostics);
 }
 
 } // namespace
@@ -102,19 +96,21 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
 
     const uint32_t slot = impl.presenter.frameIndex;
 
-    impl.currentDt           = dt;
-    impl.current_compute_cmd = impl.computePools[slot][0];
+    impl.currentDt = dt;
+    auto recording = Vk::CommandRecorder::Begin(impl.computePools[slot][0]);
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+    RecordComputeFrame(impl, recording->Handle(), dt);
+    auto executable = std::move(*recording).End();
+    if (!executable) {
+        return std::unexpected(executable.error());
+    }
 
-    RecordComputeFrame(impl, dt);
-
-    // The guard inside `RecordComputeFrame` ended the command buffer when that
-    // function returned, so the buffer is executable now and safe to hand to
-    // the queue. Submitting it from a scope where the guard is still alive
-    // would hand `vkQueueSubmit2` a buffer that is still recording.
     const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
-    auto           submitted   = Vk::QueueSubmit(
-        impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue,
-        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+    auto submitted = Vk::QueueSubmit(
+        impl.ctx.ComputeQueue(), std::move(*executable), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE,
+        impl.presenter.sync.ComputeTimeline(slot), signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
     );
 
     if (!submitted) [[unlikely]] {
@@ -126,6 +122,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
         return std::unexpected(submitted.error());
     }
 
+    impl.presenter.sync.MarkComputeSubmitted(slot);
     impl.frameState.computeSubmitted = true;
     return {};
 }

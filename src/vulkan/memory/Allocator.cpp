@@ -634,22 +634,21 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
             .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
 }
 
-auto StagingRingBuffer::Submit(VkCommandBuffer cmd, VkFence fence) noexcept -> uint64_t {
-    _timelineValue++;
-
-    for (auto& alloc: _activeAllocations) {
-        if (alloc.timelineValue == 0) {
-            alloc.timelineValue = _timelineValue;
-        }
-    }
-
+auto StagingRingBuffer::Submit(ExecutableCommands cmds, VkFence fence) noexcept -> uint64_t {
+    const uint64_t nextValue = _timelineValue + 1;
     if (auto res = QueueSubmit(
-            _queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), _timelineValue, VK_PIPELINE_STAGE_2_COPY_BIT, fence
+            _queue, std::move(cmds), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), nextValue, VK_PIPELINE_STAGE_2_COPY_BIT, fence
         );
         !res) [[unlikely]] {
         return 0;
     }
 
+    _timelineValue = nextValue;
+    for (auto& alloc: _activeAllocations) {
+        if (alloc.timelineValue == 0) {
+            alloc.timelineValue = _timelineValue;
+        }
+    }
     return _timelineValue;
 }
 

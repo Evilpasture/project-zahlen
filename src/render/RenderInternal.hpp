@@ -269,8 +269,6 @@ struct RenderContext::Impl {
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
-
     // Multi-pass subsystems. Each owns the pipelines and scratch assets its
     // passes need, so a pass is a description of recording work rather than a
     // holder of GPU state.

@@ -17,7 +17,7 @@ StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _alloc
 
 StagingContext::~StagingContext() {
     Wait();
-    _recording.reset();
+    _recorder.Abort();
     for (auto& buffer: _stagingBuffers) {
         _allocator->DestroyBuffer(buffer);
     }
@@ -27,8 +27,8 @@ StagingContext::~StagingContext() {
 }
 
 StagingContext::StagingContext(StagingContext&& other) noexcept:
-    _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)), _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)),
-    _recording(std::move(other._recording)), _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
+    _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)),
+    _recorder(std::move(other._recorder)), _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
 }
 
 auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
@@ -37,7 +37,7 @@ auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
         _fence = VK_NULL_HANDLE;
     }
-    _recording.reset();
+    _recorder.Abort();
     for (auto& buffer: _stagingBuffers) _allocator->DestroyBuffer(buffer);
     _stagingBuffers.clear();
     _cmdPool       = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
@@ -45,8 +45,11 @@ auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
     if (!alloc_res) [[unlikely]] {
         return std::unexpected(alloc_res.error());
     }
-    _cmd = _cmdPool[0];
-    _recording.emplace(_cmd);
+    auto recording = CommandRecorder::Begin(_cmdPool[0]);
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+    _recorder = std::move(*recording);
     return {};
 }
 
@@ -70,7 +73,7 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 
     ZHLN_BufferImageCopyDesc copy_region = {
@@ -83,20 +86,20 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .mip_level        = 0,
         .base_array_layer = 0
     };
-    ZHLN_CmdCopyBufferToImage(_cmd, &copy_region);
+    ZHLN_CmdCopyBufferToImage(_recorder.Handle(), &copy_region);
 
     if (mipLevels > 1) {
-        ZHLN_GenerateMipmaps(_cmd, dstImage, w, h, mipLevels);
+        ZHLN_GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels);
     } else {
         TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+            _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
         );
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 
     size_t current_offset = 0;
@@ -125,13 +128,13 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .regionCount    = 1,
                 .pRegions       = &region,
             };
-            vkCmdCopyBufferToImage2(_cmd, &copy_info);
+            vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info);
         }
         current_offset += (face_size * 6);
     }
 
     TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 }
 
@@ -140,7 +143,10 @@ void StagingContext::AddBuffer(Buffer&& buf) {
 }
 
 auto StagingContext::ExecuteAsync() -> std::expected<void, ErrorCode> {
-    _recording.reset();
+    auto executable = std::move(_recorder).End();
+    if (!executable) {
+        return std::unexpected(executable.error());
+    }
 
     if (_fence != VK_NULL_HANDLE) {
         Wait();
@@ -154,8 +160,7 @@ auto StagingContext::ExecuteAsync() -> std::expected<void, ErrorCode> {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
 
-    const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(_cmd);
-    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, {}, {}, _fence); !result) {
+    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, _fence); !result) {
         vkQueueWaitIdle(_ctx->GraphicsQueue());
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
         _fence = VK_NULL_HANDLE;

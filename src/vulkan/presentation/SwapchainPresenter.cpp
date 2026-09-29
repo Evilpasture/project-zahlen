@@ -153,7 +153,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
         return std::unexpected(ToFrameError(waited));
     }
-    sync.ResetFence(slot);
+    sync.MarkUnsubmitted(slot); // The prior submission finished; a skipped acquire does not need a fence.
     pools[slot].Reset();
 
     if (!swapchain.Valid()) {
@@ -202,14 +202,8 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 }
 
 
-auto SwapchainPresenter::Present(
-    VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
-    std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> FrameOutcome<PresentSuboptimal> {
-    const bool     presents = swapchain.Valid();
-    const uint32_t slot     = frameIndex;
-
-    if (presents && cmd != VK_NULL_HANDLE) {
+void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept {
+    if (swapchain.Valid() && recorder) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
             .image      = swapchain.Get().images[imageIndex],
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -222,13 +216,19 @@ auto SwapchainPresenter::Present(
             .base_mip   = 0,
             .mip_count  = VK_REMAINING_MIP_LEVELS,
         });
-        Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+        Vk::PipelineBarrier(recorder.Handle(), std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
     }
+}
 
-    if (cmd != VK_NULL_HANDLE) {
-        ZHLN_EndCommandBuffer(cmd);
+auto SwapchainPresenter::Present(
+    VkQueue graphicsQueue, VkQueue presentQueue, ExecutableCommands cmds, uint32_t imageIndex,
+    std::span<const VkSemaphoreSubmitInfo> extraWaits
+) noexcept -> FrameOutcome<PresentSuboptimal> {
+    if (!cmds) {
+        return std::unexpected(CommandRecordingError::NotExecutable);
     }
-
+    const bool     presents = swapchain.Valid();
+    const uint32_t slot     = frameIndex;
     const ZHLN_FrameSync& frameSync = sync[slot];
 
     std::array<VkSemaphoreSubmitInfo, 4> waits {};
@@ -243,17 +243,20 @@ auto SwapchainPresenter::Present(
         waits[waitCount++] = extra;
     }
 
-    const VkSemaphore            presentSem = PresentSemaphore(imageIndex);
-    const VkSemaphoreSubmitInfo  signal     = Vk::MakeSemaphoreSubmitInfo(presentSem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-    const VkCommandBufferSubmitInfo cmdInfo = Vk::MakeCommandBufferSubmitInfo(cmd);
+    const VkSemaphore           presentSem = PresentSemaphore(imageIndex);
+    const VkSemaphoreSubmitInfo signal     = Vk::MakeSemaphoreSubmitInfo(presentSem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
+    if (const VkResult reset = sync.ResetFence(slot); reset != VK_SUCCESS) {
+        return std::unexpected(ToFrameError(reset));
+    }
     auto submitRes = Vk::QueueSubmit(
-        graphicsQueue, std::span<const VkCommandBufferSubmitInfo> {&cmdInfo, 1}, std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount},
+        graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount},
         std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1u : 0u}, frameSync.in_flight
     );
     if (!submitRes) [[unlikely]] {
         return std::unexpected(submitRes.error());
     }
+    sync.MarkSubmitted(slot);
 
     if (!presents) {
         return {};

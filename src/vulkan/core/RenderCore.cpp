@@ -23,7 +23,11 @@ std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept {
     return {};
 }
 
-std::expected<void, ErrorCode> QueueSubmit(
+namespace {
+
+// Raw Vulkan submissions stay behind this C++ seam; public QueueSubmit
+// consumes a token and cannot submit an in-progress command buffer.
+std::expected<void, ErrorCode> SubmitInfos(
     VkQueue                                    queue,
     std::span<const VkCommandBufferSubmitInfo> cmds,
     std::span<const VkSemaphoreSubmitInfo>     waits,
@@ -47,9 +51,28 @@ std::expected<void, ErrorCode> QueueSubmit(
     return {};
 }
 
+} // namespace
+
+std::expected<void, ErrorCode> QueueSubmit(
+    VkQueue                                queue,
+    ExecutableCommands                    cmds,
+    std::span<const VkSemaphoreSubmitInfo> waits,
+    std::span<const VkSemaphoreSubmitInfo> signals,
+    VkFence                                fence
+) noexcept {
+    if (!cmds) {
+        return std::unexpected(CommandRecordingError::NotExecutable);
+    }
+    const VkCommandBufferSubmitInfo cmdInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = cmds.Handle(),
+    };
+    return SubmitInfos(queue, std::span<const VkCommandBufferSubmitInfo> {&cmdInfo, 1}, waits, signals, fence);
+}
+
 std::expected<void, ErrorCode> QueueSubmit(
     VkQueue               queue,
-    VkCommandBuffer       cmd,
+    ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore,
     uint64_t              waitValue,
     VkPipelineStageFlags2 waitStage,
@@ -58,12 +81,10 @@ std::expected<void, ErrorCode> QueueSubmit(
     VkPipelineStageFlags2 signalStage,
     VkFence               fence
 ) noexcept {
-    const VkCommandBufferSubmitInfo cmd_info    = MakeCommandBufferSubmitInfo(cmd);
-    const VkSemaphoreSubmitInfo     wait_info   = MakeSemaphoreSubmitInfo(waitSemaphore, waitValue, waitStage);
-    const VkSemaphoreSubmitInfo     signal_info = MakeSemaphoreSubmitInfo(signalSemaphore, signalValue, signalStage);
+    const VkSemaphoreSubmitInfo wait_info   = MakeSemaphoreSubmitInfo(waitSemaphore, waitValue, waitStage);
+    const VkSemaphoreSubmitInfo signal_info = MakeSemaphoreSubmitInfo(signalSemaphore, signalValue, signalStage);
     return QueueSubmit(
-        queue,
-        cmd != VK_NULL_HANDLE ? std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1} : std::span<const VkCommandBufferSubmitInfo> {},
+        queue, std::move(cmd),
         waitSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&wait_info, 1} : std::span<const VkSemaphoreSubmitInfo> {},
         signalSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&signal_info, 1} : std::span<const VkSemaphoreSubmitInfo> {},
         fence
@@ -83,8 +104,8 @@ std::string ReportVkError(VkResult result, const char* context, const std::sourc
 }
 
 std::expected<void, ErrorCode>
-    SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore, uint64_t waitValue, VkPipelineStageFlags2 waitStage) noexcept {
-    auto submit_res = QueueSubmit(queue, cmd, waitSemaphore, waitValue, waitStage);
+    SubmitAndWait(VkQueue queue, ExecutableCommands cmd, VkSemaphore waitSemaphore, uint64_t waitValue, VkPipelineStageFlags2 waitStage) noexcept {
+    auto submit_res = QueueSubmit(queue, std::move(cmd), waitSemaphore, waitValue, waitStage);
     if (!submit_res) [[unlikely]] {
         return submit_res;
     }

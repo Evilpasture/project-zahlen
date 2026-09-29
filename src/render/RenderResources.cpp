@@ -731,16 +731,17 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphics_family);
     auto allocated = tempPool.Allocate(1);
     if (!allocated) return std::unexpected(allocated.error());
-    VkCommandBuffer cmd = tempPool[0];
-    {
-        Vk::CommandBufferGuard guard(cmd);
-        Vk::MemoryBarrier(cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
-                          Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead);
-        Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
-    }
+    auto recording = Vk::CommandRecorder::Begin(tempPool[0]);
+    if (!recording) return std::unexpected(recording.error());
+    const VkCommandBuffer cmd = recording->Handle();
+    Vk::MemoryBarrier(cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
+                      Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead);
+    Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
+    auto executable = std::move(*recording).End();
+    if (!executable) return std::unexpected(executable.error());
 
     auto submitted = Vk::SubmitAndWait(
-        impl.ctx.GraphicsQueue(), cmd, impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
+        impl.ctx.GraphicsQueue(), std::move(*executable), impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
         VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
     );
     if (!submitted) {

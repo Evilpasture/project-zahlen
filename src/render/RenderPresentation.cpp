@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <utility>
 
 namespace ZHLN {
 
@@ -18,14 +19,14 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest) 
     if (image.drawn) {
         return image.layout;
     }
-    if (!dest.recording.IsOpen()) {
+    if (!dest.recorder.IsRecording()) {
         return std::nullopt;
     }
 
     const VkClearColorValue clear {
         .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
     };
-    Vk::ClearColorImage(dest.recording.Command(), image.image.Handle(), clear);
+    Vk::ClearColorImage(dest.recorder.Handle(), image.image.Handle(), clear);
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 
     if (!warnedUnwrittenTarget) {
@@ -63,7 +64,6 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         }
 
         const bool presents = destPresenter.HasSwapchain();
-        const uint32_t slot = destPresenter.frameIndex;
 
         std::array<VkSemaphoreSubmitInfo, 3> waits {};
         uint32_t waitCount = 0;
@@ -71,18 +71,31 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
-        const uint64_t computeValue = destPresenter.sync.GetTimelineValue(slot);
-        const VkSemaphore computeTimeline = destPresenter.sync.ComputeTimeline(slot);
+        // Simulations signal the primary presenter's timeline, regardless of
+        // which window consumes their results.
+        const uint64_t computeValue = presenter.sync.GetTimelineValue(presenter.frameIndex);
+        const VkSemaphore computeTimeline = presenter.sync.ComputeTimeline(presenter.frameIndex);
         if (computeTimeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(computeTimeline, computeValue, Vk::kAsyncComputeConsumerStages);
         }
 
         const VkImageLayout currentLayout = Vk::ToVkImageLayout(**reconciled);
+        destPresenter.PreparePresent(dest.recorder, dest.acquired->imageIndex, currentLayout);
+        auto executable = std::move(dest.recorder).End();
+        if (!executable) {
+            if (executable.error().Is(FrameResult::DeviceLost)) {
+                Vk::Instance::IncrementNumericalDeviceLoss();
+                return std::unexpected(executable.error());
+            }
+            if (!firstError) { firstError = executable.error(); }
+            dest.acquired.reset();
+            destPresenter.AdvanceFrame();
+            continue;
+        }
         auto presented = destPresenter.Present(
-            ctx.GraphicsQueue(), ctx.PresentQueue(), dest.recording.Command(), dest.acquired->imageIndex, currentLayout,
+            ctx.GraphicsQueue(), ctx.PresentQueue(), std::move(*executable), dest.acquired->imageIndex,
             std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount}
         );
-        dest.recording.Discard();
         if (!presented) {
             if (presented.error().Is(FrameResult::DeviceLost)) {
                 Vk::Instance::IncrementNumericalDeviceLoss();
