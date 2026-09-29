@@ -60,7 +60,7 @@ void PSShadow(ShadowGeometryOutput input) {
     }
 }
 
-PSOutput PSMain(GBufferGeometryOutput input) {
+PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
@@ -73,12 +73,18 @@ PSOutput PSMain(GBufferGeometryOutput input) {
 
     // The masked pass used a higher floor than opaque or translucent scene
     // fragments. Keep the floor in the sampling input, not the material type.
+    float3 N = normalize(input.normal);
+    float3 T = OrthogonalTangent(N, input.tangent.xyz);
+    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    // glTF double-sided lighting reverses the *entire* shading frame on a
+    // backface. Flipping N before computing B would leave the normal-map X
+    // axis unflipped; flip all three axes after constructing the front frame.
+    float facing = isFrontFace ? 1.0f : -1.0f;
     material.roughnessFloor     = input.alphaMode == 1 ? 0.045f : 0.001f;
-    material.geometricNormal    = normalize(input.normal);
     material.hasTangent         = any(input.tangent.xyz);
-    material.tangentDirection   = OrthogonalTangent(material.geometricNormal, input.tangent.xyz);
-    material.bitangentDirection = cross(material.geometricNormal, material.tangentDirection) *
-                                   (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    material.geometricNormal    = N * facing;
+    material.tangentDirection   = T * facing;
+    material.bitangentDirection = B * facing;
     material.coatParams         = input.coatParams;
     material.coatTextures       = input.coatTextures;
     material.anisotropyParams   = input.anisotropyParams;
@@ -214,6 +220,16 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
         return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
     }
 
+    // Transmission orients its normal inside ShadeTransmission. Non-transmitting
+    // two-sided surfaces need the same backface rule for both Fresnel and the
+    // anisotropic tangent frame (as in the deferred pass).
+    float3 T = OrthogonalTangent(N, input.tangent.xyz);
+    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    float facing = isFrontFace ? 1.0f : -1.0f;
+    N *= facing;
+    T *= facing;
+    B *= facing;
+
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
     float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
@@ -224,8 +240,6 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, sampledEmissive);
     float roughness = surface.roughness;
     float metallic  = surface.metallic;
-    float3 T = OrthogonalTangent(N, input.tangent.xyz);
-    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
     float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
@@ -233,7 +247,9 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 F0       = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallic);
     float3 F_rough  = FresnelSchlickRoughness(NdotV, F0, roughness);
     float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
-    float3 FssEss   = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+    // The split-sum LUT already integrates Schlick's angle-dependent Fresnel.
+    // Its A coefficient multiplies F0, not a second grazing-angle evaluation.
+    float3 FssEss   = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
     float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;

@@ -261,8 +261,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
         float NdotV    = saturate(dot(N, V));
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
-        float3 F_rough = FresnelSchlickRoughness(NdotV, F0, roughness);
-        float3 FssEss  = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+        // The LUT's A/B terms already integrate Schlick Fresnel over the GGX
+        // lobe. Applying the grazing Fresnel again here can wash out dark
+        // metal and amplify white glints on masked foliage and thin chains.
+        float3 FssEss  = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
 
         float3 R_corr = R;
         float boxFade = 0.0f;

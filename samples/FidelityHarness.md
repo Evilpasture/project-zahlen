@@ -175,6 +175,18 @@ capture. The same check applies to `khronos-MetalRoughSpheresNoTextures`.
 The upstream Blender reference parents an oriented camera to the target; it
 does **not** calculate its direction by looking at a distinct target point.
 
+For the Sponza chain/foliage fidelity regression, inspect that same capture
+against **Filament's** golden at matched scene features, not screen coordinates
+from differently zoomed viewers. The source asset's chain (material 20) and
+foliage (materials 0 and 3) are double-sided alpha-masked surfaces with normal
+maps; they do not use sheen or texture-transform extensions. Check both hanging
+chains for the source texture's dark rusty color instead of chalk-white
+reflections, and check leaves for isolated white pixels. The deferred pass must
+orient the whole normal-map frame on backfaces, and the BRDF LUT's split-sum A
+term must multiply F0 (the LUT already integrated angular Fresnel). The CPU
+check `tests/extras/test_sponza_masked_ibl_wiring.py` pins those contracts but
+**cannot** establish that a new render matches the golden.
+
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible
 immediately rather than hiding behind a failure.

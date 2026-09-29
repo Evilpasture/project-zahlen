@@ -110,6 +110,14 @@ add_test(NAME TestIBLFilteredImportanceSampling
 )
 set_tests_properties(TestIBLFilteredImportanceSampling PROPERTIES LABELS "CPU;Fast;Extras;Samples")
 
+# glTF MASK surfaces with two-sided normal maps and metallic textures need
+# back-facing tangent frames and the correct split-sum IBL Fresnel coefficient.
+# A CPU/source check; visual comparison still requires the Sponza capture.
+add_test(NAME TestSponzaMaskedIBLWiring
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_sponza_masked_ibl_wiring.py"
+)
+set_tests_properties(TestSponzaMaskedIBLWiring PROPERTIES LABELS "CPU;Fast;Extras;Samples")
+
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a
