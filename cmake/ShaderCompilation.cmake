@@ -140,15 +140,17 @@ else()
             message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
         endif()
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
-        if(TARGET slang-bootstrap)
+        # The vendored bootstrap needs a console entry point on Windows. These
+        # MinGW/Clang linker flags are not understood by macOS ld or Linux.
+        if(WIN32 AND TARGET slang-bootstrap)
             target_link_options(slang-bootstrap PRIVATE
-            -mconsole
-            -municode
-            -Wl,-subsystem,console
-        )
+                -mconsole
+                -municode
+                -Wl,-subsystem,console
+            )
             set_target_properties(slang-bootstrap PROPERTIES
-            WIN32_EXECUTABLE FALSE
-        )
+                WIN32_EXECUTABLE FALSE
+            )
         endif()
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
