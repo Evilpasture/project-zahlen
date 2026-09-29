@@ -62,44 +62,26 @@ auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optiona
 
 void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
 
+void RenderContext::RegisterBorrowedGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterBorrowedMesh(id, mesh); }
+
+void RenderContext::UnregisterBorrowedGPUMesh(AssetID id) noexcept { _impl->geometry.UnregisterBorrowedMesh(id); }
+
 void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
-auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
-    return _impl->geometry.GetOrCreateSkinnedScratchBuffer(entityKey, vertexCount);
+void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
+    if (const Material* mat = _impl->geometry.FindMaterial(id)) {
+        if (mat->pipeline != PipelineHandle::Invalid) {
+            _impl->pipelines.Destroy(mat->pipeline);
+        }
+        if (mat->prePassPipeline != PipelineHandle::Invalid) {
+            _impl->pipelines.Destroy(mat->prePassPipeline);
+        }
+        _impl->geometry.UnregisterMaterial(id);
+    }
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
     return _impl->geometry.CreateStorageBuffer(size, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
-}
-
-auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles) -> BufferHandle {
-    if (owner == Entity::Null()) {
-        return BufferHandle::Invalid;
-    }
-    return _impl->geometry.GetOrCreateParticleBuffer(
-        owner.Pack(), subresourceKey, ParticleBufferKind::Subresource, static_cast<size_t>(maxParticles) * sizeof(Particle),
-        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
-    );
-}
-
-auto RenderContext::GetOrCreateParticleEmitterBuffer(Entity owner, uint32_t maxParticles) -> BufferHandle {
-    if (owner == Entity::Null()) {
-        return BufferHandle::Invalid;
-    }
-    return _impl->geometry.GetOrCreateParticleBuffer(
-        owner.Pack(), 0, ParticleBufferKind::BillboardEmitter, static_cast<size_t>(maxParticles) * sizeof(Particle),
-        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
-    );
-}
-
-auto RenderContext::GetOrCreateMeshParticleEmitterBuffer(Entity owner, uint32_t maxParticles) -> BufferHandle {
-    if (owner == Entity::Null()) {
-        return BufferHandle::Invalid;
-    }
-    return _impl->geometry.GetOrCreateParticleBuffer(
-        owner.Pack(), 0, ParticleBufferKind::MeshEmitter, static_cast<size_t>(maxParticles) * sizeof(Particle3D),
-        Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
-    );
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
@@ -143,10 +125,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     });
     _impl->geometry.ClearMaterials();
 
-    _impl->geometry.ReleaseSkinnedScratchBuffers();
-    _impl->geometry.ReleaseTrackedEntityBuffers();
-    _impl->geometry.ClearParticleBufferCache();
-
     for (const auto& entry: _impl->renderTextures) {
         _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
     }
@@ -154,20 +132,6 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->textureManager.Clear();
 
     _impl->deletionQueue.Drain();
-}
-
-void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {
-    if (owner != Entity::Null() && buffer != BufferHandle::Invalid) {
-        _impl->geometry.TrackEntityBuffer(owner.Pack(), buffer);
-    }
-}
-
-void RenderContext::ReleaseEntityBuffers(Entity owner) { _impl->geometry.ReleaseOwner(owner.Pack()); }
-
-void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) { _impl->geometry.Reconcile(alive); }
-
-auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
-    return _impl->geometry.EntityBufferCount();
 }
 
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {

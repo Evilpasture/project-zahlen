@@ -5,7 +5,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -89,17 +88,17 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
     [[nodiscard]] std::optional<Material> GetGPUMaterial(MaterialID id) const noexcept;
+    // Ordinary asset meshes transfer buffer ownership to the renderer cache.
     void                                  RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
+    // The caller retains ownership of buffers referenced by a borrowed mesh.
+    void                                  RegisterBorrowedGPUMesh(AssetID id, Mesh mesh) noexcept;
+    void                                  UnregisterBorrowedGPUMesh(AssetID id) noexcept;
     void                                  RegisterGPUMaterial(MaterialID id, Material mat) noexcept;
+    // Retire a registered material's pipelines when the scene no longer uses it.
+    void                                  UnregisterGPUMaterial(MaterialID id) noexcept;
     void                                  ClearGPUCaches() noexcept;
 
-    BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
     BufferHandle CreateStorageBuffer(size_t size);
-    // Persistent, renderer-owned buffers reclaimed by ReleaseEntityBuffers / ReconcileEntityBuffers.
-    // Do not also destroy them or pass them to TrackEntityBuffer.
-    [[nodiscard]] BufferHandle GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles);
-    [[nodiscard]] BufferHandle GetOrCreateParticleEmitterBuffer(Entity owner, uint32_t maxParticles);
-    [[nodiscard]] BufferHandle GetOrCreateMeshParticleEmitterBuffer(Entity owner, uint32_t maxParticles);
     void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
@@ -183,13 +182,6 @@ class ZHLN_API RenderContext {
     void UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices);
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
-
-    // Register an independently created buffer exactly once for owner-lifetime cleanup.
-    void TrackEntityBuffer(Entity owner, BufferHandle buffer);
-    void ReleaseEntityBuffers(Entity owner);
-    void               ReconcileEntityBuffers(EntityAliveQuery alive);
-    // Counts all owner-lifetime registrations, including cached particle buffers.
-    [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
 

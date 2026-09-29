@@ -58,9 +58,15 @@ SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, 
 }
 
 SparseSet::~SparseSet() {
-    if (_destructor != nullptr && _data != nullptr) {
+    if (_data != nullptr) {
         for (size_t i = 0; i < _count; ++i) {
-            _destructor(_data + (i * _elementSize));
+            void* component = _data + (i * _elementSize);
+            if (_onRemove) {
+                _onRemove(_dense[i], component);
+            }
+            if (_destructor != nullptr) {
+                _destructor(component);
+            }
         }
     }
     if (_sparse != nullptr) {
@@ -117,6 +123,13 @@ void SparseSet::Insert(Entity entity, const void* data) {
         denseIdx              = static_cast<uint32_t>(_count++);
         _dense[denseIdx]      = entity;
         _sparse[entity.index] = denseIdx;
+    } else {
+        if (_dense[denseIdx] != entity) {
+            ZHLN::Panic("ECS: cannot replace a component through a stale entity handle");
+        }
+        if (_onRemove) {
+            _onRemove(entity, _data + (denseIdx * _elementSize));
+        }
     }
     std::memcpy(_data + (denseIdx * _elementSize), data, _elementSize);
 }
@@ -136,21 +149,32 @@ auto SparseSet::InsertEmpty(Entity entity) -> void* {
         _sparse[entity.index] = denseIdx;
 
         std::memset(_data + (denseIdx * _elementSize), 0, _elementSize);
+    } else {
+        if (_dense[denseIdx] != entity) {
+            ZHLN::Panic("ECS: cannot replace a component through a stale entity handle");
+        }
+        void* component = _data + (denseIdx * _elementSize);
+        if (_onRemove) {
+            _onRemove(entity, component);
+        }
+        if (_destructor != nullptr) {
+            _destructor(component);
+        }
     }
     return _data + (denseIdx * _elementSize);
 }
 
 void SparseSet::Remove(Entity entity) {
-    if (entity.index >= _sparseCapacity) {
+    if (!Contains(entity)) {
         return;
     }
     uint32_t denseIdx = _sparse[entity.index];
-    if (denseIdx == INVALID_DENSE) {
-        return;
+    void* component = _data + (denseIdx * _elementSize);
+    if (_onRemove) {
+        _onRemove(entity, component);
     }
-
     if (_destructor != nullptr) {
-        _destructor(_data + (denseIdx * _elementSize));
+        _destructor(component);
     }
 
     uint32_t lastIdx = static_cast<uint32_t>(_count) - 1;
@@ -165,7 +189,10 @@ void SparseSet::Remove(Entity entity) {
 }
 
 auto SparseSet::Contains(Entity entity) const noexcept -> bool {
-    return entity.index < _sparseCapacity && _sparse[entity.index] != INVALID_DENSE;
+    if (entity.index >= _sparseCapacity || _sparse[entity.index] == INVALID_DENSE) {
+        return false;
+    }
+    return _dense[_sparse[entity.index]] == entity;
 }
 
 auto SparseSet::Get(Entity entity) const noexcept -> void* {
@@ -176,9 +203,15 @@ auto SparseSet::Get(Entity entity) const noexcept -> void* {
 }
 
 void SparseSet::Clear() noexcept {
-    if (_destructor != nullptr && _data != nullptr) {
+    if (_data != nullptr) {
         for (size_t i = 0; i < _count; ++i) {
-            _destructor(_data + (i * _elementSize));
+            void* component = _data + (i * _elementSize);
+            if (_onRemove) {
+                _onRemove(_dense[i], component);
+            }
+            if (_destructor != nullptr) {
+                _destructor(component);
+            }
         }
     }
     if (_sparse != nullptr) {
@@ -222,19 +255,21 @@ Registry::Registry() {
 }
 
 Registry::~Registry() {
+    // Component removal observers may still inspect the registry during
+    // destruction. Keep entity generations and the component table alive.
+    for (size_t i = 0; i < _compCapacity; ++i) {
+        SparseSet* set = _components[i];
+        _components[i] = nullptr;
+        delete set;
+    }
+    if (_components != nullptr) {
+        std::free(static_cast<void*>(_components));
+    }
     if (_generations != nullptr) {
         std::free(_generations);
     }
     if (_freeIndices != nullptr) {
         std::free(_freeIndices);
-    }
-    for (size_t i = 0; i < _compCapacity; ++i) {
-        if (_components[i] != nullptr) {
-            delete _components[i];
-        }
-    }
-    if (_components != nullptr) {
-        std::free(static_cast<void*>(_components));
     }
 }
 
@@ -340,6 +375,9 @@ auto Registry::RegisterComponentDynamic(std::string_view name, size_t size, size
 
 auto Registry::AddDynamic(Entity entity, uint32_t familyID) -> void* {
     return ZHLN::Lock(sync.shadowLock, [&] -> void* {
+        if (!IsAlive(entity)) {
+            return nullptr;
+        }
         EnsureComponentCapacity(familyID);
         if (familyID >= _compCapacity || (_components[familyID] == nullptr)) {
             return nullptr;

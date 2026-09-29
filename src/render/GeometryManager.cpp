@@ -4,7 +4,6 @@
 
 #include "GeometryManager.hpp"
 
-#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstring>
@@ -106,25 +105,6 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     });
 }
 
-auto GeometryManager::GetOrCreateParticleBuffer(
-    uint64_t packedOwner, uint32_t subresourceKey, ParticleBufferKind kind, size_t byteSize, Vk::BufferUsage usage
-) -> BufferHandle {
-    if (byteSize == 0) {
-        return BufferHandle::Invalid;
-    }
-    const ParticleBufferKey key {packedOwner, subresourceKey, kind};
-    if (const auto it = _particleBuffers.find(key); it != _particleBuffers.end()) {
-        return it->second;
-    }
-
-    const BufferHandle handle = CreateStorageBuffer(byteSize, usage);
-    if (handle != BufferHandle::Invalid) {
-        _particleBuffers.emplace(key, handle);
-        TrackEntityBuffer(packedOwner, handle);
-    }
-    return handle;
-}
-
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexAttributes));
 
@@ -141,26 +121,12 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
         .value_or(BufferHandle::Invalid);
 }
 
-auto GeometryManager::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
-    const BufferHandle* existing = _skinnedScratch.Find(entityKey);
-    if (existing != nullptr && *existing != BufferHandle::Invalid) {
-        return *existing;
-    }
-
-    const BufferHandle handle = CreateSkinnedScratchBuffer(vertexCount);
-    if (handle != BufferHandle::Invalid) {
-        _skinnedScratch.Insert(entityKey, handle);
-    }
-    return handle;
-}
-
-void GeometryManager::ReleaseSkinnedScratchBuffers() {
-    _skinnedScratch.ForEach([this](uint64_t , BufferHandle handle) -> void { Destroy(handle); });
-    _skinnedScratch.Clear();
-}
-
 void GeometryManager::ReleaseMeshBuffers() {
-    _meshes.ForEach([this](AssetID, const Mesh& mesh) {
+    _meshes.ForEach([this](AssetID, const MeshEntry& entry) {
+        if (!entry.ownsBuffers) {
+            return;
+        }
+        const Mesh& mesh = entry.mesh;
         const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
                                     mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
         for (const BufferHandle handle: buffers) {
@@ -168,47 +134,6 @@ void GeometryManager::ReleaseMeshBuffers() {
         }
     });
     _meshes.Clear();
-}
-
-void GeometryManager::ClearParticleBufferCache() noexcept {
-    // The matching TrackEntityBuffer registrations own these handles.
-    _particleBuffers.clear();
-}
-
-void GeometryManager::ReleaseTrackedEntityBuffers() {
-    for (const auto& tracked: _entityBuffers) {
-        Destroy(tracked.second);
-    }
-    _entityBuffers.clear();
-}
-
-template <typename DeadFn>
-void GeometryManager::SweepOwnedBuffers(DeadFn&& isDead) {
-    using namespace ZHLN::Ranges;
-
-    _entityBuffers | EraseIf([this, &isDead](const auto& tracked) {
-        if (isDead(tracked.first)) {
-            Destroy(tracked.second);
-            return true;
-        }
-        return false;
-    });
-
-    for (auto it = _particleBuffers.begin(); it != _particleBuffers.end();) {
-        if (isDead(it->first.owner)) {
-            it = _particleBuffers.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void GeometryManager::ReleaseOwner(uint64_t packedOwner) {
-    SweepOwnedBuffers([packedOwner](uint64_t owner) noexcept { return owner == packedOwner; });
-}
-
-void GeometryManager::Reconcile(EntityAliveQuery alive) {
-    SweepOwnedBuffers([alive](uint64_t owner) { return !alive(Entity::Unpack(owner)); });
 }
 
 void GeometryManager::Destroy(BufferHandle handle) {

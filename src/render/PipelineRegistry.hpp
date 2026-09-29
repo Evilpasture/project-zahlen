@@ -30,9 +30,11 @@ class PipelineRegistry {
         Vk::PipelineCache&          pipelineCache,
         Vk::HeapMappingBundle&      sceneHeapMappings,
         Vk::GPUDiagnostics&         gpuDiagnostics,
+        Vk::DeletionQueue&          deletionQueue,
         VkPipelineLayout            emptyPipelineLayout
     ) noexcept
-        : _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _layout(emptyPipelineLayout) {}
+        : _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics),
+          _deletionQueue(deletionQueue), _layout(emptyPipelineLayout) {}
     ~PipelineRegistry() = default;
 
     PipelineRegistry(const PipelineRegistry&)                = delete;
@@ -42,7 +44,8 @@ class PipelineRegistry {
 
     [[nodiscard]] auto CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
-    void Destroy(PipelineHandle handle) { _materials.Destroy(handle); }
+    // Retire native pipelines after in-flight draws complete.
+    void Destroy(PipelineHandle handle);
 
     [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* { return _materials.Resolve(handle); }
 
@@ -53,6 +56,7 @@ class PipelineRegistry {
     Vk::PipelineCache&     _pipelineCache;
     Vk::HeapMappingBundle& _heapMappings;
     Vk::GPUDiagnostics&    _diagnostics;
+    Vk::DeletionQueue&     _deletionQueue;
     VkPipelineLayout       _layout;
 
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;

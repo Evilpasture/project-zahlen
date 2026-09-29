@@ -67,8 +67,10 @@ struct Components {
     };
 
     struct SkeletalMeshComponent {
-        uint32_t jointOffset   = 0;
-        int32_t  skeletonIndex = -1;
+        uint32_t     jointOffset        = 0;
+        int32_t      skeletonIndex      = -1;
+        BufferHandle skinnedScratch     = BufferHandle::Invalid;
+        uint32_t     scratchVertexCount = 0;
     };
 
     struct alignas(64) KinematicPoseOverrideComponent {
@@ -388,12 +390,16 @@ struct Components {
         int32_t    shadowLayer = -1;
     };
 
+    // GPU handles live with their ECS components; the engine's removal
+    // observers release them on Remove, Destroy, and Clear.
     struct ParticleEmitterComponent {
         ParticleEmitterParams params;
         TextureHandle         textureAsset   = TextureHandle::Invalid;
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
         bool                  attachToCamera = false;
+        BufferHandle          gpuBuffer      = BufferHandle::Invalid;
+        uint32_t              bufferCapacity = 0;
     };
 
     struct MeshParticleEmitterComponent {
@@ -402,6 +408,8 @@ struct Components {
         uint32_t                  maxParticles  = 128;
         bool                      active        = true;
         MeshParticleEmitterParams params;
+        BufferHandle             gpuBuffer      = BufferHandle::Invalid;
+        uint32_t                 bufferCapacity = 0;
     };
 
     struct DecalComponent {

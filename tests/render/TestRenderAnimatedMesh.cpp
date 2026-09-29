@@ -20,6 +20,7 @@
 #include <glTF/GLTFImporter.hpp>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -40,7 +41,7 @@ constexpr uint8_t kUziGlbData[] = {
 enum class AnimatedMeshTestError : uint8_t {
     PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"PrefabFactory failed to load or parse the in-memory GLB prefab.">{}) = 1,
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the animated mesh test.">{}),
-    NoSkeletalMeshSpawned ZHLN_ANNOTATION(ZHLN::Description<"No entities with SkeletalMeshComponent were spawned.">{}),
+    NoSkeletalMeshSpawned ZHLN_ANNOTATION(ZHLN::Description<"No rendered skinned mesh acquired component-owned scratch storage.">{}),
     NoAnimatorFound ZHLN_ANNOTATION(ZHLN::Description<"Root entity does not contain an AnimatorComponent.">{}),
     SimulationTickFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine::Tick failed during animated mesh playback.">{}),
     MeshDeformationExplosion ZHLN_ANNOTATION(ZHLN::Description<"Skinned mesh bounding radius exploded or contains NaN/Inf positions.">{}),
@@ -127,13 +128,30 @@ struct RenderAnimatedMeshTestSuite {
                 }
             }
 
-            // 5. Automated Skinning Sanity Check: Verify Bounding Radii
+            // 5. Automated Skinning Sanity Check: Verify Bounding Radii and
+            // per-component scratch reuse across another rendered frame.
+            std::vector<std::pair<ZHLN::Entity, ZHLN::BufferHandle>> skinnedScratch;
             for (const ZHLN::Entity e: spawnedParts) {
                 if (const auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
                     if (std::isnan(mesh->cullRadius) || std::isinf(mesh->cullRadius) || mesh->cullRadius > 20.0f) {
                         return std::unexpected(AnimatedMeshTestError::MeshDeformationExplosion);
                     }
+                    if (const auto* skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(e);
+                        skin != nullptr && skin->skinnedScratch != ZHLN::BufferHandle::Invalid) {
+                        skinnedScratch.emplace_back(e, skin->skinnedScratch);
+                    }
                 }
+            }
+            if (skinnedScratch.empty()) {
+                return std::unexpected(AnimatedMeshTestError::NoSkeletalMeshSpawned);
+            }
+            engine->ProcessEvents();
+            if (engine->Tick(dt, ZHLN::GameplayDriver::Cpp) != ZHLN::GameplayStatus::OK) {
+                return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
+            }
+            for (const auto [entity, buffer]: skinnedScratch) {
+                const auto* skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
+                ZHLN::Test::ExpectTrue(skin != nullptr && skin->skinnedScratch == buffer);
             }
 
             // 6. Automated Pixel Readback & Color Histogram Analysis

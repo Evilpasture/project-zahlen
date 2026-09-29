@@ -365,11 +365,12 @@
 
       typedef struct ParticleEmitterComponent {
           ParticleEmitterParams params;
+          uint64_t              textureAsset;
           uint32_t              maxParticles;
           bool                  active;
           bool                  attachToCamera;
           uint64_t              gpuBuffer;
-          char                  _pad[2];
+          uint32_t              bufferCapacity;
       } ParticleEmitterComponent;
 
       #pragma pack(push, 1)

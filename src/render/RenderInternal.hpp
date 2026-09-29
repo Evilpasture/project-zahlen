@@ -635,7 +635,7 @@ struct RenderContext::Impl {
           targets(ctx, allocator, graphicsCmdRing),
           textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
           geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-          pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, emptyPipelineLayout),
+          pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout),
           fileSystemWatcher(watcher) {}
 
     ~Impl() {

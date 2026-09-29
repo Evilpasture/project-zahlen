@@ -52,7 +52,6 @@ void DespawnEntity(Engine& engine, Entity entity) {
         if (const auto* physics = registry.Get<Components::PhysicsComponent>(current); physics != nullptr) {
             engine.GetPhysicsContext().DestroyBody(physics->physicsHandle);
         }
-        engine.GetRenderContext().ReleaseEntityBuffers(current);
         registry.Destroy(current);
     }
 }

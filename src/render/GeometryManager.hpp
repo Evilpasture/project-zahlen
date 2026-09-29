@@ -6,28 +6,24 @@
 #include "DrawCommands.hpp"
 #include "GenerationalPool.hpp"
 #include "Rendering.hpp"
-#include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Pair.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <unordered_map>
 #include <utility>
 
 namespace ZHLN {
 
-// Distinct cache domains keep built-in emitters independent of caller-keyed
-// subresources, even when they belong to the same entity.
-enum class ParticleBufferKind : uint8_t { Subresource, BillboardEmitter, MeshEmitter };
-
 class GeometryManager {
+    struct MeshEntry {
+        Mesh mesh;
+        bool ownsBuffers;
+    };
+
   public:
     GeometryManager(
         Vk::Context&                                ctx,
@@ -63,10 +59,20 @@ class GeometryManager {
     [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> NativeMesh* { return _buffers.Resolve(handle); }
 
 
-    void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, mesh); }
+    void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, {.mesh = mesh, .ownsBuffers = true}); }
+    void RegisterBorrowedMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, {.mesh = mesh, .ownsBuffers = false}); }
     void RegisterMaterial(MaterialID id, Material material) { _materials.Insert(id, material); }
+    void UnregisterBorrowedMesh(AssetID id) {
+        if (const auto* entry = _meshes.Find(id); entry != nullptr && !entry->ownsBuffers) {
+            _meshes.Erase(id);
+        }
+    }
+    void UnregisterMaterial(MaterialID id) { _materials.Erase(id); }
 
-    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* { return _meshes.Find(id); }
+    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* {
+        const auto* entry = _meshes.Find(id);
+        return entry != nullptr ? &entry->mesh : nullptr;
+    }
     [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> const Material* { return _materials.Find(id); }
 
     void ReleaseMeshBuffers();
@@ -78,47 +84,9 @@ class GeometryManager {
     }
     void ClearMaterials() noexcept { _materials.Clear(); }
 
-    void ClearParticleBufferCache() noexcept;
-    void ReleaseTrackedEntityBuffers();
-
-
-    void TrackEntityBuffer(uint64_t packedOwner, BufferHandle buffer) { _entityBuffers.push_back({packedOwner, buffer}); }
-    [[nodiscard]] auto EntityBufferCount() const noexcept -> size_t { return _entityBuffers.size(); }
-
-    void ReleaseOwner(uint64_t packedOwner);
-
-    void Reconcile(EntityAliveQuery alive);
-
-
-    [[nodiscard]] auto GetOrCreateParticleBuffer(
-        uint64_t packedOwner, uint32_t subresourceKey, ParticleBufferKind kind, size_t byteSize, Vk::BufferUsage usage
-    ) -> BufferHandle;
-
-
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
-    [[nodiscard]] auto GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle;
-    void             ReleaseSkinnedScratchBuffers();
 
   private:
-    template <typename DeadFn>
-    void SweepOwnedBuffers(DeadFn&& isDead);
-
-    struct ParticleBufferKey {
-        uint64_t           owner;
-        uint32_t           subresourceKey;
-        ParticleBufferKind kind;
-        constexpr bool operator==(const ParticleBufferKey&) const noexcept = default;
-    };
-
-    struct ParticleBufferKeyHash {
-        [[nodiscard]] auto operator()(const ParticleBufferKey& key) const noexcept -> size_t {
-            size_t hash = static_cast<size_t>(key.owner);
-            HashCombine(hash, key.subresourceKey);
-            HashCombine(hash, static_cast<size_t>(key.kind));
-            return hash;
-        }
-    };
-
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
     Vk::StagingRingBuffer&                       _transferRing;
@@ -127,13 +95,8 @@ class GeometryManager {
 
     GenerationalPool<NativeMesh, 8192, BufferHandle> _buffers;
 
-    ZHLN::HashMap<AssetID, Mesh>        _meshes;
+    ZHLN::HashMap<AssetID, MeshEntry>   _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;
-
-    // Lookup only; every cached handle has exactly one owning registration below.
-    std::unordered_map<ParticleBufferKey, BufferHandle, ParticleBufferKeyHash> _particleBuffers;
-    ZHLN::HashMap<uint64_t, BufferHandle> _skinnedScratch;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _entityBuffers;
 };
 
 }

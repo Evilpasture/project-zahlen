@@ -589,6 +589,10 @@ void DeletionQueue::EnqueueImage(VmaAllocator allocator, VkImage image, VmaAlloc
     _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Image, .allocator = allocator, .allocation = allocation, .image = image});
 }
 
+void DeletionQueue::EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept {
+    _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Pipeline, .device = device, .pipeline = pipeline});
+}
+
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
     _currentFrameIndex = FrameSlot(frameIndex);
     CleanupQueue(_queues[_currentFrameIndex]);
@@ -596,10 +600,16 @@ void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
 
 void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept {
     for (const auto& entry: queue) {
-        if (entry.type == DeferredDeletionEntry::Type::Buffer) {
-            vmaDestroyBuffer(entry.allocator, entry.buffer, entry.allocation);
-        } else {
-            vmaDestroyImage(entry.allocator, entry.image, entry.allocation);
+        switch (entry.type) {
+            case DeferredDeletionEntry::Type::Buffer:
+                vmaDestroyBuffer(entry.allocator, entry.buffer, entry.allocation);
+                break;
+            case DeferredDeletionEntry::Type::Image:
+                vmaDestroyImage(entry.allocator, entry.image, entry.allocation);
+                break;
+            case DeferredDeletionEntry::Type::Pipeline:
+                ZHLN_DestroyPipeline(entry.device, entry.pipeline);
+                break;
         }
     }
     queue.clear();

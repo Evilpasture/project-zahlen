@@ -36,6 +36,7 @@ module;
 #include <numbers>
 #include <random>
 #include <span>
+#include <utility>
 #include <vector>
 
 export module ZHLN.Explosions;
@@ -344,6 +345,11 @@ export struct ExplosionComponent {
 
     Entity debrisEntity  = Entity::Null();
     bool   craterSpawned = false;
+
+    BufferHandle fireBuffer       = BufferHandle::Invalid;
+    BufferHandle smokeBuffer      = BufferHandle::Invalid;
+    BufferHandle shockwaveBuffer  = BufferHandle::Invalid;
+    BufferHandle groundRingBuffer = BufferHandle::Invalid;
 };
 
 export struct CraterDecalComponent {
@@ -369,6 +375,24 @@ export class ExplosionSystem {
         // Register ECS components for the current registry instance
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
         reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
+
+        if (reg.ObserveRemoval<ExplosionComponent>([&engine](Entity, ExplosionComponent& exp) {
+                auto& render = engine.GetRenderContext();
+                render.DestroyBuffer(std::exchange(exp.fireBuffer, BufferHandle::Invalid));
+                render.DestroyBuffer(std::exchange(exp.smokeBuffer, BufferHandle::Invalid));
+                render.DestroyBuffer(std::exchange(exp.shockwaveBuffer, BufferHandle::Invalid));
+                render.DestroyBuffer(std::exchange(exp.groundRingBuffer, BufferHandle::Invalid));
+            })) {
+            engine.AddDeviceLostCallback([](Engine& owner) {
+                for (auto& exp: owner.GetRegistry().GetRawArray<ExplosionComponent>()) {
+                    exp.fireBuffer       = BufferHandle::Invalid;
+                    exp.smokeBuffer      = BufferHandle::Invalid;
+                    exp.shockwaveBuffer  = BufferHandle::Invalid;
+                    exp.groundRingBuffer = BufferHandle::Invalid;
+                }
+                s_LastRenderContext = nullptr;
+            });
+        }
 
         if (s_LastRenderContext == &rc) {
             return;
@@ -568,7 +592,7 @@ export class ExplosionSystem {
                 // Update Particle Emitters
                 UpdateGroup(exp.fireball, dt, false);
                 UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(rc, e, exp);
+                RenderBatchGPU(rc, exp);
 
                 // Clean up explosion particle root and children when particles finish
                 if (exp.age > exp.duration) {
@@ -756,8 +780,15 @@ export class ExplosionSystem {
         }
     }
 
-    static void RenderBatchGPU(RenderContext& rc, Entity e, const ExplosionComponent& exp) {
+    static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
         thread_local std::vector<Particle> t_gpuScratch;
+
+        const auto ensureBuffer = [&rc](BufferHandle& buffer, size_t count) -> BufferHandle {
+            if (buffer == BufferHandle::Invalid && count != 0) {
+                buffer = rc.CreateStorageBuffer(count * sizeof(Particle));
+            }
+            return buffer;
+        };
 
         // 1. FIREBALL
         if (!exp.fireball.empty()) {
@@ -780,7 +811,7 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x1111, static_cast<uint32_t>(exp.fireball.size()));
+            const BufferHandle buf = ensureBuffer(exp.fireBuffer, exp.fireball.size());
             rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.fireball.size()),
@@ -812,7 +843,7 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x2222, static_cast<uint32_t>(exp.soilSmoke.size()));
+            const BufferHandle buf = ensureBuffer(exp.smokeBuffer, exp.soilSmoke.size());
             rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.soilSmoke.size()),
@@ -847,7 +878,7 @@ export class ExplosionSystem {
                     };
                 }
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x3333, 4);
+                const BufferHandle buf = ensureBuffer(exp.shockwaveBuffer, 4);
                 rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(4));
                 rc.SubmitParticleEmitter(
                     buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
@@ -877,7 +908,7 @@ export class ExplosionSystem {
                     .params   = JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f)
                 };
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x4444, 1);
+                const BufferHandle buf = ensureBuffer(exp.groundRingBuffer, 1);
                 rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(1));
                 rc.SubmitParticleEmitter(
                     buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}

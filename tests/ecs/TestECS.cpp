@@ -4,8 +4,10 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <cstdint>
 #include <expected>
 #include <string>
+#include <vector>
 
 // --- Mock Components for Testing ---
 struct PositionComponent {
@@ -24,6 +26,10 @@ struct TagComponent {
 
 struct FlagComponent {
     bool active = true;
+};
+
+struct ObservedComponent {
+    uint32_t resource = 0;
 };
 
 enum class ECSTestError : uint8_t {
@@ -136,6 +142,76 @@ struct ECSTestSuite {
 
             ZHLN::Test::ExpectTrue(reg.Get<FlagComponent>(e2) != nullptr);
 
+            return {};
+        }
+
+        // Removal observers release component-owned resources on every ECS path,
+        // including raw registry destruction, replacement and scene reset.
+        std::expected<void, ZHLN::ErrorCode> component_removal_observers_follow_component_lifetime() {
+            ZHLN::ECS::Registry reg;
+            reg.RegisterComponent<ObservedComponent>("ObservedComponent");
+            std::vector<uint32_t> released;
+            ZHLN::Test::ExpectTrue(reg.ObserveRemoval<ObservedComponent>([&](ZHLN::Entity, ObservedComponent& comp) {
+                released.push_back(comp.resource);
+                comp.resource = 0;
+            }));
+            ZHLN::Test::ExpectFalse(reg.ObserveRemoval<ObservedComponent>([](ZHLN::Entity, ObservedComponent&) {}));
+
+            const auto a = reg.Create(ObservedComponent {.resource = 1});
+            const auto b = reg.Create(ObservedComponent {.resource = 2});
+            reg.Add(a, ObservedComponent {.resource = 3});
+            if (ZHLN::Test::ExpectEq(released.size(), size_t {1})) {
+                ZHLN::Test::ExpectEq(released[0], 1u);
+            }
+            reg.Remove<ObservedComponent>(a);
+            reg.Remove<ObservedComponent>(a);
+            if (ZHLN::Test::ExpectEq(released.size(), size_t {2})) {
+                ZHLN::Test::ExpectEq(released[1], 3u);
+            }
+
+            // Removal compacts the sparse set; b's resource remains its own.
+            ZHLN::Test::ExpectEq(reg.Get<ObservedComponent>(b)->resource, 2u);
+            reg.Destroy(b);
+            if (ZHLN::Test::ExpectEq(released.size(), size_t {3})) {
+                ZHLN::Test::ExpectEq(released[2], 2u);
+            }
+
+            const auto recycled = reg.Create(ObservedComponent {.resource = 4});
+            reg.Remove<ObservedComponent>(b); // a stale generation cannot remove recycled's component
+            ZHLN::Test::ExpectTrue(reg.Get<ObservedComponent>(b) == nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<ObservedComponent>(recycled)->resource, 4u);
+            reg.Clear();
+            reg.Clear();
+            if (ZHLN::Test::ExpectEq(released.size(), size_t {4})) {
+                ZHLN::Test::ExpectEq(released[3], 4u);
+            }
+
+            // Nontrivial components also invoke the observer before destruction.
+            std::string removedTag;
+            reg.RegisterComponent<TagComponent>("TagComponent");
+            ZHLN::Test::ExpectTrue(reg.ObserveRemoval<TagComponent>([&](ZHLN::Entity, TagComponent& tag) { removedTag = tag.tag; }));
+            const auto tagged = reg.Create(TagComponent {.tag = "first"});
+            reg.Add(tagged, TagComponent {.tag = "second"});
+            ZHLN::Test::ExpectEq(removedTag, std::string("first"));
+            reg.Destroy(tagged);
+            ZHLN::Test::ExpectEq(removedTag, std::string("second"));
+
+            {
+                ZHLN::ECS::Registry extra;
+                extra.RegisterComponent<ObservedComponent>("ObservedComponent");
+                static_cast<void>(extra.ObserveRemoval<ObservedComponent>([&](ZHLN::Entity, ObservedComponent& comp) {
+                    released.push_back(comp.resource);
+                }));
+                const auto deferred = extra.Create(ObservedComponent {.resource = 9});
+                ZHLN::ECS::EntityCommandBuffer ecb(extra);
+                ecb.DestroyEntity(deferred);
+                ecb.Playback();
+                extra.Create(ObservedComponent {.resource = 10});
+            } // Registry destructor releases the last still-live component.
+            if (ZHLN::Test::ExpectEq(released.size(), size_t {6})) {
+                ZHLN::Test::ExpectEq(released[4], 9u);
+                ZHLN::Test::ExpectEq(released[5], 10u);
+            }
             return {};
         }
 

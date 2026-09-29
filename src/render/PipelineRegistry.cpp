@@ -9,6 +9,18 @@
 
 namespace ZHLN {
 
+void PipelineRegistry::Destroy(PipelineHandle handle) {
+    if (NativeMaterial* material = _materials.Resolve(handle)) {
+        if (material->pipeline.Valid()) {
+            _deletionQueue.EnqueuePipeline(_ctx.Device(), material->pipeline.Release());
+        }
+        if (material->meshPipeline.Valid()) {
+            _deletionQueue.EnqueuePipeline(_ctx.Device(), material->meshPipeline.Release());
+        }
+    }
+    _materials.Destroy(handle);
+}
+
 auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept -> Vk::Pipeline {
     if (!_ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};

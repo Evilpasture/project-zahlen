@@ -13,13 +13,15 @@ namespace ZHLN::Vk {
 class Context;
 
 struct DeferredDeletionEntry {
-    enum class Type : uint8_t { Buffer, Image };
+    enum class Type : uint8_t { Buffer, Image, Pipeline };
     Type          type;
-    VmaAllocator  allocator;
-    VmaAllocation allocation;
+    VmaAllocator  allocator = nullptr;
+    VmaAllocation allocation = nullptr;
+    VkDevice      device = VK_NULL_HANDLE;
     union {
-        VkBuffer buffer;
-        VkImage  image;
+        VkBuffer   buffer;
+        VkImage    image;
+        VkPipeline pipeline;
     };
 };
 
@@ -33,6 +35,7 @@ class DeletionQueue {
 
     void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
     void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+    void EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept;
     void BeginFrame(uint32_t frameIndex) noexcept;
     // The caller must wait for the GPU to be idle before flushing every slot.
     void Drain() noexcept;

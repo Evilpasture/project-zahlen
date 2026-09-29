@@ -39,6 +39,7 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -157,6 +158,22 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+    // The old context owns the old buffers. Never pass its handles to the
+    // replacement context (generational slots may reuse the same numbers).
+    auto& reg = _impl->world->GetRegistry();
+    for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
+        emitter.gpuBuffer = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
+        emitter.gpuBuffer = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
+        skeleton.skinnedScratch = BufferHandle::Invalid;
+        skeleton.scratchVertexCount = 0;
+    }
+
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
@@ -240,6 +257,23 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     }
     _impl->kernel = std::move(kernel_res.value());
 
+    // Buffer lifetime belongs to the ECS component, not a renderer-side
+    // entity ledger. These observers also run on raw Registry::Destroy and
+    // Registry::Clear, not just through the Engine's despawn helper.
+    auto& reg = _impl->world->GetRegistry();
+    static_cast<void>(reg.ObserveRemoval<Components::ParticleEmitterComponent>([this](Entity, auto& emitter) {
+        GetRenderContext().DestroyBuffer(std::exchange(emitter.gpuBuffer, BufferHandle::Invalid));
+        emitter.bufferCapacity = 0;
+    }));
+    static_cast<void>(reg.ObserveRemoval<Components::MeshParticleEmitterComponent>([this](Entity, auto& emitter) {
+        GetRenderContext().DestroyBuffer(std::exchange(emitter.gpuBuffer, BufferHandle::Invalid));
+        emitter.bufferCapacity = 0;
+    }));
+    static_cast<void>(reg.ObserveRemoval<Components::SkeletalMeshComponent>([this](Entity, auto& skeleton) {
+        GetRenderContext().DestroyBuffer(std::exchange(skeleton.skinnedScratch, BufferHandle::Invalid));
+        skeleton.scratchVertexCount = 0;
+    }));
+
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     if (_impl->config.crashState != nullptr) {
@@ -290,7 +324,6 @@ Engine::~Engine() {
 
         _impl->world->GetArticulationSystem().Shutdown(*this);
         _impl->world->GetRegistry().Clear();
-        _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
     }
 
     _impl->world.reset();
@@ -549,8 +582,6 @@ auto Engine::InitializeDefaultScene() -> bool {
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     _impl->activeGameplayDriver = driver;
-
-    _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 

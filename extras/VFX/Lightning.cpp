@@ -40,6 +40,7 @@ module;
 #include <random>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Module Implementation Unit declaration (DO NOT use "import ZHLN.Lightning;")
@@ -181,6 +182,22 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
+    reg.RegisterComponent<LightningComponent>("LightningComponent");
+    if (reg.ObserveRemoval<LightningComponent>([&engine](Entity, LightningComponent& bolt) {
+            auto& render = engine.GetRenderContext();
+            render.UnregisterBorrowedGPUMesh(bolt.meshAssetId);
+            render.UnregisterGPUMaterial(bolt.matAssetId);
+            render.DestroyBuffer(std::exchange(bolt.vboPos, BufferHandle::Invalid));
+            render.DestroyBuffer(std::exchange(bolt.vboAttr, BufferHandle::Invalid));
+        })) {
+        engine.AddDeviceLostCallback([](Engine& owner) {
+            for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
+                bolt.vboPos  = BufferHandle::Invalid;
+                bolt.vboAttr = BufferHandle::Invalid;
+            }
+        });
+    }
+
     float      baseExposure = 4.5f;
     const auto existingEnts = reg.GetEntitiesWith<LightningComponent>();
     if (!existingEnts.empty()) {
@@ -208,17 +225,12 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const BufferHandle vboAttr = rc.CreateVertexBuffer(std::span {ribbon.attributes});
 
     const Entity boltEntity = reg.Create();
-    // The renderer, not the component destructor, owns this association. It
-    // remains visible after ordinary Registry::Destroy and is reconciled on
-    // the next lightning update.
-    rc.TrackEntityBuffer(boltEntity, vboPos);
-    rc.TrackEntityBuffer(boltEntity, vboAttr);
 
     std::array<char, 64> strBuf {};
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
     const MaterialID     matAssetId  = HashAssetID(FormatTo(strBuf, "lightning_mat_{}", boltEntity.index));
 
-    rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
+    rc.RegisterBorrowedGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
 
     if (auto matRes =
             rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
@@ -280,7 +292,6 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
 auto Update(Engine& engine, float dt) -> void {
     auto&      rc   = engine.GetRenderContext();
     auto&      reg  = engine.GetRegistry();
-    rc.ReconcileEntityBuffers(reg.AliveQuery());
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
 
     if (ents.empty()) {
@@ -300,6 +311,33 @@ auto Update(Engine& engine, float dt) -> void {
 
         if (bolt.phase == LightningPhase::Idle) {
             continue;
+        }
+
+        // A rebuilt renderer has no cached mesh or material. Restore them from
+        // component data, never from an entity-keyed buffer table.
+        bool needsMeshRegistration = !rc.GetGPUMesh(bolt.meshAssetId).has_value();
+        if (bolt.vboPos == BufferHandle::Invalid || bolt.vboAttr == BufferHandle::Invalid) {
+            static thread_local std::mt19937 rng(std::random_device {}());
+            const auto segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
+            const auto ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
+            if (bolt.vboPos == BufferHandle::Invalid) {
+                bolt.vboPos = rc.CreateVertexBuffer(std::span {ribbon.positions});
+            }
+            if (bolt.vboAttr == BufferHandle::Invalid) {
+                bolt.vboAttr = rc.CreateVertexBuffer(std::span {ribbon.attributes});
+            }
+            bolt.maxVertices     = ribbon.maxVertices;
+            bolt.visibleVertices = std::min(bolt.visibleVertices, bolt.maxVertices);
+            needsMeshRegistration = true;
+        }
+        if (needsMeshRegistration && bolt.vboPos != BufferHandle::Invalid && bolt.vboAttr != BufferHandle::Invalid) {
+            rc.RegisterBorrowedGPUMesh(bolt.meshAssetId, Mesh {.posBuffer = bolt.vboPos, .attrBuffer = bolt.vboAttr, .vertexCount = bolt.visibleVertices});
+        }
+        if (!rc.GetGPUMaterial(bolt.matAssetId)) {
+            if (auto mat = rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2,
+                                              .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
+                rc.RegisterGPUMaterial(bolt.matAssetId, *mat);
+            }
         }
 
         hasActiveBolts        = true;
@@ -374,7 +412,7 @@ auto Update(Engine& engine, float dt) -> void {
         if (auto gpuMeshOpt = rc.GetGPUMesh(bolt.meshAssetId)) {
             Mesh m        = *gpuMeshOpt;
             m.vertexCount = bolt.visibleVertices;
-            rc.RegisterGPUMesh(bolt.meshAssetId, m);
+            rc.RegisterBorrowedGPUMesh(bolt.meshAssetId, m);
         }
 
         if (reg.IsAlive(bolt.flashLightEntity)) {

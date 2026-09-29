@@ -13,6 +13,7 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
+#include <functional>
 #include <source_location>
 #include <span>
 #include <string>
@@ -65,6 +66,7 @@ constexpr auto BoxedName() -> std::string_view {
 class ZHLN_API SparseSet {
   public:
     using DestructorFn = void (*)(void*);
+    using RemovalFn = std::function<void(Entity, void*)>;
     SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor = nullptr);
     ~SparseSet();
 
@@ -77,6 +79,11 @@ class ZHLN_API SparseSet {
     [[nodiscard]] auto Contains(Entity entity) const noexcept -> bool;
     [[nodiscard]] auto Get(Entity entity) const noexcept -> void*;
     void               Clear() noexcept;
+
+    // Called before a component is replaced, removed, or destroyed. Captured
+    // services must outlive this set; dense-slot moves do not trigger removal.
+    void SetRemovalObserver(RemovalFn observer) { _onRemove = std::move(observer); }
+    [[nodiscard]] auto HasRemovalObserver() const noexcept -> bool { return static_cast<bool>(_onRemove); }
 
     auto GetBufferView(const void* owner, const char* format) const noexcept -> BufferView;
     auto GetEntityView(const void* owner) const noexcept -> BufferView;
@@ -106,6 +113,7 @@ class ZHLN_API SparseSet {
 
     BufferSync*  _sync;
     DestructorFn _destructor = nullptr;
+    RemovalFn    _onRemove;
 
     void ResizeSparse(uint32_t required);
     void ResizeDense();
@@ -218,6 +226,9 @@ class ZHLN_API Registry {
 
     template <typename T>
     auto Add(Entity entity, T&& component) -> T& {
+        if (!IsAlive(entity)) {
+            ZHLN::Panic("ECS: cannot add a component to a dead entity");
+        }
         using DecayedT = std::decay_t<T>;
         uint32_t id    = ComponentFamily::GetTypeID<DecayedT>();
         EnsureComponentCapacity(id);
@@ -258,6 +269,26 @@ class ZHLN_API Registry {
         if (id < _compCapacity && _components[id]) {
             _components[id]->Remove(entity);
         }
+    }
+
+    // One observer per component family. It runs before removal by Remove,
+    // Destroy, Clear, replacement by Add, and registry destruction. Install it
+    // before components acquire external resources. Returns true only for the
+    // first installation so clients can register companion lifecycle hooks once.
+    template <typename T, typename Fn>
+    [[nodiscard]] auto ObserveRemoval(Fn&& callback) -> bool {
+        const uint32_t id = ComponentFamily::GetTypeID<T>();
+        EnsureComponentCapacity(id);
+        if (_components[id] == nullptr) {
+            RegisterComponent<T>(BoxedName<T>());
+        }
+        if (_components[id]->HasRemovalObserver()) {
+            return false;
+        }
+        _components[id]->SetRemovalObserver([fn = std::forward<Fn>(callback)](Entity entity, void* ptr) mutable {
+            fn(entity, *static_cast<T*>(ptr));
+        });
+        return true;
     }
 
     template <typename T>

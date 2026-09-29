@@ -37,6 +37,21 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
+[[nodiscard]] auto EnsureSkinnedScratch(RenderContext& rc, Components::SkeletalMeshComponent& skeleton, uint32_t vertexCount) -> BufferHandle {
+    if (skeleton.skinnedScratch != BufferHandle::Invalid && skeleton.scratchVertexCount != vertexCount) {
+        rc.DestroyBuffer(skeleton.skinnedScratch);
+        skeleton.skinnedScratch     = BufferHandle::Invalid;
+        skeleton.scratchVertexCount = 0;
+    }
+    if (skeleton.skinnedScratch == BufferHandle::Invalid && vertexCount != 0) {
+        skeleton.skinnedScratch = rc.CreateSkinnedScratchBuffer(vertexCount);
+        if (skeleton.skinnedScratch != BufferHandle::Invalid) {
+            skeleton.scratchVertexCount = vertexCount;
+        }
+    }
+    return skeleton.skinnedScratch;
+}
+
 [[nodiscard]] auto HasAuthoredSun(const ECS::Registry& reg) noexcept -> bool {
     for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         if (const auto* light = reg.Get<Components::LightComponent>(e); light != nullptr && light->type == LightType::Sun) {
@@ -134,7 +149,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
         BufferHandle scratchVbo = BufferHandle::Invalid;
         if (isSkinned) {
-            scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
+            scratchVbo = EnsureSkinnedScratch(rc, *skelMesh, gpuMesh.vertexCount);
         }
 
         DrawFlags drawFlags = meshComp->flags;
@@ -182,7 +197,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
                             BufferHandle cutScratchVbo = BufferHandle::Invalid;
                             if (cutSkelMesh != nullptr) {
-                                cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
+                                cutScratchVbo = EnsureSkinnedScratch(rc, *cutSkelMesh, cutGpuMeshOpt->vertexCount);
                             }
 
                             csgParams.cutters.push_back(

@@ -22,7 +22,7 @@ class ZHLN_API ParticleSystem {
     ParticleSystem(ParticleSystem&&)                 = default;
     ParticleSystem& operator=(ParticleSystem&&)      = default;
 
-    static void Update(ECS::Query<const Components::ParticleEmitterComponent, const Components::MeshParticleEmitterComponent> emitters,
+    static void Update(ECS::Query<Components::ParticleEmitterComponent, Components::MeshParticleEmitterComponent> emitters,
                        ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera);
 };
 
