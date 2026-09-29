@@ -68,6 +68,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <expected>
 #include <fstream>
 #include <memory>
@@ -561,8 +562,12 @@ struct DistanceStabilitySuite {
                 .height         = kHeight,
                 .vsync          = false,
                 .fullscreen     = false,
-                .validationMode = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
-                .headless       = true
+                .validationMode    = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
+                .headless          = true,
+                // The GPU-indirect switch does not disable mesh/task shaders.
+                // Keep the default path, but allow an isolated vertex-path
+                // run to distinguish task-stage culling from a hue failure.
+                .enableMeshShading = std::getenv("ZHLN_TEST_NO_MESH_SHADING") == nullptr
             },
             .enableFallbackScene = false,
         };
@@ -591,6 +596,9 @@ struct DistanceStabilitySuite {
 
         // Scene setup happens BEFORE any Tick, so RenderContext references
         // cannot dangle; the scenario body re-fetches through the engine.
+        // Retain entity IDs to distinguish CPU culling from pixel-classifier
+        // failures during the camera sweep (including after device recovery).
+        std::array<ZHLN::Entity, kRingCount> ringEntities {};
         {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
@@ -671,7 +679,7 @@ struct DistanceStabilitySuite {
                     return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
                 }
 
-                ZHLN::PrefabFactory::CreateBox(
+                ringEntities[i] = ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(rings[i].size, rings[i].size, rings[i].size),
                     ZHLN::PrefabFactory::SpawnParams {
                         .position        = JPH::RVec3(static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)),
@@ -724,6 +732,9 @@ struct DistanceStabilitySuite {
             [&](ZHLN::Engine& eng) -> bool {
                 const auto rings = BuildRingLayout();
                 const float tanH = HorizontalHalfTan();
+                // A device-loss retry can start from the middle of a sweep.
+                // Re-establish the camera pose used to calibrate the coverage.
+                eng.GetCamera().position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
 
                 // ---------------- Phase A: coverage at every distance -------
                 failedPhase = "coverage";
@@ -1020,6 +1031,49 @@ struct DistanceStabilitySuite {
                                 CountHueInColumns(frame, RingHue(i), oppositeX0, oppositeX1), oppositeX0, oppositeX1,
                                 CountHue(frame, RingHue(i))
                             );
+                            // A zero hue count is not proof of a missing draw:
+                            // shadows, fog, and specular can all change its
+                            // display-space color. Record the CPU submission
+                            // decision and actual pixels where the box should
+                            // project before attributing this to a culler.
+                            const auto& mainVisible   = eng.GetVisibleEntities();
+                            const auto& shadowVisible = eng.GetVisibleShadowEntities();
+                            const auto& reg           = eng.GetRegistry();
+                            const auto* meshComp      = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
+                            const bool meshRegistered = meshComp != nullptr && eng.GetRenderContext().GetGPUMesh(meshComp->meshAsset).has_value();
+                            const bool matRegistered  = meshComp != nullptr && eng.GetRenderContext().GetGPUMaterial(meshComp->materialAsset).has_value();
+                            const int cx = std::clamp((windows[i].first + windows[i].second) / 2, 0, frame.width - 1);
+                            const int cy = frame.height / 2;
+                            const auto sample = [&](int x, int y) -> std::array<int, 3> {
+                                x = std::clamp(x, 0, frame.width - 1);
+                                y = std::clamp(y, 0, frame.height - 1);
+                                const size_t p = (static_cast<size_t>(y) * static_cast<size_t>(frame.width) + static_cast<size_t>(x)) * 3u;
+                                return {frame.rgb[p], frame.rgb[p + 1], frame.rgb[p + 2]};
+                            };
+                            const auto center = sample(cx, cy);
+                            const auto above  = sample(cx, cy - 10);
+                            std::array<uint64_t, 3> sum {};
+                            uint32_t n = 0;
+                            uint32_t cyanLeaning = 0;
+                            int maxChroma = -255;
+                            for (int y = std::max(0, cy - 16); y < std::min(frame.height, cy + 17); ++y) {
+                                for (int x = std::max(0, cx - 16); x < std::min(frame.width, cx + 17); ++x) {
+                                    const auto rgb = sample(x, y);
+                                    for (size_t c = 0; c < 3; ++c) sum[c] += static_cast<uint64_t>(rgb[c]);
+                                    const int gb = std::min(rgb[1], rgb[2]);
+                                    cyanLeaning += (gb >= 45 && rgb[0] + 8 < gb) ? 1u : 0u;
+                                    maxChroma = std::max(maxChroma, gb - rgb[0]);
+                                    ++n;
+                                }
+                            }
+                            ZHLN::Println(
+                                "    [INFO] ring {}: CPU main {}, shadow {}; GPU mesh {}, material {}; mesh shading {}; projected center ({},{}): RGB ({},{},{}), above ({},{},{}); patch mean ({},{},{}), cyan-leaning {}/{}, max chroma {}",
+                                i, std::ranges::find(mainVisible, ringEntities[i]) != mainVisible.end(),
+                                std::ranges::find(shadowVisible, ringEntities[i]) != shadowVisible.end(),
+                                meshRegistered, matRegistered, eng.GetRenderContext().GetInfo().meshShadingActive,
+                                cx, cy, center[0], center[1], center[2], above[0], above[1], above[2],
+                                sum[0] / n, sum[1] / n, sum[2] / n, cyanLeaning, n, maxChroma
+                            );
                             popped = true;
                         }
                     }
@@ -1035,10 +1089,15 @@ struct DistanceStabilitySuite {
                     return false;
                 }
 
+                // The loop's last sample is f=79, not f=80: sin(79*2pi/80)
+                // leaves the camera about 2.35 m from home. Return to the
+                // baseline position before measuring post-sweep parity.
+                cam.position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
+
                 // ---------------- Phase D: post-sweep parity ---------------
                 failedPhase = "parity";
-                // The sweep ended back at x = 0 (sin returns to 0): the static
-                // view must return to Phase B's noise floor. Lingering change
+                // With the camera restored to x = 0, the static view must
+                // return to Phase B's noise floor. Lingering change
                 // means stale history / double-buffered state survived motion.
                 constexpr uint32_t kParityFrames = 8;
                 RgbImage           parityPrev;
