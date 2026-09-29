@@ -61,9 +61,6 @@ SparseSet::~SparseSet() {
     if (_data != nullptr) {
         for (size_t i = 0; i < _count; ++i) {
             void* component = _data + (i * _elementSize);
-            if (_onRemove) {
-                _onRemove(_dense[i], component);
-            }
             if (_destructor != nullptr) {
                 _destructor(component);
             }
@@ -255,8 +252,8 @@ Registry::Registry() {
 }
 
 Registry::~Registry() {
-    // Component removal observers may still inspect the registry during
-    // destruction. Keep entity generations and the component table alive.
+    // Storage destruction runs component destructors, not removal observers.
+    // Owners must Clear() explicitly while observer dependencies are alive.
     for (size_t i = 0; i < _compCapacity; ++i) {
         SparseSet* set = _components[i];
         _components[i] = nullptr;

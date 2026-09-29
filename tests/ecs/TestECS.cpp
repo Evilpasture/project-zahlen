@@ -32,6 +32,16 @@ struct ObservedComponent {
     uint32_t resource = 0;
 };
 
+struct CountedComponent {
+    uint32_t* destructions = nullptr;
+
+    ~CountedComponent() {
+        if (destructions != nullptr) {
+            ++*destructions;
+        }
+    }
+};
+
 enum class ECSTestError : uint8_t {
     EntityGenerationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Recycled entity handle failed generation check.">{}) = 1,
     ComponentAccessFailed ZHLN_ANNOTATION(ZHLN::Description<"Component addition, retrieval, or removal failed.">{}),
@@ -145,8 +155,8 @@ struct ECSTestSuite {
             return {};
         }
 
-        // Removal observers release component-owned resources on every ECS path,
-        // including raw registry destruction, replacement and scene reset.
+        // Removal observers run on explicit ECS operations (including
+        // replacement, deferred destruction and scene reset), not teardown.
         std::expected<void, ZHLN::ErrorCode> component_removal_observers_follow_component_lifetime() {
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ObservedComponent>("ObservedComponent");
@@ -207,11 +217,32 @@ struct ECSTestSuite {
                 ecb.DestroyEntity(deferred);
                 ecb.Playback();
                 extra.Create(ObservedComponent {.resource = 10});
-            } // Registry destructor releases the last still-live component.
+                extra.Clear(); // Explicit cleanup runs observers while dependencies live.
+                extra.Create(ObservedComponent {.resource = 11}); // Dummy value left live to exercise teardown.
+            } // The remaining component's observer must not run in ~SparseSet.
             if (ZHLN::Test::ExpectEq(released.size(), size_t {6})) {
                 ZHLN::Test::ExpectEq(released[4], 9u);
                 ZHLN::Test::ExpectEq(released[5], 10u);
             }
+            return {};
+        }
+
+        // Destruction still runs nontrivial component destructors, without
+        // dispatching observers that may capture already-destroyed services.
+        std::expected<void, ZHLN::ErrorCode> registry_teardown_does_not_notify_removal_observers() {
+            uint32_t destructions   = 0;
+            uint32_t removals       = 0;
+            uint32_t beforeTeardown = 0;
+            {
+                ZHLN::ECS::Registry reg;
+                ZHLN::Test::ExpectTrue(reg.ObserveRemoval<CountedComponent>([&](ZHLN::Entity, CountedComponent&) {
+                    ++removals;
+                }));
+                reg.Create(CountedComponent {.destructions = &destructions});
+                beforeTeardown = destructions; // Account for the Add temporary.
+            }
+            ZHLN::Test::ExpectEq(removals, 0u);
+            ZHLN::Test::ExpectEq(destructions, beforeTeardown + 1);
             return {};
         }
 

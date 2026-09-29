@@ -80,8 +80,9 @@ class ZHLN_API SparseSet {
     [[nodiscard]] auto Get(Entity entity) const noexcept -> void*;
     void               Clear() noexcept;
 
-    // Called before a component is replaced, removed, or destroyed. Captured
-    // services must outlive this set; dense-slot moves do not trigger removal.
+    // Explicit replacement, removal and Clear invoke the observer before
+    // destroying components; ~SparseSet never does. Dense-slot moves do not
+    // trigger removal. Captured services must outlive explicit cleanup.
     void SetRemovalObserver(RemovalFn observer) { _onRemove = std::move(observer); }
     [[nodiscard]] auto HasRemovalObserver() const noexcept -> bool { return static_cast<bool>(_onRemove); }
 
@@ -271,10 +272,11 @@ class ZHLN_API Registry {
         }
     }
 
-    // One observer per component family. It runs before removal by Remove,
-    // Destroy, Clear, replacement by Add, and registry destruction. Install it
-    // before components acquire external resources. Returns true only for the
-    // first installation so clients can register companion lifecycle hooks once.
+    // One observer per component family. It runs before Remove, Destroy,
+    // Clear, or replacement by Add, but never from a registry destructor.
+    // Install it before components acquire external resources and call Clear()
+    // while captured services are still alive. Returns true only for the first
+    // installation so clients can register companion lifecycle hooks once.
     template <typename T, typename Fn>
     [[nodiscard]] auto ObserveRemoval(Fn&& callback) -> bool {
         const uint32_t id = ComponentFamily::GetTypeID<T>();
