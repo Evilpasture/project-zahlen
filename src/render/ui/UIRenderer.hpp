@@ -38,6 +38,7 @@ class UIRenderer {
     auto operator=(const UIRenderer&) -> UIRenderer& = delete;
 
     auto Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode>;
+    void DestroyBuffers(Vk::Allocator& allocator) noexcept;
 
     void BeginFrame() noexcept;
 

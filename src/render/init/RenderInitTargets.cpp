@@ -43,6 +43,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         if (!e) {
             return std::unexpected(e.error());
         }
+        member.Destroy(allocator);
         member = std::move(*e);
         return {};
     };

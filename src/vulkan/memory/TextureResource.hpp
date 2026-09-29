@@ -15,6 +15,12 @@ struct TextureResource {
     ImageView  view;
     VkExtent3D extent {};
 
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
+    }
+
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
         return ImageSlice {image.Handle(), view, extent, view.Info().format};
     }

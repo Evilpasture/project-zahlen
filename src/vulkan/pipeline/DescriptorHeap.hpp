@@ -149,6 +149,7 @@ class DescriptorHeap {
     VkDeviceSize _reservedSize = 0;
     VkDeviceSize _nonCoherentAtomSize = 1;
 
+    VmaAllocator         _allocator = nullptr;
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;
     void*                _mappedPtr = nullptr;

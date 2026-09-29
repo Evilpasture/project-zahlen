@@ -246,6 +246,10 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
 }
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {
+    defer rollback([&] {
+        for (auto& buffer: frames.jointBuffers) allocator.DestroyBuffer(buffer);
+        allocator.DestroyBuffer(morphDeltasBuffer);
+    });
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto jb_res = Vk::Buffer::Create(
@@ -257,7 +261,8 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         }
         frames.jointBuffers[i] = std::move(*jb_res);
 
-        auto mapped = frames.jointBuffers[i].Map();
+        auto mapped = frames.jointBuffers[i].Map(allocator.Get());
+        if (mapped.data == nullptr) return std::unexpected(Vk::StagingError::MemoryMappingFailed);
         std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
@@ -269,68 +274,69 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         return std::unexpected(ErrorCode(mdb_res.error()));
     }
     morphDeltasBuffer = std::move(*mdb_res);
+    rollback.Dismiss();
     return {};
 }
 
 auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
+    if (auto started = stagingContext->Begin(); !started) return std::unexpected(started.error());
+
+    auto ibl = Vk::IBLProcessor::Bake(*this);
+    if (!ibl) return std::unexpected(ibl.error());
+    iblPayload = std::move(*ibl);
+    ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
     using namespace Resource;
-    const size_t matRawSize = ltc_mat.size() - 128;
-    const size_t ampRawSize = ltc_amp.size() - 128;
+    constexpr size_t kDdsHeaderBytes = 128;
+    const size_t matRawSize = ltc_mat.size() - kDdsHeaderBytes;
+    const size_t ampRawSize = ltc_amp.size() - kDdsHeaderBytes;
+    auto stagingRes = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly);
+    if (!stagingRes) return std::unexpected(stagingRes.error());
+    auto ltcStaging = std::move(*stagingRes);
+    defer _([&] { allocator.DestroyBuffer(ltcStaging); });
+    {
+        auto mapped = ltcStaging.Map(allocator.Get());
+        if (mapped.data == nullptr) return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        std::memcpy(mapped.data, ltc_mat.data() + kDdsHeaderBytes, matRawSize);
+        std::memcpy(static_cast<std::byte*>(mapped.data) + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
+    }
 
-    return stagingContext->Begin()
-        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::ErrorCode> {
-            return Vk::IBLProcessor::Bake(*this);
-        })
-        .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
-            iblPayload = std::forward<decltype(ibl)>(ibl);
-            ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
+    constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+    auto makeLtc = [&] {
+        return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get());
+    };
+    bool submitted = false;
+    auto matImg = makeLtc();
+    if (!matImg) return std::unexpected(matImg.error());
+    defer _([&] {
+        if (submitted) stagingContext->Wait();
+        allocator.DestroyImage(*matImg);
+    });
+    auto ampImg = makeLtc();
+    if (!ampImg) return std::unexpected(ampImg.error());
+    defer _([&] {
+        if (submitted) stagingContext->Wait();
+        allocator.DestroyImage(*ampImg);
+    });
 
-            return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly)
-                .transform_error([](auto res) -> ErrorCode { return res; });
-        })
-        .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
-            constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-            auto           makeLtc   = [&] {
-                return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get());
-            };
+    stagingContext->UploadImage2DBuffer(matImg->Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+    stagingContext->UploadImage2DBuffer(ampImg->Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+    stagingContext->AddBuffer(std::move(ltcStaging));
+    if (auto executed = stagingContext->ExecuteAsync(); !executed) return std::unexpected(executed.error());
+    submitted = true;
 
-            return makeLtc()
-                .transform_error([](auto res) -> ErrorCode { return res; })
-                .and_then([&, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize, makeLtc](auto&& matImg) mutable -> auto {
-                    return makeLtc()
-                        .transform_error([](auto res) -> ErrorCode { return res; })
-                        .transform(
-                            [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
-                             matRawSize](auto&& ampImg) mutable -> auto {
-                                stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-                                stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+    auto matView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), matImg->Handle());
+    if (!matView) return std::unexpected(matView.error());
+    auto ampView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ampImg->Handle());
+    if (!ampView) return std::unexpected(ampView.error());
 
-                                stagingContext->AddBuffer(std::move(ltcStaging));
-                                return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
-                            }
-                        );
-                });
-        })
-        .and_then([&](auto&& images) -> std::expected<void, ErrorCode> {
-            ltcMatImage = std::move(images.first);
-            ltcAmpImage = std::move(images.second);
-
-            stagingContext->ExecuteAsync();
-
-            return Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
-                .transform_error([](auto res) -> ErrorCode { return res; })
-                .and_then([&](auto&& matView) -> std::expected<void, ErrorCode> {
-                    ltcMatView = std::forward<decltype(matView)>(matView);
-                    return Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
-                        .transform_error([](auto res) -> ErrorCode { return res; })
-                        .transform([&](auto&& ampView) -> auto {
-                            ltcAmpView = std::forward<decltype(ampView)>(ampView);
-                            ApplyImageDebugNames(*this);
-                        });
-                });
-        });
+    ltcMatImage = std::move(*matImg);
+    ltcAmpImage = std::move(*ampImg);
+    ltcMatView = std::move(*matView);
+    ltcAmpView = std::move(*ampView);
+    ApplyImageDebugNames(*this);
+    return {};
 }
 
 
@@ -402,15 +408,18 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         source.height       = desc.extent.height;
         source.renderSkybox = desc.renderSkybox ? 1 : 0;
     }
+    // Environment changes are rare; wait rather than retiring the old cube
+    // and LUT while previous frames can still read their descriptors/views.
+    if (auto waited = Vk::WaitIdle(impl->ctx.Device()); !waited) return std::unexpected(waited.error());
     auto baked = Vk::IBLProcessor::Bake(*impl, sky, source);
     if (!baked) {
         return std::unexpected(baked.error());
     }
     baked->contentHash = hash;
-    // Swap keeps the retired images and their views together until the old
-    // payload is destroyed (views first), rather than assigning images first.
+    // Swap keeps each view with its image; old resources are now in `baked`.
     std::swap(impl->iblPayload, *baked);
     impl->WriteSceneStaticImageDescriptors();
+    baked->Destroy(impl->allocator);
     return {};
 }
 

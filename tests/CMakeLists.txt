@@ -139,6 +139,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/RunCoreTests.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
+    core/TestDefer.cpp
     core/TestEnumFlags.cpp
     core/TestError.cpp
     core/TestFileSystemWatcher.cpp

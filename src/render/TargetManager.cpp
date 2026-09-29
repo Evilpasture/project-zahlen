@@ -29,6 +29,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
         if (!e) {
             return std::unexpected(e.error());
         }
+        member.Destroy(_allocator);
         member = std::move(*e);
         return {};
     };
@@ -98,6 +99,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     }
     // Retire supplemental views before replacing their backing images.
     _shadowCascadeViews.clear();
+    _graph.shadowMap.Destroy(_allocator);
     _graph.shadowMap = std::move(*sm_res);
 
     auto smp_res =
@@ -106,6 +108,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         return std::unexpected(smp_res.error());
     }
     _shadowCascadeViewsPrev.clear();
+    _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
     if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
@@ -129,6 +132,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _punctualShadowViews.clear();
     _shadowAtlasCubeView = {};
     _shadowAtlas2DView   = {};
+    _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas   = std::move(*sa_res);
 
     const VkImage atlas = _graph.shadowAtlas.image.Handle();
@@ -182,12 +186,15 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
                 _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
             );
             if (!smp_res) {
+                sm_res->Destroy(_allocator);
                 return std::unexpected(smp_res.error());
             }
 
             // Additional per-cascade views must die before their old images.
             _shadowCascadeViews.clear();
             _shadowCascadeViewsPrev.clear();
+            _graph.shadowMap.Destroy(_allocator);
+            _shadowMapPrev.Destroy(_allocator);
             _graph.shadowMap = std::move(*sm_res);
             _shadowMapPrev  = std::move(*smp_res);
 
@@ -286,6 +293,21 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
     vkCmdClearColorImage(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
+void TargetManager::Clear() noexcept {
+    _shadowCascadeViews.clear();
+    _shadowCascadeViewsPrev.clear();
+    _punctualShadowViews.clear();
+    _shadowAtlasCubeView = {};
+    _shadowAtlas2DView = {};
+    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) {
+        target.Destroy(_allocator);
+    });
+    // These targets are not part of the render graph's reflected resources.
+    _graph.shadowMap.Destroy(_allocator);
+    _graph.bloomBlurTarget.Destroy(_allocator);
+    _shadowMapPrev.Destroy(_allocator);
 }
 
 void TargetManager::NameGraphTargets() const noexcept {

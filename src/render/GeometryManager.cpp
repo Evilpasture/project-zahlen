@@ -33,8 +33,10 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
                _allocator.Get(), size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
                sharingMode, {families, familyCount}
     )
-        .transform([this, size, data](auto&& gpu_buf) -> auto {
+        .and_then([this, size, data](Vk::Buffer gpu_buf) -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
+            defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
             auto stagingAlloc = _transferRing.Allocate(size);
+            if (stagingAlloc.mappedData == nullptr) return std::unexpected(Vk::StagingError::MemoryMappingFailed);
 
             if (data != nullptr) {
                 std::memcpy(stagingAlloc.mappedData, data, size);
@@ -47,12 +49,16 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
             });
 
             VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
-            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
+            return std::make_pair(std::move(gpu_buf), address);
         });
 }
 
 auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
-    return _buffers.Create(std::move(buffer), vertexCount, address);
+    const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
+    if (handle == BufferHandle::Invalid) {
+        _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the rvalue.
+    }
+    return handle;
 }
 
 auto GeometryManager::CreateVertexBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle {
@@ -97,6 +103,7 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     }
 
     auto stagingAlloc = _transferRing.Allocate(size);
+    if (stagingAlloc.mappedData == nullptr) return;
     std::memcpy(stagingAlloc.mappedData, data, size);
 
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
@@ -120,11 +127,23 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
         .value_or(BufferHandle::Invalid);
 }
 
+void GeometryManager::Retire(NativeMesh& mesh) noexcept {
+    // The AS is a GPU object too. Retire it ahead of its backing allocation,
+    // then the mesh allocation, in the same frame-delayed batch.
+    _deletionQueue.EnqueueAccelerationStructure(_ctx.Device(), std::move(mesh.blas));
+    _deletionQueue.Enqueue(std::move(mesh.blasBuffer));
+    _deletionQueue.Enqueue(std::move(mesh.buffer));
+}
+
 void GeometryManager::Destroy(BufferHandle handle) {
-    if (handle != BufferHandle::Invalid) {
-        Vk::ScopedDeletionQueue guard(_deletionQueue);
+    if (auto* mesh = _buffers.Resolve(handle)) {
+        Retire(*mesh);
         _buffers.Destroy(handle);
     }
+}
+
+void GeometryManager::RetireAll() noexcept {
+    _buffers.ForEachLive([this](NativeMesh& mesh) { Retire(mesh); });
 }
 
 }

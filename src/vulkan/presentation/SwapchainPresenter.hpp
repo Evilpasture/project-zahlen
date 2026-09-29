@@ -43,12 +43,12 @@ inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
 class SwapchainPresenter {
   public:
     SwapchainPresenter() noexcept  = default;
-    ~SwapchainPresenter() noexcept = default;
+    ~SwapchainPresenter() noexcept;
 
     SwapchainPresenter(const SwapchainPresenter&)                    = delete;
     auto operator=(const SwapchainPresenter&) -> SwapchainPresenter& = delete;
     SwapchainPresenter(SwapchainPresenter&&) noexcept                = default;
-    auto operator=(SwapchainPresenter&&) noexcept -> SwapchainPresenter& = default;
+    auto operator=(SwapchainPresenter&&) noexcept -> SwapchainPresenter&;
 
 
     Surface      surface;
@@ -70,6 +70,8 @@ class SwapchainPresenter {
         -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
+    // Destruction requires all submitted frames to have completed.
+    void Cleanup() noexcept;
 
 
     [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;

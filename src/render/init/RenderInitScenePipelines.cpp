@@ -130,18 +130,24 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     Vk::BufferUsage                  extraFlags
 ) noexcept -> std::expected<void, ErrorCode> {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
+    PerFrame<Vk::Buffer> created;
+    PerFrame<VkDeviceAddress> createdAddresses;
+    defer _([&] {
+        for (auto& buffer: created) allocator.DestroyBuffer(buffer);
+    });
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res = Vk::Buffer::Create(
             allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags,
             Vk::MemoryUsage::CPUToGPU
         );
-        if (!res) {
-            return std::unexpected(res.error());
-        }
-        bufs[i]  = std::move(*res);
-        addrs[i] = ctx.BufferAddress(bufs[i].Handle());
+        if (!res) return std::unexpected(res.error());
+        created[i] = std::move(*res);
+        createdAddresses[i] = ctx.BufferAddress(created[i].Handle());
     }
+    // This helper is used at initialization; a reinit must be done after idle.
+    for (auto& buffer: bufs) allocator.DestroyBuffer(buffer);
+    bufs = std::move(created);
+    addrs = createdAddresses;
     ZHLN::Log("Allocated per-frame dynamic {} VBOs ({} bytes).", label, bufferSize);
     return {};
 }
@@ -542,7 +548,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                         Vk::MemoryUsage::CPUToGPU
                     );
                 })
-                .transform([&](auto&& tib) {
+                .and_then([&](auto&& tib) -> std::expected<void, ErrorCode> {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         frames.tlas[i] = Vk::AccelerationStructure(
@@ -551,7 +557,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                                 ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
                             )
                         );
+                        if (!frames.tlas[i].Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
                     }
+                    return {};
                 });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return BuildSkinningPipeline(); })

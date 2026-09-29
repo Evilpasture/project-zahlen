@@ -138,6 +138,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     }
     _impl->renderTextures.clear();
     _impl->textureManager.Clear();
+    _impl->textureManager.RetireAll(); // WaitIdle above covers all pending texture slots.
 
     _impl->deletionQueue.Drain();
 }
@@ -466,13 +467,13 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         return std::unexpected(imageRes.error());
     }
 
+    Vk::Image image = std::move(*imageRes);
+    defer _([&] { allocator.DestroyImage(image); });
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
-
-    Vk::Image image = std::move(*imageRes);
 
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
@@ -541,7 +542,8 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     ZHLN_AccelerationStructureSizes sizes {};
     Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
 
-    if (!scratchMesh->blas) {
+    const bool creatingBlas = !scratchMesh->blas;
+    if (creatingBlas) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
             Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
@@ -554,6 +556,10 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
             ctx.Device(),
             Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
         );
+        if (!scratchMesh->blas.Valid()) {
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            return;
+        }
         scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
     }
 
@@ -561,10 +567,18 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!scratchBufOpt) {
+        // No build was recorded: do not leave an uninitialized AS for the
+        // next frame to treat as an existing, updateable BLAS.
+        if (creatingBlas) {
+            scratchMesh->blas = {};
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            scratchMesh->blasAddress = 0;
+        }
         return;
     }
     Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
     Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
+    deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
 }
 
 uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexAttributes> attributes) noexcept {
@@ -579,8 +593,9 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
 
     constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
-    auto  mapped  = nativeMesh->buffer.Map();
+    auto  mapped  = nativeMesh->buffer.Map(_impl->allocator.Get());
     char* basePtr = static_cast<char*>(mapped.data);
+    if (basePtr == nullptr) return 0;
 
     const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
     if (count > 0) {
@@ -604,8 +619,11 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
         ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
         return;
     }
-    auto* gpuJoints = static_cast<JPH::Mat44*>(buffer.Map().data);
-    std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
+    auto mapped = buffer.Map(_impl->allocator.Get());
+    auto* gpuJoints = mapped.As<JPH::Mat44>();
+    if (gpuJoints != nullptr) {
+        std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
+    }
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
@@ -616,8 +634,10 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
         return offset;
     }
     if (!deltas.empty()) {
-        auto* gpuDeltas = static_cast<float*>(_impl->morphDeltasBuffer.Map().data) + static_cast<size_t>(offset) * 4;
-        std::memcpy(gpuDeltas, deltas.data(), deltas.size_bytes());
+        auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator.Get());
+        if (auto* gpuDeltas = mapped.As<float>()) {
+            std::memcpy(gpuDeltas + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
+        }
     }
     _impl->nextMorphDeltaIndex += static_cast<uint32_t>(deltas.size() / 4);
     return offset;
@@ -678,108 +698,70 @@ void RenderContext::SetAAState(const AAState& state) {
 #endif
 
 auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
-    auto* impl = _impl.get();
+    auto& impl = *_impl;
+    if (!impl.ctx.RayTracingSupported()) return std::unexpected(RenderFeatureError::FeatureNotSupported);
+    // MeshBuilder and the glTF importer report this specific resolution error.
+    auto* posMesh = impl.geometry.Resolve(mesh.posBuffer);
+    if (posMesh == nullptr) return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+    auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    struct BuildContext {
-        NativeMesh*                     posMesh;
-        NativeMesh*                     indexMesh;
-        ZHLN_BlasGeometryDesc           geom;
-        uint32_t                        primitiveCount;
-        ZHLN_AccelerationStructureSizes sizes;
-        Vk::Buffer                      blasBuffer;
-        Vk::AccelerationStructure       blas;
-        Vk::Buffer                      scratch;
+    const ZHLN_BlasGeometryDesc geom {
+        .vertex_data = posMesh->vboAddress,
+        .vertex_stride = sizeof(VertexPosition),
+        .max_vertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
+        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
+        .index_data = indexMesh != nullptr ? indexMesh->vboAddress : 0,
+        .index_type = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
+    const uint32_t primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    ZHLN_AccelerationStructureSizes sizes {};
+    Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount, sizes);
 
-    return std::expected<void, ErrorCode>()
-        .and_then([&]() -> std::expected<BuildContext, ErrorCode> {
-            if (!impl->ctx.RayTracingSupported()) {
-                return std::unexpected(RenderFeatureError::FeatureNotSupported);
-            }
-            // The only caller chain that ever read the resolve failure: it is
-            // logged as a warning by MeshBuilder and the glTF importer, so it
-            // keeps a code of its own rather than collapsing into nullopt.
-            auto* pos = impl->geometry.Resolve(mesh.posBuffer);
-            if (pos == nullptr) [[unlikely]] {
-                return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
-            }
+    auto bufferRes = Vk::Buffer::Create(
+        impl.allocator.Get(), sizes.acceleration_structure_size,
+        Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+    );
+    if (!bufferRes) return std::unexpected(bufferRes.error());
+    defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
+    Vk::AccelerationStructure blas(
+        impl.ctx.Device(), Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+    );
+    if (!blas.Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
 
-            auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
-            return BuildContext {
-                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
-            };
-        })
-        .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.geom = {
-                .vertex_data   = b.posMesh->vboAddress,
-                .vertex_stride = sizeof(VertexPosition),
-                .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
-                .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-                .index_data    = (b.indexMesh != nullptr) ? b.indexMesh->vboAddress : 0,
-                .index_type    = (b.indexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
-            };
-            b.primitiveCount = (b.indexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    auto scratchRes = Vk::Buffer::Create(
+        impl.allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+        Vk::MemoryUsage::GPUOnly
+    );
+    if (!scratchRes) return std::unexpected(scratchRes.error());
+    defer _([&] { impl.allocator.DestroyBuffer(*scratchRes); });
 
-            Vk::GetBLASSizes(impl->ctx.Device(), b.geom, b.primitiveCount, b.sizes);
+    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphics_family);
+    auto allocated = tempPool.Allocate(1);
+    if (!allocated) return std::unexpected(allocated.error());
+    VkCommandBuffer cmd = tempPool[0];
+    {
+        Vk::CommandBufferGuard guard(cmd);
+        Vk::MemoryBarrier(cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
+                          Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead);
+        Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
+    }
 
-            return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
-            )
-                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
-                    b.blasBuffer = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b);
-                });
-        })
-        .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.blas = Vk::AccelerationStructure(
-                impl->ctx.Device(),
-                Vk::CreateAccelerationStructure(impl->ctx.Device(), b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
-            );
-            if (!b.blas) {
-                return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-            }
+    auto submitted = Vk::SubmitAndWait(
+        impl.ctx.GraphicsQueue(), cmd, impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+    );
+    if (!submitted) {
+        vkQueueWaitIdle(impl.ctx.GraphicsQueue());
+        return std::unexpected(submitted.error());
+    }
 
-            return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                       Vk::MemoryUsage::GPUOnly
-            )
-                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
-                    b.scratch = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b);
-                });
-        })
-        .and_then([&](BuildContext b) -> std::expected<void, ErrorCode> {
-            Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-            auto                                     alloc_res = tempPool.Allocate(1);
-            if (!alloc_res) [[unlikely]] {
-                return std::unexpected(alloc_res.error());
-            }
-
-            VkCommandBuffer tempCmd = tempPool[0];
-            {
-                Vk::CommandBufferGuard guard(tempCmd);
-
-                Vk::MemoryBarrier(
-                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
-                    Vk::BarrierAccess::AccelerationStructureRead
-                );
-                Vk::BuildBLAS(
-                    tempCmd, b.geom, b.blas.Get(), Vk::BufferSlice {b.scratch, impl->ctx.BufferAddress(b.scratch.Handle())}, b.primitiveCount
-                );
-            }
-
-            return Vk::SubmitAndWait(
-                       impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
-                       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
-            )
-                .transform_error([](auto err) -> ErrorCode { return err; })
-                .transform([&]() -> void {
-                    b.posMesh->blasBuffer  = std::move(b.blasBuffer);
-                    b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas.Get());
-                    b.posMesh->blas        = std::move(b.blas);
-                });
-        });
+    // The old BLAS may still be referenced by another in-flight frame.
+    impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
+    impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
+    posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get());
+    posMesh->blasBuffer = std::move(*bufferRes);
+    posMesh->blas = std::move(blas);
+    return {};
 }
 
 
@@ -835,6 +817,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(stagingRes.error());
         }
         auto stagingBuffer = std::move(*stagingRes);
+        defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
             const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
@@ -868,7 +851,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
         });
 
-        auto mapped = stagingBuffer.Map();
+        auto mapped = stagingBuffer.Map(impl->allocator.Get());
         if (mapped.data == nullptr) {
             return std::unexpected(ScreenshotError::ReadbackFailed);
         }
@@ -943,6 +926,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         return std::unexpected(stagingRes.error());
     }
     auto stagingBuffer = std::move(*stagingRes);
+    defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
     Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
         auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
@@ -952,7 +936,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
     });
 
-    auto mapped = stagingBuffer.Map();
+    auto mapped = stagingBuffer.Map(impl->allocator.Get());
     if (mapped.data == nullptr) {
         return std::unexpected(ScreenshotError::ReadbackFailed);
     }

@@ -40,7 +40,7 @@ class TextureManager {
         Vk::CommandRing<Vk::QueueType::Graphics, 8>& cmdRing,
         Vk::HeapManager&                             heaps
     ) noexcept;
-    ~TextureManager()                                        = default;
+    ~TextureManager();
     TextureManager(const TextureManager&)                    = delete;
     auto operator=(const TextureManager&) -> TextureManager& = delete;
     TextureManager(TextureManager&&)                         = delete;
@@ -63,6 +63,8 @@ class TextureManager {
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
     void Clear();
+    // Only after an idle wait (e.g. ClearGPUCaches): reclaim every retired slot.
+    void RetireAll() noexcept;
     void OnDeviceLost();
 
 
@@ -105,6 +107,8 @@ class TextureManager {
     // Assign an opaque, never-reused handle to a newly adopted GPU slot.
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
     void WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
+    void RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
+    void DestroyAllSlots() noexcept;
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;

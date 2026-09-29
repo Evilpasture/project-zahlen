@@ -196,7 +196,9 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
-    std::memcpy(instanceBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
+    auto mappedInstances = instanceBuf.Map(allocator.Get());
+    if (mappedInstances.data == nullptr) return;
+    std::memcpy(mappedInstances.data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
@@ -225,7 +227,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.camPos[2]          = view.worldPosition.GetZ();
     currentUniforms.camPos[3]          = view.time;
 
-    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map();
+    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator.Get());
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu != nullptr) {
         gpu->viewProj           = view.viewProjMatrix;
@@ -253,8 +255,14 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     auto csgCount  = queues.CsgDraws().size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
+        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator.Get());
         auto* dst    = static_cast<InstanceData*>(mapped.data);
+        if (dst == nullptr) {
+            activeLineVertexCount = 0;
+            queues.Draws().clear();
+            queues.CsgDraws().clear();
+            return;
+        }
 
         for (size_t i = 0; i < drawCount; ++i) {
             dst[i] = queues.Draws()[i].instanceData;
@@ -368,7 +376,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
 
     deletionQueue.BeginFrame(frame_index);
     _impl->textureManager.BeginFrame(frame_index);
-    _impl->activeQueueGuard.emplace(deletionQueue);
+    _impl->frameOpen = true;
     _impl->heapManager.BeginFrame(frame_index);
     _impl->uiRenderer.BeginFrame();
 
@@ -433,7 +441,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         ~EndFrameGuard() noexcept {
             if (impl != nullptr) {
                 impl->destinations.CloseRecordings();
-                impl->activeQueueGuard.reset();
+                impl->frameOpen = false;
                 impl->queues.Clear();
                 impl->frameState.Reset();
                 impl->sceneTarget.reset();

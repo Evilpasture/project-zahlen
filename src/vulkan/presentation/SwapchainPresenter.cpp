@@ -10,6 +10,35 @@
 
 namespace ZHLN::Vk {
 
+SwapchainPresenter::~SwapchainPresenter() noexcept { Cleanup(); }
+
+void SwapchainPresenter::Cleanup() noexcept {
+    if (_alloc != nullptr) {
+        depthTarget.Destroy(*_alloc);
+        headlessColorTarget.Destroy(*_alloc);
+    }
+}
+
+auto SwapchainPresenter::operator=(SwapchainPresenter&& other) noexcept -> SwapchainPresenter& {
+    if (this != &other) {
+        Cleanup();
+        surface = std::move(other.surface);
+        swapchain = std::move(other.swapchain);
+        presentSemaphores = std::move(other.presentSemaphores);
+        depthTarget = std::move(other.depthTarget);
+        headlessColorTarget = std::move(other.headlessColorTarget);
+        sync = std::move(other.sync);
+        pools = std::move(other.pools);
+        frameIndex = std::exchange(other.frameIndex, 0);
+        resourceGeneration = std::exchange(other.resourceGeneration, 1);
+        _ctx = std::exchange(other._ctx, nullptr);
+        _alloc = std::exchange(other._alloc, nullptr);
+        _vsync = other._vsync;
+        _pacer = std::move(other._pacer);
+    }
+    return *this;
+}
+
 
 auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync)
     -> std::expected<void, ErrorCode> {
@@ -41,25 +70,21 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D renderExtent = {.width = width, .height = height};
-        {
-            auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
-            );
-            if (!dt_res) {
-                return std::unexpected(dt_res.error());
-            }
-            depthTarget = std::move(*dt_res);
+        auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
+        );
+        if (!dt_res) return std::unexpected(dt_res.error());
+        auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
+        );
+        if (!hct_res) {
+            dt_res->Destroy(*_alloc);
+            return std::unexpected(hct_res.error());
         }
-
-        {
-            auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
-            );
-            if (!hct_res) {
-                return std::unexpected(hct_res.error());
-            }
-            headlessColorTarget = std::move(*hct_res);
-        }
+        depthTarget.Destroy(*_alloc);
+        headlessColorTarget.Destroy(*_alloc);
+        depthTarget = std::move(*dt_res);
+        headlessColorTarget = std::move(*hct_res);
 
         ++resourceGeneration;
         _pacer.OnSwapchainRebuilt(VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_PRESENT_MODE_MAX_ENUM_KHR);
@@ -99,6 +124,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
         if (!dt_res) {
             return std::unexpected(dt_res.error());
         }
+        depthTarget.Destroy(*_alloc);
         depthTarget = std::move(*dt_res);
     }
 

@@ -47,7 +47,7 @@ class StagingContext {
 
     void AddBuffer(Buffer&& buf);
 
-    void ExecuteAsync();
+    [[nodiscard]] auto ExecuteAsync() -> std::expected<void, ErrorCode>;
 
     void Wait() noexcept;
 

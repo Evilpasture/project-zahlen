@@ -20,6 +20,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         return std::unexpected(imageRes.error());
     }
     auto image = std::move(*imageRes);
+    defer _([&] { allocator.DestroyImage(image); });
 
     auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     if (!viewRes) {

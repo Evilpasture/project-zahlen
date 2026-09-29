@@ -57,6 +57,7 @@ inline auto
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
+    ZHLN::defer _([&] { rt.Destroy(allocator); });
 
     const auto viewDesc = desc.arrayLayers > 1
         ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
@@ -66,7 +67,7 @@ inline auto
         return std::unexpected(view_res.error());
     }
     rt.view = std::move(*view_res);
-    return rt;
+    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 
 template <VkFormat F>
@@ -107,13 +108,14 @@ inline auto
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
+    ZHLN::defer _([&] { rt.Destroy(allocator); });
 
     auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
     rt.view = std::move(*view_res);
-    return rt;
+    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 
 // Transition Helpers

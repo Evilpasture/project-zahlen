@@ -6,6 +6,7 @@
 // clang-format on
 #include "StagingContext.hpp"
 #include "Allocator.hpp"
+#include <Zahlen/Core/Defer.hpp>
 #include <cstring>
 #include <utility>
 
@@ -15,8 +16,12 @@ StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _alloc
 }
 
 StagingContext::~StagingContext() {
+    Wait();
+    _recording.reset();
+    for (auto& buffer: _stagingBuffers) {
+        _allocator->DestroyBuffer(buffer);
+    }
     if (_fence != VK_NULL_HANDLE) {
-        Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
     }
 }
@@ -27,6 +32,14 @@ StagingContext::StagingContext(StagingContext&& other) noexcept:
 }
 
 auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
+    if (_fence != VK_NULL_HANDLE) {
+        Wait();
+        vkDestroyFence(_ctx->Device(), _fence, nullptr);
+        _fence = VK_NULL_HANDLE;
+    }
+    _recording.reset();
+    for (auto& buffer: _stagingBuffers) _allocator->DestroyBuffer(buffer);
+    _stagingBuffers.clear();
     _cmdPool       = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
     auto alloc_res = _cmdPool.Allocate(1);
     if (!alloc_res) [[unlikely]] {
@@ -41,7 +54,8 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
     -> std::expected<void, ErrorCode> {
     return Buffer::Create(_allocator->Get(), bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
         .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
-            auto mapped = staging.Map();
+            defer _([&] { _allocator->DestroyBuffer(staging); });
+            auto mapped = staging.Map(_allocator->Get());
             if (mapped.data != nullptr) {
                 std::memcpy(mapped.data, data, bytes);
             } else {
@@ -125,7 +139,7 @@ void StagingContext::AddBuffer(Buffer&& buf) {
     _stagingBuffers.push_back(std::move(buf));
 }
 
-void StagingContext::ExecuteAsync() {
+auto StagingContext::ExecuteAsync() -> std::expected<void, ErrorCode> {
     _recording.reset();
 
     if (_fence != VK_NULL_HANDLE) {
@@ -135,13 +149,19 @@ void StagingContext::ExecuteAsync() {
     }
 
     VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
-    vkCreateFence(_ctx->Device(), &fence_info, nullptr, &_fence);
+    if (vkCreateFence(_ctx->Device(), &fence_info, nullptr, &_fence) != VK_SUCCESS) {
+        // Never submit untracked work whose staging buffers could be freed.
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
+    }
 
     const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(_cmd);
-    if (!QueueSubmit(_ctx->GraphicsQueue(), std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, {}, {}, _fence)) {
+    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, {}, {}, _fence); !result) {
+        vkQueueWaitIdle(_ctx->GraphicsQueue());
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
         _fence = VK_NULL_HANDLE;
+        return std::unexpected(result.error());
     }
+    return {};
 }
 
 void StagingContext::Wait() noexcept {

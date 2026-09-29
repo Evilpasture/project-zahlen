@@ -28,7 +28,7 @@ class GeometryManager {
         Vk::DeletionQueue&                          deletionQueue
     ) noexcept
         : _ctx(ctx), _allocator(allocator), _transferRing(transferRingBuffer), _transferCmdRing(transferCmdRing), _deletionQueue(deletionQueue) {}
-    ~GeometryManager() = default;
+    ~GeometryManager() { RetireAll(); }
 
     GeometryManager(const GeometryManager&)                = delete;
     auto operator=(const GeometryManager&) -> GeometryManager& = delete;
@@ -72,8 +72,12 @@ class GeometryManager {
     void ClearMaterials() noexcept { _materials.Clear(); }
 
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
+    // After GPU idle the renderer drains the queue before releasing the allocator.
+    void RetireAll() noexcept;
 
   private:
+    void Retire(NativeMesh& mesh) noexcept;
+
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
     Vk::StagingRingBuffer&                       _transferRing;

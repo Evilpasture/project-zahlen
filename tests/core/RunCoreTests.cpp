@@ -35,11 +35,12 @@ auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 auto RunTextEditSuite() -> ZHLN::Test::TestStats;
 auto RunFontAssetSuite() -> ZHLN::Test::TestStats;
 auto RunEnumFlagsSuite() -> ZHLN::Test::TestStats;
+auto RunDeferSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunPlatformSuite, RunSignalSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathSuite,
         RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite, RunFontAssetSuite,
-        RunEnumFlagsSuite
+        RunEnumFlagsSuite, RunDeferSuite
     );
 }

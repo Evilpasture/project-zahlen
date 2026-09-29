@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <Zahlen/Core/Defer.hpp>
+
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
@@ -37,6 +39,12 @@ struct RenderTarget {
     [[nodiscard]] static auto
         Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
+    }
+
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
         return ImageSlice {image.Handle(), view, extent, F};
     }
@@ -64,6 +72,12 @@ struct RenderTarget3D {
             extent = other.extent;
         }
         return *this;
+    }
+
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
@@ -136,6 +150,7 @@ struct MipmappedRenderTarget {
             return std::unexpected(img_res.error());
         }
         target.image = std::move(img_res.value());
+        ZHLN::defer _([&] { target.Destroy(allocator); });
 
         const VkImageAspectFlags aspect   = GetFormatAspect(F);
         auto                     view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
@@ -151,7 +166,15 @@ struct MipmappedRenderTarget {
             }
             target.mipViews.push_back(std::move(*mip_res));
         }
-        return target;
+        return std::move(target); // Move before the failure guard runs.
+    }
+
+    void Destroy(Allocator& allocator) noexcept {
+        mipViews.clear();
+        fullView = {};
+        allocator.DestroyImage(image);
+        extent = {};
+        mipLevels = 1;
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
@@ -244,8 +267,21 @@ struct RenderTargetBundle {
     constexpr explicit RenderTargetBundle(Targets&... t) noexcept: targets(t...) {
     }
 
-    void Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) const {
-        std::apply([&](auto&... t) { ((t = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {})), ...); }, targets);
+    [[nodiscard]] auto Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) -> std::expected<void, ErrorCode> {
+        std::expected<void, ErrorCode> result;
+        std::apply([&](auto&... t) {
+            ([&] {
+                if (!result) return;
+                auto created = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {});
+                if (!created) {
+                    result = std::unexpected(created.error());
+                    return;
+                }
+                t.Destroy(alloc); // Caller must have waited for GPU use.
+                t = std::move(*created);
+            }(), ...);
+        }, targets);
+        return result;
     }
 
     template <VkImageLayout TargetLayout>

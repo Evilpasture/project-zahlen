@@ -96,7 +96,7 @@ auto RenderContext::Impl::AcquireDestinationImage(FrameDestinations::Window& des
 }
 
 auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget> {
-    if (!activeQueueGuard.has_value()) {
+    if (!frameOpen) {
         return std::nullopt;
     }
     const auto* dest = destinations.Find(aux);
@@ -107,7 +107,7 @@ auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) const 
 }
 
 auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<FrameTarget> {
-    if (!activeQueueGuard.has_value()) {
+    if (!frameOpen) {
         return std::unexpected(DestinationError::NoActiveFrame);
     }
 
@@ -136,7 +136,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
 }
 
 auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> std::expected<ResolvedTarget, ErrorCode> {
-    if (!activeQueueGuard.has_value()) {
+    if (!frameOpen) {
         return std::unexpected(DestinationError::NoActiveFrame);
     }
     if (target._renderer != rendererId || target._frame != frameSerial || !target.Valid()) {

@@ -58,6 +58,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
         .Texture2D(width, height, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
+            defer _([&] { allocator.DestroyImage(gpuImage); });
             auto view_res = Vk::ImageView::Create<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!view_res) {
                 return std::unexpected(view_res.error());

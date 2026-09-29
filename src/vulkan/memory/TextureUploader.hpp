@@ -8,6 +8,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Defer.hpp>
+
 namespace ZHLN::Vk {
 
 
@@ -56,6 +58,7 @@ class TextureUploader {
                           .Texture2D(desc.width, desc.height, desc.format, usage, mips)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(byteSize);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
@@ -111,6 +114,7 @@ class TextureUploader {
                           .Usage(ImageUsage::Sampled | ImageUsage::TransferDst)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(byteSize);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
@@ -158,6 +162,7 @@ class TextureUploader {
                           .TextureCube(desc.size, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(totalBytes);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);

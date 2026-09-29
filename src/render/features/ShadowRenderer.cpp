@@ -17,7 +17,16 @@ auto ShadowRenderer::InitResources(RenderContext::Impl& impl) -> std::expected<v
                impl.allocator, sizeof(VkDrawIndirectCommand) * RenderContext::Impl::kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect,
                Vk::MemoryUsage::CPUToGPU
     )
-        .transform([this](auto&& buffers) -> void { _indirectCommands = std::forward<decltype(buffers)>(buffers); });
+        .transform([this, &impl](auto&& buffers) -> void {
+            DestroyResources(impl.allocator);
+            _indirectCommands = std::forward<decltype(buffers)>(buffers);
+        });
+}
+
+void ShadowRenderer::DestroyResources(Vk::Allocator& allocator) noexcept {
+    for (auto& buffer: _indirectCommands) {
+        allocator.DestroyBuffer(buffer);
+    }
 }
 
 auto ShadowRenderer::CascadePipeline() const noexcept -> VkPipeline {

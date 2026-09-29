@@ -5,6 +5,7 @@
 #include "DescriptorHeap.hpp"
 #include "memory/Allocator.hpp"
 #include "Rendering.hpp"
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
@@ -37,7 +38,7 @@ DescriptorHeap<Type>::~DescriptorHeap() noexcept {
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _capacity(std::exchange(other._capacity, 0)), _stride(std::exchange(other._stride, 0)),
-    _reservedSize(std::exchange(other._reservedSize, 0)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
+    _reservedSize(std::exchange(other._reservedSize, 0)), _allocator(std::exchange(other._allocator, nullptr)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
     _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})) {
 }
 
@@ -49,6 +50,7 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
         _capacity              = std::exchange(other._capacity, 0);
         _stride                = std::exchange(other._stride, 0);
         _reservedSize          = std::exchange(other._reservedSize, 0);
+        _allocator             = std::exchange(other._allocator, nullptr);
         _buffer                = std::move(other._buffer);
         _mappedRegion          = std::move(other._mappedRegion);
         _mappedPtr = std::exchange(other._mappedPtr, nullptr);
@@ -60,7 +62,8 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Cleanup() noexcept {
     _mappedRegion = {};
-    _buffer       = {};
+    Allocator::DestroyBuffer(_allocator, _buffer);
+    _allocator    = nullptr;
     _mappedPtr    = nullptr;
     _capacity     = 0;
     _stride       = 0;
@@ -70,8 +73,11 @@ void DescriptorHeap<Type>::Cleanup() noexcept {
 
 template <DescriptorHeapType Type>
 auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode> {
-    _device   = ctx.Device();
-    _capacity = capacity;
+    Cleanup();
+    _device    = ctx.Device();
+    _allocator = allocator.Get();
+    _capacity  = capacity;
+    ZHLN::defer rollback([this] { Cleanup(); });
 
     if (!ctx.DescriptorHeapsSupported()) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
@@ -140,7 +146,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
     _buffer = std::move(*buffer_res);
 
-    _mappedRegion = _buffer.Map();
+    _mappedRegion = _buffer.Map(_allocator);
     _mappedPtr    = _mappedRegion.data;
     if (_mappedPtr == nullptr) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::MappingFailed);
@@ -163,12 +169,13 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         .reservedRangeSize   = _reservedSize,
     };
 
+    rollback.Dismiss();
     return {};
 }
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept {
-    _buffer.Flush(offset, size);
+    _buffer.Flush(_allocator, offset, size);
 }
 
 template <DescriptorHeapType Type>

@@ -54,6 +54,7 @@ struct UIVariants<std::integer_sequence<VkFormat, Formats...>> {
 
 struct UIRenderer::Impl {
     TextureManager* textureManager = nullptr;
+    Vk::Allocator* allocator = nullptr;
 
     UIVariants<SupportedUITargetFormats> pipelines;
     VkFormat          fallbackFormat = VK_FORMAT_UNDEFINED;
@@ -67,6 +68,12 @@ struct UIRenderer::Impl {
     std::array<uint32_t, Vk::kFramesInFlight> arenaOffset {};
     std::array<uint32_t, Vk::kFramesInFlight> arenaFrame {};
     uint32_t                frameEpoch = 0;
+
+    ~Impl() {
+        if (allocator != nullptr) {
+            for (auto& buffer: vbos) allocator->DestroyBuffer(buffer);
+        }
+    }
 };
 
 UIRenderer::UIRenderer(): _impl(std::make_unique<Impl>()) {}
@@ -81,7 +88,9 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         _impl = std::make_unique<UIRenderer::Impl>();
     }
     auto& impl      = *_impl;
+    DestroyBuffers(ctx.allocator);
     impl.textureManager   = &ctx.textureManager;
+    impl.allocator = &ctx.allocator;
     impl.layout     = ctx.emptyPipelineLayout;
 
     const Vk::ReflectedStageInput reflectInputs[2] = {
@@ -157,6 +166,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         ++pipelineCount;
     }
 
+    ZHLN::defer rollback([&] { DestroyBuffers(ctx.allocator); });
     const size_t bufferSize = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexAttributes));
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res = Vk::Buffer::Create(
@@ -168,8 +178,17 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         impl.vbos[i]          = std::move(*res);
         impl.vboAddresses[i]  = ctx.ctx.BufferAddress(impl.vbos[i].Handle());
     }
+    rollback.Dismiss();
     ZHLN::Log("UIRenderer: {} format-matched pipelines + double-buffered VBOs ({} bytes).", pipelineCount, bufferSize);
     return {};
+}
+
+void UIRenderer::DestroyBuffers(Vk::Allocator& allocator) noexcept {
+    if (_impl != nullptr) {
+        for (auto& buffer: _impl->vbos) {
+            allocator.DestroyBuffer(buffer);
+        }
+    }
 }
 
 void UIRenderer::BeginFrame() noexcept {
@@ -206,8 +225,9 @@ void UIRenderer::RecordBatches(Vk::CommandEncoder& encoder, uint32_t width, uint
         return;
     }
 
-    auto  mapped      = vbo.Map();
+    auto  mapped      = vbo.Map(impl.allocator->Get());
     auto* positions   = static_cast<VertexPosition*>(mapped.data);
+    if (positions == nullptr) return;
     auto* basePosPtr  = positions + vertexOffset;
     auto* baseAttrPtr = reinterpret_cast<VertexAttributes*>(positions + maxVertices) + vertexOffset;
     std::memcpy(basePosPtr, uiData.positions.data(), safeCount * sizeof(VertexPosition));

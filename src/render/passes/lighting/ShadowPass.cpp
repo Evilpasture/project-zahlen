@@ -38,8 +38,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
-    auto  mapped           = ctx.shadows.IndirectCommands(frameIndex).Map();
+    auto  mapped           = ctx.shadows.IndirectCommands(frameIndex).Map(ctx.allocator.Get());
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
+    if (indirectCmdsBase == nullptr) return;
 
     std::array<uint32_t, kSlotCount> passWriteOffsets {};
     passWriteOffsets[0] = 0;

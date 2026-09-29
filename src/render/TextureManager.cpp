@@ -254,19 +254,35 @@ void TextureManager::Clear() {
     }
 }
 
-void TextureManager::OnDeviceLost() {
-    // Views must be released before their images, including pending slot frees.
+TextureManager::~TextureManager() { DestroyAllSlots(); }
+
+void TextureManager::DestroyAllSlots() noexcept {
+    // Never destroy a VMA image while any of its Vulkan views still exists.
     _slotViews.clear();
-    _slotImages.clear();
-    _nextSlotIndex    = 0;
-    _bindlessBaseSlot = 0;
-    _freeSlots.clear();
     for (auto& pending: _pendingFrees) {
+        for (auto& released: pending) {
+            released.view = {};
+        }
+    }
+    for (auto& image: _slotImages) {
+        _allocator.DestroyImage(image);
+    }
+    _slotImages.clear();
+    for (auto& pending: _pendingFrees) {
+        for (auto& released: pending) {
+            _allocator.DestroyImage(released.image);
+        }
         pending.clear();
     }
+    _nextSlotIndex = 0;
+    _bindlessBaseSlot = 0;
+    _freeSlots.clear();
+}
 
+void TextureManager::OnDeviceLost() {
+    DestroyAllSlots();
     Lock(_mutex, [&] {
-        _textures.ForEach([&](uint64_t , TextureRecord& record) {
+        _textures.ForEach([&](uint64_t, TextureRecord& record) {
             record.gpuBindlessIndex = kFallbackWhiteTextureIndex;
         });
     });
@@ -288,9 +304,9 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
             ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
-            // Parameter destruction order is unspecified; the view must go before its image.
-            view = Vk::ImageView {};
-            image = Vk::Image {};
+            // A consuming sink also owns its rejected arguments.
+            view = {};
+            _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
         }
         index = _nextSlotIndex++;
@@ -307,15 +323,26 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
     return index;
 }
 
-void TextureManager::BeginFrame(uint32_t frameIndex) noexcept {
-    _frameIndex = Vk::FrameSlot(frameIndex);
-
-    auto& pending = _pendingFrees[_frameIndex];
+void TextureManager::RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept {
     for (auto& released: pending) {
         WriteSlotToHeap(released.index, _slotViews[kFallbackWhiteTextureIndex]);
+        released.view = {};
+        _allocator.DestroyImage(released.image);
         _freeSlots.push_back(released.index);
     }
     pending.clear();
+}
+
+void TextureManager::BeginFrame(uint32_t frameIndex) noexcept {
+    _frameIndex = Vk::FrameSlot(frameIndex);
+    // The frame slot's fence was waited on before this call.
+    RetireBatch(_pendingFrees[_frameIndex]);
+}
+
+void TextureManager::RetireAll() noexcept {
+    for (auto& pending: _pendingFrees) {
+        RetireBatch(pending);
+    }
 }
 
 void TextureManager::ReleaseSlot(uint32_t bindlessIndex) noexcept {

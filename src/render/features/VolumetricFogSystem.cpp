@@ -63,10 +63,16 @@ auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::exp
             {.data = pixels.data(), .width = kVolumetricNoiseSize, .height = kVolumetricNoiseSize, .depth = kVolumetricNoiseSize,
              .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
         )
-        .transform([this](Vk::TextureResource tex) -> void {
+        .transform([this, &impl](Vk::TextureResource tex) -> void {
+            DestroyNoise(impl.allocator);
             _noiseView  = std::move(tex.view);
             _noiseImage = std::move(tex.image);
         });
+}
+
+void VolumetricFogSystem::DestroyNoise(Vk::Allocator& allocator) noexcept {
+    _noiseView = {};
+    allocator.DestroyImage(_noiseImage);
 }
 
 void VolumetricFogSystem::InitSamplers(RenderContext::Impl& impl) noexcept {

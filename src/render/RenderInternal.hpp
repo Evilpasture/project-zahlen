@@ -20,6 +20,7 @@
 #include "PipelineRegistry.hpp"
 #include "ShaderReloadRegistry.hpp"
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
@@ -79,6 +80,13 @@ struct IBLPayload {
     VkFormat prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t contentHash = 0;
     int environmentMode = 0;
+
+    void Destroy(Allocator& allocator) noexcept {
+        brdfLutView = {};
+        prefilteredView = {};
+        allocator.DestroyImage(brdfLutImage);
+        allocator.DestroyImage(prefilteredImage);
+    }
 };
 
 }
@@ -272,7 +280,7 @@ struct RenderContext::Impl {
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
     Vk::DeletionQueue                      deletionQueue;
-    std::optional<Vk::ScopedDeletionQueue> activeQueueGuard;
+    bool                                   frameOpen = false;
 
     static constexpr size_t kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
     ZHLN::Array<WorkerCmdContext> workerCmds;
@@ -639,17 +647,67 @@ struct RenderContext::Impl {
           fileSystemWatcher(watcher) {}
 
     ~Impl() {
+        // Also runs when initialization fails partway through, before a
+        // RenderContext has been constructed. All explicit VMA destruction
+        // below precedes the allocator member's destructor.
+        if (ctx.Device() != VK_NULL_HANDLE) {
+            if (auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
+                ZHLN::Log("[Render] device idle wait during teardown failed: {}", waited.error());
+            }
+        }
+        stagingContext.reset();
         DestroyDestinations();
+        frameOpen = false;
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
+
+        geometry.RetireAll();
+        // Acceleration structures must go before their backing VMA buffers.
+        for (auto& tlas: frames.tlas) {
+            tlas = Vk::AccelerationStructure {};
+        }
+        uiRenderer.DestroyBuffers(allocator);
+        shadows.DestroyResources(allocator);
+        fog.DestroyNoise(allocator);
+        textureManager.OnDeviceLost();
+        iblPayload.Destroy(allocator);
+        ltcMatView = {};
+        ltcAmpView = {};
+        allocator.DestroyImage(ltcMatImage);
+        allocator.DestroyImage(ltcAmpImage);
+        targets.Clear();
+        for (auto& history: accumulationHistory) {
+            history.Destroy(allocator);
+        }
+        presenter.Cleanup();
+
+        auto destroyFrames = [this](auto& buffers) {
+            for (auto& buffer: buffers) allocator.DestroyBuffer(buffer);
+        };
+        destroyFrames(frames.lineVbos);
+        destroyFrames(frames.clusterGridBuffers);
+        destroyFrames(frames.lightIndexListBuffers);
+        destroyFrames(frames.globalCounterBuffers);
+        destroyFrames(frames.frameUniformBuffers);
+        destroyFrames(frames.lightStorageBuffers);
+        destroyFrames(frames.instanceDataBuffers);
+        destroyFrames(frames.indirectCommandsBuffers);
+        destroyFrames(frames.indirectCommandsBuffersPass2);
+        destroyFrames(frames.secondPassCandidatesBuffers);
+        destroyFrames(frames.secondPassCountBuffers);
+        destroyFrames(frames.jointBuffers);
+        destroyFrames(frames.tlasBuffer);
+        destroyFrames(frames.tlasScratchBuffer);
+        destroyFrames(frames.tlasInstanceBuffers);
+        destroyFrames(frames.fogVolumesBuffer);
+        allocator.DestroyBuffer(clusterBoundsBuffer);
+        allocator.DestroyBuffer(morphDeltasBuffer);
+        allocator.DestroyBuffer(particleBuffer);
+
+        deletionQueue.Drain();
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
-        if (ctx.Device() != VK_NULL_HANDLE) {
-            for (auto& tlas: frames.tlas) {
-                tlas = Vk::AccelerationStructure {};
-            }
-        }
     }
 
     [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);
@@ -840,6 +898,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
+            defer _([&] { allocator.DestroyImage(image); });
             auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
@@ -934,7 +993,11 @@ template <ShaderStage Stage>
 
 template <typename T = Vk::Buffer, typename... Args>
 [[nodiscard]] auto CreatePerFrame(Vk::Allocator& alloc, const Args&... args) -> std::expected<PerFrame<T>, ErrorCode> {
+    static_assert(std::is_same_v<T, Vk::Buffer>, "VMA per-frame resources need an explicit cleanup policy");
     PerFrame<T> resources;
+    defer _([&] {
+        for (auto& resource: resources) alloc.DestroyBuffer(resource);
+    });
     for (auto& resource: resources) {
         auto created = T::Create(alloc.Get(), args...);
         if (!created) {

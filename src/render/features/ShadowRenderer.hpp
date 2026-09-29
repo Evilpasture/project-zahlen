@@ -43,6 +43,7 @@ class ShadowRenderer {
     // The CPU writes shadow commands while the GPU consumes earlier frames;
     // allocate one physical buffer for each in-flight frame slot.
     [[nodiscard]] auto InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
+    void DestroyResources(Vk::Allocator& allocator) noexcept;
 
     // --- pipelines ----------------------------------------------------------
 

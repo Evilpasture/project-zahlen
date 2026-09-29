@@ -156,7 +156,7 @@ class TargetManager {
 
     TargetManager(Vk::Context& ctx, Vk::Allocator& allocator, Vk::CommandRing<Vk::QueueType::Graphics, 8>& ring) noexcept
         : _ctx(ctx), _allocator(allocator), _ring(ring) {}
-    ~TargetManager() = default;
+    ~TargetManager() { Clear(); }
 
     TargetManager(const TargetManager&)                = delete;
     auto operator=(const TargetManager&) -> TargetManager& = delete;
@@ -176,6 +176,8 @@ class TargetManager {
     void RecordInitialLayouts(VkCommandBuffer cmd) const noexcept;
 
     void NameGraphTargets() const noexcept;
+    // Only after the device is idle; release extra views before their images.
+    void Clear() noexcept;
 
 
     [[nodiscard]] auto Graph() noexcept -> GraphResources& { return _graph; }

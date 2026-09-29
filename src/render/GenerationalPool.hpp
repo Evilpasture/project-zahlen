@@ -55,6 +55,15 @@ class GenerationalPool {
         return static_cast<HandleType>(packed);
     }
 
+    template <typename Fn>
+    void ForEachLive(Fn&& fn) {
+        for (auto* pointer: _pointers) {
+            if (pointer != nullptr) {
+                fn(*pointer);
+            }
+        }
+    }
+
     void Destroy(HandleType handle) {
         auto rawHandle = static_cast<uint64_t>(handle);
         auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);

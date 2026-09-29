@@ -111,6 +111,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
 
     return allocator.Init(ctx)
         .and_then([&]() {
+            deletionQueue.Init(allocator.Get());
             return stagingRingBuffer.Init(
                 allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
