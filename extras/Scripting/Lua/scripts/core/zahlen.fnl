@@ -643,7 +643,7 @@
         pixels (ffi.new "uint32_t[?]" size)]
     ;; Invoke user callback to fill the pixel buffer
     (callback pixels width height)
-    ;; Dispatch the raw pointer to the C++ engine
+    ;; Dispatch the pixels; the returned uint64 is a texture handle, not a bindless slot (0 on failure).
     (self:dispatch :CreateTexture
                    {:data pixels : width : height :isSRGB (if is-srgb 1 0)})))
 

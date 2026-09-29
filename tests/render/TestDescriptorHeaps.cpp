@@ -31,13 +31,14 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 enum class DescriptorHeapsTestError : uint8_t {
     EngineInitFailed            ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for descriptor-heap test."> {}) = 1,
     MaterialCreationFailed      ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed during heap stress test."> {}),
-    TextureCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"CreateProceduralTexture failed during heap stress test."> {}),
+    TextureCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"A texture upload failed during the descriptor-heap test."> {}),
     RenderOutputBlank           ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
     HeapTextureArrayWrong       ZHLN_ANNOTATION(ZHLN::Description<"Not enough distinct texture colors resolved through the heap texture array."> {}),
     BoundaryTextureIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"A texture beyond the static heap-slot boundary did not resolve."> {}),
@@ -312,6 +313,97 @@ struct DescriptorHeapsSuite {
             // The slot still samples: one frame with the reused texture on a
             // box has to render rather than trip a validation error.
             ZHLN::Test::Headless::TickFrames(*engine, 2);
+            return {};
+        }
+
+        // ====================================================================
+        // 1c. Public uploads return handles, never raw descriptor slots. Each
+        //     unnamed creation owns a distinct handle even for identical
+        //     pixels; named uploads preserve their identity and dedupe.
+        // ====================================================================
+        std::expected<void, ZHLN::ErrorCode> texture_creation_registers_2d_and_cube_handles() {
+            auto engine = DescriptorHeapsSuite::CreateTestEngine();
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
+            }
+            auto& rc = engine->GetRenderContext();
+
+            std::array<uint32_t, 16> texels {};
+            texels.fill(0xFF3366CCu);
+            const auto first  = rc.CreateTexture(std::span {texels}, {4, 4}, false);
+            const auto second = rc.CreateTexture(std::span {texels}, {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(first.has_value() && second.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectNe(*first, ZHLN::TextureHandle::Invalid);
+            ZHLN::Test::ExpectNe(*first, *second);
+            const uint32_t firstSlot  = rc.GetBindlessIndex(*first);
+            const uint32_t secondSlot = rc.GetBindlessIndex(*second);
+            ZHLN::Test::ExpectGt(firstSlot, 2u);
+            ZHLN::Test::ExpectNe(firstSlot, secondSlot);
+
+            const auto callback = rc.CreateTextureProcedural({4, 4}, false, [](std::span<uint32_t> pixels) {
+                for (auto& pixel: pixels) {
+                    pixel = 0xFF3366CCu;
+                }
+            });
+            if (!ZHLN::Test::ExpectTrue(callback.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectNe(*callback, *first);
+            ZHLN::Test::ExpectGt(rc.GetBindlessIndex(*callback), 2u);
+
+            const auto named = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
+            const auto same  = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(named.has_value() && same.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectEq(*named, *same);
+            const uint32_t namedSlot = rc.GetBindlessIndex(*named);
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*same), namedSlot);
+            texels[0] = 0xFFAA11DDu;
+            const auto updated = rc.CreateTexture("dheap_named_upload", std::span {texels}, {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(updated.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectEq(*updated, *named);
+            ZHLN::Test::ExpectNe(rc.GetBindlessIndex(*updated), namedSlot);
+            ZHLN::Test::ExpectEq(rc.CreateProceduralTexture("dheap_named_upload", {4, 4}, texels, false), *named);
+            ZHLN::Test::ExpectTrue(!rc.CreateTexture("dheap_named_upload", std::span {texels}, {5, 5}).has_value());
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*updated), rc.GetBindlessIndex(*named));
+
+            std::array<std::array<std::byte, 4 * 4 * 4>, 6> faces {};
+            std::array<std::span<const std::byte>, 6> faceSpans {};
+            for (size_t i = 0; i < faces.size(); ++i) {
+                faces[i].fill(std::byte {0xFF});
+                faceSpans[i] = std::span<const std::byte> {faces[i]};
+            }
+            const auto cube = rc.CreateTextureCube(faceSpans, 4);
+            if (!ZHLN::Test::ExpectTrue(cube.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectNe(*cube, *first);
+            ZHLN::Test::ExpectGt(rc.GetBindlessIndex(*cube), 2u);
+
+            // Invalid input must not create a handle; unloading one handle
+            // cannot invalidate another, and reused slots cannot reuse IDs.
+            ZHLN::Test::ExpectTrue(!rc.CreateTexture(std::span {texels}, {5, 5}).has_value());
+            ZHLN::Test::ExpectTrue(!rc.CreateTextureCube(faceSpans, 0).has_value());
+            rc.UnloadTexture(*first);
+            rc.UnloadTexture(*cube);
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*first), rc.GetBindlessIndex(ZHLN::TextureHandle::Invalid));
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*cube), rc.GetBindlessIndex(ZHLN::TextureHandle::Invalid));
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*second), secondSlot);
+
+            const auto newer = rc.CreateTexture(std::span {texels}, {4, 4}, false);
+            if (!ZHLN::Test::ExpectTrue(newer.has_value())) {
+                return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
+            }
+            ZHLN::Test::ExpectNe(*newer, *first);
+            rc.UnloadTexture(*newer);
+            rc.UnloadTexture(*second);
+            rc.UnloadTexture(*callback);
+            rc.UnloadTexture(*named);
             return {};
         }
 

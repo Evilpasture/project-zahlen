@@ -169,7 +169,7 @@ auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFo
     return assetMgr.GetCachedFont(HashAssetPath(path));
 }
 
-auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> TextureHandle {
     uint64_t hash = HashAssetPath(path);
 
     AssetLoadRequest req;
@@ -177,7 +177,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
 
     if (!assetMgr.LoadSync(req)) {
         ZHLN::Log("WARNING: Failed to load texture asset from VFS: {}", path);
-        return 1;
+        return TextureHandle::Invalid;
     }
 
     int            width    = 0;
@@ -189,13 +189,18 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
 
     if (pixels == nullptr) {
         ZHLN::Log("ERROR: stbi_load_from_memory failed for texture: {}", path);
-        return 1;
+        return TextureHandle::Invalid;
     }
 
-    auto texRes = ctx.CreateTexture(std::span {pixels, static_cast<size_t>(width) * height * 4}, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
+    auto texRes = ctx.CreateTexture(
+        path, std::span {pixels, static_cast<size_t>(width) * height * 4}, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB
+    );
     stbi_image_free(pixels);
 
-    return texRes ? *texRes : 1;
+    if (!texRes) {
+        ZHLN::Log("ERROR: Failed to upload texture asset {}: {}", path, texRes.error());
+    }
+    return texRes.value_or(TextureHandle::Invalid);
 }
 
 auto LoadModelPrefab(RenderContext& , AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {

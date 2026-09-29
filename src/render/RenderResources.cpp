@@ -423,15 +423,24 @@ void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event)
     }
 }
 
-auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
+auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
-    return _impl->textureManager.Upload2D(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
+    return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<uint32_t, ErrorCode> {
+auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB)
+    -> std::expected<TextureHandle, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
+}
+
+auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
     if (faceSize == 0) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
@@ -448,10 +457,6 @@ auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> 
         faceData[i] = faces[i].data();
     }
     return _impl->textureManager.UploadCube(faceData.data(), faceSize);
-}
-
-auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
-    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, Rgba8Format(isSRGB));
 }
 
 void RenderContext::UnloadTexture(TextureHandle handle) {
@@ -794,7 +799,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
-    -> std::expected<uint32_t, ErrorCode> {
+    -> std::expected<TextureHandle, ErrorCode> {
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
@@ -804,7 +809,7 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
         ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureHandle::Invalid;
     }
-    const auto uploaded = _impl->textureManager.Upload(name, pixels.data(), extent.width, extent.height, Rgba8Format(isSRGB));
+    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
     if (!uploaded) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureHandle::Invalid;

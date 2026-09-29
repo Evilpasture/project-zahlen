@@ -715,12 +715,12 @@ void RegisterCreativeWorkCommands() {
     RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
                     const uint64_t texels = static_cast<uint64_t>(a.width) * a.height;
                     if (a.data == nullptr || texels == 0 || texels > std::numeric_limits<size_t>::max() / 4) {
-                        return 1;
+                        return static_cast<uint64_t>(ZHLN::TextureHandle::Invalid);
                     }
                     auto res = engine->GetRenderContext().CreateTexture(
                         std::span {static_cast<const std::byte*>(a.data), static_cast<size_t>(texels) * 4}, {a.width, a.height}, a.isSRGB != 0
                     );
-                    return res.value_or(1);
+                    return static_cast<uint64_t>(res.value_or(ZHLN::TextureHandle::Invalid));
                 }));
 }
 

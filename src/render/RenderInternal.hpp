@@ -775,7 +775,7 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-        -> std::expected<uint32_t, ErrorCode>;
+        -> std::expected<TextureHandle, ErrorCode>;
 
     void BuildTLAS(VkCommandBuffer cmd) noexcept;
 

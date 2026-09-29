@@ -149,19 +149,29 @@ class ZHLN_API RenderContext {
         DrawLine(start, end, color, color);
     }
 
+    // Only draw submission needs the GPU descriptor index; resource creation
+    // and lifetime use TextureHandle throughout.
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
 
-    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<uint32_t, ErrorCode>;
+    // Unnamed uploads each get a fresh handle; release it with UnloadTexture.
+    [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
+    // A name gives repeat uploads a stable identity and deduplicates identical pixels.
+    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true)
+        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
     template <typename T> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::span<T> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode> {
+    [[nodiscard]] auto CreateTexture(std::span<T> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
         return CreateTexture(std::as_bytes(pixels), extent, isSRGB);
     }
-    [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
+    template <typename T> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T> pixels, Extent2D extent, bool isSRGB = true)
+        -> std::expected<TextureHandle, ErrorCode> {
+        return CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+    }
     void UnloadTexture(TextureHandle handle);
 
     template <typename Func> requires std::invocable<Func&, std::span<uint32_t>>
-    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<uint32_t, ErrorCode> {
+    [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureHandle, ErrorCode> {
         std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
         callback(std::span<uint32_t> {pixels});
         return CreateTexture(std::span {pixels}, extent, isSRGB);
@@ -196,8 +206,9 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
     void                                         ProvokeDeviceLost();
 
-    auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, ErrorCode>;
-    TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
+    [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
+        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 

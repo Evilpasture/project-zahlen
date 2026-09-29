@@ -21,7 +21,7 @@ struct RenderComputeTestSuite {
     }
     enum class RenderComputeTestError : uint8_t {
         EngineInitFailed     ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the compute bake test."> {}) = 1,
-        ProceduralBakeFailed ZHLN_ANNOTATION(ZHLN::Description<"BakeProceduralTexture did not return a bindless index."> {}),
+        ProceduralBakeFailed ZHLN_ANNOTATION(ZHLN::Description<"BakeProceduralTexture did not return a registered texture handle."> {}),
     };
 
     struct Tests {
@@ -40,9 +40,13 @@ struct RenderComputeTestSuite {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
 
-            const uint32_t bindlessIndex = *bakeRes;
-            ZHLN::Test::ExpectGt(bindlessIndex, 0);
+            if (!ZHLN::Test::ExpectNe(*bakeRes, ZHLN::TextureHandle::Invalid)) {
+                return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
+            }
+            ZHLN::Test::ExpectGt(rc.GetBindlessIndex(*bakeRes), 2u);
 
+            rc.UnloadTexture(*bakeRes);
+            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*bakeRes), rc.GetBindlessIndex(ZHLN::TextureHandle::Invalid));
             return {};
         }
     };

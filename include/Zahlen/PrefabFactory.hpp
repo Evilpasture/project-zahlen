@@ -45,7 +45,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
 auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
 auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
 
-auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureHandle;
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();

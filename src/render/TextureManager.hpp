@@ -7,7 +7,6 @@
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -17,6 +16,7 @@
 #include <deque>
 #include <expected>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace ZHLN {
@@ -55,15 +55,19 @@ class TextureManager {
 
     [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
         -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto RegisterUploaded(std::string_view identifier, uint32_t bindlessIndex, VkFormat format) -> TextureHandle;
+    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto AdoptTexture(Vk::Image&& image, Vk::ImageView&& view, uint32_t width, uint32_t height)
+        -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
     void Clear();
     void OnDeviceLost();
 
 
+    // Raw slots are only for internal fallback, render-target and LUT setup.
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto Adopt(Vk::Image&& image, Vk::ImageView&& view) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;
@@ -82,13 +86,14 @@ class TextureManager {
 
   private:
     struct TextureRecord {
-        TextureHandle handle = TextureHandle::Invalid;
-        String256     identifier;
-        VkFormat      format = VK_FORMAT_UNDEFINED;
-        uint32_t      width  = 0;
-        uint32_t      height = 0;
-        uint64_t pixelHash       = 0;
-        uint32_t gpuBindlessIndex = kFallbackWhiteTextureIndex;
+        TextureHandle handle           = TextureHandle::Invalid;
+        std::string   identifier;
+        bool          named            = false;
+        VkFormat      format           = VK_FORMAT_UNDEFINED;
+        uint32_t      width            = 0;
+        uint32_t      height           = 0;
+        uint64_t      pixelHash        = 0;
+        uint32_t      gpuBindlessIndex = kFallbackWhiteTextureIndex;
     };
 
     struct ReleasedSlot {
@@ -97,6 +102,8 @@ class TextureManager {
         Vk::ImageView view;
     };
 
+    // Assign an opaque, never-reused handle to a newly adopted GPU slot.
+    [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
     void WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
 
     Vk::Context&                                 _ctx;
@@ -115,6 +122,8 @@ class TextureManager {
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;
+    // Kept across Clear() so unnamed uploads do not recycle old IDs.
+    uint64_t                         _nextAnonymousHandle = 1ull << 63;
     mutable Mutex                    _mutex {};
 };
 

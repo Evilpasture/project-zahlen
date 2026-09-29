@@ -67,7 +67,6 @@ struct CPUTextureJob {
     int            width         = 0;
     int            height        = 0;
     bool           wasRescaled   = false;
-    uint32_t       uploadedIndex = 0;
 };
 
 struct CPUPrimitiveJob {
@@ -750,8 +749,9 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
     for (size_t i = 0; i < textureJobs.size(); ++i) {
         auto& texJob = textureJobs[i];
         if (texJob.decodedPixels != nullptr) {
+            const std::string texName = std::format("{}#tex_{}", virtualPath, i);
             const auto tex_res = ctx.CreateTexture(
-                std::span {texJob.decodedPixels, static_cast<size_t>(texJob.width) * texJob.height * 4},
+                texName, std::span {texJob.decodedPixels, static_cast<size_t>(texJob.width) * texJob.height * 4},
                 {static_cast<uint32_t>(texJob.width), static_cast<uint32_t>(texJob.height)}, texJob.isSRGB
             );
             if (texJob.wasRescaled) {
@@ -760,10 +760,10 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
                 stbi_image_free(texJob.decodedPixels);
             }
 
-            const uint32_t    bindlessIdx = tex_res ? *tex_res : 1;
-            const std::string texName     = std::format("{}#tex_{}", virtualPath, i);
-
-            imageToHandle[texJob.image] = ctx.RegisterTexture(texName, bindlessIdx, texJob.isSRGB);
+            if (!tex_res) {
+                ZHLN::Log("[glTF] Texture '{}' failed to upload: {}", texName, tex_res.error());
+            }
+            imageToHandle[texJob.image] = tex_res.value_or(TextureHandle::Invalid);
         } else {
             imageToHandle[texJob.image] = TextureHandle::Invalid;
         }
