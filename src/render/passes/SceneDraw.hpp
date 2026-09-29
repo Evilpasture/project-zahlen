@@ -45,7 +45,7 @@ void SubmitDrawInstanced(
 
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
-            {.pipeline    = nativeMat->meshPipeline.Get(),
+            {.pipeline    = nativeMat->meshPipeline,
              .layout      = layout,
              .heap        = true,
              .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
@@ -58,7 +58,7 @@ void SubmitDrawInstanced(
 
     auto* pipeline = pipelineOverride;
     if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr) {
-        pipeline = nativeMat->pipeline.Get();
+        pipeline = nativeMat->pipeline;
     }
     if (pipeline == VK_NULL_HANDLE) {
         return;

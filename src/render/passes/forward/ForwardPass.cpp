@@ -41,7 +41,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                     continue;
                 }
 
-                if (!drawCmd.material->pipeline.Valid()) {
+                if (drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 

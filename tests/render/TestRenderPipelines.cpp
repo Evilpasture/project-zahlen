@@ -100,10 +100,37 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            auto captureRes = engine->GetRenderContext().CaptureScreenshotPPM("test_render_output.ppm");
+            auto& rc = engine->GetRenderContext();
+            auto captureRes = rc.CaptureScreenshotPPM("test_render_output.ppm");
             ZHLN::Test::ExpectTrue(captureRes.has_value());
             ZHLN::Test::ExpectGe(engine->GetCurrentFrame(), 60u);
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
+
+            // The box's pipeline was used by submitted frames. Unregistration
+            // must not destroy it while a draw might still be in flight.
+            const auto* boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
+            if (ZHLN::Test::ExpectTrue(boxMesh != nullptr && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
+                const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
+                const auto validationErrors = ZHLN::RenderContext::ValidationErrorCount();
+                engine->ProcessEvents();
+                ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
+                rc.UnregisterGPUMaterial(boxMaterial);
+                ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(boxMaterial).has_value());
+
+                // A pipeline with no asset ID still belongs to the registry.
+                // Cache clearing must retire it and invalidate its slot.
+                auto loose = rc.CreateBasicMaterial();
+                if (!loose) {
+                    return std::unexpected(loose.error());
+                }
+                rc.ClearGPUCaches(); // waits idle, then drains deferred pipeline destruction
+                auto recreated = rc.CreateBasicMaterial();
+                if (!recreated) {
+                    return std::unexpected(recreated.error());
+                }
+                ZHLN::Test::ExpectNe(recreated->pipeline, loose->pipeline);
+                ZHLN::Test::ExpectEq(ZHLN::RenderContext::ValidationErrorCount(), validationErrors);
+            }
 
             return {};
         }

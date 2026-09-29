@@ -9,16 +9,25 @@
 
 namespace ZHLN {
 
+void PipelineRegistry::Retire(NativeMaterial& material) noexcept {
+    if (material.pipeline != VK_NULL_HANDLE) {
+        _deletionQueue.EnqueuePipeline(_ctx.Device(), std::exchange(material.pipeline, VK_NULL_HANDLE));
+    }
+    if (material.meshPipeline != VK_NULL_HANDLE) {
+        _deletionQueue.EnqueuePipeline(_ctx.Device(), std::exchange(material.meshPipeline, VK_NULL_HANDLE));
+    }
+}
+
 void PipelineRegistry::Destroy(PipelineHandle handle) {
     if (NativeMaterial* material = _materials.Resolve(handle)) {
-        if (material->pipeline.Valid()) {
-            _deletionQueue.EnqueuePipeline(_ctx.Device(), material->pipeline.Release());
-        }
-        if (material->meshPipeline.Valid()) {
-            _deletionQueue.EnqueuePipeline(_ctx.Device(), material->meshPipeline.Release());
-        }
+        Retire(*material);
+        _materials.Destroy(handle);
     }
-    _materials.Destroy(handle);
+}
+
+void PipelineRegistry::RetireAll() noexcept {
+    _materials.ForEachLive([this](NativeMaterial& material) { Retire(material); });
+    _materials.Clear();
 }
 
 auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept -> Vk::Pipeline {
@@ -107,11 +116,22 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
 
             return pipeline.Build(_ctx.Device())
                 .transform_error([](auto) -> ErrorCode { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([this, &desc](auto&& compiledPipeline) -> auto {
+                .and_then([this, &desc](Vk::Pipeline compiledPipeline) -> std::expected<Material, ErrorCode> {
+                    // Builders retain synchronous RAII until a pool slot exists.
+                    // An exhausted pool leaves both new pipelines to be destroyed
+                    // here, before they can ever be referenced by GPU work.
                     Vk::Pipeline meshPipeline = BuildMeshVariant(desc);
+                    const PipelineHandle handle = _materials.Create();
+                    if (handle == PipelineHandle::Invalid) {
+                        return std::unexpected(MaterialCreationError::MaterialSlotsExhausted);
+                    }
 
+                    NativeMaterial* material = _materials.Resolve(handle);
+                    material->pipeline = compiledPipeline.Release();
+                    material->layout = _layout;
+                    material->meshPipeline = meshPipeline.Release();
                     return Material {
-                        .pipeline    = _materials.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), _layout, std::move(meshPipeline)),
+                        .pipeline    = handle,
                         .alphaMode   = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u,
                         .doubleSided = desc.doubleSided
                     };

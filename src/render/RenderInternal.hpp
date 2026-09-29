@@ -663,6 +663,9 @@ struct RenderContext::Impl {
         }
 
         geometry.RetireAll();
+        // The registry destructor runs after this body; enqueue its pipelines
+        // now, before the explicit deletion-queue drain below.
+        pipelines.RetireAll();
         // Acceleration structures must go before their backing VMA buffers.
         for (auto& tlas: frames.tlas) {
             tlas = Vk::AccelerationStructure {};

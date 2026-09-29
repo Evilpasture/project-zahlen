@@ -65,12 +65,12 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
             passCtx.EnsureHeapState();
 
             for (const auto& group: groups) {
-                if (!group.material->pipeline.Valid()) {
+                if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
                 passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
-                        .pipeline       = group.material->pipeline.Get(),
+                        .pipeline       = group.material->pipeline,
                         .layout         = group.material->layout,
                         .heap           = true,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(),

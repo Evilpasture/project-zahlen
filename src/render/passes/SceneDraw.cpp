@@ -187,14 +187,14 @@ auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange
         const auto&       drawCmd = impl.queues.Draws()[i];
         const auto* const drawMat = drawCmd.material;
 
-        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || !drawMat->pipeline.Valid()) {
+        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || drawMat->pipeline == VK_NULL_HANDLE) {
             currentPipeline = VK_NULL_HANDLE;
             continue;
         }
 
-        if (i == 0 || drawMat->pipeline.Get() != currentPipeline) {
+        if (i == 0 || drawMat->pipeline != currentPipeline) {
             groups.push_back(GroupRange {.material = drawMat, .start = i, .count = 1});
-            currentPipeline = drawMat->pipeline.Get();
+            currentPipeline = drawMat->pipeline;
         } else {
             groups.back().count++;
         }

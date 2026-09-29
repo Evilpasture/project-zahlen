@@ -64,6 +64,19 @@ class GenerationalPool {
         }
     }
 
+    // Drop every live slot and invalidate its handle. Callers that own external
+    // resources must retire those resources before clearing the pool.
+    void Clear() noexcept {
+        for (size_t index = 0; index < MaxObjects; ++index) {
+            if (_pointers[index] != nullptr) {
+                _pool.Destroy(_pointers[index]);
+                _pointers[index] = nullptr;
+                ++_generations[index];
+                _freeIndices.push_back(static_cast<uint32_t>(index));
+            }
+        }
+    }
+
     void Destroy(HandleType handle) {
         auto rawHandle = static_cast<uint64_t>(handle);
         auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);

@@ -65,10 +65,6 @@ class GeometryManager {
 
     void ClearMeshes() noexcept { _meshes.Clear(); }
 
-    template <typename Fn>
-    void ForEachMaterial(Fn&& fn) {
-        _materials.ForEach(std::forward<Fn>(fn));
-    }
     void ClearMaterials() noexcept { _materials.Clear(); }
 
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;

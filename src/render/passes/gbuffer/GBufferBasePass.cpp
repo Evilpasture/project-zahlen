@@ -109,12 +109,12 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
             passCtx.EnsureHeapState();
 
             for (const auto& group: groups) {
-                if (!group.material->pipeline.Valid()) {
+                if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
                 passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
-                        .pipeline       = group.material->pipeline.Get(),
+                        .pipeline       = group.material->pipeline,
                         .layout         = group.material->layout,
                         .heap           = true,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffers[frameIndex].Handle(),
@@ -170,7 +170,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
             [&](Vk::CommandEncoder& encoder, uint32_t i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
                 if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
-                    !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
+                    drawCmd.material->pipeline == VK_NULL_HANDLE || IsForwardOnly(drawCmd.instanceData.flags)) {
                     return;
                 }
                 SubmitDrawInstanced(encoder, drawCmd, i, RenderContext::Impl::ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());

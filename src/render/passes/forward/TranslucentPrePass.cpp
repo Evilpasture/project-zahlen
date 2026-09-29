@@ -30,14 +30,14 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
                     continue;
                 }
 
-                if (drawCmd.prePassMaterial == nullptr || !drawCmd.prePassMaterial->pipeline.Valid()) {
+                if (drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
+                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline,
                     drawCmd.prePassMaterial->layout
                 );
             }

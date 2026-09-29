@@ -123,14 +123,7 @@ void RenderContext::ClearGPUCaches() noexcept {
 
     _impl->geometry.ClearMeshes();
 
-    _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
-        if (mat.pipeline != PipelineHandle::Invalid) {
-            _impl->pipelines.Destroy(mat.pipeline);
-        }
-        if (mat.prePassPipeline != PipelineHandle::Invalid) {
-            _impl->pipelines.Destroy(mat.prePassPipeline);
-        }
-    });
+    _impl->pipelines.RetireAll(); // Also retires materials that were never registered by asset ID.
     _impl->geometry.ClearMaterials();
 
     for (const auto& entry: _impl->renderTextures) {
