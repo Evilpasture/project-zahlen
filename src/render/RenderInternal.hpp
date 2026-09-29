@@ -62,7 +62,7 @@ namespace ZHLN {
 struct TaskSystemScheduler {
     template <typename... Tasks>
     void Dispatch(Tasks&&... tasks) const {
-        TaskSystem::RunBorrowed(std::forward<Tasks>(tasks)...);
+        TaskSystem::ParallelInvoke(std::forward<Tasks>(tasks)...);
     }
 };
 

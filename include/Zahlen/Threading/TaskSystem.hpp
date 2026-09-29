@@ -37,13 +37,12 @@ void Wait(Counter* counter);
 
 void WakeUp(ZHLN::Fiber* fiber);
 
-// Synchronous borrow across the low-level fiber Task boundary. Callables
-// (including temporary arguments) live through this call; their views stay
-// here until every dispatched task completes. The Task ABI's void* trampoline
-// is isolated here, rather than repeated in every scheduler.
+// Invoke callables in parallel and join all fibers before returning. The
+// callables (including temporary arguments) remain alive for the whole call,
+// so the Task ABI's void* trampoline and non-owning views stay internal.
 template <typename... Funcs>
     requires(std::is_invocable_r_v<void, const std::remove_reference_t<Funcs>&> && ...)
-void RunBorrowed(Funcs&&... funcs) {
+void ParallelInvoke(Funcs&&... funcs) {
     constexpr size_t count = sizeof...(Funcs);
     if constexpr (count > 0) {
         std::array<FunctionRef<void() const>, count> borrowed {FunctionRef<void() const> {funcs}...};

@@ -17,7 +17,7 @@
 enum class TaskSystemError : uint32_t {
     DispatchFailed ZHLN_ANNOTATION(ZHLN::Description<"Dispatched tasks failed to execute or update shared memory.">{}) = 1,
     ParallelForFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelFor processing failed to reach or verify all iterations.">{}),
-    BorrowedTaskFailed ZHLN_ANNOTATION(ZHLN::Description<"Borrowed fiber tasks did not complete before their callables expired.">{})
+    ParallelInvokeFailed ZHLN_ANNOTATION(ZHLN::Description<"ParallelInvoke returned before its tasks completed.">{})
 };
 
 // ============================================================================
@@ -77,23 +77,24 @@ struct TaskSystemTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> borrowed_dispatch_waits_for_stack_callables() {
+        std::expected<void, ZHLN::ErrorCode> parallel_invoke_joins_stack_callables() {
             std::atomic<uint32_t> total {0};
             const auto add = [&](uint32_t value) { total.fetch_add(value, std::memory_order_relaxed); };
             const ZHLN::FunctionRef<void(uint32_t) const> view {add};
             view(1);
 
-            // The outer worker borrows two closures in a nested dispatch. Both
-            // waits must finish before the corresponding stack views expire.
+            // The outer worker invokes temporary closures in a nested fork.
+            // Both joins must finish before the corresponding stack views expire.
+            ZHLN::TaskSystem::ParallelInvoke();
             const auto nested = [&] {
-                ZHLN::TaskSystem::RunBorrowed(
+                ZHLN::TaskSystem::ParallelInvoke(
                     [&] { total.fetch_add(2, std::memory_order_relaxed); },
                     [&] { total.fetch_add(4, std::memory_order_relaxed); }
                 );
             };
-            ZHLN::TaskSystem::RunBorrowed(nested, [&] { total.fetch_add(8, std::memory_order_relaxed); });
+            ZHLN::TaskSystem::ParallelInvoke(nested, [&] { total.fetch_add(8, std::memory_order_relaxed); });
             if (!ZHLN::Test::ExpectEq(total.load(std::memory_order_relaxed), 15u)) {
-                return std::unexpected(TaskSystemError::BorrowedTaskFailed);
+                return std::unexpected(TaskSystemError::ParallelInvokeFailed);
             }
             return {};
         }
