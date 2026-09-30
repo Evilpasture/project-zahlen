@@ -59,7 +59,12 @@ auto GenerateTangents(
         // Normalize before weighting: a UV island's texel density must not
         // outweigh its neighbours just because its UV gradient is small.
         const JPH::Vec3 t = NormalizeOr((e1 * dv2 - e2 * dv1) / det, JPH::Vec3::sZero());
-        const JPH::Vec3 b = NormalizeOr((e2 * du1 - e1 * du2) / det, JPH::Vec3::sZero());
+        // glTF images have top-left UV origin (V grows down), but their normal
+        // maps use OpenGL's +Y-up convention. The shading bitangent is thus
+        // -dP/dV. Using +dP/dV makes NormalTangentTest's mapped spheres look
+        // concave or rotated; the authored tangents in NormalTangentMirrorTest
+        // confirm the opposite handedness for the same UV orientation.
+        const JPH::Vec3 b = NormalizeOr((e1 * du2 - e2 * du1) / det, JPH::Vec3::sZero());
         if (t.LengthSq() < 0.5f || b.LengthSq() < 0.5f) continue;
 
         const float w0 = CornerAngle(e1, e2);

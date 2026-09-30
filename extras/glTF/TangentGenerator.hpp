@@ -13,7 +13,8 @@ namespace ZHLN::GLTF {
 
 // Construct a tangent and bitangent sign from indexed positions, normals and
 // the UV set used by the normal map when a glTF primitive omits TANGENT.
-// Authored tangent attributes bypass this generator in the importer.
+// glTF's OpenGL-style normal-map +Y points opposite increasing UV V; authored
+// tangent attributes bypass this generator in the importer.
 [[nodiscard]] auto GenerateTangents(
     std::span<const VertexPosition> positions,
     std::span<const std::array<float, 3>> normals,

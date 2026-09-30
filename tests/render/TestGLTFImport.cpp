@@ -1321,33 +1321,46 @@ struct GLTFImportTestSuite {
         }
 
         /**
-         * Khronos NormalTangentTest omits TANGENT: each normal-mapped panel
-         * reorients its UVs while the real geometry next to it stays fixed.
-         * A global (1, 0, 0, +1) basis rotates the normal-mapped reflections.
-         * Check the UV-gradient generator's direction AND handedness; merely
-         * flipping the normal map's green channel would fail these cases.
+         * Khronos NormalTangentTest omits TANGENT and rotates the normal-map
+         * UVs on each flat panel. In glTF's OpenGL normal-map convention, a
+         * positive green (+Y) texel on the top half of a sphere points UP even
+         * though increasing UV V moves DOWN the image. The companion
+         * NormalTangentMirrorTest's authored tangents likewise have w=+1 for
+         * the ordinary UV-down quad and w=-1 on a mirrored quad. Check both
+         * the frame and an actual sampled map direction across UV rotations.
          */
         std::expected<void, ZHLN::ErrorCode> missing_tangents_follow_rotated_and_mirrored_uvs() {
             constexpr std::array<ZHLN::VertexPosition, 3> positions {{{{0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f}}}};
             constexpr std::array<std::array<float, 3>, 3> normals {{{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}};
             constexpr std::array<uint32_t, 3> indices {0, 1, 2};
-            const auto check = [&](const std::array<std::array<float, 2>, 3>& uv, float tx, float ty, float bx, float by, float handedness) {
+            const auto check = [&](const std::array<std::array<float, 2>, 3>& uv, float tx, float ty, float bx, float by, float handedness,
+                                   bool sampleConvex = true) {
                 const auto tangents = ZHLN::GLTF::GenerateTangents(positions, normals, uv, indices);
                 if (tangents.size() != positions.size()) return false;
+                // At world (0.25, 0.75), sample a radial normal map centered at
+                // UV (0.5, 0.5). R points toward +U; G points toward image-UP
+                // (-V). All differently rotated UV charts must yield the same
+                // world-space normal (-0.25, +0.25, z), not a concave sphere.
+                const float u = 0.25f * uv[1][0] + 0.75f * uv[2][0];
+                const float v = 0.25f * uv[1][1] + 0.75f * uv[2][1];
+                const float mapX = u - 0.5f, mapY = 0.5f - v;
                 for (const auto& t: tangents) {
+                    const float actualBx = -t[1] * t[3], actualBy = t[0] * t[3];
                     if (std::abs(t[0] - tx) > 0.01f || std::abs(t[1] - ty) > 0.01f || std::abs(t[2]) > 0.01f ||
-                        t[3] != handedness || std::abs(-t[1] * t[3] - bx) > 0.01f || std::abs(t[0] * t[3] - by) > 0.01f) {
+                        t[3] != handedness || std::abs(actualBx - bx) > 0.01f || std::abs(actualBy - by) > 0.01f ||
+                        (sampleConvex && (std::abs(mapX * t[0] + mapY * actualBx + 0.25f) > 0.01f ||
+                                          std::abs(mapX * t[1] + mapY * actualBy - 0.25f) > 0.01f))) {
                         return false;
                     }
                 }
                 return true;
             };
-            if (!check({{{0, 0}, {1, 0}, {0, 1}}}, 1, 0, 0, 1, 1) ||
-                !check({{{1, 0}, {1, 1}, {0, 0}}}, 0, -1, 1, 0, 1) ||
-                !check({{{1, 1}, {0, 1}, {1, 0}}}, -1, 0, 0, -1, 1) ||
-                !check({{{0, 1}, {0, 0}, {1, 1}}}, 0, 1, -1, 0, 1) ||
-                !check({{{1, 0}, {0, 0}, {1, 1}}}, -1, 0, 0, 1, -1) ||
-                !check({{{0, 0}, {0, 0}, {0, 0}}}, 1, 0, 0, 1, 1)) {
+            if (!check({{{0, 1}, {1, 1}, {0, 0}}}, 1, 0, 0, 1, 1) ||
+                !check({{{0, 0}, {0, 1}, {1, 0}}}, 0, 1, -1, 0, 1) ||
+                !check({{{1, 0}, {0, 0}, {1, 1}}}, -1, 0, 0, -1, 1) ||
+                !check({{{1, 1}, {1, 0}, {0, 1}}}, 0, -1, 1, 0, 1) ||
+                !check({{{1, 1}, {0, 1}, {1, 0}}}, -1, 0, 0, 1, -1) ||
+                !check({{{0, 0}, {0, 0}, {0, 0}}}, 1, 0, 0, 1, 1, false)) {
                 return std::unexpected(GLTFImportError::TangentFrameMismatch);
             }
             return {};
