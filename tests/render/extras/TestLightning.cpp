@@ -87,7 +87,8 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectEq(boltComp->phase, ZHLN::LightningPhase::SteppedLeader);
             ZHLN::Test::ExpectEq(boltComp->baseAmbientExposure, kInitialBaselineExposure);
             ZHLN::Test::ExpectTrue(boltComp->vboPos != ZHLN::BufferHandle::Invalid);
-            ZHLN::Test::ExpectTrue(boltComp->vboAttr != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboFrame != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboSurface != ZHLN::BufferHandle::Invalid);
 
             const ZHLN::Entity flashLight  = boltComp->flashLightEntity;
             const ZHLN::Entity impactLight = boltComp->impactLightEntity;

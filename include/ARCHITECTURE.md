@@ -76,8 +76,9 @@ struct LightningComponent {
     float           phaseTime           = 0.0f;
     float           baseAmbientExposure = 4.5f;
 
-    BufferHandle vboPos  = BufferHandle::Invalid;
-    BufferHandle vboAttr = BufferHandle::Invalid;
+    BufferHandle vboPos     = BufferHandle::Invalid;
+    BufferHandle vboFrame   = BufferHandle::Invalid;
+    BufferHandle vboSurface = BufferHandle::Invalid;
 
     // Component state only. The renderer sees non-owning mesh registrations;
     // Engine scene cleanup frees these buffers before destroying the component.
