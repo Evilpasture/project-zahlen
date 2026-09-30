@@ -46,6 +46,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 enum class GLTFImportError : uint8_t {
@@ -60,6 +61,7 @@ enum class GLTFImportError : uint8_t {
     ExtensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}),
     EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}),
     TangentFrameMismatch ZHLN_ANNOTATION(ZHLN::Description<"Missing glTF tangents were not generated from the UV orientation and handedness.">{}),
+    NegativeScaleMismatch ZHLN_ANNOTATION(ZHLN::Description<"NegativeScaleTest lost its authored single-/double-sided flags or shared mesh instances.">{}),
 };
 
 namespace {
@@ -84,6 +86,13 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 // attribution under tests/render/assets/, so this test must not silently skip.
 [[nodiscard]] auto ReadUnlitAssetBytes() -> std::vector<uint8_t> {
     const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/UnlitTest.glb";
+    std::ifstream     stream(path, std::ios::binary);
+    if (!stream) return {};
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+}
+
+[[nodiscard]] auto ReadNegativeScaleAssetBytes() -> std::vector<uint8_t> {
+    const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/NegativeScaleTest.glb";
     std::ifstream     stream(path, std::ios::binary);
     if (!stream) return {};
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
@@ -1402,6 +1411,100 @@ struct GLTFImportTestSuite {
             }
             const ZHLN::Material defaults {};
             if (defaults.unlit) return std::unexpected(GLTFImportError::ExtensionMismatch);
+            return {};
+        }
+
+        /**
+         * Khronos NegativeScaleTest contains a single-sided check/X material
+         * on a mirrored node and double-sided spheres instantiated under both
+         * signs of their full parent-to-child transform. The primitive cache
+         * must share geometry without letting the first node's parity change
+         * its material (or the authored doubleSided flag).
+         */
+        std::expected<void, ZHLN::ErrorCode> negative_scale_keeps_authored_sidedness_on_shared_meshes() {
+            const auto bytes = ReadNegativeScaleAssetBytes();
+            SourceDocument source;
+            if (bytes.empty() || !source.Parse(bytes) || source.data->nodes_count != 14 || source.data->materials_count != 6) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos NegativeScaleTest");
+            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+
+            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "khronos_negative_scale_test.glb"
+            );
+            if (prefab == nullptr || prefab->parts.size() != 11) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+
+            const auto findPart = [prefab](std::string_view name) -> const ZHLN::ModelPart* {
+                const auto found = std::ranges::find_if(prefab->parts, [name](const auto& part) { return std::string_view(part.name) == name; });
+                return found != prefab->parts.end() ? &*found : nullptr;
+            };
+            for (const auto& part: prefab->parts) {
+                if (part.nodeIndex < 0 || static_cast<size_t>(part.nodeIndex) >= source.data->nodes_count) {
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                }
+                const auto& node = source.data->nodes[static_cast<size_t>(part.nodeIndex)];
+                if (node.mesh == nullptr || node.mesh->primitives_count != 1 || node.mesh->primitives[0].material == nullptr ||
+                    part.defaultMaterial.doubleSided != node.mesh->primitives[0].material->double_sided ||
+                    part.defaultMaterial.pipeline == ZHLN::PipelineHandle::Invalid) {
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                }
+            }
+
+            const auto* front = findPart("NegativeScaleFront");
+            const auto* back  = findPart("NegativeScaleBack");
+            if (front == nullptr || back == nullptr || front->defaultMaterial.doubleSided || back->defaultMaterial.doubleSided ||
+                SourceWorld(source.data->nodes[static_cast<size_t>(front->nodeIndex)]).GetDeterminant3x3() >= 0.0f) {
+                return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+            }
+
+            // The same sphere primitive is drawn with different full-transform
+            // parities, including a negative determinant inherited from its
+            // parent. Both instances must retain the authored material.
+            constexpr std::array pairs {
+                std::pair {"NotShiny1", "NotShinyMinus1"},
+                std::pair {"Shiny1", "ShinyMinus1"},
+                std::pair {"Dark1", "DarkMinus1"},
+            };
+            for (const auto& [positiveName, negativeName]: pairs) {
+                const auto* a = findPart(positiveName);
+                const auto* b = findPart(negativeName);
+                if (a == nullptr || b == nullptr || !a->defaultMaterial.doubleSided || !b->defaultMaterial.doubleSided ||
+                    a->mesh.posBuffer == ZHLN::BufferHandle::Invalid || a->mesh.posBuffer != b->mesh.posBuffer ||
+                    a->defaultMaterial.pipeline != b->defaultMaterial.pipeline) {
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                }
+                const bool aMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(a->nodeIndex)]).GetDeterminant3x3() < 0.0f;
+                const bool bMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(b->nodeIndex)]).GetDeterminant3x3() < 0.0f;
+                if (aMirrored == bMirrored) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+            }
+
+            std::array<ZHLN::Entity, 16> spawned {};
+            const auto count = ZHLN::PrefabFactory::InstantiatePrefab(
+                *engine, *prefab, {.createPhysics = false, .emissiveVirtualLights = false},
+                spawned.data(), static_cast<uint32_t>(spawned.size())
+            );
+            if (count != prefab->parts.size() + 1) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+
+            // The renderer derives the raster-winding flag from the *actual*
+            // draw world matrix. Check the spawned hierarchy as well as cgltf's
+            // source hierarchy, especially the negatively scaled sphere parents.
+            auto& registry = engine->GetRegistry();
+            size_t matched = 0;
+            for (uint32_t i = 1; i < count; ++i) { // outBuffer[0] is the prefab root, not a mesh part.
+                const auto* name = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
+                const auto* world = registry.Get<ZHLN::Components::WorldTransformComponent>(spawned[i]);
+                if (name == nullptr || world == nullptr) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                const auto* part = findPart(std::string_view(name->name));
+                if (part == nullptr) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                const bool sourceMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(part->nodeIndex)]).GetDeterminant3x3() < 0.0f;
+                if ((world->world.GetDeterminant3x3() < 0.0f) != sourceMirrored) {
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                }
+                ++matched;
+            }
+            if (matched != prefab->parts.size()) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
             return {};
         }
 

@@ -65,7 +65,7 @@ void MeshMain(
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {
-        uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
+        uint3 tri       = inst.fetchRasterMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));
     }
 }
@@ -105,7 +105,7 @@ void MeshMainForward(
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {
-        uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
+        uint3 tri       = inst.fetchRasterMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));
     }
 }
@@ -146,7 +146,7 @@ void MeshMainShadow(
     }
 
     for (uint i = gtid; i < triangleCount; i += 64u) {
-        uint3 tri       = inst.fetchMeshletTriangle(m.triangleOffset, i);
+        uint3 tri       = inst.fetchRasterMeshletTriangle(m.triangleOffset, i);
         outTriangles[i] = min(tri, uint3(vertexCountOut - 1u));
     }
 }

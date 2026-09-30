@@ -74,7 +74,6 @@ struct CPUTextureJob {
 struct CPUPrimitiveJob {
     const cgltf_node*      node = nullptr;
     const cgltf_primitive* prim = nullptr;
-    JPH::Mat44             nodeTransform;
 
     std::vector<VertexPosition>     positions;
     std::vector<VertexTangentFrame> tangentFrames;
@@ -738,16 +737,9 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
             continue;
         }
 
-        float matrix[16];
-        cgltf_node_transform_world(node, matrix);
-        const JPH::Mat44 nodeTransform(
-            JPH::Vec4(matrix[0], matrix[1], matrix[2], matrix[3]), JPH::Vec4(matrix[4], matrix[5], matrix[6], matrix[7]),
-            JPH::Vec4(matrix[8], matrix[9], matrix[10], matrix[11]), JPH::Vec4(matrix[12], matrix[13], matrix[14], matrix[15])
-        );
-
         const auto* mesh = node->mesh;
         for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
-            CPUPrimitiveJob job {.node = node, .prim = &mesh->primitives[p], .nodeTransform = nodeTransform};
+            CPUPrimitiveJob job {.node = node, .prim = &mesh->primitives[p]};
 
             const auto& prim = mesh->primitives[p];
             if (prim.material != nullptr) {
@@ -858,8 +850,7 @@ auto GetOrCreateCompiledPrimitive(
     RenderContext&                                                 ctx,
     const CPUPrimitiveJob&                                         primJob,
     const std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>>& imageToHandle,
-    std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache,
-    bool                                                           isMirrored
+    std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache
 ) -> CompiledPrimitive {
     if (const auto it = primCache.find(primJob.prim); it != primCache.end()) {
         return it->second;
@@ -932,7 +923,7 @@ auto GetOrCreateCompiledPrimitive(
     };
 
     const Material subMaterial =
-        ctx.CreateMaterial({.doubleSided        = primJob.doubleSided || isMirrored,
+        ctx.CreateMaterial({.doubleSided        = primJob.doubleSided,
                             .unlit              = primJob.unlit,
                             .alphaBlend         = primJob.alphaBlend,
                             .alphaMode          = primJob.alphaMode,
@@ -1202,9 +1193,8 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     prefab->parts.reserve(primitiveJobs.size());
 
     for (const auto& primJob: primitiveJobs) {
-        const auto* node       = primJob.node;
-        const bool  isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
-        const auto  compPrim   = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+        const auto* node     = primJob.node;
+        const auto  compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache);
 
         const std::string assetKeyStr   = std::string(virtualPath) + "#part" + std::to_string(prefab->parts.size());
         const AssetID     meshAsset     = HashAssetID(assetKeyStr);
@@ -1284,10 +1274,9 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
 
     for (size_t i = 0; i < primitiveJobs.size() && i < prefab.parts.size(); ++i) {
-        const auto& primJob    = primitiveJobs[i];
-        const bool  isMirrored = (primJob.nodeTransform.GetDeterminant3x3() < 0.0f);
+        const auto& primJob = primitiveJobs[i];
 
-        const auto compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
+        const auto compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache);
 
         prefab.parts[i].mesh             = compPrim.mesh;
         prefab.parts[i].defaultMaterial  = compPrim.defaultMaterial;

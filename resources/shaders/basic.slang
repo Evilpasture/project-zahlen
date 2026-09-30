@@ -19,7 +19,7 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
 
-    SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchIndex(vertexId), worldPos);
+    SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchRasterIndex(vertexId), worldPos);
     output.instanceId = instId;
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
     activeVPPos = mul(activeVP, worldPos);

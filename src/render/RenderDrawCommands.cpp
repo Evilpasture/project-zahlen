@@ -166,6 +166,9 @@ struct InstanceDataDesc {
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
     const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
     const uint32_t isUnlit         = desc.unlit ? 1u : 0u;
+    // Winding is a property of the current draw, not of the cached mesh or
+    // material: the same primitive can be instanced under either parity.
+    const uint32_t isMirrored      = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
     std::array<float, 4> emissive = desc.emissiveFactor;
     uint32_t             paddingCenter = 0;
@@ -215,10 +218,10 @@ struct InstanceDataDesc {
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
         // Bit 9 keeps double-sided meshlets; bit 10 routes transmission forward
-        // without changing alphaMode; bit 11 marks unlit surfaces in both raster
-        // paths, without sacrificing the authored metallic/emissive factors.
-        .flags                = (isViewmodel << 16) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) |
-                                (desc.alphaMode & 0xFFu),
+        // without changing alphaMode; bit 11 marks unlit surfaces. Bit 12
+        // reverses raster triangle winding for a negative world determinant.
+        .flags                = (isViewmodel << 16) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) |
+                                (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset          = desc.jointOffset,
         .morphOffset          = desc.morphOffset,
         .activeMorphCount     = desc.activeMorphCount,

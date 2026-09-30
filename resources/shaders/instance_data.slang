@@ -161,6 +161,12 @@ public extension InstanceData {
             return (this.flags & (1u << 11)) != 0;
         }
     }
+    public property bool isMirrored {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 12)) != 0;
+        }
+    }
     public property bool isViewmodel {
         [ForceInline]
         get {
@@ -240,6 +246,20 @@ public extension InstanceData {
         return GPUBuffer<uint>(this.iboAddress).load(indexId);
     }
 
+    // Our vertex draws use sequential SV_VulkanVertexID and fetch the index
+    // ourselves. Swap corners 1 and 2 for mirrored triangle lists so the
+    // existing CCW raster front face, backface culling and SV_IsFrontFace
+    // retain their meaning. Keep fetchIndex unchanged for BLAS/ray queries.
+    [ForceInline]
+    public uint fetchRasterIndex(uint indexId) {
+        if (this.isMirrored) {
+            uint corner = indexId % 3u;
+            if (corner == 1u) indexId += 1u;
+            if (corner == 2u) indexId -= 1u;
+        }
+        return this.fetchIndex(indexId);
+    }
+
     [ForceInline]
     public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0)
@@ -296,6 +316,12 @@ public extension InstanceData {
         uint b1 = (words.load((byteBase + 1u) >> 2u) >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
         uint b2 = (words.load((byteBase + 2u) >> 2u) >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
         return uint3(b0, b1, b2);
+    }
+
+    [ForceInline]
+    public uint3 fetchRasterMeshletTriangle(uint triangleOffset, uint triangleIndex) {
+        uint3 tri = this.fetchMeshletTriangle(triangleOffset, triangleIndex);
+        return this.isMirrored ? tri.xzy : tri;
     }
 
     [ForceInline]

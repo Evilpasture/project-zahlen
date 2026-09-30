@@ -181,6 +181,21 @@ The CPU regression covers the reconstructed normal-map direction as well as
 UV rotations and mirroring; a fresh GPU capture is still needed to compare
 with the golden.
 
+For **`NegativeScaleTest`**, run
+`SCENARIO=khronos-NegativeScaleTest ./scripts/run_fidelity.sh -j1`. All six
+front/back/sample indicators should be green at scales +1 and -1, and the
+corresponding white/dark-blue spheres should have consistent illumination.
+The check/X material is authored single-sided: the importer must not turn it
+double-sided just because a node is mirrored. A negative determinant reverses
+the winding of each *draw*, including when inherited from a parent; the vertex
+and meshlet raster paths restore CCW winding before culling and front-face
+shading. The mirrored tangent-frame handedness also follows the world transform
+without modifying authored or generated local tangents. The pinned glTF import
+regression checks the real asset's material flags and mesh sharing; the
+headless GPU regression checks culling and double-sided normals on both raster
+paths. Neither is a pixel-perfect match to the Sample Viewer golden, so compare
+a new capture as well.
+
 For `SheenCloth`, the blue/black weave should repeat across the cloth instead
 of stretching into broad blue bands: its per-texture transform includes
 `scale: [30, -30]`. The importer regression checks that factor, the UV-set

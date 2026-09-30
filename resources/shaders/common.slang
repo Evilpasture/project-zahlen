@@ -323,7 +323,10 @@ public extension InstanceData {
             output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
         }
 
-        output.tangent.w            = localTangent.w;
+        // A reflected world transform reverses the cross product of the
+        // transformed tangent and normal. Preserve the authored tangent's
+        // local handedness while constructing the world-space bitangent.
+        output.tangent.w            = this.isMirrored ? -localTangent.w : localTangent.w;
         output.uv                   = localUV;
         output.uv1                  = localUV1;
         output.color                = localColor;

@@ -32,6 +32,7 @@ auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
 auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
+auto RunNegativeScaleSuite() -> ZHLN::Test::TestStats;
 auto RunTextureTransformsSuite() -> ZHLN::Test::TestStats;
 auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
 auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats;
@@ -62,6 +63,7 @@ auto main(int argc, char** argv) -> int {
         RunViewportSubregionSuite,
         RunHiZSuite,
         RunGLTFImportSuite,
+        RunNegativeScaleSuite,
         RunTextureTransformsSuite,
         RunTransparentMaterialsSuite,
         RunUnlitMaterialsSuite
