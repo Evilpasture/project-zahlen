@@ -39,6 +39,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
+    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
+    if (IsGBufferUnlit(anisoRaw.z)) {
+        return;
+    }
     float4 normRough = texNormalRoughness.Load(int3(fullPos, 0));
     float  roughness = normRough.z;
     if (roughness < 0.04f || roughness > 0.4f) {
@@ -54,8 +58,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
-    float strength = anisoRaw.z;
+    float strength = DecodeGBufferAnisotropy(anisoRaw.z);
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 tangentX  = strength > 1.0f / 255.0f ? UnpackAnisotropy(anisoRaw.xy, N) : normalize(cross(up, N));
     float3 tangentY  = cross(N, tangentX);

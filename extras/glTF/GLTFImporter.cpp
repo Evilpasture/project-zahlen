@@ -87,6 +87,7 @@ struct CPUPrimitiveJob {
     float boundingRadius = 1.0f;
 
     bool     doubleSided        = false;
+    bool     unlit              = false;
     bool     alphaBlend         = false;
     float    baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float    metallicFactor     = 1.0f;
@@ -411,6 +412,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
 
     if (prim.material != nullptr) {
         job.doubleSided = (prim.material->double_sided != 0);
+        job.unlit       = (prim.material->unlit != 0);
         if (prim.material->alpha_mode == cgltf_alpha_mode_mask) {
             job.alphaMode   = 1;
             job.alphaCutoff = prim.material->alpha_cutoff;
@@ -431,7 +433,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         // alphaMode: MASK must still discard holes in the surface.
         if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
             job.transmissionFactor = prim.material->transmission.transmission_factor;
-            job.alphaBlend         = true;
+            if (!job.unlit) job.alphaBlend = true;
         }
         if (prim.material->has_ior) {
             job.ior = prim.material->ior.ior;
@@ -899,6 +901,7 @@ auto GetOrCreateCompiledPrimitive(
 
     const Material subMaterial =
         ctx.CreateMaterial({.doubleSided        = primJob.doubleSided || isMirrored,
+                            .unlit              = primJob.unlit,
                             .alphaBlend         = primJob.alphaBlend,
                             .alphaMode          = primJob.alphaMode,
                             .alphaCutoff        = primJob.alphaCutoff,

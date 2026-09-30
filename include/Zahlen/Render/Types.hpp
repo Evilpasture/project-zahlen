@@ -92,6 +92,7 @@ struct Material {
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
     bool                doubleSided        = false;
+    bool                unlit              = false; // KHR_materials_unlit: base color without lighting.
     float               transmissionFactor = 0.0f;
     TextureHandle       transmissionMap    = TextureHandle::Invalid;
     float               iridescenceFactor  = 0.0f;
@@ -155,6 +156,7 @@ struct CSGModifier {
 
 struct MaterialDesc {
     bool doubleSided   = false;
+    bool unlit         = false;
     bool alphaBlend    = false;
     bool additiveBlend = false;
 

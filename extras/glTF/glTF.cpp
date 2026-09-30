@@ -316,7 +316,8 @@ void DrawModelNodeRows(
 [[nodiscard]] bool SameMaterial(const ZHLN::Material& a, const ZHLN::Material& b) noexcept {
     const bool sameMaps    = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
     const bool sameFactors = (a.baseColorFactor == b.baseColorFactor) && (a.emissiveFactor == b.emissiveFactor);
-    return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
+    return sameMaps && sameFactors && (a.unlit == b.unlit) && (a.metallicFactor == b.metallicFactor) &&
+           (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
            (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.transmissionMap == b.transmissionMap) &&
            (a.iridescenceFactor == b.iridescenceFactor) &&
            (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&

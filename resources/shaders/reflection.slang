@@ -154,11 +154,13 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 
         }
 
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-        float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
-
-        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
-        confidence = 0.0f;
+        if (hitInst.isUnlit) {
+            fallbackColor = hitBaseColor;
+        } else {
+            float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
+            fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
+        }
+        confidence    = 0.0f;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (hitClip.w < 0.1f) {
@@ -240,6 +242,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         if (frame.fullBright != 0) {
             return float4(litColorRaw.rgb, 1.0f);
         }
+        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
+        if (IsGBufferUnlit(anisoRaw.z)) {
+            return float4(litColorRaw.rgb, 1.0f);
+        }
 
         float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
@@ -252,8 +258,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
         float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
-        float strength = anisoRaw.z;
+        float strength = DecodeGBufferAnisotropy(anisoRaw.z);
         float3 T = strength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
         float3 B = cross(N, T);
         float3 R = AnisotropicReflection(N, V, B, roughness, strength);

@@ -116,6 +116,12 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    `KHR_materials_clearcoat` is a second dielectric GGX lobe (F0 0.04) with
    its own normal, in direct light and image-based lighting. The base is
    attenuated by one `(1 - Fc)`.
+   `KHR_materials_unlit` uses base-color factor × sRGB-decoded base-color texture
+   × vertex color, without emission, direct/ambient light, AO, PBR or reflections.
+   Its MASK fragments still use alpha cutoff and depth, OPAQUE fragments stay
+   in the G-buffer for the opaque scene copy, and BLEND fragments composite in
+   forward. The UNORM8 G-buffer anisotropy-strength channel reserves code 255
+   for unlit; lit strengths use codes 0–254 and decode to the full 0–1 range.
    `KHR_materials_anisotropy` now imports strength, rotation and the linear RG/B
    direction/strength texture. The deferred direct BRDF uses the extension's
    anisotropic GGX; the split-sum cubemap uses one lookup along a bent
@@ -194,6 +200,17 @@ reconstructs the transmission target. The resulting blur around the car's
 interior frames is renderer-specific filtering, not frosted glass in the glTF.
 We deliberately leave Zahlen's sharp thin-glass filtering alone rather than
 forcing an invented roughness or thickness just to match that golden.
+
+For **`UnlitTest`**, run
+`SCENARIO=khronos-UnlitTest ./scripts/run_fidelity.sh -j1` and compare with
+`gltf-sample-viewer-golden.png`. The bevelled orange and blue solids must have
+uniform color across their faces despite different normals or scene lighting;
+only their antialiased silhouettes should blend into the background. The
+attributed official GLB in `tests/render/assets/` drives both an importer test
+and a GPU regression that measures front/top/side colors with the sun off/on.
+The latter also tests masked and blended unlit base-color texture coverage.
+Those property checks do not replace comparison of a full harness capture
+with the sample viewer golden.
 
 For **`TransmissionTest`**, run
 `SCENARIO=khronos-TransmissionTest ./scripts/run_fidelity.sh -j1` and compare

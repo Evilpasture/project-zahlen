@@ -155,6 +155,12 @@ public extension InstanceData {
             return (this.flags & (1u << 9)) != 0;
         }
     }
+    public property bool isUnlit {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 11)) != 0;
+        }
+    }
     public property bool isViewmodel {
         [ForceInline]
         get {

@@ -775,7 +775,7 @@ struct RenderContext::Impl {
 
         uint32_t samplerCodes0;
         uint32_t samplerCodes1;
-        uint32_t _padding;
+        uint32_t unlit;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 120);
     static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 16);

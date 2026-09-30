@@ -97,7 +97,7 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
             .alphaMode           = gpuMat->alphaMode,
             .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
             .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
-            ._padding            = 0
+            .unlit               = gpuMat->unlit ? 1u : 0u
         };
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
@@ -156,7 +156,7 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
             .alphaMode           = gpuMat->alphaMode,
             .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
             .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
-            ._padding            = 0
+            .unlit               = 0u
         };
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;

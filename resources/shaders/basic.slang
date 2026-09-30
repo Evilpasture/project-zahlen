@@ -65,39 +65,52 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
     ConfigureSceneMaterial(material, input.uv1, input.instanceId);
-    float4 albedo   = SampleMaterialAlbedo<ClearCoatMaterial>(material);
-    float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
+    float4 albedo = SampleMaterialAlbedo<ClearCoatMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 
-    // The masked pass used a higher floor than opaque or translucent scene
-    // fragments. Keep the floor in the sampling input, not the material type.
-    float3 N = normalize(input.normal);
-    float3 T = OrthogonalTangent(N, input.tangent.xyz);
-    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
-    // glTF double-sided lighting reverses the *entire* shading frame on a
-    // backface. Flipping N before computing B would leave the normal-map X
-    // axis unflipped; flip all three axes after constructing the front frame.
-    float facing = isFrontFace ? 1.0f : -1.0f;
-    material.roughnessFloor     = input.alphaMode == 1 ? 0.045f : 0.001f;
-    material.hasTangent         = any(input.tangent.xyz);
-    material.geometricNormal    = N * facing;
-    material.tangentDirection   = T * facing;
-    material.bitangentDirection = B * facing;
-    material.coatParams         = input.coatParams;
-    material.coatTextures       = input.coatTextures;
-    material.anisotropyParams   = input.anisotropyParams;
-    material.anisotropyTexIndex = input.anisotropyTexIndex;
+    if (material.isUnlit) {
+        // KHR_materials_unlit uses only baseColorFactor * baseColorTexture *
+        // vertex color. Emission, normals, PBR and AO are not shading inputs.
+        // Keep the depth/velocity in the opaque G-buffer so glass can sample
+        // this surface in the subsequent opaque scene copy.
+        output.color           = albedo;
+        output.emissive        = float4(0.0f);
+        output.normalRoughness = float4(PackNormalOctahedron(normalize(input.normal)) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.clearcoat       = float4(0.0f);
+        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f); // Reserved G-buffer unlit marker.
+        output.sheen           = float4(0.0f);
+    } else {
+        // The masked pass used a higher floor than opaque or translucent scene
+        // fragments. Keep the floor in the sampling input, not the material type.
+        float3 N = normalize(input.normal);
+        float3 T = OrthogonalTangent(N, input.tangent.xyz);
+        float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+        // glTF double-sided lighting reverses the *entire* shading frame on a
+        // backface. Flipping N before computing B would leave the normal-map X
+        // axis unflipped; flip all three axes after constructing the front frame.
+        float facing = isFrontFace ? 1.0f : -1.0f;
+        material.roughnessFloor     = input.alphaMode == 1 ? 0.045f : 0.001f;
+        material.hasTangent         = any(input.tangent.xyz);
+        material.geometricNormal    = N * facing;
+        material.tangentDirection   = T * facing;
+        material.bitangentDirection = B * facing;
+        material.coatParams         = input.coatParams;
+        material.coatTextures       = input.coatTextures;
+        material.anisotropyParams   = input.anisotropyParams;
+        material.anisotropyTexIndex = input.anisotropyTexIndex;
 
-    SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
-    output.color           = float4(surface.albedo, surface.alpha);
-    output.emissive        = float4(surface.emissive, 1.0f);
-    float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
-    output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
-    output.clearcoat       = surface.clearcoat;
-    output.anisotropy      = surface.anisotropy;
-    output.sheen           = surface.sheen;
+        float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
+        SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
+        output.color           = float4(surface.albedo, surface.alpha);
+        output.emissive        = float4(surface.emissive, 1.0f);
+        float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
+        output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
+        output.clearcoat       = surface.clearcoat;
+        output.anisotropy      = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
+        output.sheen           = surface.sheen;
+    }
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -217,6 +230,11 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
+    }
+    // BLEND still composites by coverage; OPAQUE and MASK write full alpha.
+    // None of the lit paths (including emissive or fullBright) apply to unlit.
+    if (material.isUnlit) {
+        return float4(albedo.rgb, material.alphaMode == 2u ? albedo.a : 1.0f);
     }
     float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
     float3 emissive = sampledEmissive * albedo.a;

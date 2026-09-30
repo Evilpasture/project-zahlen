@@ -338,7 +338,9 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const bool transmission = desc.transmissionFactor > 0.0f;
+    // When two shading models are authored together, unlit wins. Keep its
+    // coverage mode independent of the forward-only optical transmission path.
+    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
     const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
     auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
@@ -346,6 +348,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     }
 
     Material mat        = *basicMat;
+    mat.unlit           = desc.unlit;
     // Transmission chooses a forward pipeline, not an alpha-as-coverage mode.
     // Preserve MASK (or OPAQUE) so the forward shader can apply the glTF mask.
     mat.alphaMode       = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);

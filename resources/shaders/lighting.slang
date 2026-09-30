@@ -167,6 +167,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     if (frame.fullBright != 0) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
+    float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
+    if (IsGBufferUnlit(anisoRaw.z)) {
+        return float4(albedoRaw.rgb, 1.0f);
+    }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
     float roughness     = normRoughRaw.z;
@@ -179,11 +183,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
     float NdotV = saturate(dot(N, V));
-    float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
     float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
     float3 sheenColor = sheenRaw.rgb;
     float materialAo = anisoRaw.w;
-    float anisoStrength = anisoRaw.z;
+    float anisoStrength = DecodeGBufferAnisotropy(anisoRaw.z);
     float3 T = anisoStrength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
     float3 B = cross(N, T);
 

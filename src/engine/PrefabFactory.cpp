@@ -335,7 +335,7 @@ auto InstantiateMeshPart(
     }
     // Both alpha blending and optical transmission are composited in the
     // forward pass. A masked transmissive surface is still forward-only.
-    if (activeMat.alphaMode == 2 || activeMat.transmissionFactor > 0.0f) {
+    if (activeMat.alphaMode == 2 || (!activeMat.unlit && activeMat.transmissionFactor > 0.0f)) {
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
@@ -403,6 +403,7 @@ auto InstantiateMeshPart(
 }
 
 auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> Entity {
+    if (part.defaultMaterial.unlit) return Entity::Null(); // KHR_materials_unlit ignores emissive factors.
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float invImportScale = 1.0f / emissiveFactorScale;

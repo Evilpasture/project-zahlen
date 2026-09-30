@@ -34,6 +34,7 @@ auto RunHiZSuite() -> ZHLN::Test::TestStats;
 auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
 auto RunTextureTransformsSuite() -> ZHLN::Test::TestStats;
 auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
+auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -62,6 +63,7 @@ auto main(int argc, char** argv) -> int {
         RunHiZSuite,
         RunGLTFImportSuite,
         RunTextureTransformsSuite,
-        RunTransparentMaterialsSuite
+        RunTransparentMaterialsSuite,
+        RunUnlitMaterialsSuite
     );
 }

@@ -110,6 +110,7 @@ struct InstanceDataDesc {
     bool     isViewmodel = false;
     bool     isSkinned   = false;
     bool     doubleSided = false;
+    bool     unlit       = false;
 
     uint32_t vertexCount      = 0;
     uint32_t indexCount       = 0;
@@ -163,7 +164,8 @@ struct InstanceDataDesc {
     const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
     const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
-    const uint32_t hasTransmission = desc.transmissionFactor > 0.0f ? 1u : 0u;
+    const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
+    const uint32_t isUnlit         = desc.unlit ? 1u : 0u;
 
     std::array<float, 4> emissive = desc.emissiveFactor;
     uint32_t             paddingCenter = 0;
@@ -212,9 +214,11 @@ struct InstanceDataDesc {
         .metallicFactor      = desc.metallicFactor,
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
-        // Bit 9 keeps back-facing meshlets of a double-sided material. Bit 10
-        // routes transmission forward without overwriting glTF alphaMode MASK.
-        .flags                = (isViewmodel << 16) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        // Bit 9 keeps double-sided meshlets; bit 10 routes transmission forward
+        // without changing alphaMode; bit 11 marks unlit surfaces in both raster
+        // paths, without sacrificing the authored metallic/emissive factors.
+        .flags                = (isViewmodel << 16) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) |
+                                (desc.alphaMode & 0xFFu),
         .jointOffset          = desc.jointOffset,
         .morphOffset          = desc.morphOffset,
         .activeMorphCount     = desc.activeMorphCount,
@@ -436,6 +440,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .isViewmodel              = isViewmodel != 0u,
                  .isSkinned                = isSkinned != 0u,
                  .doubleSided              = material.doubleSided,
+                 .unlit                    = material.unlit,
                  .vertexCount              = resolved->posMesh->vertexCount,
                  .indexCount               = mesh.indexCount,
                  .jointOffset              = params.jointOffset,
@@ -518,6 +523,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                     .isSkinned                = isSkinned != 0u,
                     .doubleSided              = material.doubleSided,
+                    .unlit                    = material.unlit,
                     .vertexCount              = resolved->posMesh->vertexCount,
                     .indexCount               = mesh.indexCount,
                     .jointOffset              = jointOffset,

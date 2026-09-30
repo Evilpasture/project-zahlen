@@ -39,6 +39,7 @@ public struct MaterialSampleInputs {
     public float roughnessFactor;
     public float alphaCutoff;
     public uint alphaMode;
+    public bool isUnlit;
     public float roughnessFloor;
     public float3 geometricNormal;
     public float3 tangentDirection;
@@ -74,6 +75,7 @@ public MaterialSampleInputs MakeMaterialInputs(float2 uv, float4 color, uint4 in
     i.roughnessFactor    = pbrFactors.y;
     i.alphaCutoff        = pbrFactors.z;
     i.alphaMode          = alphaMode;
+    i.isUnlit            = false;
     i.roughnessFloor     = 0.001f;
     i.geometricNormal    = float3(0.0f, 1.0f, 0.0f);
     i.tangentDirection   = float3(1.0f, 0.0f, 0.0f);
@@ -126,6 +128,7 @@ public void ConfigureSceneMaterial(inout MaterialSampleInputs i, float2 uv1, uin
     i.instanceId = instanceId;
     i.uv1 = uv1;
     InstanceData inst = scene.g_instances[instanceId];
+    i.isUnlit = inst.isUnlit;
     i.sheenParams = inst.sheenParams;
     i.sheenColorTexIndex = inst.sheenColorTexIndex;
     i.sheenRoughnessTexIndex = inst.sheenRoughnessTexIndex;

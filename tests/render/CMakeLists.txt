@@ -140,6 +140,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestGLTFImport.cpp
     TestTextureTransforms.cpp
     TestTransparentMaterials.cpp
+    TestUnlitMaterials.cpp
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
@@ -160,8 +161,8 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # extras target camera rig (extras/Camera); the component and the rig's
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
-# ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime instead of
-# embedding a 100 KB rig.
+# ZHLN_TEST_SOURCE_DIR locates resources/assets/ and the attributed
+# tests/render/assets/UnlitTest.glb fixture at runtime.
 target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)

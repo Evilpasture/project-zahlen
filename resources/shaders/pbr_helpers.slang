@@ -8,6 +8,20 @@ __exported import math.transform;
 __exported import uniforms;
 __exported import vertex_format;
 
+// Res_Anisotropy is R8G8B8A8_UNORM. Reserve the top code (255) in its
+// strength channel for KHR_materials_unlit, and quantize lit strengths into
+// 0..254. That lets opaque unlit materials stay in the G-buffer (and in the
+// opaque scene sampled by transmission) without mistaking strength=1 for unlit.
+public float EncodeGBufferAnisotropy(float strength) {
+    return saturate(strength) * (254.0f / 255.0f);
+}
+public float DecodeGBufferAnisotropy(float encodedStrength) {
+    return saturate(encodedStrength * (255.0f / 254.0f));
+}
+public bool IsGBufferUnlit(float encodedStrength) {
+    return encodedStrength > (254.5f / 255.0f);
+}
+
 public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                                     float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
                                                     float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),

@@ -77,6 +77,15 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return bytes;
 }
 
+// The pinned Khronos fixture is tiny (3,992 bytes) and checked in with its
+// attribution under tests/render/assets/, so this test must not silently skip.
+[[nodiscard]] auto ReadUnlitAssetBytes() -> std::vector<uint8_t> {
+    const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/UnlitTest.glb";
+    std::ifstream     stream(path, std::ios::binary);
+    if (!stream) return {};
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+}
+
 [[nodiscard]] JPH::Mat44 ColumnMajor(const float (&values)[16]) noexcept {
     return JPH::Mat44(
         JPH::Vec4(values[0], values[1], values[2], values[3]), JPH::Vec4(values[4], values[5], values[6], values[7]),
@@ -1305,6 +1314,45 @@ struct GLTFImportTestSuite {
                 defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
+            return {};
+        }
+
+        /**
+         * The official UnlitTest GLB requires KHR_materials_unlit. Its two
+         * materials leave metallicFactor at the glTF default 1: altering the
+         * fallback PBR fields to get a flat image is not implementing unlit.
+         */
+        std::expected<void, ZHLN::ErrorCode> importer_preserves_required_unlit_materials() {
+            const auto bytes = ReadUnlitAssetBytes();
+            SourceDocument source;
+            if (bytes.empty() || !source.Parse(bytes) || source.data->materials_count != 2 || source.data->meshes_count != 2 ||
+                !source.data->materials[0].unlit || !source.data->materials[1].unlit) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Unlit");
+            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "KHR_materials_unlit.glb"
+            );
+            if (prefab == nullptr || prefab->parts.size() != 2) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            for (size_t i = 0; i < 2; ++i) {
+                const auto& expected = source.data->materials[i];
+                const auto& material = prefab->parts[i].defaultMaterial;
+                if (!material.unlit || material.alphaMode != 0u || material.albedoMap != ZHLN::TextureHandle::Invalid ||
+                    material.metallicFactor != expected.pbr_metallic_roughness.metallic_factor || material.metallicFactor != 1.0f ||
+                    material.pipeline == ZHLN::PipelineHandle::Invalid) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+                for (size_t channel = 0; channel < 4; ++channel) {
+                    if (std::abs(material.baseColorFactor[channel] - expected.pbr_metallic_roughness.base_color_factor[channel]) > 1e-6f) {
+                        return std::unexpected(GLTFImportError::ExtensionMismatch);
+                    }
+                }
+            }
+            const ZHLN::Material defaults {};
+            if (defaults.unlit) return std::unexpected(GLTFImportError::ExtensionMismatch);
             return {};
         }
 

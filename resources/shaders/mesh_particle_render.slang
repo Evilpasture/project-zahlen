@@ -36,7 +36,7 @@ struct MeshParticleRenderPushConstants {
 
     uint samplerCodes0;
     uint samplerCodes1;
-    uint _padding;
+    uint unlit;
 };
 
 [vk::push_constant]
@@ -160,11 +160,23 @@ PSOutput PSMain(VSOutput input) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
                                                         input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
-    float4 albedo   = SampleMaterialAlbedo<StandardPBRMaterial>(material);
-    float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
     if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
+    if (mp_pc.unlit != 0u) {
+        output.color           = albedo;
+        output.emissive        = float4(0.0f);
+        output.normalRoughness = float4(PackNormalOctahedron(normalize(input.normal)) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.clearcoat       = float4(0.0f);
+        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f);
+        output.sheen           = float4(0.0f);
+        float currW = max(input.currClip.w, 0.0001f);
+        float prevW = max(input.prevClip.w, 0.0001f);
+        output.velocity = (input.currClip.xy / currW - input.prevClip.xy / prevW) * 0.5f;
+        return output;
+    }
+    float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
 
     // Mesh-particle normals use their original tangent fallback and encoded
     // tangent sign; their G-buffer roughness floor is 0.045 for every mode.
@@ -193,7 +205,7 @@ PSOutput PSMain(VSOutput input) {
 
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
     output.clearcoat  = surface.clearcoat;
-    output.anisotropy = surface.anisotropy;
+    output.anisotropy = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
     output.sheen = surface.sheen;
 
     return output;
