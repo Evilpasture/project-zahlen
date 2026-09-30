@@ -86,6 +86,7 @@ this harness builds none of them. Specifically:
 | `--output <file.pam>` | Capture path (required). `.pam` keeps alpha so omit-background pixels are skipped; `.ppm` stays P6 and forces alpha opaque. |
 | `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). Applied at shade time, not baked. |
 | `--no-aa` | Disable the default spatial SMAA for an unfiltered comparison. |
+| `--diagnostic <mode>` | Opt-in scene isolation, described below. Never used by the fidelity runner or golden comparisons. |
 | `--headless` | Run without a window (core flag) |
 
 Exit codes: `0` captured; `1` usage/scenario/capture error.
@@ -267,15 +268,53 @@ override, mirrored/rotated transforms, and the shared image's separate sRGB
 and linear handles. It does **not** compare a rendered frame to the golden;
 sheen's GGX-based environment approximation can still differ in brightness.
 
-For HDR IBL speckles, rebuild `FidelityHarness` and run both
-`SCENARIO=khronos-MetalRoughSpheres-HDR ./scripts/run_fidelity.sh -j1` and
-`SCENARIO=khronos-IridescentDishWithOlives ./scripts/run_fidelity.sh -j1`.
-Inspect the PAM captures against their goldens: the higher-roughness spheres
-and the glass/olives should no longer show isolated bright dots, while the
-smooth metal reflections retain their sharp environment detail. The independent
-`tests/extras/test_ibl_importance_sampling_math.py` checks numerical properties
-of the GGX PDF and equirectangular texel solid angle; it does **not** inspect
-shader source, execute the shader, or replace these Vulkan captures.
+For HDR IBL speckles, compare `khronos-MetalRoughSpheres-HDR` and
+`khronos-IridescentDishWithOlives` to their Filament goldens with the same
+exposure, panorama, and camera. A fourfold-overlap change to the HDR prefilter
+was tried and **reverted**: the reported teal-like patches on the olives did
+not improve. Do not treat source-footprint filtering as a proven cause. The
+independent `tests/extras/test_ibl_importance_sampling_math.py` checks the
+GGX PDF and panorama solid angle numerically; it cannot validate a Vulkan
+render or identify which layer contributes a visible patch.
+
+### Isolating olive and glass color (diagnostic captures only)
+
+The official olives' base-color image has dark red/green flecks, but little
+blue (maximum 64/255). Their ORM texture's metallic (blue) channel is zero at
+every pixel; their normal map is close to flat. A teal patch could instead be
+from diffuse irradiance, dielectric specular IBL, or the forward-rendered,
+transmissive/iridescent glass cover. **None has been established as the source.**
+Run the baseline and the opt-in diagnostics with the *same* camera, environment,
+and AA setting. After the regular runner generates the scenario JSON, for
+example:
+
+```bash
+BIN=build/samples/FidelityHarness  # or the binary in your CMake preset's build/samples/
+SC=build/fidelity_output/khronos-IridescentDishWithOlives.json
+OUT=build/fidelity_output
+"$BIN" --headless --no-aa --scenario "$SC" --output "$OUT/olives-baseline.pam"
+for mode in opaque-only dielectric-specular transmission-coverage transmission-no-iridescence; do
+    "$BIN" --headless --no-aa --scenario "$SC" --diagnostic "$mode" --output "$OUT/olives-$mode.pam"
+done
+```
+
+| Diagnostic mode | What changes in *this capture only* |
+| --- | --- |
+| `opaque-only` | Hides transmitting meshes entirely, leaving the opaque olives, gold leaf, and their lighting. Zeroing the glass's transmission factor would **not** do this. |
+| `dielectric-specular` | Hides transmitting meshes and removes diffuse albedo and emission from lit opaque meshes. For the nonmetallic olives, their F0, AO, roughness, normal map, and specular IBL are preserved. On **metals**, blackening albedo also removes their colored specular F0; do not interpret this as a metal specular view. |
+| `transmission-coverage` | Renders transmitting meshes unlit white, using their original forward pipeline and depth test over the unmodified opaque scene. White over an olive means a glass surface is actually in front at that pixel; white elsewhere can also be the glass dish. To avoid a false coverage mask, the harness refuses this mode for textured or alpha-covered glass. |
+| `transmission-no-iridescence` | Preserves glass geometry, refraction, and ordinary Fresnel but removes its iridescent film. Use only after the coverage comparison implicates glass. |
+
+Compare **matching pixels** in the baseline and the opaque-only stills first.
+If a patch disappears, check whether the white glass coverage still actually
+covers that olive, then compare the no-iridescence image. If a patch survives
+without glass, compare the dielectric-specular image: a matching patch there
+implicates the opaque specular contribution; if it does not survive, investigate
+the remaining diffuse/albedo/AO contribution instead. The opaque-only and
+specular-only pair separates the olive's dielectric specular term from its
+remaining diffuse term; neither the mask nor the no-iridescence image is a
+replacement for a normal fidelity capture. This isolation produces evidence,
+**not** a new parity fix.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.

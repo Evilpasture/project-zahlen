@@ -27,6 +27,7 @@
  *   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1).
  *                         Applied at shade time, not baked into the SH or cube.
  *   --no-aa               Disable the default spatial SMAA for A/B captures.
+ *   --diagnostic <mode>    Opt-in material isolation; see FidelityHarness.md.
  */
 //
 // Exit codes: 0 = rendered and captured; 1 = a usage, scenario or capture
@@ -479,6 +480,113 @@ void StripSceneLights(ZHLN::Engine& engine) {
     }
 }
 
+// These captures vary only the imported scene. The normal fidelity render never
+// enters this path; no shader, environment, or global renderer setting changes.
+enum class DiagnosticCapture {
+    None,
+    OpaqueOnly,
+    DielectricSpecular,
+    TransmissionCoverage,
+    TransmissionWithoutIridescence,
+};
+
+[[nodiscard]] auto ParseDiagnosticCapture(std::string_view name) -> std::optional<DiagnosticCapture> {
+    if (name.empty()) {
+        return DiagnosticCapture::None;
+    }
+    if (name == "opaque-only") {
+        return DiagnosticCapture::OpaqueOnly;
+    }
+    if (name == "dielectric-specular") {
+        return DiagnosticCapture::DielectricSpecular;
+    }
+    if (name == "transmission-coverage") {
+        return DiagnosticCapture::TransmissionCoverage;
+    }
+    if (name == "transmission-no-iridescence") {
+        return DiagnosticCapture::TransmissionWithoutIridescence;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool ApplyDiagnosticCapture(ZHLN::Engine& engine, DiagnosticCapture mode) {
+    if (mode == DiagnosticCapture::None) {
+        return true;
+    }
+
+    auto& registry = engine.GetRegistry();
+    auto& renderer = engine.GetRenderContext();
+    uint32_t transmitting = 0;
+    uint32_t opaque       = 0;
+    uint32_t iridescent   = 0;
+
+    for (const ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
+        const auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(e);
+        if (mesh == nullptr) {
+            return false;
+        }
+        auto material = renderer.GetGPUMaterial(mesh->materialAsset);
+        if (!material) {
+            ZHLN::Log("[Fidelity] Diagnostic cannot find a material for an imported mesh.");
+            return false;
+        }
+
+        if (!material->unlit && material->transmissionFactor > 0.0f) {
+            ++transmitting;
+            if (mode == DiagnosticCapture::OpaqueOnly || mode == DiagnosticCapture::DielectricSpecular) {
+                // Hiding the entire forward draw preserves the opaque scene and
+                // the actual occlusion of the olives; it does not pretend that
+                // zeroing transmission turns glass into a missing surface.
+                if (!registry.Patch<ZHLN::Components::MeshComponent>(e, [](auto& part) { part.flags |= ZHLN::DrawFlags::Hidden; })) {
+                    return false;
+                }
+            } else if (mode == DiagnosticCapture::TransmissionCoverage) {
+                // Reuse the transmitting part's forward pipeline and depth
+                // test, but output solid white instead of refracted/iridescent
+                // light. Unlit clears the instance's transmission routing bit;
+                // BLEND with alpha 1 keeps this otherwise OPAQUE mesh in the
+                // forward pass, at unchanged full coverage. Textured or
+                // alpha-covered glass needs a separate shader mask.
+                if (material->alphaMode != 0 || material->albedoMap != ZHLN::TextureHandle::Invalid) {
+                    ZHLN::Log("[Fidelity] Transmission coverage requires untextured OPAQUE glass; this material is unsupported.");
+                    return false;
+                }
+                material->unlit           = true;
+                material->alphaMode       = 2;
+                material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
+                renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+            } else if (mode == DiagnosticCapture::TransmissionWithoutIridescence) {
+                if (material->iridescenceFactor > 0.0f) {
+                    ++iridescent;
+                    material->iridescenceFactor = 0.0f;
+                    renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+                }
+            }
+        } else if (mode == DiagnosticCapture::DielectricSpecular && !material->unlit) {
+            ++opaque;
+            // For a dielectric (the olives' ORM blue channel is identically
+            // zero), removing albedo removes diffuse SH but preserves F0=0.04,
+            // normals, roughness, AO, and specular IBL. Not a specular-only
+            // view of metallic materials: their F0 comes from base color.
+            material->baseColorFactor[0] = 0.0f;
+            material->baseColorFactor[1] = 0.0f;
+            material->baseColorFactor[2] = 0.0f;
+            material->emissiveFactor[0]  = 0.0f;
+            material->emissiveFactor[1]  = 0.0f;
+            material->emissiveFactor[2]  = 0.0f;
+            renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
+        }
+    }
+
+    if (transmitting == 0 || (mode == DiagnosticCapture::DielectricSpecular && opaque == 0) ||
+        (mode == DiagnosticCapture::TransmissionWithoutIridescence && iridescent == 0)) {
+        ZHLN::Log("[Fidelity] Diagnostic has no applicable transmitting/opaque/iridescent mesh; refusing an unchanged capture.");
+        return false;
+    }
+    ZHLN::Log("[Fidelity] Diagnostic: {} transmitting, {} black-albedo opaque, {} iridescent mesh(es).", transmitting, opaque, iridescent);
+    return true;
+}
+
 // ============================================================================
 // COMMAND LINE
 // ============================================================================
@@ -521,18 +629,21 @@ auto main(int argc, char* argv[]) -> int {
     // core the rest. Value flags accept both `--flag value` and `--flag=value`;
     // `args` aliases the process-owned strings, so the filtered list holds
     // pointers into the same storage.
-    const std::string scenarioPath = FlagValue(args, "--scenario");
-    const std::string outputPath   = FlagValue(args, "--output");
-    const float       ambientScale = FlagFloat(args, "--ambient-scale", 1.0f);
-    bool              noAA         = false;
+    const std::string scenarioPath   = FlagValue(args, "--scenario");
+    const std::string outputPath     = FlagValue(args, "--output");
+    const std::string diagnosticName = FlagValue(args, "--diagnostic");
+    const auto        diagnostic     = ParseDiagnosticCapture(diagnosticName);
+    const float       ambientScale   = FlagFloat(args, "--ambient-scale", 1.0f);
+    bool              noAA           = false;
 
     std::vector<char*> coreArgs;
     coreArgs.reserve(args.size());
     for (size_t i = 0; i < args.size(); ++i) {
         const std::string_view arg = args[i];
-        if (arg == "--scenario" || arg == "--output" || arg == "--ambient-scale") {
+        if (arg == "--scenario" || arg == "--output" || arg == "--ambient-scale" || arg == "--diagnostic") {
             ++i; // skip this flag's value
-        } else if (arg.starts_with("--scenario=") || arg.starts_with("--output=") || arg.starts_with("--ambient-scale=")) {
+        } else if (arg.starts_with("--scenario=") || arg.starts_with("--output=") || arg.starts_with("--ambient-scale=") ||
+                   arg.starts_with("--diagnostic=")) {
             // consumed inline
         } else if (arg == "--no-aa") {
             noAA = true;
@@ -552,6 +663,14 @@ auto main(int argc, char* argv[]) -> int {
 
     if (scenarioPath.empty() || outputPath.empty()) {
         ZHLN::Log("Fidelity harness: --scenario <file.json> and --output <file.pam> are required.");
+        return EXIT_FAILURE;
+    }
+    const bool diagnosticFlagPresent = std::ranges::any_of(args, [](const char* arg) {
+        const std::string_view flag(arg);
+        return flag == "--diagnostic" || flag.starts_with("--diagnostic=");
+    });
+    if (!diagnostic || (diagnosticFlagPresent && diagnosticName.empty())) {
+        ZHLN::Log("[Fidelity] Unknown/empty --diagnostic mode. Use opaque-only, dielectric-specular, transmission-coverage, or transmission-no-iridescence.");
         return EXIT_FAILURE;
     }
 
@@ -688,6 +807,9 @@ auto main(int argc, char* argv[]) -> int {
     // Defensively remove any scene lights: neither the model nor the default
     // scene may add unauthored point lights to the panorama-only scenario.
     StripSceneLights(*engine);
+    if (!ApplyDiagnosticCapture(*engine, *diagnostic)) {
+        return EXIT_FAILURE;
+    }
 
     // Tick several frames so descriptor sets, async uploads and any late
     // resource publishes settle before the capture — the same settle pattern
