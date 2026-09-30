@@ -77,8 +77,11 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
                     float sampleSolidAngle = 1.0f / (float(samples) * max(pdf, 1e-6f));
                     float sinTheta = max(sqrt(max(1.0f - L.y * L.y, 0.0f)), minSinTheta);
                     float texelSolidAngle = texelSolidAngleScale * sinTheta;
+                    // Overlap neighboring GGX sample footprints by 4x (one source mip),
+                    // as in cmgen. Without overlap, the first rough HDR mip can
+                    // still read isolated, very bright panorama texels at LOD 0.
                     // A mip covers 4x the area of its parent, hence 0.5*log2.
-                    mipLevel = clamp(0.5f * log2(sampleSolidAngle / texelSolidAngle), 0.0f, float(sourceMipLevels - 1u));
+                    mipLevel = clamp(0.5f * log2(4.0f * sampleSolidAngle / texelSolidAngle), 0.0f, float(sourceMipLevels - 1u));
                 }
                 acc += SampleEnvironment(L, mipLevel) * NdotL;
                 totalWeight += NdotL;
