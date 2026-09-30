@@ -252,6 +252,19 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
         },
         instances.data(), static_cast<uint32_t>(instances.size())
     );
+
+    // The generator's Filament stills never play a glTF animation. Keep the
+    // AnimatorComponent for static skinning/bind-pose evaluation, but disable
+    // the prefab factory's automatic first-clip playback. Otherwise our eight
+    // settle ticks advance "Individuals" in MorphStressTest: its first target
+    // lifts the yellow block while the untouched blocks stay level.
+    if (written > 0 && !prefab->animations.empty() &&
+        !engine.GetRegistry().Patch<ZHLN::Components::AnimatorComponent>(instances.front(), [](auto& animator) {
+            animator.currentTrackIdx = -1;
+        })) {
+        ZHLN::Log("[Fidelity] Animated prefab '{}' has no animator root.", virtualPath);
+        return 0;
+    }
     return written;
 }
 

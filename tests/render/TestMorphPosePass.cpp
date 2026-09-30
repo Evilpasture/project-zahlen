@@ -21,7 +21,7 @@
 //
 // This suite also checks the draw boundary: DrawParams owns its four morph
 // weights, so clearing the source component cannot change a pending draw.
-// The three pose-pass claims are:
+// The pose-pass claims are:
 //
 //   1. The pose pass writes weights only into a MorphTargetComponent that
 //      already exists. It never inserts one, on any entity, however many
@@ -36,17 +36,15 @@
 //      silently stops writing looks exactly like a pass with nothing to do, so
 //      the last case renders a fully-weighted mesh and demands the silhouette
 //      actually change.
+//   4. With no clip selected, the animator leaves the factory's authored morph
+//      weights in place through the fidelity harness's settle ticks, rather
+//      than overwriting them with values from the first clip.
 //
-// The prefab is built by hand rather than imported, and that is a statement
-// about the tree rather than a shortcut: extras/glTF parses `targets` into
-// PrimitiveJob::tempDeltas / activeMorphCount but nothing ever assigns either,
-// so no prefab the importer can produce has morph deltas, and every model in
-// resources/ is imported without them. A test that went through the importer
-// would be measuring the absence of a producer. Building the ModelPrefab
-// directly runs the same instantiate -> pose -> extract -> shader path with the
-// fields a producer will fill in; when the importer (or the cooker) starts
-// setting activeMorphCount, this suite starts covering it for free, because a
-// factory-attached component is already what it asserts on.
+// The miniature prefab is built by hand so the tests can control the active
+// clip, nonzero default weights and morph deltas independently of an external
+// asset. extras/glTF now populates those fields for imported glTF primitives
+// (up to four targets). This fixture exercises the same instantiate -> pose ->
+// extract -> shader path with a predictable authored base pose.
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
@@ -85,6 +83,8 @@ enum class MorphPosePassTestError : uint8_t {
     CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"Frame capture failed during the morph deformation test."> {}),
     MorphDeformationNotVisible ZHLN_ANNOTATION(ZHLN::Description<"Fully weighted morph targets did not change the rendered frame."> {}),
     MorphWeightsBorrowed ZHLN_ANNOTATION(ZHLN::Description<"DrawParams borrowed morph weights instead of owning four floats."> {}),
+    IdleAnimatorMissing ZHLN_ANNOTATION(ZHLN::Description<"An animated prefab had no animator to leave at its authored pose."> {}),
+    IdleMorphWeightsChanged ZHLN_ANNOTATION(ZHLN::Description<"An idle animator changed the authored default morph weights during settle frames."> {}),
 };
 
 struct MorphPosePassSuite {
@@ -282,6 +282,48 @@ struct MorphPosePassSuite {
             if (!ZHLN::Test::ExpectEq(params.morphWeights, (std::array<float, 4> {0.25f, 0.5f, 0.75f, 1.0f})) ||
                 !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, (std::array<float, 4> {}))) {
                 return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
+            }
+            return {};
+        }
+
+        // Filament's stills leave animations unplayed. An animator with no
+        // selected clip must keep the glTF node/mesh weights from the factory
+        // throughout the harness's settle frames, even when a weights clip
+        // exists and would normally override them on the first tick.
+        std::expected<void, ZHLN::ErrorCode> idle_animator_preserves_authored_morph_weights() {
+            auto engine = MorphPosePassSuite::CreateTestEngine();
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(MorphPosePassTestError::EngineInitFailed);
+            }
+
+            auto& reg = engine->GetRegistry();
+            auto& rc  = engine->GetRenderContext();
+            auto material = MorphPosePassSuite::CreateMorphMaterial(rc);
+            if (!material) {
+                return std::unexpected(MorphPosePassTestError::MaterialCreationFailed);
+            }
+
+            auto built = MorphPosePassSuite::BuildMorphPrefab(rc, /*degenerateClip=*/false);
+            auto instances = MorphPosePassSuite::SpawnInstances(*engine, built.prefab, *material, 1);
+            if (instances.size() != 1) {
+                return std::unexpected(MorphPosePassTestError::InstanceSpawnFailed);
+            }
+            if (!reg.Patch<ZHLN::Components::AnimatorComponent>(instances[0].root, [](auto& animator) {
+                    animator.currentTrackIdx = -1;
+                })) {
+                return std::unexpected(MorphPosePassTestError::IdleAnimatorMissing);
+            }
+
+            ZHLN::Test::Headless::TickFrames(*engine, 8); // fidelity harness settle frames
+            const auto* morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
+            if (!ZHLN::Test::ExpectTrue(morph != nullptr)) {
+                return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
+            }
+            const auto expected = std::array<float, 4> {
+                MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f
+            };
+            if (!ZHLN::Test::ExpectEq(morph->weights, expected)) {
+                return std::unexpected(MorphPosePassTestError::IdleMorphWeightsChanged);
             }
             return {};
         }

@@ -42,6 +42,11 @@ this harness builds none of them. Specifically:
   was pushing neutral tonemapping into its pale-highlight desaturation. This
   is an import-unit fix, not an image-grade adjustment.
 * **No floor.** No `CreatePlane`, nothing to bounce light.
+* **Static glTF pose.** An animator is retained where needed for skinning and
+  bind-pose evaluation, but no clip is selected: the generator's Filament
+  renderer does not play animations for its stills. Authored node/mesh morph
+  weights are preserved while the harness settles eight frames. Auto-playing
+  the first clip made the captured pose depend on render/load time.
 * **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
   `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
   `saturation = 1`, identity colour filter. The blit writes linear color; the
@@ -217,6 +222,19 @@ metallic factor or globally raise exposure to chase one viewer's golden; for
 closer parity, compare a common tone map and inspect the HDR prefilter and
 rough-metal specular energy across other scenarios before changing the PBR
 model. Zahlen's simpler `ACESFilm` option is **not** the Three.js ACES shader.
+
+For **`MorphStressTest`**, run
+`SCENARIO=khronos-MorphStressTest ./scripts/run_fidelity.sh -j1` and compare
+with `filament-golden.png`: the yellow block's top should be level with the
+untouched green block, not raised. This is the *base pose*, not a failure to
+import the first morph target. The official mesh has eight targets, and its
+first `Individuals` clip begins lifting target 0 (the yellow block) almost
+immediately. The prefab factory normally starts clip 0; letting the harness
+run it through the eight settle ticks produced a time-dependent raised yellow
+block that Filament's still does not have. Fidelity captures now leave the
+animator idle, preserving authored default weights. Zahlen currently imports
+only the **first four** targets; that separate limitation affects animated
+poses involving targets 4–7, not the **first** block's incorrect height here.
 
 For `SheenCloth`, the blue/black weave should repeat across the cloth instead
 of stretching into broad blue bands: its per-texture transform includes
