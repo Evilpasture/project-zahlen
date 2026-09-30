@@ -6,17 +6,14 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/FileSystem/EnvironmentImage.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
-#include <string_view>
 #include <vector>
 
-namespace ZHLN {
-
-class AssetManager;
+namespace ZHLN::FS {
 
 inline constexpr uint32_t kCookedRadianceMagic   = 0x3144525A;
 inline constexpr uint32_t kCookedRadianceVersion = 1;
@@ -36,12 +33,8 @@ enum class RadianceAssetError : uint8_t {
     LdrDecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"LDR JPEG radiance image could not be decoded"> {}),
 };
 
-struct RadianceMap {
-    uint32_t           width       = 0;
-    uint32_t           height      = 0;
-    std::vector<float> rgba;
-    uint64_t           contentHash = 0;
-};
+// The codec's internal name for the transferable decoded image value.
+using RadianceMap = LinearImage;
 
 [[nodiscard]] inline auto HashRadiancePixels(const float* rgba, uint32_t width, uint32_t height) noexcept -> uint64_t {
     uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
@@ -57,6 +50,4 @@ struct RadianceMap {
 
 [[nodiscard]] auto EncodeCookedRadiance(const RadianceMap& map) -> std::vector<std::byte>;
 
-[[nodiscard]] auto LoadRadianceMap(AssetManager& assets, std::string_view path) -> std::expected<const RadianceMap*, ErrorCode>;
-
-}
+} // namespace ZHLN::FS

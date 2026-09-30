@@ -6,11 +6,11 @@
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -72,16 +72,15 @@ namespace {
     if (env == nullptr || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
-    auto loaded = LoadRadianceMap(engine.GetAssetManager(), std::string_view(env->source));
+    auto loaded = engine.GetAssetManager().LoadRadiance(std::string_view(env->source));
     if (!loaded) {
         Log("[IBL] Failed to load radiance '{}': {}", std::string_view(env->source), loaded.error());
         return std::unexpected(loaded.error());
     }
-    const RadianceMap& map = **loaded;
     return rc.SetEnvironmentRadiance({
-        .rgba         = map.rgba,
-        .extent       = {.width = map.width, .height = map.height},
-        .contentHash  = map.contentHash,
+        .rgba         = loaded->rgba,
+        .extent       = {.width = loaded->width, .height = loaded->height},
+        .contentHash  = loaded->contentHash,
         .renderSkybox = env->renderSkybox != 0,
     });
 }

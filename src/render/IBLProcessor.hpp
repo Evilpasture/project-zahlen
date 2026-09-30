@@ -6,11 +6,10 @@
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Resources.hpp"
-#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -20,6 +19,10 @@
 #include <utility>
 
 namespace ZHLN::Vk {
+
+// GPU bake budget; the filesystem decoder enforces the same maximum before
+// handing pixels to the renderer.
+inline constexpr uint32_t kMaxEnvironmentRadianceExtent = 8192;
 
 enum class EnvironmentBakeError : uint8_t {
     RadianceTooLarge ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect exceeds the bake size limit"> {}) = 1,
@@ -37,7 +40,7 @@ class IBLProcessor {
         int          renderSkybox;
     };
 
-    static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}, const RadianceSource& radiance = {})
+    static auto Bake(RenderContext::Impl& impl, const EnvironmentSettings& sky = {}, const RadianceSource& radiance = {})
         -> std::expected<IBLPayload, ZHLN::ErrorCode> {
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
@@ -45,7 +48,7 @@ class IBLProcessor {
         constexpr size_t   kSHBytes   = sizeof(JPH::Vec4) * 9;
 
         const bool hasRadiance = radiance.rgba != nullptr && radiance.width > 0 && radiance.height > 0;
-        if (hasRadiance && (radiance.width > kMaxRadianceExtent || radiance.height > kMaxRadianceExtent)) {
+        if (hasRadiance && (radiance.width > kMaxEnvironmentRadianceExtent || radiance.height > kMaxEnvironmentRadianceExtent)) {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
         const VkFormat cubeFormat = hasRadiance ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
@@ -69,6 +72,12 @@ class IBLProcessor {
         const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
         const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
+        const auto toVec4 = [](const std::array<float, 4>& values) {
+            return JPH::Vec4(values[0], values[1], values[2], values[3]);
+        };
+        const JPH::Vec4 skyZenith  = toVec4(sky.skyZenith);
+        const JPH::Vec4 skyHorizon = toVec4(sky.skyHorizon);
+        const JPH::Vec4 skyGround  = toVec4(sky.skyGround);
 
         // These pipeline wrappers are RAII Vulkan objects. The VMA resources
         // below are not; their lexical guard covers every early return.
@@ -149,7 +158,7 @@ class IBLProcessor {
         if (cpuSourceMips)
             ZHLN::Log("[IBL] FP32 linear blit unsupported; staging the radiance mip chain on the CPU.");
 
-        std::array<size_t, GetMipLevels(kMaxRadianceExtent, kMaxRadianceExtent)> sourceMipOffsets {};
+        std::array<size_t, GetMipLevels(kMaxEnvironmentRadianceExtent, kMaxEnvironmentRadianceExtent)> sourceMipOffsets {};
         size_t stagedFloats = static_cast<size_t>(uploadWidth) * uploadHeight * 4u;
         if (cpuSourceMips) {
             for (uint32_t mip = 1; mip < sourceMipLevels; ++mip) {
@@ -186,9 +195,9 @@ class IBLProcessor {
             .outAddr      = impl.ctx.BufferAddress(state.shGpu.Handle()),
             .sampleCount  = 16384,
             .hasRadiance  = hasRadianceWord,
-            .skyZenith    = sky.skyZenith,
-            .skyHorizon   = sky.skyHorizon,
-            .skyGround    = sky.skyGround,
+            .skyZenith    = skyZenith,
+            .skyHorizon   = skyHorizon,
+            .skyGround    = skyGround,
             .sunDir       = sunDir,
         };
 
@@ -287,9 +296,9 @@ class IBLProcessor {
                         .face        = face,
                         .sampleCount = sampleCount,
                         .hasRadiance = hasRadianceWord,
-                        .skyZenith   = sky.skyZenith,
-                        .skyHorizon  = sky.skyHorizon,
-                        .skyGround   = sky.skyGround,
+                        .skyZenith   = skyZenith,
+                        .skyHorizon  = skyHorizon,
+                        .skyGround   = skyGround,
                         .sunDir      = sunDir,
                     };
                     specPass->DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(

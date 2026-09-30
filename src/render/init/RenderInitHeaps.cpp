@@ -5,13 +5,26 @@
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <array>
 #include <cstring>
 
 namespace ZHLN {
+
+namespace {
+
+[[nodiscard]] auto HashEnvironmentPixels(const EnvironmentRadianceDesc& desc) noexcept -> uint64_t {
+    const uint32_t width = desc.extent.width;
+    const uint32_t height = desc.extent.height;
+    uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
+    hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
+    hash ^= Hash64(reinterpret_cast<const char*>(desc.rgba.data()), desc.rgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    return hash == 0 ? 1 : hash;
+}
+
+} // namespace
 
 enum class BindlessSetupError : uint8_t {
     DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices"> {}) = 1,
@@ -388,7 +401,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
 auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl      = _impl.get();
     const bool  hasPixels = !desc.rgba.empty();
-    if (hasPixels && (desc.extent.width > kMaxRadianceExtent || desc.extent.height > kMaxRadianceExtent)) {
+    if (hasPixels && (desc.extent.width > Vk::kMaxEnvironmentRadianceExtent || desc.extent.height > Vk::kMaxEnvironmentRadianceExtent)) {
         return std::unexpected(Vk::EnvironmentBakeError::RadianceTooLarge);
     }
     if ((hasPixels &&
@@ -400,7 +413,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
     uint64_t hash = 0;
     int      mode = 0;
     if (hasPixels) {
-        hash = desc.contentHash != 0 ? desc.contentHash : HashRadiancePixels(desc.rgba.data(), desc.extent.width, desc.extent.height);
+        hash = desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc);
         mode = static_cast<int>(desc.renderSkybox) != 0 ? 1 : 2;
     }
     if (impl->iblPayload.contentHash == hash && impl->iblPayload.environmentMode == mode) {
@@ -411,11 +424,9 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         return {};
     }
 
-    Components::PostProcessSettingsComponent sky {};
-    const auto&                              env = impl->settings.environment;
-    sky.skyZenith                                = JPH::Vec4(env.skyZenith[0], env.skyZenith[1], env.skyZenith[2], env.skyZenith[3]);
-    sky.skyHorizon                               = JPH::Vec4(env.skyHorizon[0], env.skyHorizon[1], env.skyHorizon[2], env.skyHorizon[3]);
-    sky.skyGround                                = JPH::Vec4(env.skyGround[0], env.skyGround[1], env.skyGround[2], env.skyGround[3]);
+    // RenderSystem already translated the ECS settings into GraphicsSettings.
+    // Keep that boundary here instead of reconstructing an ECS component.
+    const auto& sky = impl->settings.environment;
 
     Vk::IBLProcessor::RadianceSource source {};
     if (hasPixels) {

@@ -5,6 +5,8 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <memory>
+#include <utility>
 
 namespace ZHLN {
 
@@ -116,12 +118,24 @@ uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t m
     return _fontCache.GetAll(outFonts, maxCount);
 }
 
-RadianceMap* AssetManager::GetCachedRadiance(uint64_t hash) {
-    return _radianceCache.Find(hash);
-}
-
-void AssetManager::CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map) {
-    _radianceCache.Insert(hash, std::move(map));
+auto AssetManager::LoadRadiance(std::string_view path) -> std::expected<RadianceView, ErrorCode> {
+    const uint64_t id = HashAssetPath(path);
+    const FS::LinearImage* map = _radianceCache.Find(id);
+    if (map == nullptr) {
+        auto decoded = FS::ReadEnvironmentImage(_vfs, path);
+        if (!decoded) {
+            return std::unexpected(decoded.error());
+        }
+        auto owned = std::make_unique<FS::LinearImage>(std::move(*decoded));
+        map = owned.get();
+        _radianceCache.Insert(id, std::move(owned));
+    }
+    return RadianceView {
+        .rgba        = map->rgba,
+        .width       = map->width,
+        .height      = map->height,
+        .contentHash = map->contentHash,
+    };
 }
 
 }

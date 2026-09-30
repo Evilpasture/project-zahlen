@@ -1,8 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/RadianceMap.hpp>
-#include <Zahlen/AssetManager.hpp>
+#include "RadianceMap.hpp"
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <stb_image.h>
 
 #include <array>
@@ -15,7 +15,7 @@
 #include <string>
 #include <utility>
 
-namespace ZHLN {
+namespace ZHLN::FS {
 
 namespace {
 
@@ -383,11 +383,11 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     return map;
 }
 
-auto ReadAssetBytes(AssetManager& assets, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
-    const size_t vfsSize = assets.ReadFile(path, nullptr, 0);
+auto ReadAssetBytes(const VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
+    const size_t vfsSize = vfs.ReadFile(path, nullptr, 0);
     if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
         std::vector<std::byte> bytes(vfsSize);
-        if (assets.ReadFile(path, bytes.data(), bytes.size()) == vfsSize) {
+        if (vfs.ReadFile(path, bytes.data(), bytes.size()) == vfsSize) {
             return bytes;
         }
     }
@@ -447,26 +447,15 @@ auto EncodeCookedRadiance(const RadianceMap& map) -> std::vector<std::byte> {
     return out;
 }
 
-auto LoadRadianceMap(AssetManager& assets, std::string_view path) -> std::expected<const RadianceMap*, ErrorCode> {
+auto ReadEnvironmentImage(const VirtualFileSystem& vfs, std::string_view path) -> std::expected<LinearImage, ErrorCode> {
     if (path.empty()) {
         return std::unexpected(RadianceAssetError::NotFound);
     }
-    const uint64_t id = HashAssetPath(path);
-    if (const RadianceMap* cached = assets.GetCachedRadiance(id); cached != nullptr) {
-        return cached;
-    }
-    auto bytes = ReadAssetBytes(assets, path);
+    auto bytes = ReadAssetBytes(vfs, path);
     if (!bytes) {
         return std::unexpected(bytes.error());
     }
-    auto decoded = DecodeRadiance(*bytes);
-    if (!decoded) {
-        return std::unexpected(decoded.error());
-    }
-    auto owned = std::make_unique<RadianceMap>(std::move(*decoded));
-    const RadianceMap* raw = owned.get();
-    assets.CacheRadiance(id, std::move(owned));
-    return raw;
+    return DecodeRadiance(*bytes);
 }
 
-}
+} // namespace ZHLN::FS

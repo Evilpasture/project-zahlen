@@ -186,6 +186,9 @@ zahlen_add_cpu_test_group(CPU_Assets
     assets/TestRadiance.cpp
     assets/TestPackaging.cpp
 )
+# The asset suites launch zcook as an external program (including radiance
+# cooking); building just CPU_Assets must still produce that program.
+add_dependencies(CPU_Assets zcook)
 
 zahlen_add_cpu_test_group(CPU_Audio
     audio/RunAudioTests.cpp

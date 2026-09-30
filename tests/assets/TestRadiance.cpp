@@ -2,11 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/CookerFixture.hpp"
 #include <Zahlen/AssetManager.hpp>
-#include <Zahlen/RadianceMap.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <span>
 #include <string>
 #include <vector>
@@ -15,6 +21,7 @@ enum class RadianceTestError : uint8_t {
     DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"A synthetic radiance blob did not decode to the expected pixels.">{}) = 1,
     CookedRoundTripFailed ZHLN_ANNOTATION(ZHLN::Description<"The cooked ZRD1 container did not round-trip.">{}),
     CacheFailed ZHLN_ANNOTATION(ZHLN::Description<"AssetManager did not cache or drop the radiance map.">{}),
+    FixtureFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not write or cook the synthetic radiance fixture.">{}),
 };
 
 namespace {
@@ -98,13 +105,34 @@ constexpr std::array<uint8_t, 287> kLdrJpeg {{
     0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00, 0x1d, 0xc2, 0x75, 0x18, 0x7f, 0xff, 0xd9,
 }};
 
+bool WriteRadianceFile(const fs::path& path, std::span<const std::byte> bytes) {
+    std::ofstream out(path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    return out.good();
+}
+
+struct RadianceFixture {
+    TempSandbox sandbox {"radiance"};
+    ZHLN::AssetManager assets;
+
+    [[nodiscard]] auto Decode(std::span<const std::byte> bytes, std::string_view name = "environment.hdr")
+        -> std::expected<ZHLN::RadianceView, ZHLN::ErrorCode> {
+        const fs::path path = sandbox.SubPath(name);
+        if (!WriteRadianceFile(path, bytes)) {
+            return std::unexpected(RadianceTestError::FixtureFailed);
+        }
+        return assets.LoadRadiance(path.string());
+    }
+};
+
 } // namespace
 
 struct RadianceTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> flat_rgbe_decodes_top_down() {
             const auto bytes = FlatHdr(4, 2, "-Y", 1.0f, 10, 20);
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes);
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -128,7 +156,8 @@ struct RadianceTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> positive_y_is_flipped_to_top_down() {
             const auto bytes = FlatHdr(4, 2, "+Y", 1.0f, 10, 20);
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes);
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -141,7 +170,8 @@ struct RadianceTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> exposure_scales_pixels() {
             const auto bytes = FlatHdr(4, 1, "-Y", 2.0f, 10, 10);
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes);
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -160,7 +190,8 @@ struct RadianceTestSuite {
             for (const uint8_t red: reds) {
                 AppendPixel(bytes, red, 0, 0);
             }
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes);
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -176,7 +207,8 @@ struct RadianceTestSuite {
             for (uint32_t x = 0; x < 8; ++x) {
                 AppendPixel(bytes, static_cast<uint8_t>(x + 1), 0, 0);
             }
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes);
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -188,7 +220,8 @@ struct RadianceTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> rle_scanline_decodes() {
-            auto decoded = ZHLN::DecodeRadiance(RleHdr());
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(RleHdr());
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -200,21 +233,32 @@ struct RadianceTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> cooked_container_round_trips() {
-            auto decoded = ZHLN::DecodeRadiance(RleHdr());
-            if (!decoded) {
-                return std::unexpected(decoded.error());
+            RadianceFixture fixture;
+            const fs::path rawPath    = fixture.sandbox.SubPath("environment.hdr");
+            const fs::path cookedPath = fixture.sandbox.SubPath("environment.zrd");
+            if (!WriteRadianceFile(rawPath, RleHdr())) {
+                return std::unexpected(RadianceTestError::FixtureFailed);
             }
-            const auto cooked = ZHLN::EncodeCookedRadiance(*decoded);
-            if (cooked.size() < 4 || static_cast<uint8_t>(cooked[0]) != 0x5A || static_cast<uint8_t>(cooked[1]) != 0x52 ||
-                static_cast<uint8_t>(cooked[2]) != 0x44 || static_cast<uint8_t>(cooked[3]) != 0x31) {
+            const fs::path zcook = FindZcookExecutable();
+            if (zcook.empty() || RunZcook(zcook, std::format(R"(tex -i "{}" -o "{}")", rawPath.string(), cookedPath.string())) != 0) {
+                return std::unexpected(RadianceTestError::FixtureFailed);
+            }
+            std::ifstream cookedFile(cookedPath, std::ios::binary);
+            std::array<uint32_t, 5> header {};
+            cookedFile.read(reinterpret_cast<char*>(header.data()), sizeof(header));
+            if (!ZHLN::Test::ExpectTrue(cookedFile.good()) || !ZHLN::Test::ExpectEq(header[0], 0x3144525Au) ||
+                !ZHLN::Test::ExpectEq(header[1], 1u) || !ZHLN::Test::ExpectEq(header[2], 8u) ||
+                !ZHLN::Test::ExpectEq(header[3], 1u) || !ZHLN::Test::ExpectEq(header[4], 8u * 4u * sizeof(float))) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
-            auto again = ZHLN::DecodeRadiance(cooked);
-            if (!again) {
-                return std::unexpected(again.error());
+            auto decoded = fixture.assets.LoadRadiance(rawPath.string());
+            auto again   = fixture.assets.LoadRadiance(cookedPath.string());
+            if (!decoded || !again) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
-            if (!ZHLN::Test::ExpectEq(again->width, decoded->width) || !ZHLN::Test::ExpectEq(again->contentHash, decoded->contentHash) ||
-                !ZHLN::Test::ExpectEq(again->rgba[0], decoded->rgba[0])) {
+            if (!ZHLN::Test::ExpectEq(again->width, decoded->width) || !ZHLN::Test::ExpectEq(again->height, decoded->height) ||
+                !ZHLN::Test::ExpectEq(again->contentHash, decoded->contentHash) ||
+                !ZHLN::Test::ExpectTrue(std::ranges::equal(again->rgba, decoded->rgba))) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
             return {};
@@ -222,7 +266,8 @@ struct RadianceTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> ldr_jpeg_is_linearized_for_ibl() {
             const auto bytes = std::as_bytes(std::span {kLdrJpeg});
-            auto decoded = ZHLN::DecodeRadiance(bytes);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(bytes, "environment.jpg");
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -240,20 +285,15 @@ struct RadianceTestSuite {
                 !ZHLN::Test::ExpectTrue(decoded->contentHash != 0)) {
                 return std::unexpected(RadianceTestError::DecodeFailed);
             }
-            const auto cooked = ZHLN::EncodeCookedRadiance(*decoded);
-            auto again = ZHLN::DecodeRadiance(cooked);
-            if (!again || !ZHLN::Test::ExpectEq(again->contentHash, decoded->contentHash) ||
-                !ZHLN::Test::ExpectTrue(again->rgba == decoded->rgba)) {
-                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
-            }
             return {};
         }
 
         std::expected<void, ZHLN::ErrorCode> truncated_ldr_jpeg_is_rejected() {
             const auto headerOnly = std::as_bytes(std::span {kLdrJpeg}).first(3);
-            auto decoded = ZHLN::DecodeRadiance(headerOnly);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(headerOnly, "truncated.jpg");
             if (!ZHLN::Test::ExpectFalse(decoded.has_value()) ||
-                !ZHLN::Test::ExpectTrue(decoded.error().Is(ZHLN::RadianceAssetError::LdrDecodeFailed))) {
+                !ZHLN::Test::ExpectEq(ZHLN::Error(decoded.error()).Name(), std::string_view {"LdrDecodeFailed"})) {
                 return std::unexpected(RadianceTestError::DecodeFailed);
             }
             return {};
@@ -261,7 +301,8 @@ struct RadianceTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> garbage_is_rejected() {
             const std::byte junk[] = {std::byte {1}, std::byte {2}, std::byte {3}, std::byte {4}};
-            auto decoded = ZHLN::DecodeRadiance(junk);
+            RadianceFixture fixture;
+            auto decoded = fixture.Decode(junk);
             if (!ZHLN::Test::ExpectTrue(!decoded.has_value())) {
                 return std::unexpected(RadianceTestError::DecodeFailed);
             }
@@ -269,18 +310,30 @@ struct RadianceTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> cache_drops_on_clear() {
-            ZHLN::AssetManager assets;
-            auto decoded = ZHLN::DecodeRadiance(RleHdr());
-            if (!decoded) {
-                return std::unexpected(decoded.error());
+            RadianceFixture fixture;
+            const fs::path path = fixture.sandbox.SubPath("environments/unit.hdr");
+            constexpr std::string_view virtualPath = "environments/unit.hdr";
+            if (!fixture.assets.MountDirectory(fixture.sandbox.rootPath.string()) || !WriteRadianceFile(path, RleHdr())) {
+                return std::unexpected(RadianceTestError::FixtureFailed);
             }
-            const uint64_t id = ZHLN::HashAssetPath("environments/unit.hdr");
-            assets.CacheRadiance(id, std::make_unique<ZHLN::RadianceMap>(std::move(*decoded)));
-            if (assets.GetCachedRadiance(id) == nullptr) {
+            const auto first = fixture.assets.LoadRadiance(virtualPath);
+            if (!first || !ZHLN::Test::ExpectEq(first->width, 8u)) {
                 return std::unexpected(RadianceTestError::CacheFailed);
             }
-            assets.ClearCache();
-            if (assets.GetCachedRadiance(id) != nullptr) {
+            if (!WriteRadianceFile(path, FlatHdr(4, 1, "-Y", 1.0f, 10, 10))) {
+                return std::unexpected(RadianceTestError::FixtureFailed);
+            }
+            const auto cached = fixture.assets.LoadRadiance(virtualPath);
+            if (!cached || !ZHLN::Test::ExpectEq(cached->rgba.data(), first->rgba.data()) ||
+                !ZHLN::Test::ExpectEq(cached->width, 8u)) {
+                return std::unexpected(RadianceTestError::CacheFailed);
+            }
+            const uint64_t oldHash = first->contentHash;
+            fixture.assets.ClearCache(); // invalidates both borrowed views
+            const auto reloaded = fixture.assets.LoadRadiance(virtualPath);
+            if (!reloaded || !ZHLN::Test::ExpectEq(reloaded->width, 4u) ||
+                !ZHLN::Test::ExpectEq(reloaded->rgba[0], 10.0f) ||
+                !ZHLN::Test::ExpectNe(reloaded->contentHash, oldHash)) {
                 return std::unexpected(RadianceTestError::CacheFailed);
             }
             return {};

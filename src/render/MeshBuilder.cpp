@@ -3,13 +3,10 @@
 
 #include "Resources.hpp"
 #include "Zahlen/Render/Render.hpp"
-#include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

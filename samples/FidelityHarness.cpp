@@ -33,6 +33,7 @@
 // error. See scripts/run_fidelity.sh for the driver that feeds it the Khronos
 // scenario set and compares the frames against the reference goldens.
 
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -45,7 +46,6 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -618,10 +618,10 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
-        // Validate the decoded panorama, not just its existence. In particular,
-        // Khronos' LDR case is a JPEG: a file probe succeeds even if the IBL
-        // loader cannot decode it. Reuse this cached map in the render ticks.
-        if (auto radiance = ZHLN::LoadRadianceMap(engine->GetAssetManager(), scenario.lighting); !radiance) {
+        // RenderSystem loads from AssetManager's cache. Preflight here so a
+        // malformed panorama cannot silently turn into a capture without IBL:
+        // ordinary render errors do not currently change Engine::Tick's status.
+        if (auto radiance = engine->GetAssetManager().LoadRadiance(scenario.lighting); !radiance) {
             ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, radiance.error());
             return EXIT_FAILURE;
         }

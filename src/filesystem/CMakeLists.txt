@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
+zahlen_transpile_sources(FILESYSTEM_RADIANCE_SOURCE RadianceMap.cpp)
+
 add_library(zahlen_filesystem STATIC
     FileSystemWatcher.cpp
     RuntimePaths.cpp
     VirtualFileSystem.cpp
     MappedFile.cpp
+    ${FILESYSTEM_RADIANCE_SOURCE}
 )
 
 set_target_properties(zahlen_filesystem PROPERTIES
@@ -19,10 +22,11 @@ set_target_properties(zahlen_filesystem PROPERTIES
 target_include_directories(zahlen_filesystem
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+target_include_directories(zahlen_filesystem SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/stb)
 
 target_link_libraries(zahlen_filesystem
     PUBLIC

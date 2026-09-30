@@ -5,18 +5,31 @@
 #pragma once
 
 #include <Zahlen/FileSystem/AssetCache.hpp>
+#include <Zahlen/FileSystem/EnvironmentImage.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/RadianceMap.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <cstdint>
+#include <expected>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
 
 class RenderContext;
+
+// Borrowed linear RGBA pixels from AssetManager's cache. The view remains
+// valid until ClearCache or the manager's destruction; never hold it across
+// either operation (or concurrently with a cache clear).
+struct RadianceView {
+    std::span<const float> rgba {};
+    uint32_t               width       = 0;
+    uint32_t               height      = 0;
+    uint64_t               contentHash = 0;
+};
 
 namespace TaskSystem {
 struct Counter;
@@ -128,8 +141,9 @@ class AssetManager {
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
-    RadianceMap* GetCachedRadiance(uint64_t hash);
-    void CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map);
+    // Decode a VFS or direct-path environment once, then return a borrowed
+    // view of the cached pixels. No filesystem decoder types escape this API.
+    [[nodiscard]] auto LoadRadiance(std::string_view path) -> std::expected<RadianceView, ErrorCode>;
 
     // Cached model parts own their GPU buffers, shared by all instances of
     // each prefab. The context must outlive the cache (Kernel enforces this).
@@ -159,7 +173,7 @@ class AssetManager {
 
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
-    FS::AssetCache<RadianceMap> _radianceCache;
+    FS::AssetCache<FS::LinearImage> _radianceCache;
 };
 
 }
