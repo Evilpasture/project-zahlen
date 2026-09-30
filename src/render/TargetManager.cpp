@@ -235,22 +235,11 @@ void TargetManager::RecreatePunctualShadowViews() noexcept {
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
-    const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-    const VkImageSubresourceRange clearRange = {
-        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel   = 0,
-        .levelCount     = VK_REMAINING_MIP_LEVELS,
-        .baseArrayLayer = 0,
-        .layerCount     = VK_REMAINING_ARRAY_LAYERS
-    };
-
-    const std::array targets3D = {_graph.voxelMedia.image.Handle(),   _graph.voxelLight.image.Handle(),      _graph.voxelIntegrated.image.Handle(),
-                                  _graph.voxelHistory.image.Handle(), _graph.voxelResolved.image.Handle()};
-    for (auto* const img: targets3D) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f},
+        _graph.voxelMedia, _graph.voxelLight, _graph.voxelIntegrated,
+        _graph.voxelHistory, _graph.voxelResolved
+    );
 
     const std::array colorTargets = {_graph.sceneColor.image.Handle(),
                                      _graph.velocityBuffer.image.Handle(),
@@ -291,10 +280,8 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
     );
 
-    const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
-    vkCmdClearColorImage(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
+    // Every Hi-Z mip begins at far depth and ends shader-readable.
+    Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }
 
 void TargetManager::Clear() noexcept {

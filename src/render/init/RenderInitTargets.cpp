@@ -62,20 +62,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);
 
-        const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-        const VkImageSubresourceRange clearRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = VK_REMAINING_MIP_LEVELS,
-            .baseArrayLayer = 0,
-            .layerCount     = VK_REMAINING_ARRAY_LAYERS
-        };
-        for (const auto& history: accumulationHistory) {
-            const auto img = history.image.Handle();
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
+        Vk::ClearColorAndTransition(cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
             heapManager.WriteImage(decalDepthSlot, presenter.depthTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

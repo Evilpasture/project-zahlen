@@ -7,7 +7,9 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <concepts>
 #include <optional>
+#include <type_traits>
 
 namespace ZHLN::Vk {
 
@@ -253,6 +255,58 @@ void TransitionLayout(
     uint32_t           baseMip  = 0,
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
+
+// Unlike the aspect/mip overload, transitions precisely the requested layers
+// as well. A subresource clear must not change the layout of other layers.
+template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept;
+
+// Borrow an image handle. Owning targets expose image.Handle(); slices and
+// bare images expose Handle() or the raw image member. Constrain wrapper
+// handles to VkImage rather than accepting a buffer or image view by accident.
+template <typename T>
+concept ColorClearTarget =
+    std::same_as<std::remove_cvref_t<T>, VkImage> ||
+    requires(const T& target) { { target.image.Handle() } -> std::same_as<VkImage>; } ||
+    requires(const T& target) { { target.Handle() } -> std::same_as<VkImage>; } ||
+    requires(const T& target) { { target.image } -> std::convertible_to<VkImage>; };
+
+template <ColorClearTarget T>
+[[nodiscard]] constexpr auto GetVkImage(const T& target) noexcept -> VkImage;
+
+[[nodiscard]] constexpr auto ToVkClearColor(const Color4& color) noexcept -> VkClearColorValue;
+[[nodiscard]] constexpr auto ToVkClearColor(float scalar) noexcept -> VkClearColorValue;
+[[nodiscard]] constexpr auto ToVkClearColor(const VkClearColorValue& color) noexcept -> VkClearColorValue;
+
+template <typename T>
+concept ClearColorSource = std::same_as<std::remove_cvref_t<T>, Color4> ||
+                           std::same_as<std::remove_cvref_t<T>, float> ||
+                           std::same_as<std::remove_cvref_t<T>, VkClearColorValue>;
+
+inline constexpr VkImageSubresourceRange kAllColorSubresources = {
+    .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+    .baseMipLevel   = 0,
+    .levelCount     = VK_REMAINING_MIP_LEVELS,
+    .baseArrayLayer = 0,
+    .layerCount     = VK_REMAINING_ARRAY_LAYERS,
+};
+
+// Transfer clear only: every image must have VK_IMAGE_USAGE_TRANSFER_DST_BIT.
+// The color aspect of the requested mips/layers must be in InitialLayout (or
+// newly created with UNDEFINED); after the clear it is in FinalLayout. A null
+// image records nothing. Presentation images need an attachment load-op clear.
+template <VkImageLayout InitialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+          VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          ColorClearTarget Target, ClearColorSource Color>
+void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color,
+                             const VkImageSubresourceRange& range = kAllColorSubresources) noexcept;
+
+// The shared color/layouts expand to ordered, independent image clears.
+template <VkImageLayout InitialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+          VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          ClearColorSource Color, ColorClearTarget... Targets>
+    requires (sizeof...(Targets) > 1)
+void ClearColorAndTransition(VkCommandBuffer cmd, const Color& color, const Targets&... targets) noexcept;
 
 // Transfer clear only: image must have VK_IMAGE_USAGE_TRANSFER_DST_BIT.
 // For presentation images, clear through a color attachment load op instead.

@@ -132,12 +132,72 @@ inline void TransitionLayout(
     ImageBarrier(cmd, MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, aspect, baseMip, mipCount));
 }
 
-inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
-    // UNDEFINED -> TRANSFER_DST discards whatever the allocation happened to
-    // hold, which is exactly the contract of a frame that never wrote the
-    // image: nothing to preserve.
-    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
+template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept {
+    // MakeImageBarrier's ordinary form covers all layers from zero. A partial
+    // clear needs both transitions to match the exact range passed to Vulkan.
+    VkImageMemoryBarrier2 barrier = MakeImageBarrier(
+        MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, range.aspectMask, range.baseMipLevel, range.levelCount)
+    );
+    barrier.subresourceRange = range;
+    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+}
 
+template <ColorClearTarget T>
+constexpr auto GetVkImage(const T& target) noexcept -> VkImage {
+    if constexpr (std::same_as<std::remove_cvref_t<T>, VkImage>) {
+        return target;
+    } else if constexpr (requires { { target.image.Handle() } -> std::same_as<VkImage>; }) {
+        return target.image.Handle();
+    } else if constexpr (requires { { target.Handle() } -> std::same_as<VkImage>; }) {
+        return target.Handle();
+    } else {
+        return target.image;
+    }
+}
+
+constexpr auto ToVkClearColor(const Color4& color) noexcept -> VkClearColorValue {
+    return {.float32 = {color.r, color.g, color.b, color.a}};
+}
+
+constexpr auto ToVkClearColor(float scalar) noexcept -> VkClearColorValue {
+    return {.float32 = {scalar, scalar, scalar, scalar}};
+}
+
+constexpr auto ToVkClearColor(const VkClearColorValue& color) noexcept -> VkClearColorValue {
+    return color;
+}
+
+template <VkImageLayout InitialLayout, VkImageLayout FinalLayout, ColorClearTarget Target, ClearColorSource Color>
+inline void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color,
+                                    const VkImageSubresourceRange& range) noexcept {
+    static_assert(FinalLayout != VK_IMAGE_LAYOUT_UNDEFINED, "A cleared image cannot finish in UNDEFINED layout.");
+    const VkImage image = GetVkImage(target);
+    if (image == VK_NULL_HANDLE) return;
+
+    const VkClearColorValue clear = ToVkClearColor(color);
+    TransitionLayout<InitialLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image, range);
+    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
+    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, FinalLayout>(cmd, image, range);
+}
+
+template <VkImageLayout InitialLayout, VkImageLayout FinalLayout, ClearColorSource Color, ColorClearTarget... Targets>
+    requires (sizeof...(Targets) > 1)
+inline void ClearColorAndTransition(VkCommandBuffer cmd, const Color& color, const Targets&... targets) noexcept {
+    (ClearColorAndTransition<InitialLayout, FinalLayout>(cmd, targets, color), ...);
+}
+
+static_assert(ColorClearTarget<VkImage> && ColorClearTarget<ImageSlice> && !ColorClearTarget<Color4>);
+// 32-bit Vulkan headers may typedef all non-dispatchable handles to uint64_t.
+static_assert(std::same_as<VkImage, VkImageView> || !ColorClearTarget<VkImageView>);
+static_assert(std::same_as<VkImage, VkBuffer> || !ColorClearTarget<VkBuffer>);
+static_assert(ToVkClearColor(Color4 {0.25f, 0.5f, 0.75f, 1.0f}).float32[2] == 0.75f);
+static_assert(ToVkClearColor(1.0f).float32[3] == 1.0f);
+static_assert(ToVkClearColor(VkClearColorValue {.float32 = {0.1f, 0.2f, 0.3f, 0.4f}}).float32[1] == 0.2f);
+
+inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
+    // Retain the legacy mip-0/color-attachment contract; both barriers now
+    // cover exactly the layers being cleared, not unrelated array layers.
     const VkImageSubresourceRange range {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -145,9 +205,7 @@ inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, cons
         .baseArrayLayer = 0,
         .layerCount     = layerCount,
     };
-    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
-
-    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
+    ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image, color, range);
 }
 
 // Scoped RAII Layout Transition Implementations
