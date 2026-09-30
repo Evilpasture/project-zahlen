@@ -40,6 +40,7 @@
 // clang-format off
 #include "core/Extensions.hpp"
 #include "core/Features.hpp"
+#include "core/DeviceConfigurator.hpp"
 #include "diagnostics/DebugNames.hpp"
 #include "pipeline/Vertex.hpp"
 #include "core/Handles.hpp"

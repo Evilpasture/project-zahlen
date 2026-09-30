@@ -53,19 +53,21 @@ namespace {
     return false;
 }
 
-struct ChainHeader {
-    VkStructureType sType;
-    const void*     pNext;
-};
-static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2, pNext));
-
 [[nodiscard]] auto FeatureBitEnabled(const VkPhysicalDeviceFeatures2* root, VkStructureType sType, size_t bitOffset) noexcept -> bool {
-    for (const auto* cursor = reinterpret_cast<const ChainHeader*>(root); cursor != nullptr;
-         cursor = static_cast<const ChainHeader*>(cursor->pNext)) {
-        if (cursor->sType == sType) {
-            const auto* bit = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(cursor) + bitOffset);
-            return *bit == VK_TRUE;
+    // Chain elements are different Vulkan struct types; reading them through
+    // an unrelated C++ struct pointer violates strict aliasing. The shared
+    // sType/pNext header and VkBool32 fields are inspected as bytes instead.
+    for (const void* cursor = root; cursor != nullptr;) {
+        VkStructureType type = VK_STRUCTURE_TYPE_MAX_ENUM;
+        const void*     next = nullptr;
+        std::memcpy(&type, cursor, sizeof(type));
+        std::memcpy(&next, static_cast<const char*>(cursor) + offsetof(VkPhysicalDeviceFeatures2, pNext), sizeof(next));
+        if (type == sType) {
+            VkBool32 bit = VK_FALSE;
+            std::memcpy(&bit, static_cast<const char*>(cursor) + bitOffset, sizeof(bit));
+            return bit == VK_TRUE;
         }
+        cursor = next;
     }
     return false;
 }
@@ -78,7 +80,8 @@ static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2
     const bool id2Ext    = ExtensionEnabled(extensions, VK_KHR_PRESENT_ID_2_EXTENSION_NAME);
     const bool calibExt  = ExtensionEnabled(extensions, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME) ||
                           ExtensionEnabled(extensions, VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
-    const bool timingGroup = timingExt && id2Ext && calibExt;
+    // Closed-loop pacing also queries surface capabilities2 on the instance.
+    const bool timingGroup = timingExt && id2Ext && calibExt && vkGetPhysicalDeviceSurfaceCapabilities2KHR != nullptr;
 
     const bool fifoBit = FeatureBitEnabled(
         features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_KHR,
@@ -104,82 +107,7 @@ static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2
     };
 }
 
-
-struct BackendExtensions {
-    bool robustness2    = false;
-    bool deviceFaultKhr = false;
-    bool deviceFaultExt = false;
-    bool constantData   = false;
-    bool shaderAbort    = false;
-
-    [[nodiscard]] auto Names() const noexcept -> std::vector<const char*> {
-        std::vector<const char*> out;
-        out.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
-        if (robustness2) {
-            out.push_back(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
-        }
-        if (deviceFaultKhr) {
-            out.push_back(VK_KHR_DEVICE_FAULT_EXTENSION_NAME);
-        }
-        if (deviceFaultExt) {
-            out.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
-        }
-        if (constantData) {
-            out.push_back(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME);
-        }
-        if (shaderAbort) {
-            out.push_back(VK_KHR_SHADER_ABORT_EXTENSION_NAME);
-        }
-        return out;
-    }
-};
-
-[[nodiscard]] auto ScanBackendExtensions(VkPhysicalDevice physical) noexcept -> BackendExtensions {
-    if (physical == VK_NULL_HANDLE) {
-        return {};
-    }
-    const auto q = QueryDeviceExtensions(
-        physical, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, VK_KHR_DEVICE_FAULT_EXTENSION_NAME, VK_EXT_DEVICE_FAULT_EXTENSION_NAME,
-        VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, VK_KHR_SHADER_ABORT_EXTENSION_NAME
-    );
-    return BackendExtensions {
-        .robustness2    = q[0],
-        .deviceFaultKhr = q[1],
-        .deviceFaultExt = q[2],
-        .constantData   = q[3],
-        .shaderAbort    = q[4],
-    };
 }
-
-[[nodiscard]] auto BuildBackendChain(VkPhysicalDevice physical, ValidationMode validationMode) {
-    return FeatureChainBuilder(physical)
-        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) -> auto {
-            f.nullDescriptor = VK_TRUE;
-            if (validationMode == ZHLN_VALIDATION_GPU) {
-                f.robustBufferAccess2 = VK_TRUE;
-                f.robustImageAccess2  = VK_TRUE;
-            }
-        })
-        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) -> auto { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
-        .Optional<VkPhysicalDeviceFaultFeaturesKHR>([physical](auto& f) -> auto {
-            const auto supported            = QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesKHR>(physical);
-            f.deviceFault                   = VK_TRUE;
-            f.deviceFaultVendorBinary       = supported.deviceFaultVendorBinary;
-            f.deviceFaultReportMasked       = supported.deviceFaultReportMasked;
-            f.deviceFaultDeviceLostOnMasked = supported.deviceFaultDeviceLostOnMasked;
-        })
-        .Optional<VkPhysicalDeviceFaultFeaturesEXT>([physical](auto& f) -> auto {
-            const auto supported      = QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesEXT>(physical);
-            f.deviceFault             = VK_TRUE;
-            f.deviceFaultVendorBinary = supported.deviceFaultVendorBinary;
-        })
-        .Optional<VkPhysicalDeviceShaderConstantDataFeaturesKHR>([](auto& f) -> auto { f.shaderConstantData = VK_TRUE; })
-        .Optional<VkPhysicalDeviceShaderAbortFeaturesKHR>([](auto& f) -> auto { f.shaderAbort = VK_TRUE; })
-        .Build();
-}
-
-}
-
 
 std::expected<Vk::Instance, ZHLN::ErrorCode> Context::Builder::BuildInstance() noexcept {
     _instanceObject = Instance::Create(_appName, _appVersion, _instanceExtensions, _validationMode);
@@ -205,15 +133,44 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     ctx._surface  = _surface;
     ctx._physical = _physical;
 
-    const BackendExtensions backendExts = ScanBackendExtensions(_physical.handle);
-    auto                    backend     = BuildBackendChain(_physical.handle, _validationMode);
-
-    std::vector<const char*> extensions = _deviceExtensions;
-    if (const auto names = backendExts.Names(); !names.empty()) {
-        extensions.insert(extensions.end(), names.begin(), names.end());
+    auto backend = DeviceConfigurator<>(_physical.handle)
+        .RequireExtension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        .RequireExtension<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>(
+            VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME, [](auto& f) { f.dynamicRenderingUnusedAttachments = VK_TRUE; }
+        )
+        .OptionalExtension<VkPhysicalDeviceRobustness2FeaturesEXT>(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, [this](auto& f) {
+            f.nullDescriptor = VK_TRUE;
+            if (_validationMode == ZHLN_VALIDATION_GPU) {
+                f.robustBufferAccess2 = VK_TRUE;
+                f.robustImageAccess2  = VK_TRUE;
+            }
+        })
+        .OptionalExtension<VkPhysicalDeviceFaultFeaturesKHR>(VK_KHR_DEVICE_FAULT_EXTENSION_NAME, [](auto& f) {
+            f.deviceFault                   = VK_TRUE;
+            f.deviceFaultVendorBinary       = VK_TRUE;
+            f.deviceFaultReportMasked       = VK_TRUE;
+            f.deviceFaultDeviceLostOnMasked = VK_TRUE;
+        }, [](VkPhysicalDevice, const auto& enabled) { return enabled.deviceFault == VK_TRUE; })
+        .OptionalExtension<VkPhysicalDeviceFaultFeaturesEXT>(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, [](auto& f) {
+            f.deviceFault             = VK_TRUE;
+            f.deviceFaultVendorBinary = VK_TRUE;
+        }, [](VkPhysicalDevice, const auto& enabled) { return enabled.deviceFault == VK_TRUE; })
+        .OptionalExtension<VkPhysicalDeviceShaderConstantDataFeaturesKHR>(
+            VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, [](auto& f) { f.shaderConstantData = VK_TRUE; }
+        )
+        .OptionalExtension<VkPhysicalDeviceShaderAbortFeaturesKHR>(
+            VK_KHR_SHADER_ABORT_EXTENSION_NAME, [](auto& f) { f.shaderAbort = VK_TRUE; }
+        )
+        .Build();
+    if (!backend) {
+        return std::unexpected(backend.error());
     }
 
-    const VkPhysicalDeviceFeatures2* backendRoot = backend.GetRoot(_features);
+    std::vector<const char*> extensions = _deviceExtensions;
+    const std::vector<const char*>& backendExts = backend->extensions;
+    extensions.insert(extensions.end(), backendExts.begin(), backendExts.end());
+
+    const VkPhysicalDeviceFeatures2* backendRoot = backend->features.GetRoot(_features);
     const VkPhysicalDeviceFeatures2* root        = backendRoot != nullptr ? backendRoot : _features;
 
     const ZHLN_DeviceDesc device_desc = {
@@ -227,10 +184,20 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     if (const VkResult res = ZHLN_CreateDevice(&device_desc, &ctx._device); res != VK_SUCCESS) {
         return std::unexpected(ToFrameError(res));
     }
+    // The C ABI checks entry points/limits. Only advertise paths whose whole
+    // feature+extension bundle was actually negotiated into this device.
+    ctx._device.mesh_shader_enabled = ctx._device.mesh_shader_enabled &&
+        ExtensionEnabled(extensions, VK_EXT_MESH_SHADER_EXTENSION_NAME) &&
+        FeatureBitEnabled(root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, taskShader)) &&
+        FeatureBitEnabled(root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, meshShader));
+    ctx._device.ray_tracing_enabled = ctx._device.ray_tracing_enabled &&
+        FeatureBitEnabled(root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+                          offsetof(VkPhysicalDeviceAccelerationStructureFeaturesKHR, accelerationStructure)) &&
+        FeatureBitEnabled(root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, offsetof(VkPhysicalDeviceRayQueryFeaturesKHR, rayQuery));
     ctx._present = ScanPresentSupport(extensions, _features);
 
     ctx._enabledFeatures = std::move(_enabledFeatures);
-    for (EnabledFeature& entry: backend.SnapshotEnabled()) {
+    for (EnabledFeature& entry: backend->features.SnapshotEnabled()) {
         ctx._enabledFeatures.push_back(std::move(entry));
     }
 

@@ -124,6 +124,11 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     endif()
 endfunction()
 
+# Vulkan's private mock-device negotiation test is defined alongside the
+# implementation in src/vulkan; only its CTest registration belongs here.
+add_test(NAME VulkanFeatureNegotiation COMMAND VulkanFeatureNegotiation)
+set_tests_properties(VulkanFeatureNegotiation PROPERTIES LABELS "CPU;Fast")
+
 # 2. The CPU test groups.
 #
 # Sources are listed rather than globbed. What that costs: a new Test*.cpp

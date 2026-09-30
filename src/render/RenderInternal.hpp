@@ -95,8 +95,7 @@ struct IBLPayload {
 
 namespace ZHLN {
 
-void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
-[[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
+void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;

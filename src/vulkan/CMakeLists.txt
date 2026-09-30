@@ -22,6 +22,7 @@ add_library(
   core/Instance.cpp
   core/Context.cpp
   core/Extensions.cpp
+  core/DeviceConfigurator.cpp
   presentation/PresentPacer.cpp
   presentation/Surface.cpp
   presentation/Swapchain.cpp
@@ -125,3 +126,12 @@ target_compile_options(
           -Wpedantic>)
 
 target_link_libraries(zahlen_vulkan PRIVATE zahlen_warnings)
+
+# Private feature/extension negotiation test, kept with the Vulkan module so
+# public tests/ suites never include implementation headers.
+if(ZHLN_BUILD_TESTS)
+  add_executable(VulkanFeatureNegotiation tests/FeatureNegotiation.cpp)
+  target_link_libraries(VulkanFeatureNegotiation PRIVATE zahlen_engine zahlen_vulkan)
+  target_include_directories(VulkanFeatureNegotiation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  zahlen_enable_reflection(VulkanFeatureNegotiation)
+endif()

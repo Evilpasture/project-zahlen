@@ -55,6 +55,11 @@ class ExtensionBuilder {
 
     [[nodiscard]] static auto ForDevice(VkPhysicalDevice physical) noexcept -> ExtensionBuilder;
     [[nodiscard]] static auto ForInstance() noexcept -> ExtensionBuilder;
+    // Also useful with a pre-enumerated catalog (e.g. offline negotiation tests).
+    [[nodiscard]] static auto ForAvailable(std::span<const std::string_view> names) -> ExtensionBuilder;
+
+    [[nodiscard]] bool Supports(std::string_view name) const noexcept;
+    [[nodiscard]] bool SupportsAll(std::initializer_list<std::string_view> names) const noexcept;
 
     auto Require(std::string_view name) noexcept -> ExtensionBuilder&;
 
