@@ -15,35 +15,37 @@ namespace {
 // GBufferSceneTargets uses runtime-format TypedImages (AssumeLayout), so a
 // secondary must inherit the formats AddColor/AddDepth actually recorded.
 // Exercise both a combined stencil attachment and a depth-only attachment.
-static_assert([] {
-    constexpr auto colorA = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_R8G8B8A8_UNORM}
-                                .Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-    constexpr auto colorB = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_B8G8R8A8_SRGB}
-                                .Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-    constexpr auto depthStencil = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT_S8_UINT}
-                                      .Assume<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>();
-    constexpr auto depthOnly = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT}
-                                   .Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+static_assert(
+    [] {
+        constexpr auto colorA =
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_R8G8B8A8_UNORM}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+        constexpr auto colorB =
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_B8G8R8A8_SRGB}.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+        constexpr auto depthStencil = Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT_S8_UINT}
+                                          .Assume<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>();
+        constexpr auto depthOnly =
+            Vk::ImageSlice {VK_NULL_HANDLE, VK_NULL_HANDLE, VkExtent2D {}, VK_FORMAT_D32_SFLOAT}.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
-    const auto pass = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
-        .Viewport(2.0F, 3.0F, 30.0F, 20.0F)
-        .AddColor(colorA)
-        .AddColorGroup(std::tuple {colorB})
-        .AddDepth(depthStencil)
-        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
-        .ViewMask(3);
-    const auto inherit = pass.GetSecondaryInheritance();
-    const auto colors = inherit.ColorFormats();
-    const auto noStencil = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
-        .AddDepth(depthOnly)
-        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
-        .GetSecondaryInheritance();
+        const auto pass      = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
+                                   .Viewport(2.0F, 3.0F, 30.0F, 20.0F)
+                                   .AddColor(colorA)
+                                   .AddColorGroup(std::tuple {colorB})
+                                   .AddDepth(depthStencil)
+                                   .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
+                                   .ViewMask(3);
+        const auto inherit   = pass.GetSecondaryInheritance();
+        const auto colors    = inherit.ColorFormats();
+        const auto noStencil = Vk::DynamicPass(VkExtent2D {.width = 64, .height = 32})
+                                   .AddDepth(depthOnly)
+                                   .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT)
+                                   .GetSecondaryInheritance();
 
-    return colors.size() == 2 && colors[0] == colorA.GetFormat() && colors[1] == colorB.GetFormat() &&
-           inherit.depthFormat == depthStencil.GetFormat() && inherit.stencilFormat == depthStencil.GetFormat() && inherit.viewMask == 3 &&
-           inherit.viewport.x == 2.0F && inherit.viewport.width == 30.0F &&
-           noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.GetFormat() && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
-}(), "Secondary inheritance must match the DynamicPass's bound runtime attachments.");
+        return colors.size() == 2 && colors[0] == colorA.GetFormat() && colors[1] == colorB.GetFormat() && inherit.depthFormat == depthStencil.GetFormat() &&
+               inherit.stencilFormat == depthStencil.GetFormat() && inherit.viewMask == 3 && inherit.viewport.x == 2.0F && inherit.viewport.width == 30.0F &&
+               noStencil.ColorFormats().empty() && noStencil.depthFormat == depthOnly.GetFormat() && noStencil.stencilFormat == VK_FORMAT_UNDEFINED;
+    }(),
+    "Secondary inheritance must match the DynamicPass's bound runtime attachments."
+);
 
 struct TaskSystemSchedulerAdapter {
     void ParallelFor(uint32_t count, uint32_t chunkSize, auto&& func) const {
@@ -56,8 +58,8 @@ struct TaskSystemSchedulerAdapter {
 // test, so this is also the point where the second-pass candidate list is
 // produced for the resolve pass to pick up.
 void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
-    VkCommandBuffer cmd = passCtx.Cmd();
-    auto&           ctx = passCtx.ctx;
+    VkCommandBuffer cmd        = passCtx.Cmd();
+    auto&           ctx        = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;
 
     Vk::BufferBarrier(
@@ -68,11 +70,11 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
     Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[frameIndex], 0, 0u);
 
     Vk::BufferBarrier(
-        cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
-        Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
+        cmd, ctx.frames.secondPassCountBuffers[frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Compute,
+        Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
     );
 
-    const auto sceneVp     = ctx.EffectiveViewport();
+    const auto     sceneVp = ctx.EffectiveViewport();
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
     const RenderContext::Impl::CullingConstants pc {
@@ -138,16 +140,16 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
     const auto      sceneVp    = ctx.EffectiveViewport();
 
     const auto pass = Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(sceneVp)
-        .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
-        .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
-        .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
-        .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
-        .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorClearcoat)
-        .AddColor(in.anisotropy, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
-        .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
-        .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
-        .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
+                          .Viewport(sceneVp)
+                          .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
+                          .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
+                          .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+                          .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorEmissive)
+                          .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorClearcoat)
+                          .AddColor(in.anisotropy, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
+                          .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
+                          .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
+                          .Flags(VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT);
     pass.Execute(cmd, [&]() {
         ctx.BindHeapsAndPushFrame(cmd);
         const auto frameAddresses = ctx.FrameHeapAddresses();
@@ -161,7 +163,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
                 std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()}
             ),
             drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
-            [&](uint32_t ) -> VkCommandBuffer {
+            [&](uint32_t) -> VkCommandBuffer {
                 uint32_t wIdx = TaskSystem::GetWorkerIndex();
                 if (wIdx >= ctx.workerCmds.size()) {
                     wIdx = static_cast<uint32_t>(ctx.workerCmds.size() - 1);
@@ -206,8 +208,8 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const ZHLN::Array<GroupRange> groups = BuildGroupRanges(impl);
 
-    const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers[impl.presenter.frameIndex].Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
+    const bool useGpuCulling = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers[impl.presenter.frameIndex].Valid() &&
+                               (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
 
     const GBufferTargets in = GBufferSceneTargets(impl);
     if (useGpuCulling) {
@@ -217,4 +219,4 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

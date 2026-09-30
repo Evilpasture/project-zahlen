@@ -11,6 +11,7 @@
 // that needs per-frame tuning values carries them as members.
 
 #include "RenderInternal.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "graph/RenderGraph.hpp"
 #include "passes/aa/FXAAPass.hpp"
 #include "passes/aa/MLAAPass.hpp"
@@ -34,7 +35,6 @@
 #include "passes/postprocess/HdrDenoisePass.hpp"
 #include "passes/postprocess/TonemapBlitPass.hpp"
 #include <ShaderBindings.hpp>
-#include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -90,7 +90,7 @@ struct ResourceResolver<Res_Swapchain> {
     }
 };
 
-}
+} // namespace Vk
 
 namespace {
 
@@ -101,8 +101,8 @@ using SwapchainImage = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>;
 // the GI tuning the lighting, AO and reflection passes all read.
 using ScenePushConstants = GeneratedGpu::ScenePassPushConstants;
 
-[[nodiscard]] auto AssembleScenePushConstants(const RenderContext::Impl& impl, const SceneView& view, const GraphicsSettings& settings) noexcept
-    -> ScenePushConstants {
+[[nodiscard]] auto
+    AssembleScenePushConstants(const RenderContext::Impl& impl, const SceneView& view, const GraphicsSettings& settings) noexcept -> ScenePushConstants {
     return ScenePushConstants {
         .invViewProj = view.invViewProjMatrix,
         .viewProj    = view.viewProjMatrix,
@@ -139,22 +139,12 @@ template <AAMode Mode, typename GetSwapchainImageT>
     // default-initialized and keeps the list below readable as what it is: one
     // pass per line, in the order they run.
     auto core = Vk::MakePassPack(
-        Passes::ShadowPass {.impl = self},
-        Passes::GBufferBasePass {.impl = self},
-        Passes::HiZGeneratePass {.impl = self},
-        Passes::GBufferResolvePass {.impl = self},
-        Passes::DecalPass {.impl = self},
-        Passes::ViewmodelPass {.impl = self},
-        Passes::TranslucentPrePass {.impl = self},
-        Passes::GtaoPass {.impl = self, .pc = pc},
-        Passes::ClusteredLightingPass {.impl = self, .pc = pc},
-        Passes::RtrHalfTracePass {.impl = self},
-        Passes::ReflectionCompositePass {.impl = self, .pc = pc},
-        Passes::TranslucentReflectionPass {.impl = self, .pc = pc},
-        Passes::OpaqueSceneCopyPass {.impl = self},
-        Passes::ForwardPass {.impl = self},
-        Passes::HdrDenoisePass {.impl = self},
-        Passes::BloomPass {.impl = self}
+        Passes::ShadowPass {.impl = self}, Passes::GBufferBasePass {.impl = self}, Passes::HiZGeneratePass {.impl = self},
+        Passes::GBufferResolvePass {.impl = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
+        Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc}, Passes::ClusteredLightingPass {.impl = self, .pc = pc},
+        Passes::RtrHalfTracePass {.impl = self}, Passes::ReflectionCompositePass {.impl = self, .pc = pc},
+        Passes::TranslucentReflectionPass {.impl = self, .pc = pc}, Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.impl = self},
+        Passes::HdrDenoisePass {.impl = self}, Passes::BloomPass {.impl = self}
     );
 
     // 2. Anti-aliasing tail. Which passes exist at all depends on the mode, so
@@ -177,9 +167,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
 
     // 3. Tone-mapping and the blit onto this frame's presentation image.
     auto blit = Vk::MakePassPack(
-        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {
-            .impl = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)
-        }
+        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {.impl = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)}
     );
 
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
@@ -187,7 +175,11 @@ template <AAMode Mode, typename GetSwapchainImageT>
 
 template <AAMode Mode, typename GetSwapchainImageT>
 void ExecuteSceneGraph(
-    RenderContext::Impl& self, VkCommandBuffer cmd, const SceneView& view, const GraphicsSettings& settings, GetSwapchainImageT&& getSwapchain
+    RenderContext::Impl&    self,
+    VkCommandBuffer         cmd,
+    const SceneView&        view,
+    const GraphicsSettings& settings,
+    GetSwapchainImageT&&    getSwapchain
 ) {
     auto graph = BuildFrameGraph<Mode>(self, AssembleScenePushConstants(self, view, settings), std::forward<GetSwapchainImageT>(getSwapchain));
 
@@ -202,12 +194,8 @@ void ExecuteSceneGraph(
 }
 
 template <typename Self, typename GetSwapchainImageT>
-void DispatchAAMode(
-    Self& self, VkCommandBuffer cmd, AAMode mode, const SceneView& view, const GraphicsSettings& settings, GetSwapchainImageT&& getSwapchain
-) {
-    Reflect::DispatchEnum(mode, [&]<AAMode Val>() {
-        ExecuteSceneGraph<Val>(self, cmd, view, settings, std::forward<GetSwapchainImageT>(getSwapchain));
-    });
+void DispatchAAMode(Self& self, VkCommandBuffer cmd, AAMode mode, const SceneView& view, const GraphicsSettings& settings, GetSwapchainImageT&& getSwapchain) {
+    Reflect::DispatchEnum(mode, [&]<AAMode Val>() { ExecuteSceneGraph<Val>(self, cmd, view, settings, std::forward<GetSwapchainImageT>(getSwapchain)); });
 }
 
 // The graph type for one anti-aliasing configuration. The visualization is a
@@ -216,9 +204,8 @@ void DispatchAAMode(
 // `decltype` on an unevaluated call is enough to ask the engine what it worked
 // out.
 template <AAMode Mode>
-using SceneGraphFor = decltype(BuildFrameGraph<Mode>(
-    std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()
-));
+using SceneGraphFor =
+    decltype(BuildFrameGraph<Mode>(std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()));
 
 } // namespace
 
@@ -248,11 +235,9 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
-    auto getSwapchainImage = [&]() -> SwapchainImage {
-        return sceneTarget->Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
-    };
+    auto getSwapchainImage = [&]() -> SwapchainImage { return sceneTarget->Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(); };
 
     DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, view, sceneSettings, getSwapchainImage);
 }
 
-}
+} // namespace ZHLN

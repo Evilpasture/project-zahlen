@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -26,7 +25,7 @@ struct ReflectedBinding {
     uint32_t                 descriptorCount = 1;
     VkShaderStageFlags       stageFlags      = 0;
     VkDescriptorBindingFlags bindingFlags    = 0;
-    std::string name;
+    std::string              name;
 };
 
 struct ReflectedSet {
@@ -91,4 +90,4 @@ class ReflectedLayoutBuilder {
     uint32_t                 _stageCount = 0;
 };
 
-}
+} // namespace ZHLN::Vk

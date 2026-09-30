@@ -2,24 +2,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "DrawCommands.hpp"
+#include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
+#include "GenerationalPool.hpp"
+#include "GeometryManager.hpp"
+#include "GpuAbi.hpp"
+#include "PipelineDesc.hpp"
+#include "PipelineRegistry.hpp"
+#include "PresentationTarget.hpp"
 #include "Rendering.hpp"
+#include "ShaderReloadRegistry.hpp"
+#include "TargetManager.hpp"
+#include "TextureManager.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
+#include "features/PostProcessFeature.hpp"
+#include "features/ShadowRenderer.hpp"
+#include "features/VolumetricFogSystem.hpp"
 #include "graph/RenderGraph.hpp"
 #include "pipeline/ComputePass.hpp"
 #include "pipeline/FullscreenPass.hpp"
-
-#include "TextureManager.hpp"
-#include "DrawCommands.hpp"
-#include "DrawQueueManager.hpp"
-#include "TargetManager.hpp"
-#include "GenerationalPool.hpp"
-#include "GeometryManager.hpp"
-#include "PipelineDesc.hpp"
-#include "PipelineRegistry.hpp"
-#include "ShaderReloadRegistry.hpp"
+#include "ui/UIRenderer.hpp"
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -27,22 +33,15 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/Log.hpp>
-#include "PresentationTarget.hpp"
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Log.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Vertex.hpp>
-#include "GpuAbi.hpp"
-#include "ui/UIRenderer.hpp"
-#include "features/PostProcessFeature.hpp"
-#include "features/ShadowRenderer.hpp"
-#include "features/VolumetricFogSystem.hpp"
 #include <algorithm>
-#include <atomic>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -69,7 +68,7 @@ struct TaskSystemScheduler {
     }
 };
 
-}
+} // namespace ZHLN
 
 namespace ZHLN::Vk {
 
@@ -79,19 +78,19 @@ struct IBLPayload {
     Image                    prefilteredImage;
     ImageView                prefilteredView;
     std::array<JPH::Vec4, 9> shCoeffs {};
-    VkFormat prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    uint64_t contentHash = 0;
-    int environmentMode = 0;
+    VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    uint64_t                 contentHash       = 0;
+    int                      environmentMode   = 0;
 
     void Destroy(Allocator& allocator) noexcept {
-        brdfLutView = {};
+        brdfLutView     = {};
         prefilteredView = {};
         allocator.DestroyImage(brdfLutImage);
         allocator.DestroyImage(prefilteredImage);
     }
 };
 
-}
+} // namespace ZHLN::Vk
 
 namespace ZHLN {
 
@@ -100,46 +99,45 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 [[nodiscard]] bool ForkSequentialForced() noexcept;
-}
-
+} // namespace Diag
 
 static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
 static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 
-static constexpr uint32_t kParallelChunkSize            = 256;
+static constexpr uint32_t kParallelChunkSize = 256;
 
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
 static_assert(kSceneStaticSamplerSlots >= 3 + kMaterialSamplerVariantCount);
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
-static constexpr uint32_t kPassStaticSamplerSlots = 64;
+static constexpr uint32_t kPassStaticSamplerSlots          = 64;
 
-static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f};
-static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr Color4 kClearColorClearcoat = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr Color4 kClearColorScene      = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f};
+static constexpr Color4 kClearColorVelocity   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr Color4 kClearColorEmissive   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr Color4 kClearColorClearcoat  = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr Color4 kClearColorAnisotropy = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}; // A is glTF occlusion.
-static constexpr Color4 kClearColorSheen = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr float  kClearDepthValue    = 1.0f;
+static constexpr Color4 kClearColorSheen      = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+static constexpr float  kClearDepthValue      = 1.0f;
 
 static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-using GlobalSceneLayout           = Vk::ReflectedLayout;
-using TAALayout                   = Vk::ReflectedLayout;
-using FXAALayout                  = Vk::ReflectedLayout;
-using MLAALayout                  = Vk::ReflectedLayout;
-using SMAAEdgeLayout              = Vk::ReflectedLayout;
-using SMAAWeightLayout            = Vk::ReflectedLayout;
-using SMAABlendLayout             = Vk::ReflectedLayout;
-using LightingLayout              = Vk::ReflectedLayout;
-using ReflectionLayout            = Vk::ReflectedLayout;
-using BlitLayout                  = Vk::ReflectedLayout;
-using CullingLayout               = Vk::ReflectedLayout;
-using HiZGenerateLayout           = Vk::ReflectedLayout;
-using ClusterCullingLayout        = Vk::ReflectedLayout;
-using BakeLayout                  = Vk::ReflectedLayout;
-using DecalLayout                 = Vk::ReflectedLayout;
+using GlobalSceneLayout    = Vk::ReflectedLayout;
+using TAALayout            = Vk::ReflectedLayout;
+using FXAALayout           = Vk::ReflectedLayout;
+using MLAALayout           = Vk::ReflectedLayout;
+using SMAAEdgeLayout       = Vk::ReflectedLayout;
+using SMAAWeightLayout     = Vk::ReflectedLayout;
+using SMAABlendLayout      = Vk::ReflectedLayout;
+using LightingLayout       = Vk::ReflectedLayout;
+using ReflectionLayout     = Vk::ReflectedLayout;
+using BlitLayout           = Vk::ReflectedLayout;
+using CullingLayout        = Vk::ReflectedLayout;
+using HiZGenerateLayout    = Vk::ReflectedLayout;
+using ClusterCullingLayout = Vk::ReflectedLayout;
+using BakeLayout           = Vk::ReflectedLayout;
+using DecalLayout          = Vk::ReflectedLayout;
 
 enum class Stage : uint8_t {
     MainPass1,
@@ -180,7 +178,7 @@ struct ShaderStageSource {
     static constexpr ShaderStage  stage = Stage;
     const char*                   path;
     std::span<const std::uint8_t> fallback;
-    const char* entryPoint = nullptr;
+    const char*                   entryPoint = nullptr;
 };
 
 using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
@@ -201,10 +199,7 @@ using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
 template <ShaderStage Stage, Vk::ShaderProgram Module>
 [[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Stage> {
-    static_assert(
-        Vk::StageOf<Module>() == StageFlagOf(Stage),
-        "a stage source names a module compiled for that stage (<ShaderBindings.hpp>)"
-    );
+    static_assert(Vk::StageOf<Module>() == StageFlagOf(Stage), "a stage source names a module compiled for that stage (<ShaderBindings.hpp>)");
     return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
 }
 
@@ -232,7 +227,6 @@ struct SceneResources {
 namespace Resource {
 }
 
-
 struct RenderContext::Impl {
     using GraphResources = TargetManager::GraphResources;
 
@@ -243,7 +237,6 @@ struct RenderContext::Impl {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> resourcesForAA;
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
     };
-
 
     static constexpr uint32_t SHADOW_RES          = TargetManager::kShadowResolution;
     static constexpr uint32_t NUM_CASCADES        = TargetManager::kCascades;
@@ -256,17 +249,17 @@ struct RenderContext::Impl {
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
     static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
-    PresentationTarget&                         presentationTarget;
-    String64                                     appName;
-    Vk::Context                                  ctx;
-    Vk::PipelineCache                            pipelineCache;
-    std::string                                  pipelineCachePath;
-    Vk::Allocator                                allocator;
-    Vk::SwapchainPresenter                       presenter;
-    PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
+    PresentationTarget&                                           presentationTarget;
+    String64                                                      appName;
+    Vk::Context                                                   ctx;
+    Vk::PipelineCache                                             pipelineCache;
+    std::string                                                   pipelineCachePath;
+    Vk::Allocator                                                 allocator;
+    Vk::SwapchainPresenter                                        presenter;
+    PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;
     Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute> computePools;
-    Vk::StagingRingBuffer                        stagingRingBuffer;
-    mutable Vk::StagingRingBuffer                transferRingBuffer;
+    Vk::StagingRingBuffer                                         stagingRingBuffer;
+    mutable Vk::StagingRingBuffer                                 transferRingBuffer;
 
     mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
@@ -280,14 +273,14 @@ struct RenderContext::Impl {
     PostProcessFeature  postProcess;
 
     std::unique_ptr<Vk::SubmittedStagingWork> submittedStaging;
-    Vk::DeletionQueue                        deletionQueue;
-    bool                                     frameOpen = false;
+    Vk::DeletionQueue                         deletionQueue;
+    bool                                      frameOpen = false;
 
-    static constexpr size_t kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
-    ZHLN::Array<WorkerCmdContext> workerCmds;
+    static constexpr size_t                                        kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
+    ZHLN::Array<WorkerCmdContext>                                  workerCmds;
     PerFrame<Vk::ParallelCommandRecorder<kParallelRecordingSlots>> parallelRecorders;
 
-    TargetManager  targets;
+    TargetManager   targets;
     GraphResources& graphResources = targets.Graph();
 
     uint32_t viewportX = 0;
@@ -345,7 +338,7 @@ struct RenderContext::Impl {
         PerFrame<Vk::Buffer>                fogVolumesBuffer;
     };
 
-    PerFrameResources frames;
+    PerFrameResources                                         frames;
     PingPong<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumulationHistory;
 
     Vk::Buffer clusterBoundsBuffer;
@@ -406,13 +399,13 @@ struct RenderContext::Impl {
     Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
     Vk::FullscreenPass<BlitLayout>       blitPass;
 
-    Vk::FixedComputePass clusterBoundsPass;
-    Vk::FixedComputePass clusterCullingPass;
+    Vk::FixedComputePass   clusterBoundsPass;
+    Vk::FixedComputePass   clusterCullingPass;
     Vk::DynamicComputePass cullingPass;
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
-    Vk::PipelineLayout skinningPipelineLayout;
+    Vk::PipelineLayout     skinningPipelineLayout;
 
     bool enableMeshShading = true;
 
@@ -420,22 +413,21 @@ struct RenderContext::Impl {
         return enableMeshShading && ctx.MeshShadersSupported();
     }
 
-
     TextureManager textureManager;
 
     Vk::Buffer                  particleBuffer;
-    Vk::DynamicComputePass particleUpdatePass;
+    Vk::DynamicComputePass      particleUpdatePass;
     VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::DynamicComputePass meshParticleUpdatePass;
-    VkPipelineLayout meshParticleRenderLayout = VK_NULL_HANDLE;
-    Vk::Pipeline     meshParticleRenderPipeline;
-    Vk::Pipeline     meshParticleShadowPipeline;
+    VkPipelineLayout       meshParticleRenderLayout = VK_NULL_HANDLE;
+    Vk::Pipeline           meshParticleRenderPipeline;
+    Vk::Pipeline           meshParticleShadowPipeline;
 
     Vk::ReflectedLayout decalDescLayout;
-    VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE;
-    Vk::Pipeline             decalPipeline;
+    VkPipelineLayout    decalPipelineLayout = VK_NULL_HANDLE;
+    Vk::Pipeline        decalPipeline;
 
     VkPipelineLayout linePipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline     linePipeline;
@@ -445,32 +437,32 @@ struct RenderContext::Impl {
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
     std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
-        size_t                           maxVertices,
-        PerFrame<Vk::Buffer>&            bufs,
-        PerFrame<VkDeviceAddress>&       addrs,
-        const char*                      label,
-        Vk::BufferUsage                  extraFlags = Vk::BufferUsage::None
-    ) noexcept;
+        size_t                     maxVertices,
+        PerFrame<Vk::Buffer>&      bufs,
+        PerFrame<VkDeviceAddress>& addrs,
+        const char*                label,
+        Vk::BufferUsage            extraFlags = Vk::BufferUsage::None
+    ) const noexcept;
     void FlushLineQueue();
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
-    void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
+    void               BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
     std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
-    void                       BuildSceneHeapMappings() noexcept;
-    void                       BuildDecalHeapMappings() noexcept;
-    void                       WriteSceneStaticImageDescriptors() noexcept;
-    void                       WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
-    void                       WriteTransLightingToHeap() noexcept;
-    void                       InitPassSamplerDescriptors() noexcept;
+    void                           BuildSceneHeapMappings() noexcept;
+    void                           BuildDecalHeapMappings() noexcept;
+    void                           WriteSceneStaticImageDescriptors() noexcept;
+    void                           WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
+    void                           WriteTransLightingToHeap() noexcept;
+    void                           InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
-    Vk::ReflectedLayout cullingLayout;
+    Vk::ReflectedLayout    cullingLayout;
     Vk::DynamicComputePass hizGeneratePass;
-    Vk::ReflectedLayout hizDescLayout;
+    Vk::ReflectedLayout    hizDescLayout;
 
     Vk::ReflectedLayout clusterCullingDescLayout;
     Vk::ReflectedLayout clusterBoundsDescLayout;
@@ -501,14 +493,13 @@ struct RenderContext::Impl {
 
     UIRenderer uiRenderer;
 
-
     FrameDestinations destinations;
 
     struct RenderTexture {
-        Vk::ImageSlice image {};
-        uint32_t bindlessIndex = 0;
-        Vk::AttachmentLayout layout = Vk::AttachmentLayout::Undefined;
-        bool drawn = false;
+        Vk::ImageSlice       image {};
+        uint32_t             bindlessIndex = 0;
+        Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
+        bool                 drawn         = false;
     };
     std::unordered_map<RenderTextureHandle, RenderTexture> renderTextures;
 
@@ -516,16 +507,16 @@ struct RenderContext::Impl {
     // render texture (or a frame capability) after device-loss recovery.
     static inline std::atomic<uint64_t> nextRenderTextureId {1};
     static inline std::atomic<uint64_t> nextRendererId {1};
-    uint64_t rendererId = nextRendererId.fetch_add(1, std::memory_order_relaxed);
-    uint64_t frameSerial = 0;
-    uint64_t nextAcquisition = 1;
-    bool warnedUnwrittenTarget = false;
+    uint64_t                            rendererId            = nextRendererId.fetch_add(1, std::memory_order_relaxed);
+    uint64_t                            frameSerial           = 0;
+    uint64_t                            nextAcquisition       = 1;
+    bool                                warnedUnwrittenTarget = false;
 
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
         }
         RenderContext::Impl* impl;
-        [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
+        [[nodiscard]] auto   ForkSecondariesActive() const noexcept -> bool {
             return impl->frameState.inForkSecondary;
         }
         void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkCall> bodies) noexcept;
@@ -540,7 +531,7 @@ struct RenderContext::Impl {
 
         bool hasSkinned = false;
 
-        bool resized = true;
+        bool resized            = true;
         bool clusterBoundsDirty = true;
 
         void Reset() noexcept {
@@ -559,33 +550,31 @@ struct RenderContext::Impl {
         return frameState.inForkSecondary;
     }
 
-
     struct DestinationVend {
-        FrameDestinations::Window* entry = nullptr;
-        bool created = false;
+        FrameDestinations::Window* entry   = nullptr;
+        bool                       created = false;
     };
 
-    [[nodiscard]] auto FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept
-        -> std::expected<DestinationVend, ErrorCode>;
+    [[nodiscard]] auto FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode>;
     [[nodiscard]] auto AcquireDestinationImage(FrameDestinations::Window& dest) noexcept -> std::expected<bool, ErrorCode>;
-    [[nodiscard]] auto ReconcileDestination(FrameDestinations::Window& dest, Vk::CommandRecorder& recorder) noexcept
-        -> std::expected<Vk::AttachmentLayout, ErrorCode>;
+    [[nodiscard]] auto
+        ReconcileDestination(FrameDestinations::Window& dest, Vk::CommandRecorder& recorder) noexcept -> std::expected<Vk::AttachmentLayout, ErrorCode>;
     [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget>;
     [[nodiscard]] auto AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<FrameTarget>;
 
     struct ResolvedTarget {
         FrameDestinations::Window& window;
-        Vk::CommandRecorder& recorder;
-        Vk::ImageSlice image;
-        Vk::AttachmentLayout& layout;
-        bool& drawn;
+        Vk::CommandRecorder&       recorder;
+        Vk::ImageSlice             image;
+        Vk::AttachmentLayout&      layout;
+        bool&                      drawn;
     };
     [[nodiscard]] auto ResolveTarget(const FrameTarget& target) noexcept -> std::expected<ResolvedTarget, ErrorCode>;
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
-    void ReleaseTarget(const PresentationTarget& aux) noexcept;
-    void DestroyDestinations() noexcept;
+    void               ReleaseTarget(const PresentationTarget& aux) noexcept;
+    void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode>;
-    void DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
@@ -615,14 +604,13 @@ struct RenderContext::Impl {
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
-    PipelineRegistry   pipelines;
+    PipelineRegistry pipelines;
 
     GpuPipelineCounters pendingPipelineCounters {};
 
-    FS::FileSystemWatcher* fileSystemWatcher   = nullptr;
+    FS::FileSystemWatcher* fileSystemWatcher    = nullptr;
     FS::FileWatchHandle    shaderDirectoryWatch = 0;
     ShaderReloadRegistry   shaderReloads;
-
 
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t blueNoiseTexIdx     = 0;
@@ -641,21 +629,19 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher)
-        : presentationTarget(target),
-          targets(ctx, allocator, graphicsCmdRing),
-          textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
-          geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-          pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout),
-          fileSystemWatcher(watcher) {}
+    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher):
+        presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
+        geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
+        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher) {
+    }
 
     ~Impl() {
         // Also runs when initialization fails partway through, before a
         // RenderContext has been constructed. All explicit VMA destruction
         // below precedes the allocator member's destructor.
         const bool traceEnabled = std::getenv("ZHLN_TRACE_TEARDOWN") != nullptr;
-        const auto start = std::chrono::steady_clock::now();
-        const auto trace = [&](const char* phase) {
+        const auto start        = std::chrono::steady_clock::now();
+        const auto trace        = [&](const char* phase) {
             if (traceEnabled) {
                 const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
                 ZHLN::Log("[Render teardown] Impl {} (+{} ms)", phase, ms);
@@ -704,7 +690,8 @@ struct RenderContext::Impl {
         presenter.Cleanup();
 
         auto destroyFrames = [this](auto& buffers) {
-            for (auto& buffer: buffers) allocator.DestroyBuffer(buffer);
+            for (auto& buffer: buffers)
+                allocator.DestroyBuffer(buffer);
         };
         destroyFrames(frames.lineVbos);
         destroyFrames(frames.clusterGridBuffers);
@@ -768,8 +755,8 @@ struct RenderContext::Impl {
     };
 
     struct MeshParticleRenderPush {
-        VkDeviceAddress particleBufferAddr;
-        VkDeviceAddress posAddress;
+        VkDeviceAddress      particleBufferAddr;
+        VkDeviceAddress      posAddress;
         std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
         std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
         VkDeviceAddress      tangentFrameAddress;
@@ -815,7 +802,7 @@ struct RenderContext::Impl {
     static_assert(offsetof(UIObjectConstants, surfaceAddress) == 72);
 
     using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
-    using PPPushConstants = ScenePassPushConstants;
+    using PPPushConstants        = ScenePassPushConstants;
 
     struct alignas(8) SkinningConstants {
         VkDeviceAddress inPosAddr;
@@ -847,16 +834,17 @@ struct RenderContext::Impl {
     // reached from more than one place. Every payload that belongs to exactly
     // one pass is declared next to that pass and asserted there.
     static_assert(
-        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> && GpuAbi::ScenePassPayload<MeshParticleComputePush>
-         && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants>
-         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<ScenePassPushConstants>),
+        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> &&
+         GpuAbi::ScenePassPayload<MeshParticleComputePush> && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> &&
+         GpuAbi::ScenePassPayload<UIObjectConstants> && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> &&
+         GpuAbi::ScenePassPayload<ScenePassPushConstants>),
         "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                     DispatchSkinningPasses(VkCommandBuffer cmd);
+    void                                         DispatchSkinningPasses(VkCommandBuffer cmd);
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
@@ -883,8 +871,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-
-
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh);
 
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
@@ -895,7 +881,6 @@ struct RenderContext::Impl {
     // RenderGraphBuilder.cpp; the compute frame lives in
     // pipelines/ComputeSimPipeline.cpp next to the queue it is submitted on.
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
-
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FS::FileWatchEvent& event);
@@ -911,7 +896,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
@@ -926,15 +910,13 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         .Build(allocator.Get())
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             defer _([&] { allocator.DestroyImage(image); });
-            auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto  viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }
             Vk::ImageView view = std::move(*viewRes);
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(
-                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view)
-            );
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view));
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
@@ -953,8 +935,7 @@ struct PassContext {
     RenderContext::Impl& ctx;
     bool                 heapsInherited;
 
-    PassContext(VkCommandBuffer cmd, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        encoder(cmd), ctx(impl), heapsInherited(inherited) {
+    PassContext(VkCommandBuffer cmd, RenderContext::Impl& impl, bool inherited = false) noexcept: encoder(cmd), ctx(impl), heapsInherited(inherited) {
     }
 
     [[nodiscard]] auto Cmd() const noexcept -> VkCommandBuffer {
@@ -1022,8 +1003,9 @@ template <typename T = Vk::Buffer, typename... Args>
 [[nodiscard]] auto CreatePerFrame(Vk::Allocator& alloc, const Args&... args) -> std::expected<PerFrame<T>, ErrorCode> {
     static_assert(std::is_same_v<T, Vk::Buffer>, "VMA per-frame resources need an explicit cleanup policy");
     PerFrame<T> resources;
-    defer _([&] {
-        for (auto& resource: resources) alloc.DestroyBuffer(resource);
+    defer       _([&] {
+        for (auto& resource: resources)
+            alloc.DestroyBuffer(resource);
     });
     for (auto& resource: resources) {
         auto created = T::Create(alloc.Get(), args...);
@@ -1035,7 +1017,7 @@ template <typename T = Vk::Buffer, typename... Args>
     return std::expected<PerFrame<T>, ErrorCode> {std::move(resources)};
 }
 
-}
+} // namespace ZHLN
 
 template <>
 struct ZHLN::Vk::FormatOf<float[3]> {
