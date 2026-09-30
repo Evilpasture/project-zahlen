@@ -429,9 +429,9 @@ struct RenderPipelinesTestSuite {
             std::array<ZHLN::VertexPosition, 3> positions {};
             std::array<ZHLN::VertexTangentFrame, 3> frames {};
             std::array<ZHLN::VertexSurface, 3>      surfaces {};
-            const auto                              pos     = rc.CreateVertexBuffer(std::span {positions});
-            const auto                              frame   = rc.CreateVertexBuffer(std::span {frames});
-            const auto                              surface = rc.CreateVertexBuffer(std::span {surfaces});
+            const auto pos     = rc.CreateVertexBuffer(std::span<ZHLN::VertexPosition> {positions});
+            const auto frame   = rc.CreateVertexBuffer(std::span<ZHLN::VertexTangentFrame> {frames});
+            const auto surface = rc.CreateVertexBuffer(std::span<ZHLN::VertexSurface> {surfaces});
             const auto scratch = rc.CreateSkinnedScratchBuffer(3);
             if (!ZHLN::Test::ExpectTrue(
                     pos != ZHLN::BufferHandle::Invalid && frame != ZHLN::BufferHandle::Invalid && surface != ZHLN::BufferHandle::Invalid &&
