@@ -26,6 +26,7 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <algorithm>
 #include <array>
 #include <cgltf.h>
@@ -35,6 +36,7 @@
 #include <expected>
 #include <fstream>
 #include <glTF/GLTFImporter.hpp>
+#include <glTF/TangentGenerator.hpp>
 #include <ios>
 #include <iterator>
 #include <json/JSONSchema.hpp>
@@ -57,6 +59,7 @@ enum class GLTFImportError : uint8_t {
     PrefabCacheMismatch ZHLN_ANNOTATION(ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}),
     ExtensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}),
     EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}),
+    TangentFrameMismatch ZHLN_ANNOTATION(ZHLN::Description<"Missing glTF tangents were not generated from the UV orientation and handedness.">{}),
 };
 
 namespace {
@@ -1313,6 +1316,39 @@ struct GLTFImportTestSuite {
             if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
                 defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            return {};
+        }
+
+        /**
+         * Khronos NormalTangentTest omits TANGENT: each normal-mapped panel
+         * reorients its UVs while the real geometry next to it stays fixed.
+         * A global (1, 0, 0, +1) basis rotates the normal-mapped reflections.
+         * Check the UV-gradient generator's direction AND handedness; merely
+         * flipping the normal map's green channel would fail these cases.
+         */
+        std::expected<void, ZHLN::ErrorCode> missing_tangents_follow_rotated_and_mirrored_uvs() {
+            constexpr std::array<ZHLN::VertexPosition, 3> positions {{{{0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f}}}};
+            constexpr std::array<std::array<float, 3>, 3> normals {{{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}};
+            constexpr std::array<uint32_t, 3> indices {0, 1, 2};
+            const auto check = [&](const std::array<std::array<float, 2>, 3>& uv, float tx, float ty, float bx, float by, float handedness) {
+                const auto tangents = ZHLN::GLTF::GenerateTangents(positions, normals, uv, indices);
+                if (tangents.size() != positions.size()) return false;
+                for (const auto& t: tangents) {
+                    if (std::abs(t[0] - tx) > 0.01f || std::abs(t[1] - ty) > 0.01f || std::abs(t[2]) > 0.01f ||
+                        t[3] != handedness || std::abs(-t[1] * t[3] - bx) > 0.01f || std::abs(t[0] * t[3] - by) > 0.01f) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            if (!check({{{0, 0}, {1, 0}, {0, 1}}}, 1, 0, 0, 1, 1) ||
+                !check({{{1, 0}, {1, 1}, {0, 0}}}, 0, -1, 1, 0, 1) ||
+                !check({{{1, 1}, {0, 1}, {1, 0}}}, -1, 0, 0, -1, 1) ||
+                !check({{{0, 1}, {0, 0}, {1, 1}}}, 0, 1, -1, 0, 1) ||
+                !check({{{1, 0}, {0, 0}, {1, 1}}}, -1, 0, 0, 1, -1) ||
+                !check({{{0, 0}, {0, 0}, {0, 0}}}, 1, 0, 0, 1, 1)) {
+                return std::unexpected(GLTFImportError::TangentFrameMismatch);
             }
             return {};
         }

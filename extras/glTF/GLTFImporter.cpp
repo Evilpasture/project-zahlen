@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GLTFImporter.hpp"
+#include "TangentGenerator.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/PrefabFactory.hpp>
@@ -550,6 +551,25 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         job.skins.resize(vertexCount);
     }
 
+    // glTF's TANGENT attribute is optional even when a normal map is present.
+    // Use the UV set sampled by the normal texture (before any textureInfo
+    // transform) to construct the missing basis. A global +X tangent only
+    // works on UV islands that happen to align with the world X/Y axes.
+    uint32_t tangentUvSet = 0;
+    if (prim.material != nullptr && prim.material->normal_texture.texture != nullptr) {
+        tangentUvSet = job.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Normal)].texCoord;
+    } else if (prim.material != nullptr && prim.material->has_clearcoat && prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+        tangentUvSet = job.textureTransforms[static_cast<size_t>(MaterialTextureSlot::ClearcoatNormal)].texCoord;
+    }
+    const cgltf_accessor* tangentUvAcc = tangentUvSet == 0 ? uvAcc : tangentUvSet == 1 ? uv1Acc : nullptr;
+    const bool generateTangents = tangentAcc == nullptr && prim.type == cgltf_primitive_type_triangles && tangentUvAcc != nullptr;
+    std::vector<std::array<float, 3>> tangentNormals;
+    std::vector<std::array<float, 2>> tangentUVs;
+    if (generateTangents) {
+        tangentNormals.resize(vertexCount);
+        tangentUVs.resize(vertexCount);
+    }
+
     for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
         float rawPos[3] = {0.0f, 0.0f, 0.0f};
         cgltf_accessor_read_float(posAcc, vIdx, rawPos, 3);
@@ -579,6 +599,10 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         float uv1[2] = {0.0f, 0.0f};
         if (uv1Acc != nullptr) {
             cgltf_accessor_read_float(uv1Acc, vIdx, uv1, 2);
+        }
+        if (generateTangents) {
+            tangentNormals[vIdx] = {rawNorm[0], rawNorm[1], rawNorm[2]};
+            tangentUVs[vIdx] = tangentUvSet == 0 ? std::array {uv[0], uv[1]} : std::array {uv1[0], uv1[1]};
         }
 
         float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -621,6 +645,14 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         job.indices.resize(job.indexCount);
         for (uint32_t idx = 0; idx < job.indexCount; ++idx) {
             job.indices[idx] = idx;
+        }
+    }
+
+    if (generateTangents) {
+        const auto generated = GenerateTangents(std::span {job.positions}, std::span {tangentNormals}, std::span {tangentUVs}, std::span {job.indices});
+        for (size_t vIdx = 0; vIdx < generated.size(); ++vIdx) {
+            const auto& tangent = generated[vIdx];
+            job.tangentFrames[vIdx].tangent = Math::PackNormal(tangent[0], tangent[1], tangent[2], tangent[3]);
         }
     }
 

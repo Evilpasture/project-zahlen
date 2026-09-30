@@ -164,6 +164,18 @@ uses an isotropic BRDF LUT and one bent-reflection cubemap lookup with an
 anisotropy-aware LOD, so exact pixel agreement with a reference path tracer
 is not expected.
 
+For **`NormalTangentTest`**, run
+`SCENARIO=khronos-NormalTangentTest ./scripts/run_fidelity.sh -j1` and compare
+with the glTF Sample Viewer golden. The left cell of each pair is geometry;
+the right is a normal-mapped surface with differently oriented UVs. The source
+mesh supplies `NORMAL` and `TEXCOORD_0`, **not `TANGENT`**. The importer now
+generates tangents and bitangent handedness from triangle positions and UVs
+instead of using a fixed +X tangent. All five right-hand reflections should
+face the same way as their left-hand counterparts. Do not globally invert
+normal-map green to conceal a missing or incorrectly signed tangent frame.
+The CPU tangent-basis regression covers rotations and mirroring; a fresh GPU
+capture is still needed to compare the whole image with the golden.
+
 For `SheenCloth`, the blue/black weave should repeat across the cloth instead
 of stretching into broad blue bands: its per-texture transform includes
 `scale: [30, -30]`. The importer regression checks that factor, the UV-set
