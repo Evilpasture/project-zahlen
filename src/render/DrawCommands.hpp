@@ -67,7 +67,7 @@ struct DrawCommand {
     NativeMaterial*      material;
     NativeMaterial*      prePassMaterial;
     NativeMesh*          posMesh;
-    NativeMesh*          attrMesh;
+    NativeMesh*          frameMesh;
     NativeMesh*          skinMesh;
     BufferHandle         skinnedVertexBuffer;
     uint32_t             jointOffset;

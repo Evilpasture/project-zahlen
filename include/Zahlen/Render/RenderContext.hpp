@@ -129,7 +129,7 @@ class ZHLN_API RenderContext {
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
-    [[nodiscard]] uint32_t UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexAttributes> attributes) noexcept;
+    [[nodiscard]] uint32_t     UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
 

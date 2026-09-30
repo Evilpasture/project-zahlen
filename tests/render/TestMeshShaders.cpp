@@ -398,7 +398,12 @@ struct MeshShaderTestSuite {
                 // Meshlets are an ADDITIONAL view: the raw vertex pool must stay
                 // intact for BLAS builds and the vertex pipeline fallback.
                 allOk &= ZHLN::Test::ExpectTrue(c.mesh.posBuffer != ZHLN::BufferHandle::Invalid);
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.attrBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.tangentFrameBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.surfaceBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(
+                    c.mesh.posBuffer != c.mesh.tangentFrameBuffer && c.mesh.posBuffer != c.mesh.surfaceBuffer &&
+                    c.mesh.tangentFrameBuffer != c.mesh.surfaceBuffer
+                );
                 allOk &= ZHLN::Test::ExpectGt(c.mesh.vertexCount, 0);
 
                 ZHLN::Println("    [INFO] {}: {} verts, {} meshlets.", c.name, c.mesh.vertexCount, c.mesh.meshletCount);

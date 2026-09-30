@@ -14,7 +14,7 @@ namespace ZHLN::GUI {
 
 auto AppendTextVertices(
     VertexPosition*    outPos,
-    VertexAttributes*  outAttr,
+    VertexSurface*     outSurface,
     const FontAtlas&   font,
     const std::string& text,
     float              x,
@@ -22,5 +22,4 @@ auto AppendTextVertices(
     float              scale,
     const JPH::Vec4&   color
 ) -> uint32_t;
-
 }

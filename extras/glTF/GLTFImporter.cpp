@@ -75,9 +75,10 @@ struct CPUPrimitiveJob {
     const cgltf_primitive* prim = nullptr;
     JPH::Mat44             nodeTransform;
 
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    std::vector<VertexSkin>       skins;
+    std::vector<VertexPosition>     positions;
+    std::vector<VertexTangentFrame> tangentFrames;
+    std::vector<VertexSurface>      surfaces;
+    std::vector<VertexSkin>         skins;
     std::vector<uint32_t>         indices;
     uint32_t                      indexCount = 0;
 
@@ -542,7 +543,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
 
     const size_t vertexCount = posAcc->count;
     job.positions.resize(vertexCount);
-    job.attributes.resize(vertexCount);
+    job.tangentFrames.resize(vertexCount);
+    job.surfaces.resize(vertexCount);
     if (jointsAcc != nullptr && weightsAcc != nullptr) {
         job.skins.resize(vertexCount);
     }
@@ -583,12 +585,12 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
             cgltf_accessor_read_float(colorAcc, vIdx, rawColor, 4);
         }
 
-        job.attributes[vIdx] = {
+        job.tangentFrames[vIdx] = {
             .normal  = Math::PackNormal(rawNorm[0], rawNorm[1], rawNorm[2]),
-            .tangent = Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3]),
-            .uv      = Math::PackUV(uv[0], uv[1]),
-            .color   = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]),
-            .uv1     = Math::PackUV(uv1[0], uv1[1])
+            .tangent = Math::PackNormal(rawTangent[0], rawTangent[1], rawTangent[2], rawTangent[3])
+        };
+        job.surfaces[vIdx] = {
+            .uv = Math::PackUV(uv[0], uv[1]), .color = Math::PackColor(rawColor[0], rawColor[1], rawColor[2], rawColor[3]), .uv1 = Math::PackUV(uv1[0], uv1[1])
         };
 
         if (jointsAcc != nullptr && weightsAcc != nullptr) {
@@ -827,8 +829,8 @@ auto GetOrCreateCompiledPrimitive(
     }
 
     const BufferHandle posVbo = ctx.CreateVertexBuffer(std::span {primJob.positions});
-    const BufferHandle attrVbo =
-        ctx.CreateVertexBuffer(std::span {primJob.attributes});
+    const BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {primJob.tangentFrames});
+    const BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {primJob.surfaces});
 
     const BufferHandle skinVbo = !primJob.skins.empty() ?
                                      ctx.CreateVertexBuffer(std::span {primJob.skins}) :
@@ -863,7 +865,8 @@ auto GetOrCreateCompiledPrimitive(
 
     Mesh subMesh = {
         .posBuffer           = posVbo,
-        .attrBuffer          = attrVbo,
+        .tangentFrameBuffer  = frameVbo,
+        .surfaceBuffer       = surfaceVbo,
         .skinBuffer          = skinVbo,
         .indexBuffer         = ibo,
         .vertexCount         = static_cast<uint32_t>(primJob.positions.size()),

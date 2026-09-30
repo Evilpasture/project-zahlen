@@ -21,18 +21,18 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -58,9 +58,10 @@ struct LightningSegment {
 };
 
 struct GeneratedRibbon {
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    uint32_t                      maxVertices = 0;
+    std::vector<VertexPosition>     positions;
+    std::vector<VertexTangentFrame> frames;
+    std::vector<VertexSurface>      surfaces;
+    uint32_t                        maxVertices = 0;
 };
 
 auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWidth, const LightningConfig& config, std::mt19937& rng)
@@ -113,7 +114,8 @@ auto GenerateFractalSegments(JPH::Vec3Arg start, JPH::Vec3Arg end, float startWi
 auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Vec3Arg cameraPos) -> GeneratedRibbon {
     GeneratedRibbon ribbon;
     ribbon.positions.reserve(segments.size() * 6);
-    ribbon.attributes.reserve(segments.size() * 6);
+    ribbon.frames.reserve(segments.size() * 6);
+    ribbon.surfaces.reserve(segments.size() * 6);
 
     const auto n    = Math::PackNormal(0, 1, 0);
     const auto t    = Math::PackNormal(1, 0, 0, 1);
@@ -147,18 +149,24 @@ auto BuildCameraFacingRibbon(std::span<const LightningSegment> segments, JPH::Ve
         const JPH::Vec3 v3    = p1 + side * width;
 
         ribbon.positions.push_back({{v0.GetX(), v0.GetY(), v0.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv00, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv00, .color = c});
         ribbon.positions.push_back({{v1.GetX(), v1.GetY(), v1.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv10, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv10, .color = c});
         ribbon.positions.push_back({{v2.GetX(), v2.GetY(), v2.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv01, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv01, .color = c});
 
         ribbon.positions.push_back({{v2.GetX(), v2.GetY(), v2.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv01, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv01, .color = c});
         ribbon.positions.push_back({{v1.GetX(), v1.GetY(), v1.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv10, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv10, .color = c});
         ribbon.positions.push_back({{v3.GetX(), v3.GetY(), v3.GetZ()}});
-        ribbon.attributes.push_back({.normal = n, .tangent = t, .uv = uv11, .color = c});
+        ribbon.frames.push_back({.normal = n, .tangent = t});
+        ribbon.surfaces.push_back({.uv = uv11, .color = c});
     }
 
     ribbon.maxVertices = static_cast<uint32_t>(ribbon.positions.size());
@@ -182,14 +190,19 @@ void ReleaseLightning(Engine& engine, LightningComponent& bolt) {
     if (bolt.matAssetId != InvalidMaterialID) {
         render.UnregisterGPUMaterial(bolt.matAssetId);
     }
-    render.DestroyMesh(Mesh {.posBuffer = std::exchange(bolt.vboPos, BufferHandle::Invalid),
-                             .attrBuffer = std::exchange(bolt.vboAttr, BufferHandle::Invalid)});
+    render.DestroyMesh(
+        Mesh {
+            .posBuffer          = std::exchange(bolt.vboPos, BufferHandle::Invalid),
+            .tangentFrameBuffer = std::exchange(bolt.vboFrame, BufferHandle::Invalid),
+            .surfaceBuffer      = std::exchange(bolt.vboSurface, BufferHandle::Invalid)
+        }
+    );
     bolt.meshAssetId = InvalidAssetID;
     bolt.matAssetId  = InvalidMaterialID;
 }
 
 void CleanupLightning(Engine& engine, bool all) {
-    auto& reg = engine.GetRegistry();
+    auto&      reg      = engine.GetRegistry();
     const auto entities = reg.GetEntitiesWith<LightningComponent>();
     if (entities.empty()) {
         return;
@@ -208,8 +221,9 @@ void RegisterCleanup(Engine& engine) {
     if (engine.AddSceneCleanupPass(&CleanupLightning)) {
         engine.AddDeviceLostCallback([](Engine& owner) {
             for (auto& bolt: owner.GetRegistry().GetRawArray<LightningComponent>()) {
-                bolt.vboPos  = BufferHandle::Invalid;
-                bolt.vboAttr = BufferHandle::Invalid;
+                bolt.vboPos     = BufferHandle::Invalid;
+                bolt.vboFrame   = BufferHandle::Invalid;
+                bolt.vboSurface = BufferHandle::Invalid;
             }
         });
     }
@@ -261,8 +275,9 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const auto segments = GenerateFractalSegments(cloudOrigin, groundTarget, cfg.ribbonWidth, cfg, s_rng);
     const auto ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
 
-    const BufferHandle vboPos  = rc.CreateVertexBuffer(std::span {ribbon.positions});
-    const BufferHandle vboAttr = rc.CreateVertexBuffer(std::span {ribbon.attributes});
+    const BufferHandle vboPos     = rc.CreateVertexBuffer(std::span {ribbon.positions});
+    const BufferHandle vboFrame   = rc.CreateVertexBuffer(std::span {ribbon.frames});
+    const BufferHandle vboSurface = rc.CreateVertexBuffer(std::span {ribbon.surfaces});
 
     const Entity boltEntity = reg.Create();
 
@@ -270,7 +285,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const AssetID        meshAssetId = HashAssetID(FormatTo(strBuf, "lightning_mesh_{}", boltEntity.index));
     const MaterialID     matAssetId  = HashAssetID(FormatTo(strBuf, "lightning_mat_{}", boltEntity.index));
 
-    rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
+    rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .tangentFrameBuffer = vboFrame, .surfaceBuffer = vboSurface, .vertexCount = 0});
 
     if (auto matRes =
             rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
@@ -315,7 +330,8 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
             .cloudOrigin         = cloudOrigin,
             .groundTarget        = groundTarget,
             .vboPos              = vboPos,
-            .vboAttr             = vboAttr,
+            .vboFrame            = vboFrame,
+            .vboSurface          = vboSurface,
             .meshAssetId         = meshAssetId,
             .matAssetId          = matAssetId,
             .maxVertices         = ribbon.maxVertices,
@@ -356,26 +372,34 @@ auto Update(Engine& engine, float dt) -> void {
         // A rebuilt renderer has no cached mesh or material. Restore them from
         // component data, never from an entity-keyed buffer table.
         bool needsMeshRegistration = !rc.GetGPUMesh(bolt.meshAssetId).has_value();
-        if (bolt.vboPos == BufferHandle::Invalid || bolt.vboAttr == BufferHandle::Invalid) {
+        if (bolt.vboPos == BufferHandle::Invalid || bolt.vboFrame == BufferHandle::Invalid || bolt.vboSurface == BufferHandle::Invalid) {
             static thread_local std::mt19937 rng(std::random_device {}());
-            const auto segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
-            const auto ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
+            const auto                       segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
+            const auto                       ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
             if (bolt.vboPos == BufferHandle::Invalid) {
                 bolt.vboPos = rc.CreateVertexBuffer(std::span {ribbon.positions});
             }
-            if (bolt.vboAttr == BufferHandle::Invalid) {
-                bolt.vboAttr = rc.CreateVertexBuffer(std::span {ribbon.attributes});
+            if (bolt.vboFrame == BufferHandle::Invalid) {
+                bolt.vboFrame = rc.CreateVertexBuffer(std::span {ribbon.frames});
             }
-            bolt.maxVertices     = ribbon.maxVertices;
-            bolt.visibleVertices = std::min(bolt.visibleVertices, bolt.maxVertices);
+            if (bolt.vboSurface == BufferHandle::Invalid) {
+                bolt.vboSurface = rc.CreateVertexBuffer(std::span {ribbon.surfaces});
+            }
+            bolt.maxVertices      = ribbon.maxVertices;
+            bolt.visibleVertices  = std::min(bolt.visibleVertices, bolt.maxVertices);
             needsMeshRegistration = true;
         }
-        if (needsMeshRegistration && bolt.vboPos != BufferHandle::Invalid && bolt.vboAttr != BufferHandle::Invalid) {
-            rc.RegisterGPUMesh(bolt.meshAssetId, Mesh {.posBuffer = bolt.vboPos, .attrBuffer = bolt.vboAttr, .vertexCount = bolt.visibleVertices});
+        if (needsMeshRegistration && bolt.vboPos != BufferHandle::Invalid && bolt.vboFrame != BufferHandle::Invalid &&
+            bolt.vboSurface != BufferHandle::Invalid) {
+            rc.RegisterGPUMesh(
+                bolt.meshAssetId,
+                Mesh {.posBuffer = bolt.vboPos, .tangentFrameBuffer = bolt.vboFrame, .surfaceBuffer = bolt.vboSurface, .vertexCount = bolt.visibleVertices}
+            );
         }
         if (!rc.GetGPUMaterial(bolt.matAssetId)) {
-            if (auto mat = rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2,
-                                              .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
+            if (auto mat = rc.CreateMaterial(
+                    {.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
+                )) {
                 rc.RegisterGPUMaterial(bolt.matAssetId, *mat);
             }
         }
@@ -436,7 +460,7 @@ auto Update(Engine& engine, float dt) -> void {
                 break;
         }
 
-        hasActiveBolts = true;
+        hasActiveBolts         = true;
         peakLuminanceThisFrame = std::max(peakLuminanceThisFrame, bolt.flashLuminance);
 
         if (auto gpuMatOpt = rc.GetGPUMaterial(bolt.matAssetId)) {

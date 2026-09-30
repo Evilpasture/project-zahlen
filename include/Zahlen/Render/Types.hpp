@@ -61,10 +61,11 @@ using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_ca
 
 struct Mesh {
     using enum BufferHandle;
-    BufferHandle posBuffer   = Invalid;
-    BufferHandle attrBuffer  = Invalid;
-    BufferHandle skinBuffer  = Invalid;
-    BufferHandle indexBuffer = Invalid;
+    BufferHandle posBuffer          = Invalid;
+    BufferHandle tangentFrameBuffer = Invalid;
+    BufferHandle surfaceBuffer      = Invalid;
+    BufferHandle skinBuffer         = Invalid;
+    BufferHandle indexBuffer        = Invalid;
     uint32_t     vertexCount = 0;
     uint32_t     indexCount  = 0;
 

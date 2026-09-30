@@ -67,8 +67,8 @@ void RenderContext::UnregisterGPUMesh(AssetID id) noexcept { _impl->geometry.Unr
 void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
     // Mesh is a view; callers must unregister all aliases before releasing
     // shared buffers. DestroyBuffer ignores invalid/already-retired handles.
-    const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
-                                mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
+    const std::array buffers = {mesh.posBuffer,   mesh.tangentFrameBuffer, mesh.surfaceBuffer,       mesh.skinBuffer,
+                                mesh.indexBuffer, mesh.meshletBuffer,      mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
     for (const BufferHandle handle: buffers) {
         DestroyBuffer(handle);
     }
@@ -581,9 +581,9 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
 }
 
-uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexAttributes> attributes) noexcept {
-    if (positions.size() != attributes.size()) {
-        ZHLN::Assert(false, "debug vertex positions and attributes must have the same count");
+uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces) noexcept {
+    if (positions.size() != surfaces.size()) {
+        ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
         return 0;
     }
     auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
@@ -600,7 +600,7 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
     const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
     if (count > 0) {
         std::memcpy(basePtr, positions.data(), count * sizeof(VertexPosition));
-        std::memcpy(basePtr + maxPosSize, attributes.data(), count * sizeof(VertexAttributes));
+        std::memcpy(basePtr + maxPosSize, surfaces.data(), count * sizeof(VertexSurface));
     }
     nativeMesh->vertexCount = static_cast<uint32_t>(count);
     return nativeMesh->vertexCount;

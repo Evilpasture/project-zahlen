@@ -23,7 +23,7 @@ class PhysicsContext;
 
 namespace Terrain {
 
-// Builds a heightfield mesh (positions + packed attributes + meshlets + BLAS)
+// Builds a heightfield mesh (positions + tangent frames + surfaces + meshlets + BLAS)
 // from caller-owned height/color arrays. No noise, no tinting -- pure
 // heightmap tessellation. The returned buffers belong to the caller; release
 // them with RenderContext::DestroyMesh unless attached to a scene entity.

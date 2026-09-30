@@ -11,7 +11,8 @@ public struct InstanceData {
     public float4x4 world;
     public float4x4 prevWorld;
     public uint64_t posAddress;
-    public uint64_t attrAddress;
+    public uint64_t tangentFrameAddress;
+    public uint64_t surfaceAddress;
     public uint64_t skinAddress;
     public uint64_t iboAddress;
 
@@ -86,49 +87,10 @@ public struct GPUMeshlet {
     public float coneCutoff;
 };
 
-public struct VertexAttributes {
-    public uint normal;
-    public uint tangent;
-    public uint uv;
-    public uint color;
-    public uint uv1;
-};
-
 public struct SkinVertex {
     public uint2 joints;
     public uint weights;
 };
-
-public extension VertexAttributes {
-    public property float4 unpackedNormal {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.normal);
-        }
-    }
-    public property float4 unpackedTangent {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.tangent);
-        }
-    }
-    public property float2 unpackedUV {
-        [ForceInline]
-        get {
-            return UnpackHalf2(this.uv);
-        }
-    }
-    public property float2 unpackedUV1 {
-        [ForceInline]
-        get { return UnpackHalf2(this.uv1); }
-    }
-    public property float4 unpackedColor {
-        [ForceInline]
-        get {
-            return UnpackRGBA8(this.color);
-        }
-    }
-}
 
 public float AverageWorldScale(float4x4 world) {
     float3x3 m = (float3x3) world;
@@ -277,8 +239,13 @@ public extension InstanceData {
     }
 
     [ForceInline]
-    public VertexAttributes fetchAttributes(uint vertexId) {
-        return GPUBuffer<VertexAttributes>(this.attrAddress).load(vertexId);
+    public VertexTangentFrame fetchTangentFrame(uint vertexId) {
+        return GPUBuffer<VertexTangentFrame>(this.tangentFrameAddress).load(vertexId);
+    }
+
+    [ForceInline]
+    public VertexSurface fetchSurface(uint vertexId) {
+        return GPUBuffer<VertexSurface>(this.surfaceAddress).load(vertexId);
     }
 
     [ForceInline]

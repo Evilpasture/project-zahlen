@@ -424,23 +424,28 @@ struct RenderPipelinesTestSuite {
             }
 
             // Valid mesh/material, but a destroyed (nonzero) scratch handle.
-            // The position and attribute buffers must differ so resolution
-            // reaches the skinned attribute-address branch.
+            // The positions, frames and surfaces must be distinct so resolution
+            // reaches the skinned tangent-frame-address branch.
             std::array<ZHLN::VertexPosition, 3> positions {};
-            std::array<ZHLN::VertexAttributes, 3> attributes {};
-            const auto pos     = rc.CreateVertexBuffer(std::span<ZHLN::VertexPosition> {positions});
-            const auto attr    = rc.CreateVertexBuffer(std::span<ZHLN::VertexAttributes> {attributes});
+            std::array<ZHLN::VertexTangentFrame, 3> frames {};
+            std::array<ZHLN::VertexSurface, 3>      surfaces {};
+            const auto                              pos     = rc.CreateVertexBuffer(std::span {positions});
+            const auto                              frame   = rc.CreateVertexBuffer(std::span {frames});
+            const auto                              surface = rc.CreateVertexBuffer(std::span {surfaces});
             const auto scratch = rc.CreateSkinnedScratchBuffer(3);
-            if (!ZHLN::Test::ExpectTrue(pos != ZHLN::BufferHandle::Invalid && attr != ZHLN::BufferHandle::Invalid &&
-                                        scratch != ZHLN::BufferHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectTrue(
+                    pos != ZHLN::BufferHandle::Invalid && frame != ZHLN::BufferHandle::Invalid && surface != ZHLN::BufferHandle::Invalid &&
+                    scratch != ZHLN::BufferHandle::Invalid
+                )) {
                 rc.DestroyBuffer(pos);
-                rc.DestroyBuffer(attr);
+                rc.DestroyBuffer(frame);
+                rc.DestroyBuffer(surface);
                 rc.DestroyBuffer(scratch);
                 return {};
             }
 
             rc.DestroyBuffer(scratch);
-            const ZHLN::Mesh mesh {.posBuffer = pos, .attrBuffer = attr, .vertexCount = 3};
+            const ZHLN::Mesh mesh {.posBuffer = pos, .tangentFrameBuffer = frame, .surfaceBuffer = surface, .vertexCount = 3};
             rc.Draw(*material, mesh, ZHLN::DrawParams {.skinnedVertexBuffer = scratch});
 
             ZHLN::CSGDrawParams invalidEye;
@@ -454,7 +459,8 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             rc.DestroyBuffer(pos);
-            rc.DestroyBuffer(attr);
+            rc.DestroyBuffer(frame);
+            rc.DestroyBuffer(surface);
             return {};
         }
 

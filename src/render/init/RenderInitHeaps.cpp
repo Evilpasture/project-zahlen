@@ -71,7 +71,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped per-frame debug VBOs...");
-            size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+            size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
             for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                 auto gpu_buf_res = Vk::Buffer::Create(
                     allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU

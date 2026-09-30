@@ -83,9 +83,10 @@ my %FIRST_PARTY = (
     Packed1010102    => ['include/Zahlen/Vertex.hpp'],
     PackedHalf2      => ['include/Zahlen/Vertex.hpp'],
     PackedRGBA8      => ['include/Zahlen/Vertex.hpp'],
-    VertexPosition   => ['include/Zahlen/Vertex.hpp'],
-    VertexAttributes => ['include/Zahlen/Vertex.hpp'],
-    VertexSkin       => ['include/Zahlen/Vertex.hpp'],
+    VertexPosition     => ['include/Zahlen/Vertex.hpp'],
+    VertexTangentFrame => ['include/Zahlen/Vertex.hpp'],
+    VertexSurface      => ['include/Zahlen/Vertex.hpp'],
+    VertexSkin         => ['include/Zahlen/Vertex.hpp'],
     # Audio
     AudioHandle      => ['include/Zahlen/Audio/AudioTypes.hpp'],
     SynthHandle      => ['include/Zahlen/Audio/AudioTypes.hpp'],

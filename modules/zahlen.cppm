@@ -335,8 +335,9 @@ using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
 using ZHLN::UIBatch;
-using ZHLN::VertexAttributes;
 using ZHLN::VertexPosition;
+using ZHLN::VertexTangentFrame;
+using ZHLN::VertexSurface;
 using ZHLN::VertexSkin;
 
 namespace Math {

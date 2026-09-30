@@ -56,9 +56,12 @@ requirement).
 Header **version 4** added three counts
 (`meshletCount`, `meshletVertexCount`, `meshletTriByteCount`), and the three
 streams are written after the index stream. `sizeof(CookedMeshHeader)` is now
-56 bytes (was 44). **Version 5** adds `TEXCOORD_1` to each packed
-`VertexAttributes` record (20 bytes instead of 16); recook version-4 meshes
-before loading them with the new vertex shader.
+56 bytes (was 44). **Version 5** added `TEXCOORD_1` to the former
+interleaved vertex record (20 bytes instead of 16). **Version 6** stores
+separate `VertexTangentFrame` (8 bytes: normal/tangent) and `VertexSurface`
+(12 bytes: UV0/color/UV1) arrays after the position array. The optional skin,
+index, and three meshlet arrays follow in that order. Recook earlier meshes
+before using them with the version-6 shaders.
 
 ---
 

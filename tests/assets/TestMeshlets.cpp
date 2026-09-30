@@ -5,7 +5,7 @@
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <cmath>
-#include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -66,21 +66,18 @@ bool StreamsEqual(const ZHLN::MeshletBuildResult& a, const ZHLN::MeshletBuildRes
 
 struct MeshletTestSuite {
     struct Tests {
-        // The cooker writes sizeof(VertexAttributes) etc. straight into .zmesh
-        // (Cook.cpp:97-114) and the JIT importer sizes its VBOs the same way
-        // (GLTFImporter.cpp:553-558). Both move together if a packing type
-        // changes, so the C++ side stays self-consistent -- but the compiled
-        // shaders would silently disagree.
-        //
-        // GPUMeshlet is already pinned by static_assert (Zahlen/Meshlet.hpp);
-        // VertexPosition/VertexAttributes/VertexSkin (Zahlen/Vertex.hpp) are only
-        // documented in comments, so those three are the real gap covered here.
-        // GPUMeshlet is re-checked as a guard against the assert being removed.
+        // The cooker and JIT importer write the same independent SoA streams.
+        // Pin each shader-visible stride and offset; a total-size-only check
+        // would miss swapping tangent-frame and surface bytes in a .zmesh.
+        // GPUMeshlet is re-checked as a guard against its assert being removed.
         std::expected<void, ZHLN::ErrorCode> gpu_stream_layout_is_pinned() {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexAttributes), size_t {20})) {
+            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexTangentFrame), size_t {8}) ||
+                !ZHLN::Test::ExpectEq(offsetof(ZHLN::VertexTangentFrame, tangent), size_t {4}) ||
+                !ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSurface), size_t {12}) || !ZHLN::Test::ExpectEq(offsetof(ZHLN::VertexSurface, color), size_t {4}) ||
+                !ZHLN::Test::ExpectEq(offsetof(ZHLN::VertexSurface, uv1), size_t {8})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSkin), size_t {12})) {

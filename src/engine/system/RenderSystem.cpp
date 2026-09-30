@@ -488,30 +488,25 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 return;
             }
 
-            std::vector<VertexPosition>   debugPos;
-            std::vector<VertexAttributes> debugAttr;
+            std::vector<VertexPosition> debugPos;
+            std::vector<VertexSurface>  debugSurface;
             debugPos.reserve(debugData.triangleCount);
-            debugAttr.reserve(debugData.triangleCount);
+            debugSurface.reserve(debugData.triangleCount);
             for (size_t i = 0; i < debugData.triangleCount; ++i) {
                 const auto& jv = debugData.triangles[i];
                 debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
-                debugAttr.push_back(
-                    {.normal  = Math::PackNormal(0.0f, 1.0f, 0.0f),
-                     .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                     .uv      = Math::PackUV(0.0f, 0.0f),
-                     .color   = {.data = jv.color}}
-                );
+                debugSurface.push_back({.uv = Math::PackUV(0.0f, 0.0f), .color = {.data = jv.color}});
             }
 
-            const uint32_t uploadedVertices = rc.UploadDebugVertices(std::span {debugPos}, std::span {debugAttr});
+            const uint32_t uploadedVertices = rc.UploadDebugVertices(std::span {debugPos}, std::span {debugSurface});
 
             Mesh debugMesh = {
-                .posBuffer   = rc.GetDebugMeshBuffer(),
-                .attrBuffer  = rc.GetDebugMeshBuffer(),
-                .skinBuffer  = BufferHandle::Invalid,
-                .indexBuffer = BufferHandle::Invalid,
-                .vertexCount = uploadedVertices,
-                .indexCount  = 0
+                .posBuffer     = rc.GetDebugMeshBuffer(),
+                .surfaceBuffer = rc.GetDebugMeshBuffer(),
+                .skinBuffer    = BufferHandle::Invalid,
+                .indexBuffer   = BufferHandle::Invalid,
+                .vertexCount   = uploadedVertices,
+                .indexCount    = 0
             };
 
             rc.Draw(

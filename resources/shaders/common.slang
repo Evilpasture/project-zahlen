@@ -276,13 +276,16 @@ public extension InstanceData {
         float3 localNormal  = float3(0, 1, 0);
         float4 localTangent = float4(1, 0, 0, 1);
 
-        if (this.attrAddress != 0) {
-            VertexAttributes attributes = this.fetchAttributes(actualVertexId);
-            localNormal                 = attributes.unpackedNormal.xyz;
-            localTangent                = attributes.unpackedTangent;
-            localUV                     = attributes.unpackedUV;
-            localUV1                    = attributes.unpackedUV1;
-            localColor                  = attributes.unpackedColor;
+        if (this.tangentFrameAddress != 0) {
+            VertexTangentFrame frame = this.fetchTangentFrame(actualVertexId);
+            localNormal = frame.unpackedNormal.xyz;
+            localTangent = frame.unpackedTangent;
+        }
+        if (this.surfaceAddress != 0) {
+            VertexSurface surface = this.fetchSurface(actualVertexId);
+            localUV = surface.unpackedUV;
+            localUV1 = surface.unpackedUV1;
+            localColor = surface.unpackedColor;
         }
 
         float4 localPos = float4(position, 1.0f);

@@ -69,7 +69,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 5; // Version 5: VertexAttributes adds packed TEXCOORD_1
+    meshHeader.version = 6; // Version 6: separate 8-byte tangent-frame and 12-byte surface streams
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =
@@ -101,8 +101,11 @@ int CookMesh(int argc, char** argv) {
         if (!compiled.positions.empty()) {
             std::fwrite(compiled.positions.data(), 1, compiled.positions.size() * sizeof(VertexPosition), out);
         }
-        if (!compiled.attributes.empty()) {
-            std::fwrite(compiled.attributes.data(), 1, compiled.attributes.size() * sizeof(VertexAttributes), out);
+        if (!compiled.tangentFrames.empty()) {
+            std::fwrite(compiled.tangentFrames.data(), 1, compiled.tangentFrames.size() * sizeof(VertexTangentFrame), out);
+        }
+        if (!compiled.surfaces.empty()) {
+            std::fwrite(compiled.surfaces.data(), 1, compiled.surfaces.size() * sizeof(VertexSurface), out);
         }
         if (compiled.isSkinned && !compiled.skins.empty()) {
             std::fwrite(compiled.skins.data(), 1, compiled.skins.size() * sizeof(VertexSkin), out);

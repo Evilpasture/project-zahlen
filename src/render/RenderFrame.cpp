@@ -83,32 +83,31 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
     for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             auto* posMesh     = drawCmd.posMesh;
-            auto* attrMesh    = drawCmd.attrMesh;
+            auto* frameMesh   = drawCmd.frameMesh;
             auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
-            if (AnyNull(posMesh, attrMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
+            if (AnyNull(posMesh, frameMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
                 continue;
             }
 
-            // The skinning output is two adjacent regions of one scratch VBO.
-            // Keep the GPU push-constant ABI scalar, but derive its addresses
-            // from bounded, non-owning subspans rather than naked arithmetic.
+            // Only position and tangent-frame streams are animated; the
+            // immutable surface stream is read directly by the draw shader.
             const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress};
-            const VkDeviceSize posBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
-            const VkDeviceSize attrBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexAttributes);
-            const auto positions = output.Subspan(0, posBytes);
-            const auto attributes = output.Subspan(posBytes, attrBytes);
-            if (positions.Size() != posBytes || attributes.Size() != attrBytes) {
+            const VkDeviceSize posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
+            const VkDeviceSize frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
+            const auto         positions  = output.Subspan(0, posBytes);
+            const auto         framesOut  = output.Subspan(posBytes, frameBytes);
+            if (positions.Size() != posBytes || framesOut.Size() != frameBytes) {
                 continue;
             }
 
             SkinningConstants pcs {
                 .inPosAddr        = posMesh->vboAddress,
-                .inAttrAddr       = attrMesh->vboAddress,
+                .inFrameAddr      = frameMesh->vboAddress,
                 .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
                 .outPosAddr       = positions.Address(),
-                .outAttrAddr      = attributes.Address(),
+                .outFrameAddr     = framesOut.Address(),
                 .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,

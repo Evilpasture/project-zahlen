@@ -184,7 +184,8 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
     }
 
     result.positions.resize(rawVerts.size());
-    result.attributes.resize(rawVerts.size());
+    result.tangentFrames.resize(rawVerts.size());
+    result.surfaces.resize(rawVerts.size());
     if (hasSkin) {
         result.skins.resize(rawVerts.size());
     }
@@ -195,7 +196,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
         // 1. Pack Positions
         result.positions[i] = {.position = {rv.px, rv.py, rv.pz}};
 
-        // 2. Compute and Pack Tangents and Attributes
+        // 2. Compute and pack the tangent frame and surface streams
         JPH::Vec3 n(rv.nx, rv.ny, rv.nz);
         JPH::Vec3 t = tangents[i];
         JPH::Vec3 tangentVec;
@@ -210,12 +211,10 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
             tangentVec          = (fallbackT - n * n.Dot(fallbackT)).Normalized();
         }
 
-        result.attributes[i] = {
-            .normal  = Math::PackNormal(rv.nx, rv.ny, rv.nz),
-            .tangent = Math::PackNormal(tangentVec.GetX(), tangentVec.GetY(), tangentVec.GetZ(), sign),
-            .uv      = Math::PackUV(rv.u, rv.v),
-            .color   = Math::PackColor(rv.r, rv.g, rv.b, rv.a)
+        result.tangentFrames[i] = {
+            .normal = Math::PackNormal(rv.nx, rv.ny, rv.nz), .tangent = Math::PackNormal(tangentVec.GetX(), tangentVec.GetY(), tangentVec.GetZ(), sign)
         };
+        result.surfaces[i] = {.uv = Math::PackUV(rv.u, rv.v), .color = Math::PackColor(rv.r, rv.g, rv.b, rv.a)};
 
         // 3. Pack Joints and Weights (using UNORM8 compression)
         if (hasSkin) {
@@ -234,7 +233,7 @@ CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& bin
         result.maxB[2] = std::max(result.maxB[2], rv.pz);
     }
 
-    // 5. Meshletize for VK_EXT_mesh_shader. The raw position/attribute/index
+    // 5. Meshletize for VK_EXT_mesh_shader. The raw position/frame/surface/index
     // streams above are still written to the .zmesh verbatim: the BLAS builder
     // and the legacy vertex pipeline consume them unchanged, meshlets are only
     // an additional index view over the same vertex pool.

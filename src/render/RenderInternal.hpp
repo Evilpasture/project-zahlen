@@ -771,11 +771,11 @@ struct RenderContext::Impl {
     struct MeshParticleRenderPush {
         VkDeviceAddress particleBufferAddr;
         VkDeviceAddress posAddress;
-        VkDeviceAddress attrAddress;
-        VkDeviceAddress iboAddress;
-
         std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
         std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+        VkDeviceAddress      tangentFrameAddress;
+        VkDeviceAddress      surfaceAddress;
+        VkDeviceAddress      iboAddress;
 
         uint32_t indexCount;
         uint32_t albedoIdx;
@@ -791,11 +791,12 @@ struct RenderContext::Impl {
         uint32_t samplerCodes1;
         uint32_t _padding;
     };
-    static_assert(sizeof(MeshParticleRenderPush) == 112);
-    static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 32);
-    static_assert(offsetof(MeshParticleRenderPush, emissiveFactor) == 48);
-    static_assert(offsetof(MeshParticleRenderPush, indexCount) == 64);
-
+    static_assert(sizeof(MeshParticleRenderPush) == 120);
+    static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 16);
+    static_assert(offsetof(MeshParticleRenderPush, emissiveFactor) == 32);
+    static_assert(offsetof(MeshParticleRenderPush, tangentFrameAddress) == 48);
+    static_assert(offsetof(MeshParticleRenderPush, surfaceAddress) == 56);
+    static_assert(offsetof(MeshParticleRenderPush, indexCount) == 72);
 
     struct ObjectConstants {
         uint32_t instanceId;
@@ -806,22 +807,23 @@ struct RenderContext::Impl {
     struct UIObjectConstants {
         JPH::Mat44 orthoMatrix;
         uint64_t   posAddress;
-        uint64_t   attrAddress;
+        uint64_t   surfaceAddress;
         uint32_t   albedoIdx;
         uint32_t   isSDF;
         uint32_t   useTextureColor;
     };
     static_assert(sizeof(UIObjectConstants) == 96);
+    static_assert(offsetof(UIObjectConstants, surfaceAddress) == 72);
 
     using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
     using PPPushConstants = ScenePassPushConstants;
 
     struct alignas(8) SkinningConstants {
         VkDeviceAddress inPosAddr;
-        VkDeviceAddress inAttrAddr;
+        VkDeviceAddress inFrameAddr;
         VkDeviceAddress inSkinAddr;
         VkDeviceAddress outPosAddr;
-        VkDeviceAddress outAttrAddr;
+        VkDeviceAddress outFrameAddr;
         VkDeviceAddress jointsAddr;
         VkDeviceAddress morphDeltasAddr;
         uint32_t        vertexCount;
@@ -830,6 +832,8 @@ struct RenderContext::Impl {
         uint32_t        activeMorphCount;
         float           morphWeights[4];
     };
+    static_assert(offsetof(SkinningConstants, inFrameAddr) == 8);
+    static_assert(offsetof(SkinningConstants, outFrameAddr) == 32);
 
     struct BakePush {
         uint32_t width;

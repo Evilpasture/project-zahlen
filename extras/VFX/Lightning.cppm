@@ -49,7 +49,8 @@ export struct LightningComponent {
     JPH::Vec3 groundTarget = JPH::Vec3::sZero();
 
     BufferHandle vboPos          = BufferHandle::Invalid;
-    BufferHandle vboAttr         = BufferHandle::Invalid;
+    BufferHandle vboFrame        = BufferHandle::Invalid;
+    BufferHandle vboSurface      = BufferHandle::Invalid;
     AssetID      meshAssetId     = InvalidAssetID;
     MaterialID   matAssetId      = InvalidMaterialID;
     uint32_t     maxVertices     = 0;

@@ -3,6 +3,7 @@
 
 
 import instance_data;
+import vertex_format;
 import pbr_helpers;
 import uniforms;
 
@@ -66,9 +67,9 @@ float TraceVisibility(float3 origin, float3 direction, float tMax, bool alphaTes
         uint i1        = inst.fetchIndex(primIndex * 3u + 1u);
         uint i2        = inst.fetchIndex(primIndex * 3u + 2u);
 
-        float2 uv0 = UnpackHalf2(inst.fetchAttributes(i0).uv);
-        float2 uv1 = UnpackHalf2(inst.fetchAttributes(i1).uv);
-        float2 uv2 = UnpackHalf2(inst.fetchAttributes(i2).uv);
+        float2 uv0 = inst.fetchSurface(i0).unpackedUV;
+        float2 uv1 = inst.fetchSurface(i1).unpackedUV;
+        float2 uv2 = inst.fetchSurface(i2).unpackedUV;
         float2 uv  = uv0 * (1.0f - bary.x - bary.y) + uv1 * bary.x + uv2 * bary.y;
 
         float alpha = globalTextures[inst.albedoIndex].SampleLevel(pointSampler, uv, 0.0f).a * inst.baseColorFactor.a;

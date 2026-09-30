@@ -833,6 +833,14 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PartMismatch);
             }
             for (const ZHLN::ModelPart& part: prefab->parts) {
+                // The importer must upload three independently addressable
+                // vertex streams, including the surface that carries UV1.
+                const auto& mesh = part.mesh;
+                if (mesh.posBuffer == ZHLN::BufferHandle::Invalid || mesh.tangentFrameBuffer == ZHLN::BufferHandle::Invalid ||
+                    mesh.surfaceBuffer == ZHLN::BufferHandle::Invalid || mesh.posBuffer == mesh.tangentFrameBuffer || mesh.posBuffer == mesh.surfaceBuffer ||
+                    mesh.tangentFrameBuffer == mesh.surfaceBuffer) {
+                    return std::unexpected(GLTFImportError::PartMismatch);
+                }
                 if (part.nodeIndex < 0 || static_cast<size_t>(part.nodeIndex) >= prefab->nodes.size()) {
                     return std::unexpected(GLTFImportError::PartMismatch);
                 }

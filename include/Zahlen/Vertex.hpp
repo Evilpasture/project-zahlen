@@ -21,14 +21,20 @@ struct VertexPosition {
     float position[3];
 };
 
-struct VertexAttributes {
+// Separate streams: animation writes only the 8-byte tangent frame, while
+// UVs and vertex color stay immutable in the 12-byte surface stream.
+struct VertexTangentFrame {
     Packed1010102 normal;
     Packed1010102 tangent;
-    PackedHalf2   uv;
-    PackedRGBA8   color;
-    PackedHalf2   uv1; // TEXCOORD_1; keep UV0/color offsets stable for existing geometry.
 };
-static_assert(sizeof(VertexAttributes) == 20 && offsetof(VertexAttributes, uv1) == 16);
+static_assert(sizeof(VertexTangentFrame) == 8 && offsetof(VertexTangentFrame, tangent) == 4);
+
+struct VertexSurface {
+    PackedHalf2 uv;
+    PackedRGBA8 color;
+    PackedHalf2 uv1; // TEXCOORD_1
+};
+static_assert(sizeof(VertexSurface) == 12 && offsetof(VertexSurface, color) == 4 && offsetof(VertexSurface, uv1) == 8);
 
 struct VertexSkin {
     uint16_t    joints[4];

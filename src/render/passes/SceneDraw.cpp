@@ -70,29 +70,34 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
             continue;
         }
 
-        auto* posMesh  = ctx.geometry.Resolve(gpuMesh->posBuffer);
-        auto* attrMesh = ctx.geometry.Resolve(gpuMesh->attrBuffer);
-        auto* iboMesh  = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        auto* posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
+        auto* frameMesh   = ctx.geometry.Resolve(gpuMesh->tangentFrameBuffer);
+        auto* surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
+        auto* iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        if (posMesh == nullptr) {
+            continue;
+        }
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
-            .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
-            .attrAddress        = (attrMesh != nullptr) ? attrMesh->vboAddress : 0,
-            .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
-            .baseColorFactor    = gpuMat->baseColorFactor,
-            .emissiveFactor     = gpuMat->emissiveFactor,
-            .indexCount         = gpuMesh->indexCount,
-            .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
-            .normalIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
-            .pbrIdx             = ctx.textureManager.GetBindlessIndex(gpuMat->pbrMap),
-            .emissiveIdx        = ctx.textureManager.GetBindlessIndex(gpuMat->emissiveMap),
-            .roughness          = gpuMat->roughnessFactor,
-            .metallic           = gpuMat->metallicFactor,
-            .alphaCutoff        = gpuMat->alphaCutoff,
-            .alphaMode          = gpuMat->alphaMode,
-            .samplerCodes0      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
-            .samplerCodes1      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
-            ._padding           = 0
+            .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
+            .posAddress          = posMesh->vboAddress,
+            .baseColorFactor     = gpuMat->baseColorFactor,
+            .emissiveFactor      = gpuMat->emissiveFactor,
+            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress : 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .indexCount          = gpuMesh->indexCount,
+            .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
+            .normalIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
+            .pbrIdx              = ctx.textureManager.GetBindlessIndex(gpuMat->pbrMap),
+            .emissiveIdx         = ctx.textureManager.GetBindlessIndex(gpuMat->emissiveMap),
+            .roughness           = gpuMat->roughnessFactor,
+            .metallic            = gpuMat->metallicFactor,
+            .alphaCutoff         = gpuMat->alphaCutoff,
+            .alphaMode           = gpuMat->alphaMode,
+            .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
+            .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
+            ._padding            = 0
         };
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
@@ -125,28 +130,33 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
             continue;
         }
 
-        auto* posMesh = ctx.geometry.Resolve(gpuMesh->posBuffer);
-        auto* iboMesh = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        auto* posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
+        auto* surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
+        auto* iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        if (posMesh == nullptr) {
+            continue;
+        }
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
-            .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress         = (posMesh != nullptr) ? posMesh->vboAddress : 0,
-            .attrAddress        = 0,
-            .iboAddress         = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
-            .baseColorFactor    = gpuMat->baseColorFactor,
-            .emissiveFactor     = {},
-            .indexCount         = gpuMesh->indexCount,
-            .albedoIdx          = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
-            .normalIdx          = 0,
-            .pbrIdx             = 0,
-            .emissiveIdx        = 0,
-            .roughness          = 0.0f,
-            .metallic           = 0.0f,
-            .alphaCutoff        = gpuMat->alphaCutoff,
-            .alphaMode          = gpuMat->alphaMode,
-            .samplerCodes0      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
-            .samplerCodes1      = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
-            ._padding           = 0
+            .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
+            .posAddress          = posMesh->vboAddress,
+            .baseColorFactor     = gpuMat->baseColorFactor,
+            .emissiveFactor      = {},
+            .tangentFrameAddress = 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .indexCount          = gpuMesh->indexCount,
+            .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
+            .normalIdx           = 0,
+            .pbrIdx              = 0,
+            .emissiveIdx         = 0,
+            .roughness           = 0.0f,
+            .metallic            = 0.0f,
+            .alphaCutoff         = gpuMat->alphaCutoff,
+            .alphaMode           = gpuMat->alphaMode,
+            .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
+            .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
+            ._padding            = 0
         };
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;

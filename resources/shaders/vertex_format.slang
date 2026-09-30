@@ -3,11 +3,17 @@
 
 module vertex_format;
 
-public struct PackedVertexAttributes {
-    public uint packedNormal;
-    public uint packedTangent;
-    public uint packedUV;
-    public uint packedColor;
+// Match Zahlen/Vertex.hpp exactly: 8-byte animated tangent frame and
+// 12-byte immutable UV/color stream. Both are indexed independently by vertex.
+public struct VertexTangentFrame {
+    public uint normal;
+    public uint tangent;
+};
+
+public struct VertexSurface {
+    public uint uv;
+    public uint color;
+    public uint uv1;
 };
 
 public struct PackedSkinVertex {
@@ -40,30 +46,29 @@ public uint4 UnpackJoints16(uint2 packed) {
     return uint4(packed.x & 0xFFFF, packed.x >> 16, packed.y & 0xFFFF, packed.y >> 16);
 }
 
-public extension PackedVertexAttributes {
-    public property float4 normal {
+public extension VertexTangentFrame {
+    public property float4 unpackedNormal {
         [ForceInline]
-        get {
-            return Unpack1010102(this.packedNormal);
-        }
+        get { return Unpack1010102(this.normal); }
     }
-    public property float4 tangent {
+    public property float4 unpackedTangent {
         [ForceInline]
-        get {
-            return Unpack1010102(this.packedTangent);
-        }
+        get { return Unpack1010102(this.tangent); }
     }
-    public property float2 uv {
+}
+
+public extension VertexSurface {
+    public property float2 unpackedUV {
         [ForceInline]
-        get {
-            return UnpackHalf2(this.packedUV);
-        }
+        get { return UnpackHalf2(this.uv); }
     }
-    public property float4 color {
+    public property float2 unpackedUV1 {
         [ForceInline]
-        get {
-            return UnpackRGBA8(this.packedColor);
-        }
+        get { return UnpackHalf2(this.uv1); }
+    }
+    public property float4 unpackedColor {
+        [ForceInline]
+        get { return UnpackRGBA8(this.color); }
     }
 }
 

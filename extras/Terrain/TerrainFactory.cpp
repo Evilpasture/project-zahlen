@@ -5,11 +5,11 @@
 #include "TerrainFactory.hpp"
 #include "TerrainSystem.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -90,11 +90,13 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         return JPH::Vec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
     };
 
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    size_t                        quadCount = static_cast<size_t>(sampleCount - 1) * (sampleCount - 1);
+    std::vector<VertexPosition>     positions;
+    std::vector<VertexTangentFrame> tangentFrames;
+    std::vector<VertexSurface>      surfaces;
+    size_t                          quadCount = static_cast<size_t>(sampleCount - 1) * (sampleCount - 1);
     positions.reserve(quadCount * 6);
-    attributes.reserve(quadCount * 6);
+    tangentFrames.reserve(quadCount * 6);
+    surfaces.reserve(quadCount * 6);
 
     for (int z = 0; z < sampleCount - 1; ++z) {
         for (int x = 0; x < sampleCount - 1; ++x) {
@@ -125,57 +127,54 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
                 return Math::PackColor(c[0], c[1], c[2], c[3]);
             };
 
-            VertexPosition   posA {{ax, heights[idxA], az}};
-            VertexAttributes attrA {
-                .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = fetch_color(idxA)
+            VertexPosition     posA {{ax, heights[idxA], az}};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxA)};
+
+            VertexPosition     posB {{bx, heights[idxB], bz}};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexSurface      surfaceB = {
+                     .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = fetch_color(idxB)
             };
 
-            VertexPosition   posB {{bx, heights[idxB], bz}};
-            VertexAttributes attrB {
-                .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = fetch_color(idxB)
+            VertexPosition     posC {{cx, heights[idxC], cz}};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexSurface      surfaceC = {
+                     .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxC)
             };
 
-            VertexPosition   posC {{cx, heights[idxC], cz}};
-            VertexAttributes attrC {
-                .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = fetch_color(idxC)
-            };
-
-            VertexPosition   posD {{dx_, heights[idxD], dz_}};
-            VertexAttributes attrD {
-                .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = fetch_color(idxD)
+            VertexPosition     posD {{dx_, heights[idxD], dz_}};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1, 0, 0, 1)};
+            VertexSurface      surfaceD = {
+                     .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = fetch_color(idxD)
             };
 
             positions.push_back(posA);
-            attributes.push_back(attrA);
+            tangentFrames.push_back(frameA);
+            surfaces.push_back(surfaceA);
             positions.push_back(posC);
-            attributes.push_back(attrC);
+            tangentFrames.push_back(frameC);
+            surfaces.push_back(surfaceC);
             positions.push_back(posB);
-            attributes.push_back(attrB);
+            tangentFrames.push_back(frameB);
+            surfaces.push_back(surfaceB);
             positions.push_back(posB);
-            attributes.push_back(attrB);
+            tangentFrames.push_back(frameB);
+            surfaces.push_back(surfaceB);
             positions.push_back(posC);
-            attributes.push_back(attrC);
+            tangentFrames.push_back(frameC);
+            surfaces.push_back(surfaceC);
             positions.push_back(posD);
-            attributes.push_back(attrD);
+            tangentFrames.push_back(frameD);
+            surfaces.push_back(surfaceD);
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {tangentFrames});
+    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {surfaces});
 
-    Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
+    Mesh finalMesh {.posBuffer = posVbo, .tangentFrameBuffer = frameVbo, .surfaceBuffer = surfaceVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
     AttachTerrainMeshlets(ctx, finalMesh, positions, {});
     if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
@@ -249,10 +248,12 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
 
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
+    std::vector<VertexPosition>     positions;
+    std::vector<VertexTangentFrame> tangentFrames;
+    std::vector<VertexSurface>      surfaces;
     positions.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
-    attributes.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
+    tangentFrames.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
+    surfaces.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
 
     auto get_normal = [&](int x, int z) -> JPH::Vec3 {
         float     posX = -halfSize + x * dx;
@@ -328,68 +329,66 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
                 return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
             };
 
-            VertexPosition   posA  = {{ax, ay, az}};
-            VertexAttributes attrA = {
-                .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = get_color(ay, nA)
+            VertexPosition     posA = {{ax, ay, az}};
+            VertexTangentFrame frameA {.normal = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexSurface surfaceA {.uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(ay, nA)};
+
+            VertexPosition     vB = {{bx, by, bz}};
+            VertexTangentFrame frameB {.normal = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexSurface      surfaceB = {
+                     .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount), .color = get_color(by, nB)
             };
 
-            VertexPosition   vB    = {{bx, by, bz}};
-            VertexAttributes attrB = {
-                .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = get_color(by, nB)
+            VertexPosition     vC = {{cx, cy, cz}};
+            VertexTangentFrame frameC {.normal = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexSurface      surfaceC = {
+                     .uv = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(cy, nC)
             };
 
-            VertexPosition   vC    = {{cx, cy, cz}};
-            VertexAttributes attrC = {
-                .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = get_color(cy, nC)
-            };
-
-            VertexPosition   vD    = {{dx_, dy, dz_}};
-            VertexAttributes attrD = {
-                .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = get_color(dy, nD)
+            VertexPosition     vD = {{dx_, dy, dz_}};
+            VertexTangentFrame frameD {.normal = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()), .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f)};
+            VertexSurface      surfaceD = {
+                     .uv = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount), .color = get_color(dy, nD)
             };
 
             positions.push_back(posA);
-            attributes.push_back(attrA);
+            tangentFrames.push_back(frameA);
+            surfaces.push_back(surfaceA);
 
             positions.push_back(vC);
-            attributes.push_back(attrC);
+            tangentFrames.push_back(frameC);
+            surfaces.push_back(surfaceC);
 
             positions.push_back(vB);
-            attributes.push_back(attrB);
+            tangentFrames.push_back(frameB);
+            surfaces.push_back(surfaceB);
 
             positions.push_back(vB);
-            attributes.push_back(attrB);
+            tangentFrames.push_back(frameB);
+            surfaces.push_back(surfaceB);
 
             positions.push_back(vC);
-            attributes.push_back(attrC);
+            tangentFrames.push_back(frameC);
+            surfaces.push_back(surfaceC);
 
             positions.push_back(vD);
-            attributes.push_back(attrD);
+            tangentFrames.push_back(frameD);
+            surfaces.push_back(surfaceD);
         }
     }
 
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(std::span {attributes});
+    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {tangentFrames});
+    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {surfaces});
 
     auto finalMesh = Mesh {
-        .posBuffer   = posVbo,
-        .attrBuffer  = attrVbo,
-        .skinBuffer  = BufferHandle::Invalid,
-        .indexBuffer = BufferHandle::Invalid,
-        .vertexCount = static_cast<uint32_t>(positions.size()),
-        .indexCount  = 0
+        .posBuffer          = posVbo,
+        .tangentFrameBuffer = frameVbo,
+        .surfaceBuffer      = surfaceVbo,
+        .skinBuffer         = BufferHandle::Invalid,
+        .indexBuffer        = BufferHandle::Invalid,
+        .vertexCount        = static_cast<uint32_t>(positions.size()),
+        .indexCount         = 0
     };
     AttachTerrainMeshlets(ctx, finalMesh, positions, {});
     auto res = ctx.BuildMeshBLAS(finalMesh);
@@ -402,13 +401,13 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
 }
 
 auto CreateTerrainFromData(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    int                sampleCount,
-    float              worldSize,
-    const float*       heights,
-    const float*       colorsRGBA,
+    RenderContext&                    ctx,
+    ECS::Registry&                    reg,
+    PhysicsContext*                   pc,
+    int                               sampleCount,
+    float                             worldSize,
+    const float*                      heights,
+    const float*                      colorsRGBA,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
     Entity e = reg.Create();
@@ -469,8 +468,14 @@ auto CreateTerrainFromData(
     return e;
 }
 
-auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const PrefabFactory::SpawnParams& params)
-    -> Entity {
+auto CreateTerrainFromData(
+    Engine&                           engine,
+    int                               sampleCount,
+    float                             worldSize,
+    const float*                      heights,
+    const float*                      colorsRGBA,
+    const PrefabFactory::SpawnParams& params
+) -> Entity {
     TerrainSystem::RegisterCleanup(engine);
     return CreateTerrainFromData(
         engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
@@ -478,13 +483,13 @@ auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, con
 }
 
 auto CreateTerrain(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    size_t             sampleCount,
-    float              worldSize,
-    float              maxHeight,
-    TerrainType        type,
+    RenderContext&                    ctx,
+    ECS::Registry&                    reg,
+    PhysicsContext*                   pc,
+    size_t                            sampleCount,
+    float                             worldSize,
+    float                             maxHeight,
+    TerrainType                       type,
     const PrefabFactory::SpawnParams& params
 ) -> Entity {
     Entity e = reg.Create();
@@ -535,7 +540,8 @@ auto CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
+            auto body =
+                pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF);
             reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }

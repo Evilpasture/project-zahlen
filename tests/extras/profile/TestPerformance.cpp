@@ -543,7 +543,7 @@ struct PerformanceTestSuite {
                                        );
 
                                        const ZHLN::UIDrawData draw = gui.EndFrame();
-                                       if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                       if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                            ++framesWithoutDrawData;
                                        }
                                    }
@@ -797,7 +797,7 @@ struct PerformanceTestSuite {
                                      );
 
                                      const ZHLN::UIDrawData draw = gui.EndFrame();
-                                     if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                     if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                          ++framesWithoutDrawData;
                                      }
                                  }

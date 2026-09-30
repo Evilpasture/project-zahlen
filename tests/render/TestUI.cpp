@@ -48,10 +48,10 @@ using ZHLN::Test::Image::RgbImage;
 struct SolidPayload {
     std::vector<ZHLN::UIBatch>          batches;
     std::vector<ZHLN::VertexPosition>   positions;
-    std::vector<ZHLN::VertexAttributes> attributes;
+    std::vector<ZHLN::VertexSurface>    surfaces;
 
     [[nodiscard]] auto View() const noexcept -> ZHLN::UIDrawData {
-        return ZHLN::UIDrawData {.batches = batches, .positions = positions, .attributes = attributes};
+        return ZHLN::UIDrawData {.batches = batches, .positions = positions, .surfaces = surfaces};
     }
 };
 
@@ -70,7 +70,7 @@ struct SolidPayload {
     SolidPayload payload;
     payload.batches.assign(frame.batches.begin(), frame.batches.end());
     payload.positions.assign(frame.positions.begin(), frame.positions.end());
-    payload.attributes.assign(frame.attributes.begin(), frame.attributes.end());
+    payload.surfaces.assign(frame.surfaces.begin(), frame.surfaces.end());
     return payload;
 }
 

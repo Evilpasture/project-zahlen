@@ -8,7 +8,7 @@ import vertex_format;
 struct UIObjectConstants {
     float4x4 orthoMatrix;
     uint64_t posAddress;
-    uint64_t attrAddress;
+    uint64_t surfaceAddress;
     uint albedoIdx;
     uint isSDF;
     uint useTextureColor;
@@ -35,14 +35,14 @@ UIVSOutput VSMain(uint vertexId: SV_VertexID) {
     UIVSOutput output;
 
     GPUBuffer<float3> posPool = GPUBuffer<float3>(uiObj.posAddress);
-    GPUBuffer<VertexAttributes> attrPool = GPUBuffer<VertexAttributes>(uiObj.attrAddress);
+    GPUBuffer<VertexSurface> surfaces = GPUBuffer<VertexSurface>(uiObj.surfaceAddress);
 
     float3 position = posPool.load(vertexId);
-    VertexAttributes attr = attrPool.load(vertexId);
+    VertexSurface surface = surfaces.load(vertexId);
 
     output.pos   = mul(uiObj.orthoMatrix, float4(position, 1.0f));
-    output.uv    = attr.unpackedUV;
-    output.color = attr.unpackedColor;
+    output.uv    = surface.unpackedUV;
+    output.color = surface.unpackedColor;
     return output;
 }
 

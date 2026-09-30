@@ -42,14 +42,16 @@ static_assert(EncodeMaterialSamplerWord(MaterialSamplerAddresses {}, 0) == 0u);
 
 struct ResolvedMeshMaterial {
     NativeMesh*     posMesh         = nullptr;
-    NativeMesh*     attrMesh        = nullptr;
+    NativeMesh*     frameMesh       = nullptr;
+    NativeMesh*     surfaceMesh     = nullptr;
     NativeMesh*     finalPosMesh    = nullptr;
     NativeMesh*     skinMesh        = nullptr;
     NativeMesh*     indexMesh       = nullptr;
     NativeMaterial* material        = nullptr;
     NativeMaterial* prePassMaterial = nullptr;
     VkDeviceAddress posAddr         = 0;
-    VkDeviceAddress attrAddr        = 0;
+    VkDeviceAddress frameAddr       = 0;
+    VkDeviceAddress surfaceAddr     = 0;
 
     VkDeviceAddress meshletAddr       = 0;
     VkDeviceAddress meshletVertexAddr = 0;
@@ -93,8 +95,9 @@ struct InstanceDataDesc {
     JPH::Mat44 world     = JPH::Mat44::sIdentity();
     JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
 
-    uint64_t posAddress  = 0;
-    uint64_t attrAddress = 0;
+    uint64_t posAddress          = 0;
+    uint64_t tangentFrameAddress = 0;
+    uint64_t surfaceAddress      = 0;
 
     BindlessIndices indices {};
 
@@ -195,32 +198,33 @@ struct InstanceDataDesc {
     }
 
     return InstanceData {
-        .world            = desc.world,
-        .prevWorld        = desc.prevWorld,
-        .posAddress       = desc.posAddress,
-        .attrAddress      = desc.attrAddress,
-        .skinAddress      = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress : 0ull,
-        .iboAddress       = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress : 0ull,
-        .vertexCount      = desc.vertexCount,
-        .indexCount       = desc.indexCount,
-        .texIndices0      = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
-        .texIndices1      = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
-        .cullRadius       = desc.cullRadius,
-        .metallicFactor   = metallic,
-        .roughnessFactor  = desc.roughnessFactor,
-        .alphaCutoff      = alphaCutoff,
+        .world               = desc.world,
+        .prevWorld           = desc.prevWorld,
+        .posAddress          = desc.posAddress,
+        .tangentFrameAddress = desc.tangentFrameAddress,
+        .surfaceAddress      = desc.surfaceAddress,
+        .skinAddress         = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress : 0ull,
+        .iboAddress          = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress : 0ull,
+        .vertexCount         = desc.vertexCount,
+        .indexCount          = desc.indexCount,
+        .texIndices0         = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
+        .texIndices1         = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
+        .cullRadius          = desc.cullRadius,
+        .metallicFactor      = metallic,
+        .roughnessFactor     = desc.roughnessFactor,
+        .alphaCutoff         = alphaCutoff,
         // Bit 9 tells the task shader to keep back-facing meshlets of a
         // double-sided material. Rasterizer CullNone cannot restore a meshlet
         // rejected by the task stage.
-        .flags            = (transmission8 << 24) | (isViewmodel << 16) | (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
-        .jointOffset      = desc.jointOffset,
-        .morphOffset      = desc.morphOffset,
-        .activeMorphCount = desc.activeMorphCount,
-        .localCenter      = desc.localCenter,
-        ._paddingCenter   = paddingCenter,
-        .morphWeights     = desc.morphWeights,
-        .baseColorFactor  = baseColor,
-        .emissiveFactor   = emissive,
+        .flags                = (transmission8 << 24) | (isViewmodel << 16) | (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .jointOffset          = desc.jointOffset,
+        .morphOffset          = desc.morphOffset,
+        .activeMorphCount     = desc.activeMorphCount,
+        .localCenter          = desc.localCenter,
+        ._paddingCenter       = paddingCenter,
+        .morphWeights         = desc.morphWeights,
+        .baseColorFactor      = baseColor,
+        .emissiveFactor       = emissive,
         .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
@@ -231,14 +235,13 @@ struct InstanceDataDesc {
         .anisotropyTexIndex   = desc.anisotropyTex,
         .samplerCodes0        = PackMaterialSamplerAddresses(desc.textureSamplers, 0),
         .samplerCodes1        = PackMaterialSamplerAddresses(desc.textureSamplers, 8),
-        .sheenParams          = {desc.sheenColorFactor[0], desc.sheenColorFactor[1], desc.sheenColorFactor[2],
-                                 std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
-        .sheenColorTexIndex   = desc.sheenColorTex,
+        .sheenParams        = {desc.sheenColorFactor[0], desc.sheenColorFactor[1], desc.sheenColorFactor[2], std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
+        .sheenColorTexIndex = desc.sheenColorTex,
         .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
-        .occlusionTexIndex    = desc.occlusionTex,
-        .occlusionStrength    = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
-        .uvRow0               = uvRow0,
-        .uvRow1               = uvRow1,
+        .occlusionTexIndex      = desc.occlusionTex,
+        .occlusionStrength      = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
+        .uvRow0                 = uvRow0,
+        .uvRow1                 = uvRow1,
     };
 }
 
@@ -247,17 +250,20 @@ struct InstanceDataDesc {
     using enum BufferHandle;
 
     auto* posMesh        = impl->geometry.Resolve(mesh.posBuffer);
-    auto* attrMesh       = impl->geometry.Resolve(mesh.attrBuffer);
+    auto* frameMesh      = impl->geometry.Resolve(mesh.tangentFrameBuffer);
+    auto* surfaceMesh    = impl->geometry.Resolve(mesh.surfaceBuffer);
     auto* nativeMaterial = impl->pipelines.Resolve(material.pipeline);
 
-    if (posMesh == nullptr || attrMesh == nullptr || nativeMaterial == nullptr) [[unlikely]] {
+    if (posMesh == nullptr || surfaceMesh == nullptr || (mesh.tangentFrameBuffer != Invalid && frameMesh == nullptr) ||
+        (skinnedVertexBuffer != Invalid && frameMesh == nullptr) || nativeMaterial == nullptr) [[unlikely]] {
         return std::nullopt;
     }
 
     ResolvedMeshMaterial res;
-    res.posMesh  = posMesh;
-    res.attrMesh = attrMesh;
-    res.material = nativeMaterial;
+    res.posMesh     = posMesh;
+    res.frameMesh   = frameMesh;
+    res.surfaceMesh = surfaceMesh;
+    res.material    = nativeMaterial;
 
     if (material.prePassPipeline != PipelineHandle::Invalid) {
         res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline);
@@ -267,14 +273,21 @@ struct InstanceDataDesc {
     res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer) : res.posMesh;
-    // A non-invalid scratch handle can still be stale or destroyed; unlike
-    // the base position buffer, it has not been validated yet.
+    // A non-invalid scratch handle can still be stale or undersized. Never
+    // enqueue a draw that could read uninitialized positions or tangent frames.
     if (res.finalPosMesh == nullptr) [[unlikely]] {
         return std::nullopt;
     }
+    if (skinnedVertexBuffer != Invalid &&
+        (res.finalPosMesh->vertexCount < posMesh->vertexCount ||
+         res.finalPosMesh->buffer.Size() < static_cast<size_t>(res.finalPosMesh->vertexCount) *
+                                               (sizeof(VertexPosition) + sizeof(VertexTangentFrame)))) [[unlikely]] {
+        return std::nullopt;
+    }
 
-    res.posAddr  = res.finalPosMesh->vboAddress;
-    res.attrAddr = res.attrMesh->vboAddress;
+    res.posAddr     = res.finalPosMesh->vboAddress;
+    res.frameAddr   = res.frameMesh != nullptr ? res.frameMesh->vboAddress : 0;
+    res.surfaceAddr = res.surfaceMesh->vboAddress;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
         auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
@@ -289,10 +302,14 @@ struct InstanceDataDesc {
         }
     }
 
-    if (res.posMesh == res.attrMesh) {
-        res.attrAddr = res.posMesh->vboAddress + (RenderContext::Impl::kMaxLineVertices * sizeof(VertexPosition));
-    } else if (skinnedVertexBuffer != Invalid) {
-        res.attrAddr = res.finalPosMesh->vboAddress + (res.posMesh->vertexCount * sizeof(VertexPosition));
+    // Persistently mapped debug triangles store positions then surfaces in
+    // one buffer. Skinned geometry stores positions then animated frames in
+    // scratch; its UVs/color continue to use the original surface buffer.
+    if (res.posMesh == res.surfaceMesh) {
+        res.surfaceAddr += RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
+    }
+    if (skinnedVertexBuffer != Invalid) {
+        res.frameAddr = res.finalPosMesh->vboAddress + (res.finalPosMesh->vertexCount * sizeof(VertexPosition));
     }
 
     return res;
@@ -317,10 +334,7 @@ void RenderContext::Impl::FlushLineQueue() {
     auto  mappedRegion = frames.lineVbos[presenter.frameIndex].Map(allocator.Get());
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
     if (basePosPtr == nullptr) return;
-    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxLineVerts);
-
-    Packed1010102 dummyNorm = Math::PackNormal(0.0f, 1.0f, 0.0f);
-    Packed1010102 dummyTang = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
+    auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(basePosPtr + maxLineVerts);
 
     uint32_t vertIdx = 0;
     for (const auto& line: queues.Lines()) {
@@ -329,22 +343,18 @@ void RenderContext::Impl::FlushLineQueue() {
         }
 
         basePosPtr[vertIdx]  = {.position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()}};
-        baseAttrPtr[vertIdx] = {
-            .normal  = dummyNorm,
-            .tangent = dummyTang,
-            .uv      = Math::PackUV(0.0f, 0.0f),
-            .color   = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW()),
-            .uv1     = Math::PackUV(0.0f, 0.0f)
+        baseSurfacePtr[vertIdx] = {
+            .uv    = Math::PackUV(0.0f, 0.0f),
+            .color = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW()),
+            .uv1   = Math::PackUV(0.0f, 0.0f)
         };
         vertIdx++;
 
         basePosPtr[vertIdx]  = {.position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()}};
-        baseAttrPtr[vertIdx] = {
-            .normal  = dummyNorm,
-            .tangent = dummyTang,
-            .uv      = Math::PackUV(1.0f, 1.0f),
-            .color   = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW()),
-            .uv1     = Math::PackUV(1.0f, 1.0f)
+        baseSurfacePtr[vertIdx] = {
+            .uv    = Math::PackUV(1.0f, 1.0f),
+            .color = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW()),
+            .uv1   = Math::PackUV(1.0f, 1.0f)
         };
         vertIdx++;
     }
@@ -355,11 +365,11 @@ void RenderContext::Impl::FlushLineQueue() {
     lineInstanceId       = lineInstanceIdx;
 
     const Vk::BufferSlice lineBuffer {frames.lineVbos[presenter.frameIndex], frames.lineVboAddresses[presenter.frameIndex]};
-    const VkDeviceSize posBytes = static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexPosition);
-    const auto positions = lineBuffer.Subspan(0, posBytes);
-    const auto attributes = lineBuffer.Subspan(posBytes, static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexAttributes));
-    const VkDeviceAddress posAddr  = positions.Address();
-    const VkDeviceAddress attrAddr = attributes.Address();
+    const VkDeviceSize    posBytes    = static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexPosition);
+    const auto            positions   = lineBuffer.Subspan(0, posBytes);
+    const auto            surfaces    = lineBuffer.Subspan(posBytes, static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexSurface));
+    const VkDeviceAddress posAddr     = positions.Address();
+    const VkDeviceAddress surfaceAddr = surfaces.Address();
 
     auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator.Get());
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);
@@ -370,12 +380,12 @@ void RenderContext::Impl::FlushLineQueue() {
 
     dst[lineInstanceIdx] = BuildGPUInstanceData(
         InstanceDataDesc {
-            .posAddress  = posAddr,
-            .attrAddress = attrAddr,
-            .indices     = BindlessIndices {.albedo = 1, .normal = 2, .pbr = 0, .emissive = 1},
-            .alphaMode   = 2,
-            .vertexCount = vertIdx,
-            .cullRadius  = 10000.0f,
+            .posAddress     = posAddr,
+            .surfaceAddress = surfaceAddr,
+            .indices        = BindlessIndices {.albedo = 1, .normal = 2, .pbr = 0, .emissive = 1},
+            .alphaMode      = 2,
+            .vertexCount    = vertIdx,
+            .cullRadius     = 10000.0f,
         }
     );
 
@@ -409,54 +419,55 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
-                 .resolved  = &*resolved,
-                 .world     = params.transform,
-                 .prevWorld = params.prevTransform,
-                 .posAddress       = resolved->posAddr,
-                 .attrAddress      = resolved->attrAddr,
-                 .indices          = tex,
-                 .alphaMode        = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
-                 .isViewmodel      = isViewmodel != 0u,
-                 .isSkinned        = isSkinned != 0u,
-                 .doubleSided      = material.doubleSided,
-                 .vertexCount      = resolved->posMesh->vertexCount,
-                 .indexCount       = mesh.indexCount,
-                 .jointOffset      = params.jointOffset,
-                 .morphOffset      = params.morphOffset,
-                 .activeMorphCount = activeMorphCount,
-                 .cullRadius       = params.cullRadius,
-                 .metallicFactor   = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
-                 .roughnessFactor  = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
-                 .alphaCutoff      = material.alphaCutoff,
-                 .localCenter      = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
-                 .morphWeights     = params.morphWeights,
-                 .baseColorFactor = (params.colorOverride[3] >= 0.0f) ? params.colorOverride : material.baseColorFactor,
-                 .emissiveFactor  = (params.emissiveOverride[3] >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
-                 .transmissionFactor = material.transmissionFactor,
-                 .iridescenceFactor  = material.iridescenceFactor,
-                 .filmThicknessNm    = material.filmThicknessNm,
-                 .filmThicknessMinNm = material.filmThicknessMinNm,
-                 .volumeThicknessM   = material.volumeThicknessM,
-                 .ior                = material.ior,
-                 .normalScale        = material.normalScale,
-                 .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
-                 .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
-                 .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                 .resolved                 = &*resolved,
+                 .world                    = params.transform,
+                 .prevWorld                = params.prevTransform,
+                 .posAddress               = resolved->posAddr,
+                 .tangentFrameAddress      = resolved->frameAddr,
+                 .surfaceAddress           = resolved->surfaceAddr,
+                 .indices                  = tex,
+                 .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                 .isViewmodel              = isViewmodel != 0u,
+                 .isSkinned                = isSkinned != 0u,
+                 .doubleSided              = material.doubleSided,
+                 .vertexCount              = resolved->posMesh->vertexCount,
+                 .indexCount               = mesh.indexCount,
+                 .jointOffset              = params.jointOffset,
+                 .morphOffset              = params.morphOffset,
+                 .activeMorphCount         = activeMorphCount,
+                 .cullRadius               = params.cullRadius,
+                 .metallicFactor           = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
+                 .roughnessFactor          = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
+                 .alphaCutoff              = material.alphaCutoff,
+                 .localCenter              = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+                 .morphWeights             = params.morphWeights,
+                 .baseColorFactor          = (params.colorOverride[3] >= 0.0f) ? params.colorOverride : material.baseColorFactor,
+                 .emissiveFactor           = (params.emissiveOverride[3] >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
+                 .transmissionFactor       = material.transmissionFactor,
+                 .iridescenceFactor        = material.iridescenceFactor,
+                 .filmThicknessNm          = material.filmThicknessNm,
+                 .filmThicknessMinNm       = material.filmThicknessMinNm,
+                 .volumeThicknessM         = material.volumeThicknessM,
+                 .ior                      = material.ior,
+                 .normalScale              = material.normalScale,
+                 .filmThicknessTex         = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                 .iridescenceTex           = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                 .volumeThicknessTex       = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
                  .clearcoatFactor          = material.clearcoatFactor,
                  .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
                  .clearcoatNormalScale     = material.clearcoatNormalScale,
                  .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
                  .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
                  .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
-                 .anisotropyStrength      = material.anisotropyStrength,
-                 .anisotropyRotation      = material.anisotropyRotation,
-                 .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
-                 .sheenColorFactor        = material.sheenColorFactor,
-                 .sheenRoughnessFactor    = material.sheenRoughnessFactor,
-                 .sheenColorTex           = FilmTextureIndex(_impl.get(), material.sheenColorMap),
-                 .sheenRoughnessTex       = FilmTextureIndex(_impl.get(), material.sheenRoughnessMap),
-                 .occlusionTex            = FilmTextureIndex(_impl.get(), material.occlusionMap),
-                 .occlusionStrength       = material.occlusionStrength,
+                 .anisotropyStrength       = material.anisotropyStrength,
+                 .anisotropyRotation       = material.anisotropyRotation,
+                 .anisotropyTex            = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                 .sheenColorFactor         = material.sheenColorFactor,
+                 .sheenRoughnessFactor     = material.sheenRoughnessFactor,
+                 .sheenColorTex            = FilmTextureIndex(_impl.get(), material.sheenColorMap),
+                 .sheenRoughnessTex        = FilmTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                 .occlusionTex             = FilmTextureIndex(_impl.get(), material.occlusionMap),
+                 .occlusionStrength        = material.occlusionStrength,
                  .textureSamplers          = material.textureSamplers,
                  .textureTransforms        = material.textureTransforms,
              }
@@ -464,7 +475,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
          .posMesh             = resolved->posMesh,
-         .attrMesh            = resolved->attrMesh,
+         .frameMesh           = resolved->frameMesh,
          .skinMesh            = resolved->skinMesh,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,
          .jointOffset         = params.jointOffset,
@@ -488,53 +499,53 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
         return DrawCommand {
-            .instanceData =
-            BuildGPUInstanceData(
+            .instanceData = BuildGPUInstanceData(
                 InstanceDataDesc {
-                    .resolved        = &*resolved,
-                    .world           = transform,
-                    .prevWorld       = prevTransform,
-                    .posAddress      = resolved->posAddr,
-                    .attrAddress     = resolved->attrAddr,
-                    .indices         = tex,
-                    .alphaMode       = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
-                    .isSkinned       = isSkinned != 0u,
-                    .doubleSided     = material.doubleSided,
-                    .vertexCount     = resolved->finalPosMesh->vertexCount,
-                    .indexCount      = mesh.indexCount,
-                    .jointOffset     = jointOffset,
-                    .cullRadius      = cullRadius,
-                    .metallicFactor  = material.metallicFactor,
-                    .roughnessFactor = material.roughnessFactor,
-                    .alphaCutoff     = material.alphaCutoff,
-                    .baseColorFactor = material.baseColorFactor,
-                    .emissiveFactor  = material.emissiveFactor,
-                    .transmissionFactor = material.transmissionFactor,
-                    .iridescenceFactor  = material.iridescenceFactor,
-                    .filmThicknessNm    = material.filmThicknessNm,
-                    .filmThicknessMinNm = material.filmThicknessMinNm,
-                    .volumeThicknessM   = material.volumeThicknessM,
-                    .ior                = material.ior,
-                    .normalScale        = material.normalScale,
-                    .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
-                    .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
-                    .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                    .resolved                 = &*resolved,
+                    .world                    = transform,
+                    .prevWorld                = prevTransform,
+                    .posAddress               = resolved->posAddr,
+                    .tangentFrameAddress      = resolved->frameAddr,
+                    .surfaceAddress           = resolved->surfaceAddr,
+                    .indices                  = tex,
+                    .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
+                    .isSkinned                = isSkinned != 0u,
+                    .doubleSided              = material.doubleSided,
+                    .vertexCount              = resolved->posMesh->vertexCount,
+                    .indexCount               = mesh.indexCount,
+                    .jointOffset              = jointOffset,
+                    .cullRadius               = cullRadius,
+                    .metallicFactor           = material.metallicFactor,
+                    .roughnessFactor          = material.roughnessFactor,
+                    .alphaCutoff              = material.alphaCutoff,
+                    .baseColorFactor          = material.baseColorFactor,
+                    .emissiveFactor           = material.emissiveFactor,
+                    .transmissionFactor       = material.transmissionFactor,
+                    .iridescenceFactor        = material.iridescenceFactor,
+                    .filmThicknessNm          = material.filmThicknessNm,
+                    .filmThicknessMinNm       = material.filmThicknessMinNm,
+                    .volumeThicknessM         = material.volumeThicknessM,
+                    .ior                      = material.ior,
+                    .normalScale              = material.normalScale,
+                    .filmThicknessTex         = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                    .iridescenceTex           = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                    .volumeThicknessTex       = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
                     .clearcoatFactor          = material.clearcoatFactor,
                     .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
                     .clearcoatNormalScale     = material.clearcoatNormalScale,
                     .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
                     .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
                     .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
-                    .anisotropyStrength      = material.anisotropyStrength,
-                    .anisotropyRotation      = material.anisotropyRotation,
-                    .anisotropyTex           = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                    .anisotropyStrength       = material.anisotropyStrength,
+                    .anisotropyRotation       = material.anisotropyRotation,
+                    .anisotropyTex            = FilmTextureIndex(_impl.get(), material.anisotropyMap),
                     .textureSamplers          = material.textureSamplers,
                 }
             ),
             .material            = resolved->material,
             .prePassMaterial     = resolved->prePassMaterial,
-            .posMesh             = resolved->finalPosMesh,
-            .attrMesh            = resolved->attrMesh,
+            .posMesh             = resolved->posMesh,
+            .frameMesh           = resolved->frameMesh,
             .skinMesh            = resolved->skinMesh,
             .skinnedVertexBuffer = skinnedVertexBuffer,
             .jointOffset         = jointOffset,

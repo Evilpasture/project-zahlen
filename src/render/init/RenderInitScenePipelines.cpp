@@ -129,7 +129,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     const char*                      label,
     Vk::BufferUsage                  extraFlags
 ) noexcept -> std::expected<void, ErrorCode> {
-    const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
+    const size_t              bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
     PerFrame<Vk::Buffer> created;
     PerFrame<VkDeviceAddress> createdAddresses;
     defer _([&] {

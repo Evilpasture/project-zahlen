@@ -1,12 +1,5 @@
 import gpu_buffer;
-
-struct VertexAttributes {
-    uint normal;
-    uint tangent;
-    uint uv;
-    uint color;
-    uint uv1;
-};
+import vertex_format;
 
 struct GPUJoint {
     float4 col0;
@@ -17,10 +10,10 @@ struct GPUJoint {
 
 struct SkinningConstants {
     uint64_t inPosAddr;
-    uint64_t inAttrAddr;
+    uint64_t inFrameAddr;
     uint64_t inSkinAddr;
     uint64_t outPosAddr;
-    uint64_t outAttrAddr;
+    uint64_t outFrameAddr;
     uint64_t jointsAddr;
     uint64_t morphDeltasAddr;
     uint32_t vertexCount;
@@ -103,20 +96,18 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
 
     GPUBuffer<float> inPosValues = GPUBuffer<float>(pcs.inPosAddr);
-    GPUBuffer<VertexAttributes> inAttrPool = GPUBuffer<VertexAttributes>(pcs.inAttrAddr);
+    GPUBuffer<VertexTangentFrame> inFrames = GPUBuffer<VertexTangentFrame>(pcs.inFrameAddr);
     GPUBuffer<float> outPosValues = GPUBuffer<float>(pcs.outPosAddr);
-    GPUBuffer<VertexAttributes> outAttrPool = GPUBuffer<VertexAttributes>(pcs.outAttrAddr);
+    GPUBuffer<VertexTangentFrame> outFrames = GPUBuffer<VertexTangentFrame>(pcs.outFrameAddr);
     GPUBuffer<GPUJoint> jointsPool = GPUBuffer<GPUJoint>(pcs.jointsAddr);
     GPUBuffer<float4> morphDeltasPool = GPUBuffer<float4>(pcs.morphDeltasAddr);
 
     uint posOffset  = tid.x * 3u;
     float3 localPos = float3(inPosValues.load(posOffset), inPosValues.load(posOffset + 1u), inPosValues.load(posOffset + 2u));
 
-    VertexAttributes attr = inAttrPool.load(tid.x);
-    uint normalRaw        = attr.normal;
-    uint tangentRaw       = attr.tangent;
-    uint uvRaw            = attr.uv;
-    uint colorRaw         = attr.color;
+    VertexTangentFrame frame = inFrames.load(tid.x);
+    uint normalRaw  = frame.normal;
+    uint tangentRaw = frame.tangent;
 
     uint4 joints   = uint4(0, 0, 0, 0);
     float4 weights = float4(1.0f, 0.0f, 0.0f, 0.0f);
@@ -151,8 +142,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     outPosValues.store(posOffset + 1u, skinnedPos.y);
     outPosValues.store(posOffset + 2u, skinnedPos.z);
 
-    uint outNorm       = PackNormal(skinnedNorm, normUnpack.w);
-    uint outTang       = PackNormal(skinnedTang, tangUnpack.w);
-    VertexAttributes outAttr = { outNorm, outTang, uvRaw, colorRaw, attr.uv1 };
-    outAttrPool.store(tid.x, outAttr);
+    // UVs and vertex color are immutable: leave the surface buffer untouched.
+    uint outNorm = PackNormal(skinnedNorm, normUnpack.w);
+    uint outTang = PackNormal(skinnedTang, tangUnpack.w);
+    VertexTangentFrame outFrame = {outNorm, outTang};
+    outFrames.store(tid.x, outFrame);
 }

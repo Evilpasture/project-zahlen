@@ -112,7 +112,9 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
 }
 
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-    const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexAttributes));
+    // Deform only positions and the tangent frame. UV/color data stays in
+    // the immutable VertexSurface buffer owned by the source mesh.
+    const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexTangentFrame));
 
     Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     if (_ctx.RayTracingSupported()) {

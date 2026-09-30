@@ -341,7 +341,7 @@ type it spells through its own includes.
 | `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
 | `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
-| `VertexPosition`, `VertexAttributes`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
 | `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
@@ -582,7 +582,7 @@ ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 `GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
 boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
 frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
-`VertexAttributes` the host hands back through
+`VertexSurface` the host hands back through
 `RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
 interface and knows nothing about `GUI::Context`; it forwards the payload to
 the renderer-private `UIRenderer`. The UI shader does not import `common` and

@@ -18,11 +18,11 @@ struct Particle3D {
 struct MeshParticleRenderPushConstants {
     uint64_t particleBufferAddr;
     uint64_t posAddress;
-    uint64_t attrAddress;
-    uint64_t iboAddress;
-
     float4 baseColorFactor;
     float4 emissiveFactor;
+    uint64_t tangentFrameAddress;
+    uint64_t surfaceAddress;
+    uint64_t iboAddress;
 
     uint indexCount;
     uint albedoIdx;
@@ -121,22 +121,19 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.pos = output.shadowPos;
 #endif
 
-    if (mp_pc.attrAddress != 0) {
-        GPUBuffer<VertexAttributes> attributes = GPUBuffer<VertexAttributes>(mp_pc.attrAddress);
-        VertexAttributes attributesAtVertex = attributes.load(actualVertexId);
-        Quaternion rotation                 = Quaternion(p.rotation);
-
-        float3 localNormal = attributesAtVertex.unpackedNormal.xyz;
-        output.normal      = normalize(rotation.rotate(localNormal));
-
-        float4 localTangent = attributesAtVertex.unpackedTangent;
-        output.tangent.xyz  = normalize(rotation.rotate(localTangent.xyz));
-        output.tangent.w    = localTangent.w;
-        output.uv           = attributesAtVertex.unpackedUV;
-    } else {
-        output.normal  = float3(0.0f, 1.0f, 0.0f);
-        output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
-        output.uv      = float2(0.0f, 0.0f);
+    output.normal  = float3(0.0f, 1.0f, 0.0f);
+    output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    output.uv      = float2(0.0f, 0.0f);
+    if (mp_pc.tangentFrameAddress != 0) {
+        VertexTangentFrame frame = GPUBuffer<VertexTangentFrame>(mp_pc.tangentFrameAddress).load(actualVertexId);
+        Quaternion rotation = Quaternion(p.rotation);
+        output.normal = normalize(rotation.rotate(frame.unpackedNormal.xyz));
+        float4 tangent = frame.unpackedTangent;
+        output.tangent = float4(normalize(rotation.rotate(tangent.xyz)), tangent.w);
+    }
+    if (mp_pc.surfaceAddress != 0) {
+        VertexSurface surface = GPUBuffer<VertexSurface>(mp_pc.surfaceAddress).load(actualVertexId);
+        output.uv = surface.unpackedUV;
     }
 
     output.color           = p.color;
