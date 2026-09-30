@@ -185,16 +185,19 @@ struct InstanceDataDesc {
         }
     }
 
-    // glTF: uv' = offset + rotation * scale * uv. Keep the per-reference
-    // matrices independent (one image can be used in several material slots).
+    // glTF UVs have a top-left origin (V increases down the image). A positive
+    // KHR_texture_transform rotation moves +U toward -V, not +V. In particular,
+    // TextureTransformMultiTest's 90-degree transform must land on the same
+    // atlas checkmark as its untransformed Sample column, not the centre slash.
+    // Keep the rows per texture reference, even when several slots share an image.
     std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
     std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot] = JPH::Vec4(c * transform.scale[0], -s * transform.scale[1], transform.offset[0], 0.0f);
-        uvRow1[slot] = JPH::Vec4(s * transform.scale[0], c * transform.scale[1], transform.offset[1], static_cast<float>(transform.texCoord));
+        uvRow0[slot] = JPH::Vec4(c * transform.scale[0], s * transform.scale[1], transform.offset[0], 0.0f);
+        uvRow1[slot] = JPH::Vec4(-s * transform.scale[0], c * transform.scale[1], transform.offset[1], static_cast<float>(transform.texCoord));
     }
 
     return InstanceData {
@@ -540,6 +543,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .anisotropyRotation       = material.anisotropyRotation,
                     .anisotropyTex            = FilmTextureIndex(_impl.get(), material.anisotropyMap),
                     .textureSamplers          = material.textureSamplers,
+                    .textureTransforms        = material.textureTransforms,
                 }
             ),
             .material            = resolved->material,

@@ -1254,16 +1254,17 @@ struct GLTFImportTestSuite {
                 occlusion.scale != std::array<float, 2> {1.0f, 1.0f}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
-            // This also pins the matrix multiplication order (T * R * S), the
-            // override of TEXCOORD_0, and preservation of a mirrored V axis.
+            // A positive rotation in top-left-origin UV space moves +U toward
+            // -V. The separate render test checks the actual instance rows and
+            // shader against the untransformed Sample column.
             auto apply = [](const ZHLN::MaterialTextureTransform& t, std::array<float, 2> uv) {
                 const float u = uv[0] * t.scale[0], v = uv[1] * t.scale[1];
-                return std::array<float, 2> {t.offset[0] + std::cos(t.rotation) * u - std::sin(t.rotation) * v,
-                                              t.offset[1] + std::sin(t.rotation) * u + std::cos(t.rotation) * v};
+                return std::array<float, 2> {t.offset[0] + std::cos(t.rotation) * u + std::sin(t.rotation) * v,
+                                              t.offset[1] - std::sin(t.rotation) * u + std::cos(t.rotation) * v};
             };
             const auto transformed = apply(albedo, {0.5f, 0.2f}); // TEXCOORD_1, not TEXCOORD_0.
             const auto tiled = apply(pbr, {0.25f, 0.5f});
-            if (std::abs(transformed[0] - 0.8f) > 1e-4f || std::abs(transformed[1] - 1.4f) > 1e-4f ||
+            if (std::abs(transformed[0] + 0.4f) > 1e-4f || std::abs(transformed[1] + 0.6f) > 1e-4f ||
                 std::abs(tiled[0] - 7.5f) > 1e-4f || std::abs(tiled[1] + 15.0f) > 1e-4f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }

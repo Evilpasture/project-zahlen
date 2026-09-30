@@ -138,6 +138,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
     TestGLTFImport.cpp
+    TestTextureTransforms.cpp
     TestTransparentMaterials.cpp
 )
 
