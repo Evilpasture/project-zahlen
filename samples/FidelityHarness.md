@@ -39,7 +39,12 @@ this harness builds none of them. Specifically:
   `saturation = 1`, identity colour filter. The blit writes linear color; the
   headless target is `R8G8B8A8_SRGB`, so the store encodes sRGB the way a
   swapchain does. A `_UNORM` target was writing the linear bytes into the PAM.
-* **No AA** (`AAMode::None`) — a still must not carry TAA history or jitter.
+* **Spatial SMAA** (`AAMode::SMAA`) smooths rasterized edges in the still,
+  including coverage at scene/background boundaries. It has no TAA camera jitter
+  or history. Khronos goldens are antialiased; disabling every AA pass left
+  obvious one-pixel stair steps even at the goldens' native 2x resolution.
+  Use `--no-aa` to capture the unfiltered baseline for A/B comparison. Spatial
+  AA cannot recover geometry smaller than a rendered pixel like coverage AA can.
 * **No SSR/RTR reflections and no shadows** — the only illumination is the IBL.
 * **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving the
   baked SH diffuse irradiance plus the pre-filtered specular environment, which
@@ -61,6 +66,7 @@ this harness builds none of them. Specifically:
 | `--scenario <file.json>` | Scenario JSON (required) |
 | `--output <file.pam>` | Capture path (required). `.pam` keeps alpha so omit-background pixels are skipped; `.ppm` stays P6 and forces alpha opaque. |
 | `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). Applied at shade time, not baked. |
+| `--no-aa` | Disable the default spatial SMAA for an unfiltered comparison. |
 | `--headless` | Run without a window (core flag) |
 
 Exit codes: `0` captured; `1` usage/scenario/capture error.
@@ -176,11 +182,15 @@ does **not** calculate its direction by looking at a distinct target point.
 
 For the Sponza chain/foliage fidelity regression, inspect that same capture
 against **Filament's** golden at matched scene features, not screen coordinates
-from differently zoomed viewers. The source asset's chain (material 20) and
-foliage (materials 0 and 3) are double-sided alpha-masked surfaces with normal
-maps; they do not use sheen or texture-transform extensions. Check both hanging
-chains for the source texture's dark rusty color instead of chalk-white
-reflections, and check leaves for isolated white pixels. The deferred pass must
+from differently zoomed viewers. At 1000% zoom, the wall/arch silhouette should
+no longer have the hard one-pixel staircase of the `--no-aa` capture. The
+reference's antialiasing may still be smoother than spatial SMAA; compare the
+same image resolution and crop before judging edge quality. The source asset's
+chain (material 20) and foliage (materials 0 and 3) are double-sided alpha-masked
+surfaces with normal maps; they do not use sheen or texture-transform
+extensions. Check both hanging chains for the source texture's dark rusty color
+instead of chalk-white reflections, and check leaves for isolated white pixels.
+The deferred pass must
 orient the whole normal-map frame on backfaces, and the BRDF LUT's split-sum A
 term must multiply F0 (the LUT already integrated angular Fresnel). `zshader`
 compiles and reflects both paths; only the image comparison can test whether

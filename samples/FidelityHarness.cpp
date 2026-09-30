@@ -26,6 +26,7 @@
  *
  *   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1).
  *                         Applied at shade time, not baked into the SH or cube.
+ *   --no-aa               Disable the default spatial SMAA for A/B captures.
  */
 //
 // Exit codes: 0 = rendered and captured; 1 = a usage, scenario or capture
@@ -289,20 +290,20 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 
 // The conformance look: neutral tone mapping, 1:1 exposure, no bloom, no
 // vignette, no contrast/SAT grade, no AO/GI term over the IBL, no SSR/RTR
-// reflections, no anti-aliasing (spatial or temporal -- a still must not carry
-// TAA's accumulated history), and no scene lights (this function builds no
-// studio; initialization never made any).
+// reflections, spatial SMAA (without TAA's jitter/history), and no scene lights
+// (this function builds no studio; initialization never made any).
 //
-// `ambientScale` is the one deliberate escape hatch. It scales the baked SH
-// and the prefiltered cube at shade time (FrameUniforms::ambientExposure); it
-// is not folded into the bake, so 1.0 is the panorama's authorial radiance.
-// Fidelity conformance wants that 1:1, which is why it is the default.
+// `ambientScale` is the lighting escape hatch. It scales the baked SH and the
+// prefiltered cube at shade time (FrameUniforms::ambientExposure); it is not
+// folded into the bake, so 1.0 is the panorama's authorial radiance. Fidelity
+// conformance wants that 1:1, which is why it is the default. `--no-aa` is
+// only for checking the unfiltered coverage against the SMAA capture.
 //
 // No analytical sun. InitializeDefaultScene does not spawn one; the 180-intensity
 // value LightingSystem returns when none is authored is the procedural sky's
 // fill, and RenderSystem drops it while an environment map is set. StripSceneLights
 // removes anything a later spawn attaches (an emissive part becomes a point light).
-[[nodiscard]] auto MakeConformanceSettings(float ambientScale) -> ZHLN::GraphicsSettings {
+[[nodiscard]] auto MakeConformanceSettings(float ambientScale, bool noAA) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
     gfx.ApplyPreset(ZHLN::QualityLevel::High);
 
@@ -326,9 +327,10 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     gfx.post.enableSSR   = 0;
     gfx.post.enableRTR   = 0;
 
-    // Spatial AA only (none). TAA would fold its history and jitter into a
-    // still; SMAA/FXAA re-filter edges the goldens do not.
-    gfx.antiAliasing.mode = ZHLN::AAMode::None;
+    // The reference stills have antialiased geometry. SMAA smooths the final
+    // scene edges, including alpha, without moving the camera or accumulating
+    // temporal history. Keep the raw single-sample path for A/B diagnostics.
+    gfx.antiAliasing.mode = noAA ? ZHLN::AAMode::None : ZHLN::AAMode::SMAA;
 
     // Ray tracing off: no shadows, no reflections. A conformance frame is the
     // IBL and nothing else.
@@ -491,13 +493,14 @@ auto main(int argc, char* argv[]) -> int {
     const std::span<char* const> args(argv, static_cast<size_t>(argc));
 
     // This harness's own flags are consumed first: core's HandleCommandLine
-    // rejects unknown arguments, so the harness parses its three out and hands
-    // core only the rest. `--scenario`, `--output` and `--ambient-scale` accept
-    // both `--flag value` and `--flag=value`; `args` aliases the process-owned
-    // strings, so the filtered list holds pointers into the same storage.
+    // rejects unknown arguments, so the harness removes them before handing
+    // core the rest. Value flags accept both `--flag value` and `--flag=value`;
+    // `args` aliases the process-owned strings, so the filtered list holds
+    // pointers into the same storage.
     const std::string scenarioPath = FlagValue(args, "--scenario");
     const std::string outputPath   = FlagValue(args, "--output");
     const float       ambientScale = FlagFloat(args, "--ambient-scale", 1.0f);
+    bool              noAA         = false;
 
     std::vector<char*> coreArgs;
     coreArgs.reserve(args.size());
@@ -507,6 +510,8 @@ auto main(int argc, char* argv[]) -> int {
             ++i; // skip this flag's value
         } else if (arg.starts_with("--scenario=") || arg.starts_with("--output=") || arg.starts_with("--ambient-scale=")) {
             // consumed inline
+        } else if (arg == "--no-aa") {
+            noAA = true;
         } else {
             coreArgs.push_back(args[i]);
         }
@@ -594,9 +599,10 @@ auto main(int argc, char* argv[]) -> int {
 
     // Conformance settings and the authored camera, before the import: the
     // backdrop and the grade are already right while the model uploads. The
-    // ambient scale is the only non-conformant knob and defaults to 1:1.
-    const ZHLN::GraphicsSettings settings = MakeConformanceSettings(ambientScale);
+    // ambient scale defaults to 1:1; --no-aa is only for unfiltered A/B captures.
+    const ZHLN::GraphicsSettings settings = MakeConformanceSettings(ambientScale, noAA);
     ApplyGraphicsSettings(*engine, settings);
+    ZHLN::Log("[Fidelity] Antialiasing: {}.", noAA ? "none (--no-aa)" : "SMAA (spatial)");
 
     // The environment is an ECS component, not a renderer-side file load.
     // String256 is the component's path; a longer absolute path cannot be
