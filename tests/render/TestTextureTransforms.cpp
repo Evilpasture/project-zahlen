@@ -38,6 +38,16 @@ enum class TextureTransformError : uint8_t {
 
 namespace {
 
+// CTAD gives std::span<T, 4> for std::array<T, 4>; all typed buffer helpers
+// must accept it (including a const element type), not only dynamic spans.
+static_assert(requires(ZHLN::RenderContext& rc, ZHLN::BufferHandle handle,
+                       std::array<ZHLN::VertexPosition, 4>& vertices,
+                       const std::array<ZHLN::VertexPosition, 4>& immutable) {
+    rc.CreateStorageBuffer(std::span {vertices});
+    rc.CreateVertexBuffer(std::span {immutable});
+    rc.UpdateBuffer(handle, std::span {vertices});
+});
+
 constexpr std::array<float, 3> kPanelX {-1.2f, 0.0f, 1.2f};
 constexpr float                kCameraDistance = 4.0f;
 constexpr float                kUvLow          = 0.1884253f;
@@ -104,9 +114,9 @@ constexpr std::array kSampleUV {
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
     return {
-        .posBuffer          = rc.CreateVertexBuffer(std::span<ZHLN::VertexPosition> {positions}),
-        .tangentFrameBuffer = rc.CreateVertexBuffer(std::span<ZHLN::VertexTangentFrame> {frames}),
-        .surfaceBuffer      = rc.CreateVertexBuffer(std::span<ZHLN::VertexSurface> {surfaces}),
+        .posBuffer          = rc.CreateVertexBuffer(std::span {positions}),
+        .tangentFrameBuffer = rc.CreateVertexBuffer(std::span {frames}),
+        .surfaceBuffer      = rc.CreateVertexBuffer(std::span {surfaces}),
         .indexBuffer        = rc.CreateIndexBuffer(std::span<const uint32_t> {indices}),
         .vertexCount        = 4,
         .indexCount         = 6,

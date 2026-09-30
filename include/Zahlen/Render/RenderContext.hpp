@@ -111,16 +111,17 @@ class ZHLN_API RenderContext {
     void DestroyBuffer(BufferHandle handle);
     void UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept;
 
-    template <typename T> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateStorageBuffer(std::span<T> elements) -> BufferHandle {
+    // Accept both dynamic spans and fixed-extent spans deduced from std::array.
+    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateStorageBuffer(std::span<T, SpanExtent> elements) -> BufferHandle {
         return CreateStorageBuffer(std::as_bytes(elements), static_cast<uint32_t>(sizeof(T)));
     }
-    template <typename T> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateVertexBuffer(std::span<T> vertices) -> BufferHandle {
+    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateVertexBuffer(std::span<T, SpanExtent> vertices) -> BufferHandle {
         return CreateVertexBuffer(std::as_bytes(vertices), static_cast<uint32_t>(sizeof(T)));
     }
-    template <typename T> requires std::is_trivially_copyable_v<T>
-    void UpdateBuffer(BufferHandle handle, std::span<T> elements) noexcept {
+    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    void UpdateBuffer(BufferHandle handle, std::span<T, SpanExtent> elements) noexcept {
         UpdateBuffer(handle, std::as_bytes(elements));
     }
     auto CreateConstantBuffer(size_t size) -> BufferHandle;
