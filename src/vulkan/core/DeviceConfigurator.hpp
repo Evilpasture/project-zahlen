@@ -41,12 +41,7 @@ template <typename... Ts>
 class DeviceConfigurator {
   public:
     explicit DeviceConfigurator(VkPhysicalDevice physical) requires(sizeof...(Ts) == 0):
-        DeviceConfigurator(physical, ExtensionBuilder::ForDevice(physical)) {}
-
-    // A pre-enumerated catalog avoids repeat enumeration and makes negotiation
-    // testable without an ICD. Feature queries still use the physical device.
-    DeviceConfigurator(VkPhysicalDevice physical, ExtensionBuilder extensions) requires(sizeof...(Ts) == 0):
-        _physical(physical), _extensions(std::move(extensions)), _features(physical, std::tuple<>{}) {}
+        _physical(physical), _extensions(ExtensionBuilder::ForDevice(physical)), _features(physical, std::tuple<>{}) {}
 
     auto RequireExtension(std::string_view name) && -> DeviceConfigurator&& {
         _extensions.Require(name);

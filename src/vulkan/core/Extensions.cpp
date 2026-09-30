@@ -53,15 +53,6 @@ auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
     return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateInstanceExtensions()));
 }
 
-auto ExtensionBuilder::ForAvailable(std::span<const std::string_view> names) -> ExtensionBuilder {
-    std::vector<std::string> available;
-    available.reserve(names.size());
-    for (const auto name: names) {
-        available.emplace_back(name);
-    }
-    return ExtensionBuilder(std::move(available));
-}
-
 bool ExtensionBuilder::Supports(std::string_view name) const noexcept { return IsSupported(name); }
 
 bool ExtensionBuilder::SupportsAll(std::initializer_list<std::string_view> names) const noexcept {
