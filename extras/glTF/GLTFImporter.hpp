@@ -28,7 +28,17 @@ class RenderContext;
 class AssetManager;
 
 namespace GLTF {
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path) -> ModelPrefab*;
+// The engine's default presentation uses a low exposure and boosts imported
+// emission accordingly. A glTF fidelity renderer instead sets this to 1.0f:
+// emissiveFactor * KHR_materials_emissive_strength then stays in glTF's
+// authored linear units. Emissive texture sampling remains sRGB -> linear in
+// either mode. A virtualPath identifies one prefab AND one set of options;
+// reusing a cached path with a different scale is rejected.
+struct ImportOptions {
+    float emissiveFactorScale = kGLTFEmissiveDisplayScale;
+};
+
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ModelPrefab*;
 
 // Like LoadGLBPrefab, but consumes bytes already read by the caller. Split
 // .gltf assets store geometry and textures in external .bin/image files whose
@@ -41,7 +51,8 @@ auto LoadGLBPrefabFromMemory(
     AssetManager&            cwMgr,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
-    std::string_view         bytesPath = {}
+    std::string_view         bytesPath = {},
+    ImportOptions            options = {}
 ) -> ModelPrefab*;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 

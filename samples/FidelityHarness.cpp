@@ -223,24 +223,30 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
 
 // Imports bytes and spawns the parts. Returns the number of spawned entities,
 // or zero when the parse or the spawn produced nothing. The prefab is cached by
-// `virtualPath` (the resolved model path, unique per asset in the suite), so a
-// second run -- and the device-lost rebuild -- reuse the same entry.
+// `virtualPath` (the resolved model path, unique per asset in the suite), so
+// repeated imports of the same asset and options reuse the same entry.
 uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) {
-    ZHLN::ModelPrefab* prefab =
-        ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath);
+    // The suite specifies glTF emissive factors in linear radiometric units.
+    // Do not use the engine's 100x low-exposure presentation boost here: it
+    // drives bright green emitters into neutral tonemapping's desaturation.
+    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+        engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath,
+        ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f}
+    );
     if (prefab == nullptr) {
         ZHLN::Log("[Fidelity] '{}' is not a glTF this importer can read.", virtualPath);
         return 0;
     }
 
-    const size_t capacity = 1u + prefab->parts.size() * 2u; // root + one part + at most one emissive virtual light each
+    const size_t capacity = 1u + prefab->parts.size(); // root + parts; no unauthored virtual lights
     std::vector<ZHLN::Entity> instances(capacity);
     const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
         engine, *prefab,
         ZHLN::PrefabFactory::SpawnParams {
-            .position      = JPH::RVec3(0.0, 0.0, 0.0),
-            .createPhysics = false,
-            .isAnimated    = !prefab->animations.empty(),
+            .position              = JPH::RVec3(0.0, 0.0, 0.0),
+            .createPhysics         = false,
+            .isAnimated            = !prefab->animations.empty(),
+            .emissiveVirtualLights = false,
         },
         instances.data(), static_cast<uint32_t>(instances.size())
     );
@@ -656,8 +662,8 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[Fidelity] Model import produced no geometry; nothing to render.");
         return EXIT_FAILURE;
     }
-    // Prefab spawn attaches a point light to an emissive part. That is not
-    // in the Khronos contract; the panorama is the only light.
+    // Defensively remove any scene lights: neither the model nor the default
+    // scene may add unauthored point lights to the panorama-only scenario.
     StripSceneLights(*engine);
 
     // Tick several frames so descriptor sets, async uploads and any late

@@ -29,10 +29,18 @@ ACES grading, `ambientExposure = 4`, an extra sun with two punctual fills and a
 0.03-roughness mirror floor). None of those exist in a conformance render, and
 this harness builds none of them. Specifically:
 
-* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`. The
-  harness still destroys any that exist, including the point light a prefab
-  spawn attaches to an emissive part, and the unauthored 180-intensity fill
-  is dropped while the environment map is set.
+* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`. Prefab
+  virtual point lights are disabled (they are opt-in anyway); the harness
+  defensively destroys any that exist. The unauthored 180-intensity fill is
+  dropped while the environment map is set.
+* **Authored emissive units.** The import uses `emissiveFactorScale = 1`: an
+  emissive factor is its glTF linear value, multiplied by
+  `KHR_materials_emissive_strength` when present and by the sRGB-decoded
+  emissive texture when present. Other engine clients retain the 100x import
+  boost needed for their low-exposure neon look. In `TextureEncodingTest` the
+  factor-only green emitter is authored as `0.2462`, not `24.62`; boosting it
+  was pushing neutral tonemapping into its pale-highlight desaturation. This
+  is an import-unit fix, not an image-grade adjustment.
 * **No floor.** No `CreatePlane`, nothing to bounce light.
 * **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
   `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
@@ -179,6 +187,13 @@ candidate PNG contains opaque scene pixels rather than an all-transparent
 capture. The same check applies to `khronos-MetalRoughSpheresNoTextures`.
 The upstream Blender reference parents an oriented camera to the target; it
 does **not** calculate its direction by looking at a distinct target point.
+
+For `TextureEncodingTest`, run
+`SCENARIO=khronos-TextureEncodingTest ./scripts/run_fidelity.sh -j1` and compare
+against Filament's golden. The factor-only and texture-driven emissive spheres
+should be green, not pale mint, in all texture-encoding columns. The importer
+fixture checks emissive strength, sRGB texture registration, and both import
+scales; a new GPU capture is still needed to compare the final image.
 
 For the Sponza chain/foliage fidelity regression, inspect that same capture
 against **Filament's** golden at matched scene features, not screen coordinates

@@ -16,6 +16,8 @@
 
 namespace ZHLN {
 
+// Artistic boost for the engine's low-exposure scene preset, not a glTF
+// requirement. Conformance imports use an explicit scale of 1 instead.
 inline constexpr float kGLTFEmissiveDisplayScale = 100.0f;
 
 struct ModelNode {
@@ -55,6 +57,11 @@ struct ModelPart {
 
 struct ModelPrefab {
     String256 virtualPath;
+
+    // Import-time emissive conversion, retained so a GPU rebuild uses the
+    // same material units and opt-in virtual lights can recover authored
+    // emission. Procedural prefabs keep the engine's presentation default.
+    float emissiveFactorScale = kGLTFEmissiveDisplayScale;
 
     std::vector<ModelPart>     parts;
     std::vector<ModelNode>     nodes;

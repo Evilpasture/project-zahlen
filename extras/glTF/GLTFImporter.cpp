@@ -345,7 +345,7 @@ void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t 
     }
 }
 
-void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
+void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     const auto& prim = *job.prim;
 
     cgltf_accessor* posAcc     = nullptr;
@@ -468,13 +468,12 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         job.emissiveFactor[1] = prim.material->emissive_factor[1];
         job.emissiveFactor[2] = prim.material->emissive_factor[2];
 
-        // KHR_materials_emissive_strength is a relative multiplier on the
-        // authored factor; kGLTFEmissiveDisplayScale is the glTF [0,1] ->
-        // engine HDR unit conversion that applies either way. Without the
-        // latter an imported emissive material renders at ~10/255 and never
-        // reaches the bloom bright pass (see Zahlen/ModelPrefab.hpp).
+        // KHR_materials_emissive_strength multiplies the authored linear
+        // factor. The separate presentation scale is 1 for fidelity captures
+        // and higher only when the low-exposure engine look is requested;
+        // neither scale is applied to the sRGB emissive texture's texels.
         const float strength      = prim.material->has_emissive_strength ? prim.material->emissive_strength.emissive_strength : 1.0f;
-        const float emissiveScale = strength * kGLTFEmissiveDisplayScale;
+        const float emissiveScale = strength * emissiveFactorScale;
 
         job.emissiveFactor[0] *= emissiveScale;
         job.emissiveFactor[1] *= emissiveScale;
@@ -760,7 +759,8 @@ void ProcessCPUTasks(
     const std::string&               textureSearchPath,
     const std::vector<ImportedTextureRef>& uniqueImages,
     std::vector<CPUPrimitiveJob>&    primitiveJobs,
-    JPH::Array<CPUTextureJob>&       outTextureJobs
+    JPH::Array<CPUTextureJob>&       outTextureJobs,
+    float                            emissiveFactorScale
 ) {
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
@@ -778,7 +778,7 @@ void ProcessCPUTasks(
     if (!primitiveJobs.empty()) {
         TaskSystem::ParallelFor(primitiveJobs.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) -> void {
             for (uint32_t i = start; i < end; ++i) {
-                ProcessCPUPrimitive(primitiveJobs[i]);
+                ProcessCPUPrimitive(primitiveJobs[i], emissiveFactorScale);
             }
         });
     }
@@ -953,13 +953,14 @@ auto GetOrCreateCompiledPrimitive(
  * @brief Common builder that constructs and caches a ModelPrefab from loaded cgltf_data.
  * Adheres strictly to aggregate initialization and DRY across disk & memory pathways.
  */
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath)
-    -> ModelPrefab* {
+auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath,
+                      ImportOptions options) -> ModelPrefab* {
     // RAII guard ensures cgltf_data is cleanly freed on function exit
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> dataGuard(data, &cgltf_free);
 
-    auto prefab         = std::make_unique<ModelPrefab>();
-    prefab->virtualPath = String256(virtualPath);
+    auto prefab                 = std::make_unique<ModelPrefab>();
+    prefab->virtualPath         = String256(virtualPath);
+    prefab->emissiveFactorScale = options.emissiveFactorScale;
 
     // ------------------------------------------------------------------------
     // 1. Flatten Nodes with Aggregate Initialization
@@ -1152,7 +1153,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(std::string(textureSearchPath), uniqueImages, primitiveJobs, textureJobs);
+    ProcessCPUTasks(std::string(textureSearchPath), uniqueImages, primitiveJobs, textureJobs, options.emissiveFactorScale);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, virtualPath, textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
@@ -1235,7 +1236,7 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs);
+    ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs, prefab.emissiveFactorScale);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, prefab.virtualPath.c_str(), textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
@@ -1259,6 +1260,15 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     });
 }
 
+[[nodiscard]] bool MatchesCachedEmissiveScale(const ModelPrefab* cached, std::string_view path, float requestedScale) {
+    if (cached != nullptr && cached->emissiveFactorScale != requestedScale) {
+        ZHLN::Log("[glTF] '{}' is already cached with emissive scale {}; requested {}. Use a distinct virtualPath for a different import.",
+                  path, cached->emissiveFactorScale, requestedScale);
+        return false;
+    }
+    return true;
+}
+
 void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
     for (const auto& part: prefab.parts) {
         if (part.mesh.posBuffer != BufferHandle::Invalid) {
@@ -1276,9 +1286,16 @@ void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
 // Public Entry Points
 // ============================================================================
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path) -> ModelPrefab* {
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options) -> ModelPrefab* {
+    if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
+        Log("[glTF] '{}' requested an invalid emissive factor scale {}.", path, options.emissiveFactorScale);
+        return nullptr;
+    }
     const uint64_t hash = HashAssetPath(path);
     auto* const cached = cwMgr.GetCachedPrefab(hash);
+    if (!MatchesCachedEmissiveScale(cached, path, options.emissiveFactorScale)) {
+        return nullptr;
+    }
     if (cached != nullptr && !NeedsGPURefresh(*cached)) {
         return cached;
     }
@@ -1307,7 +1324,7 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, data, path, rawPath);
+    return BuildModelPrefab(ctx, cwMgr, data, path, rawPath, options);
 }
 
 auto LoadGLBPrefabFromMemory(
@@ -1315,10 +1332,18 @@ auto LoadGLBPrefabFromMemory(
     AssetManager&            cwMgr,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
-    std::string_view         bytesPath
+    std::string_view         bytesPath,
+    ImportOptions            options
 ) -> ModelPrefab* {
+    if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
+        Log("[glTF] '{}' requested an invalid emissive factor scale {}.", virtualPath, options.emissiveFactorScale);
+        return nullptr;
+    }
     const uint64_t hash = HashAssetPath(virtualPath);
     auto* const cached = cwMgr.GetCachedPrefab(hash);
+    if (!MatchesCachedEmissiveScale(cached, virtualPath, options.emissiveFactorScale)) {
+        return nullptr;
+    }
     if (cached != nullptr && !NeedsGPURefresh(*cached)) {
         return cached;
     }
@@ -1349,7 +1374,7 @@ auto LoadGLBPrefabFromMemory(
         RegisterPrefabGPUResources(ctx, *cached);
         return cached;
     }
-    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, basePath);
+    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, basePath, options);
 }
 
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {

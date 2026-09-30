@@ -205,9 +205,11 @@ struct GltfAnisotropyPbr {
 };
 
 struct GltfAnisotropyMaterial {
-    std::string_view         name;
-    GltfAnisotropyPbr        pbrMetallicRoughness;
-    GltfAnisotropyExtensions extensions;
+    std::string_view           name;
+    GltfAnisotropyPbr          pbrMetallicRoughness;
+    std::array<float, 3>       emissiveFactor {0.0f, 1.0f, 0.0f};
+    GltfAnisotropyTextureInfo emissiveTexture;
+    GltfAnisotropyExtensions  extensions;
 };
 
 struct GltfAnisotropyImage {
@@ -564,8 +566,9 @@ constexpr float                kEmissiveStrength = 4.0f;
 }
 
 // A tangent-space triangle with a 1x1 *linear* anisotropy map (R=1, G=.5,
-// B=.25). Its base, PBR and anisotropy textures share the same image but have
-// different S/T sampler modes, so image-level sampler storage cannot pass.
+// B=.25). Base, PBR, emissive and anisotropy textures share the same image:
+// color slots need sRGB views, data slots need linear views, and sampler modes
+// differ per texture object rather than per image.
 [[nodiscard]] auto MakeAnisotropyFixture() -> std::vector<uint8_t> {
     constexpr std::array<float, 9> normals {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
     constexpr std::array<float, 12> tangents {1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f};
@@ -1009,10 +1012,11 @@ struct GLTFImportTestSuite {
          * extensions are pinned as the behaviour they actually have rather
          * than the behaviour a reader might assume.
          *
-         * Every imported emissive factor also carries kGLTFEmissiveDisplayScale,
-         * the glTF [0,1] -> engine HDR unit conversion. The extension is a
-         * relative multiplier on top of it, exactly as the spec says, so the
-         * two fixtures below differ by precisely kEmissiveStrength.
+         * In the default engine presentation, imported factors carry the
+         * kGLTFEmissiveDisplayScale boost for low-exposure scenes. The extension
+         * is a relative multiplier on top of that boost, so the two fixtures
+         * below differ by precisely kEmissiveStrength. The fidelity-mode
+         * import with a 1:1 scale is tested separately below.
          *
          * KHR_lights_punctual in particular is exported by zcook
          * (tools/zcook/GLB.cpp) but never read back: ModelPrefab has no
@@ -1100,6 +1104,59 @@ struct GLTFImportTestSuite {
             }
             if (!lightOnly->parts.empty() || !lightOnly->skeletons.empty() || !lightOnly->animations.empty()) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            return {};
+        }
+
+        /**
+         * The fidelity harness must import emission in glTF's authored linear
+         * units, not the low-exposure game's boosted units. The extension
+         * still multiplies the factor, and the emissive texture must use the
+         * sRGB view of the same bytes used by the linear PBR data texture.
+         */
+        std::expected<void, ZHLN::ErrorCode> importer_preserves_conformance_emission_and_texture_color_space() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Emissive Fidelity");
+            if (engine == nullptr) {
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            }
+            auto& rc = engine->GetRenderContext();
+            auto& assets = engine->GetAssetManager();
+            constexpr ZHLN::GLTF::ImportOptions conformant {.emissiveFactorScale = 1.0f};
+
+            const auto plainBytes = MakePlainEmissiveFixture();
+            const auto* plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            const auto strengthBytes = MakeEmissiveStrengthFixture();
+            const auto* strong = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
+            if (plain == nullptr || strong == nullptr || plain->parts.size() != 1 || strong->parts.size() != 1 ||
+                plain->emissiveFactorScale != 1.0f || strong->emissiveFactorScale != 1.0f) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            for (size_t channel = 0; channel < 3; ++channel) {
+                if (std::abs(plain->parts[0].defaultMaterial.emissiveFactor[channel] - kAuthoredEmissive[channel]) > 1e-5f ||
+                    std::abs(strong->parts[0].defaultMaterial.emissiveFactor[channel] - kAuthoredEmissive[channel] * kEmissiveStrength) > 1e-5f) {
+                    return std::unexpected(GLTFImportError::ExtensionMismatch);
+                }
+            }
+
+            // An emissive image and albedo share a source image. Both must
+            // sample sRGB; a PBR data reference to the same image must not.
+            const auto texturedBytes = MakeAnisotropyFixture();
+            const auto* textured = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
+            if (textured == nullptr || textured->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            const auto& material = textured->parts[0].defaultMaterial;
+            if (material.emissiveFactor != std::array<float, 4> {0.0f, 1.0f, 0.0f, 1.0f} ||
+                material.emissiveMap == ZHLN::TextureHandle::Invalid || material.emissiveMap != material.albedoMap ||
+                material.emissiveMap == material.pbrMap || rc.GetBindlessIndex(material.emissiveMap) <= 2u) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+
+            // A cached path must not silently reuse a prefab with a different
+            // import scale; reloading in the same mode must preserve identity.
+            if (ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant) != plain ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb") != nullptr) {
+                return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
             return {};
         }

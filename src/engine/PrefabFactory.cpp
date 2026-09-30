@@ -400,11 +400,12 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
-    static constexpr float kInvDisplayScale = 1.0f / kGLTFEmissiveDisplayScale;
-
+auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> Entity {
+    // Virtual lights approximate authored emission, not the presentation
+    // boost chosen by the importer. Fidelity captures never opt into them.
+    const float invImportScale = 1.0f / emissiveFactorScale;
     const float* raw = part.defaultMaterial.emissiveFactor.data();
-    const float  ef[3] {raw[0] * kInvDisplayScale, raw[1] * kInvDisplayScale, raw[2] * kInvDisplayScale};
+    const float  ef[3] {raw[0] * invImportScale, raw[1] * invImportScale, raw[2] * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -716,7 +717,7 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult) : Entity::Null();
+        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) : Entity::Null();
         if (glowEnt != Entity::Null()) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;
