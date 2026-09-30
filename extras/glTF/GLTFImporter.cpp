@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <format>
 #include <json/JSONSchema.hpp>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stb_image.h>
@@ -45,6 +46,141 @@ namespace {
 struct NodeExtras {
     std::string csg_data;
 };
+
+// Shader morph-weight storage is bounded, even when the source has more.
+constexpr uint32_t kMaxMorphTargets = 4;
+
+// Advisory diagnostics only. In particular, extensionsRequired is a warning
+// here, not a reason to discard geometry that can still use the core fallback.
+void WarnImport(std::string_view path, std::string_view detail) {
+    Log("{}[glTF WARNING] '{}' {}{}", Color::Yellow, path, detail, Color::Reset);
+}
+
+[[nodiscard]] auto FindExtensionCapability(std::string_view name) -> const Capability* {
+    for (const auto& capability: kCapabilities) {
+        if (capability.kind == CapabilityKind::Extension && capability.name == name) {
+            return &capability;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] bool DeclaresExtension(char* const* extensions, cgltf_size count, std::string_view name) {
+    for (cgltf_size i = 0; i < count; ++i) {
+        if (extensions[i] != nullptr && std::string_view(extensions[i]) == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path) {
+    if (data.asset.version == nullptr || std::string_view(data.asset.version) != "2.0") {
+        WarnImport(path, std::format("glTF version '{}' is not 2.0; continuing best effort.",
+                                     data.asset.version != nullptr ? data.asset.version : "(missing)"));
+    }
+    if (data.asset.min_version != nullptr && std::string_view(data.asset.min_version) != "2.0") {
+        WarnImport(path, std::format("glTF minVersion '{}' differs from our supported 2.0; continuing best effort.", data.asset.min_version));
+    }
+
+    auto report = [path](std::string_view name, bool required) {
+        const auto* capability = FindExtensionCapability(name);
+        const char* status = required ? "Required" : "Used";
+        if (capability == nullptr) {
+            WarnImport(path, std::format("{} extension '{}' is unsupported; attempting the core/fallback data anyway.", status, name));
+        } else if (capability->support == CapabilitySupport::Partial) {
+            WarnImport(path, std::format("{} extension '{}' is partially supported ({}); continuing best effort.", status, name, capability->limitation));
+        }
+    };
+
+    for (cgltf_size i = 0; i < data.extensions_required_count; ++i) {
+        const std::string_view name = data.extensions_required[i];
+        if (!DeclaresExtension(data.extensions_used, data.extensions_used_count, name)) {
+            WarnImport(path, std::format("Required extension '{}' is missing from extensionsUsed.", name));
+        }
+        report(name, true);
+    }
+    for (cgltf_size i = 0; i < data.extensions_used_count; ++i) {
+        const std::string_view name = data.extensions_used[i];
+        if (!DeclaresExtension(data.extensions_required, data.extensions_required_count, name)) {
+            report(name, false);
+        }
+    }
+}
+
+[[nodiscard]] bool HasPosition(const cgltf_primitive& prim) {
+    return cgltf_find_accessor(&prim, cgltf_attribute_type_position, 0) != nullptr;
+}
+
+void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
+    if (data.cameras_count != 0) {
+        WarnImport(path, "glTF cameras are not imported; using the scene's camera instead.");
+    }
+    for (cgltf_size m = 0; m < data.materials_count; ++m) {
+        const auto& mat = data.materials[m];
+        if (mat.has_pbr_specular_glossiness && !mat.has_pbr_metallic_roughness) {
+            WarnImport(path, std::format("Material '{}' has only KHR_materials_pbrSpecularGlossiness; no core PBR fallback, so it renders gray/default.",
+                                         mat.name != nullptr ? mat.name : "(unnamed)"));
+        }
+    }
+
+    for (cgltf_size m = 0; m < data.meshes_count; ++m) {
+        const auto& mesh = data.meshes[m];
+        for (cgltf_size p = 0; p < mesh.primitives_count; ++p) {
+            const auto& prim = mesh.primitives[p];
+            const auto meshName = mesh.name != nullptr ? mesh.name : "(unnamed)";
+            if (prim.type != cgltf_primitive_type_triangles) {
+                WarnImport(path, std::format("Mesh '{}' primitive {} is not TRIANGLES; drawing with triangle topology best effort.", meshName, p));
+            }
+            if (!HasPosition(prim)) {
+                WarnImport(path, std::format("Mesh '{}' primitive {} has no POSITION; skipping this primitive, but importing the rest.", meshName, p));
+            }
+            if (prim.targets_count > kMaxMorphTargets) {
+                WarnImport(path, std::format("Mesh '{}' primitive {} has {} morph targets; only the first {} POSITION deltas are used.",
+                                             meshName, p, prim.targets_count, kMaxMorphTargets));
+            }
+            for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
+                const auto& attr = prim.attributes[a];
+                const bool ignored = (attr.type == cgltf_attribute_type_texcoord && attr.index > 1) ||
+                                     ((attr.type == cgltf_attribute_type_color || attr.type == cgltf_attribute_type_joints ||
+                                       attr.type == cgltf_attribute_type_weights) && attr.index > 0);
+                if (ignored) {
+                    WarnImport(path, std::format("Mesh '{}' primitive {} ignores attribute '{}'.", meshName, p,
+                                                 attr.name != nullptr ? attr.name : "(unnamed)"));
+                }
+            }
+            bool ignoresMorphNormals = false;
+            bool ignoresMorphTangents = false;
+            for (cgltf_size t = 0; t < std::min<cgltf_size>(prim.targets_count, kMaxMorphTargets); ++t) {
+                const auto& target = prim.targets[t];
+                for (cgltf_size a = 0; a < target.attributes_count; ++a) {
+                    ignoresMorphNormals |= target.attributes[a].type == cgltf_attribute_type_normal;
+                    ignoresMorphTangents |= target.attributes[a].type == cgltf_attribute_type_tangent;
+                }
+            }
+            if (ignoresMorphNormals || ignoresMorphTangents) {
+                WarnImport(path, std::format("Mesh '{}' primitive {} ignores morph {} deltas; only POSITION is imported.", meshName, p,
+                                             ignoresMorphNormals && ignoresMorphTangents ? "NORMAL/TANGENT" : ignoresMorphNormals ? "NORMAL" : "TANGENT"));
+            }
+        }
+    }
+
+    bool easedLinear = false;
+    bool cubicSpline = false;
+    for (cgltf_size a = 0; a < data.animations_count; ++a) {
+        const auto& anim = data.animations[a];
+        for (cgltf_size s = 0; s < anim.samplers_count; ++s) {
+            easedLinear |= anim.samplers[s].interpolation == cgltf_interpolation_type_linear;
+            cubicSpline |= anim.samplers[s].interpolation == cgltf_interpolation_type_cubic_spline;
+        }
+    }
+    if (easedLinear) {
+        WarnImport(path, "LINEAR animation playback eases between keys rather than following glTF linear timing.");
+    }
+    if (cubicSpline) {
+        WarnImport(path, "CUBICSPLINE tangent interpolation is unsupported; animation playback may be inaccurate.");
+    }
+}
 
 [[nodiscard]] TextureWrap DecodeWrap(cgltf_wrap_mode mode) noexcept {
     switch (mode) {
@@ -199,10 +335,15 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
     unsigned char* pixels   = nullptr;
 
     if (job.image->buffer_view != nullptr) {
-        const auto* bufferData = static_cast<const char*>(job.image->buffer_view->buffer->data) + job.image->buffer_view->offset;
-        pixels                 = stbi_load_from_memory(
-            reinterpret_cast<const stbi_uc*>(bufferData), static_cast<int>(job.image->buffer_view->size), &job.width, &job.height, &channels, 4
-        );
+        const auto* view = job.image->buffer_view;
+        const bool inBounds = view->data != nullptr ||
+                              (view->buffer != nullptr && view->buffer->data != nullptr && view->offset <= view->buffer->size &&
+                               view->size <= view->buffer->size - view->offset);
+        if (inBounds && view->size <= static_cast<cgltf_size>(std::numeric_limits<int>::max())) {
+            if (const auto* bufferData = cgltf_buffer_view_data(view); bufferData != nullptr) {
+                pixels = stbi_load_from_memory(bufferData, static_cast<int>(view->size), &job.width, &job.height, &channels, 4);
+            }
+        }
     } else if (job.image->uri != nullptr && !job.glbPath.empty()) {
         const std::filesystem::path glbFolder = std::filesystem::path(job.glbPath).parent_path();
         const std::filesystem::path texPath   = glbFolder / job.image->uri;
@@ -267,9 +408,7 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
 }
 
 // glTF morph weights: node.weights wins, otherwise mesh.weights, otherwise 0.
-// The shader stores four weights; extra targets are dropped.
-constexpr uint32_t kMaxMorphTargets = 4;
-
+// Extra targets beyond the shader's kMaxMorphTargets are dropped.
 [[nodiscard]] constexpr size_t AccessorFloatCount(cgltf_type type) noexcept {
     switch (type) {
         case cgltf_type_scalar: return 1;
@@ -290,10 +429,6 @@ void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t 
 
     const auto available = static_cast<uint32_t>(prim.targets_count);
     const uint32_t numTargets = std::min(available, kMaxMorphTargets);
-    if (available > kMaxMorphTargets) {
-        ZHLN::Log("[glTF] Primitive has {} morph targets; the shader keeps {}.", available, kMaxMorphTargets);
-    }
-
     job.activeMorphCount = numTargets;
     job.tempDeltas.assign(numTargets * vertexCount * 4, 0.0f);
 
@@ -739,9 +874,13 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
 
         const auto* mesh = node->mesh;
         for (cgltf_size p = 0; p < mesh->primitives_count; ++p) {
-            CPUPrimitiveJob job {.node = node, .prim = &mesh->primitives[p]};
-
             const auto& prim = mesh->primitives[p];
+            if (!HasPosition(prim)) {
+                // No vertex stream can be uploaded for this primitive. Other
+                // primitives and nodes can still render normally.
+                continue;
+            }
+            CPUPrimitiveJob job {.node = node, .prim = &prim};
             if (prim.material != nullptr) {
                 if (prim.material->has_pbr_metallic_roughness) {
                     const auto& pbr = prim.material->pbr_metallic_roughness;
@@ -843,6 +982,8 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
             }
             imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = tex_res.value_or(TextureHandle::Invalid);
         } else {
+            WarnImport(virtualPath, std::format("Image '{}' could not be decoded; rendering without this texture.",
+                                                 texJob.image->name != nullptr ? texJob.image->name : "(unnamed)"));
             imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = TextureHandle::Invalid;
         }
     }
@@ -1356,11 +1497,13 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
         return nullptr;
     }
 
+    ValidateDeclaredExtensions(*data, path);
     if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
         Log("ERROR: Failed to load GLB buffers from file: {}", rawPath);
         cgltf_free(data);
         return nullptr;
     }
+    ValidateFeatureUsage(*data, path);
 
     if (cached != nullptr) {
         cwMgr.UseRenderContext(ctx);
@@ -1410,11 +1553,13 @@ auto LoadGLBPrefabFromMemory(
         return nullptr;
     }
 
+    ValidateDeclaredExtensions(*data, virtualPath);
     if (cgltf_load_buffers(&opts, data, basePath.empty() ? nullptr : basePath.c_str()) != cgltf_result_success) {
         Log("ERROR: Failed to load in-memory GLB buffers: {}", virtualPath);
         cgltf_free(data);
         return nullptr;
     }
+    ValidateFeatureUsage(*data, virtualPath);
 
     if (cached != nullptr) {
         cwMgr.UseRenderContext(ctx);
@@ -1438,10 +1583,12 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
     if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
         return;
     }
+    ValidateDeclaredExtensions(*data, prefab->virtualPath.c_str());
     if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
         cgltf_free(data);
         return;
     }
+    ValidateFeatureUsage(*data, prefab->virtualPath.c_str());
 
     RefreshPrefabGPUResources(ctx, *prefab, data, rawPath);
 

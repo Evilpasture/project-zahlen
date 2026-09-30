@@ -203,6 +203,20 @@ struct GltfEmissiveStrengthMaterial {
     GltfMaterialExtensions   extensions;
 };
 
+// Spec/gloss-only material: like the Khronos bottle, it supplies no core
+// metallic-roughness fallback. Its tinted diffuseFactor must NOT be applied as
+// baseColorFactor when KHR_materials_pbrSpecularGlossiness is unsupported.
+struct KhrSpecGloss {
+    std::array<float, 4> diffuseFactor {0.2f, 0.4f, 0.8f, 1.0f};
+};
+struct GltfSpecGlossExtensions {
+    KhrSpecGloss KHR_materials_pbrSpecularGlossiness;
+};
+struct GltfSpecGlossMaterial {
+    std::string_view name = "SpecGlossOnly";
+    GltfSpecGlossExtensions extensions;
+};
+
 struct GltfAnisotropyTextureInfo {
     int32_t index = 0;
 };
@@ -333,6 +347,34 @@ struct GltfDocument {
     std::vector<GltfBufferView>   bufferViews;
     std::vector<GltfBuffer>       buffers;
 };
+
+struct GltfSpecGlossDocument {
+    GltfAsset                          asset;
+    std::vector<std::string_view>      extensionsUsed {"KHR_materials_pbrSpecularGlossiness"};
+    std::vector<std::string_view>      extensionsRequired {"KHR_materials_pbrSpecularGlossiness"};
+    int32_t                            scene = 0;
+    std::vector<GltfScene>             scenes;
+    std::vector<GltfMeshNode>          nodes;
+    std::vector<GltfMesh>              meshes;
+    std::vector<GltfSpecGlossMaterial> materials;
+    std::vector<GltfAccessor>          accessors;
+    std::vector<GltfBufferView>        bufferViews;
+    std::vector<GltfBuffer>            buffers;
+};
+
+[[nodiscard]] constexpr auto FindExtensionCapability(std::string_view name) -> const ZHLN::GLTF::Capability* {
+    for (const auto& capability: ZHLN::GLTF::kCapabilities) {
+        if (capability.kind == ZHLN::GLTF::CapabilityKind::Extension && capability.name == name) {
+            return &capability;
+        }
+    }
+    return nullptr;
+}
+static_assert(FindExtensionCapability("KHR_materials_unlit") != nullptr);
+static_assert(FindExtensionCapability("KHR_texture_transform") != nullptr);
+static_assert(FindExtensionCapability("KHR_materials_volume")->support == ZHLN::GLTF::CapabilitySupport::Partial);
+static_assert(FindExtensionCapability("KHR_lights_punctual") == nullptr);
+static_assert(FindExtensionCapability("KHR_materials_pbrSpecularGlossiness") == nullptr);
 
 struct GltfAnisotropyDocument {
     GltfAsset                             asset;
@@ -622,6 +664,19 @@ constexpr float                kEmissiveStrength = 4.0f;
         .nodes       = {GltfMeshNode {.name = "EmissiveTriangle"}},
         .meshes      = TriangleMeshes(),
         .materials   = {GltfPlainMaterial {.name = "Emissive", .emissiveFactor = kAuthoredEmissive}},
+        .accessors   = TriangleAccessors(),
+        .bufferViews = TriangleBufferViews(),
+        .buffers     = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
+}
+
+[[nodiscard]] auto MakeRequiredSpecGlossFixture() -> std::vector<uint8_t> {
+    const GltfSpecGlossDocument document {
+        .scenes      = {GltfScene {.nodes = {0}}},
+        .nodes       = {GltfMeshNode {.name = "SpecGlossBottle"}},
+        .meshes      = TriangleMeshes(),
+        .materials   = {GltfSpecGlossMaterial {}},
         .accessors   = TriangleAccessors(),
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
@@ -1420,6 +1475,35 @@ struct GLTFImportTestSuite {
             }
             const ZHLN::Material defaults {};
             if (defaults.unlit) return std::unexpected(GLTFImportError::ExtensionMismatch);
+            return {};
+        }
+
+        /**
+         * An unsupported *required* extension is advisory, not an import
+         * veto. A spec/gloss-only material has no core PBR fallback, so the
+         * primitive still renders but keeps the renderer's gray defaults.
+         */
+        std::expected<void, ZHLN::ErrorCode> unsupported_required_specular_glossiness_keeps_gray_fallback() {
+            const auto bytes = MakeRequiredSpecGlossFixture();
+            SourceDocument source;
+            if (!source.Parse(bytes) || source.data->extensions_required_count != 1 || source.data->materials_count != 1 ||
+                !source.data->materials[0].has_pbr_specular_glossiness || source.data->materials[0].has_pbr_metallic_roughness) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Required SpecGloss");
+            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "required_specular_glossiness.glb"
+            );
+            if (prefab == nullptr || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+            const auto& material = prefab->parts[0].defaultMaterial;
+            if (material.baseColorFactor != std::array<float, 4> {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f ||
+                material.roughnessFactor != 1.0f || material.albedoMap != ZHLN::TextureHandle::Invalid ||
+                material.pipeline == ZHLN::PipelineHandle::Invalid) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
             return {};
         }
 

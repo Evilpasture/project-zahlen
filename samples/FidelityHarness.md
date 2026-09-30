@@ -154,7 +154,13 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    environment/LUT. `KHR_texture_transform` applies offset, rotation, scale
    and texture-specific UV-set selection (TEXCOORD_0/1) to each textureInfo,
    including the separately sampled glTF occlusion texture. Higher UV sets
-   are not stored. KHR_materials_specular remains unsupported.
+   are not stored. `KHR_materials_specular` and
+   `KHR_materials_pbrSpecularGlossiness` remain unsupported. In the Khronos
+   `SpecGlossVsMetalRough` scenario, the right bottle has no core PBR fallback:
+   it stays gray/default, as in `<model-viewer>`. The importer prints a yellow
+   warning for the *required* spec/gloss extension but still attempts to draw
+   the rest of the asset. Files cgltf cannot parse or whose buffers fail to
+   load still fail import.
 5. **Texture addressing.** The importer carries each glTF texture reference's
    independent `wrapS`/`wrapT` (repeat, clamp-to-edge, mirrored-repeat) through
    its material to one of nine preallocated GPU samplers. Images remain shared
