@@ -18,6 +18,7 @@ void ReflectionCompositePass::operator()(Vk::RasterPassContextBase& ctx) const n
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texEnvMap">(inputs.prefiltered),
+        Vk::Slot<"texSkyEquirect">(inputs.visualSky),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"brdfLUT">(inputs.brdfLut),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(impl.graphResources.lightingTarget)),

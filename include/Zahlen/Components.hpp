@@ -176,6 +176,9 @@ struct Components {
     };
 
     struct SceneLightTagComponent {};
+    // Owned by the scene's environment reconciliation system. Never saved as
+    // an authored light; it is recreated from prepared environment metadata.
+    struct EnvironmentSunTagComponent {};
 
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};

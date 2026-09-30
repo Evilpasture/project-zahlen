@@ -209,7 +209,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
     if (!isFullBright) {
         auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(
             query.Select<const Components::LightComponent, const Components::WorldTransformComponent,
-                         const Components::TransformComponent, const Components::SunTagComponent>());
+                         const Components::TransformComponent, const Components::SunTagComponent,
+                         const Components::EnvironmentSunTagComponent>());
 
         JPH::Vec3 shadowCenter = cam.position;
         float     texelSize    = shadowWidth / static_cast<float>(shadowResolution);

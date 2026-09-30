@@ -4,7 +4,7 @@
 # Offline/host-side codecs. AssetPipeline defines this target even when the
 # optional gameplay extras are disabled: zcook always needs it, and a host may
 # opt in to decoding source environments before registering their pixels.
-zahlen_transpile_sources(ASSET_COOKING_SOURCES RadianceDecoder.cpp RadianceEncoder.cpp)
+zahlen_transpile_sources(ASSET_COOKING_SOURCES EnvironmentPreparation.cpp RadianceDecoder.cpp RadianceEncoder.cpp)
 
 add_library(zahlen_asset_cooking STATIC ${ASSET_COOKING_SOURCES})
 set_target_properties(zahlen_asset_cooking PROPERTIES

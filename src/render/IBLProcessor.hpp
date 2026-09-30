@@ -3,7 +3,6 @@
 
 #pragma once
 #include "RenderInternal.hpp"
-#include "IrradianceSH.hpp"
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Resources.hpp"
@@ -35,7 +34,11 @@ enum class EnvironmentBakeError : uint8_t {
 class IBLProcessor {
   public:
     struct RadianceSource {
+        // Conditioned pixels drive both GPU bake paths. visualRgba is the
+        // original only when it differs from the lighting panorama.
         const float* rgba;
+        const float* visualRgba;
+        std::span<const std::array<float, 3>> diffuseSH;
         uint32_t     width;
         uint32_t     height;
         int          renderSkybox;
@@ -49,11 +52,13 @@ class IBLProcessor {
         constexpr size_t   kSHBytes   = sizeof(JPH::Vec4) * 9;
 
         const bool hasRadiance = radiance.rgba != nullptr && radiance.width > 0 && radiance.height > 0;
+        const bool hasPreparedSH = radiance.diffuseSH.size() == 9;
         if (hasRadiance && (radiance.width > kMaxEnvironmentRadianceExtent || radiance.height > kMaxEnvironmentRadianceExtent)) {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
         const VkFormat cubeFormat = hasRadiance ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
-        const int environmentMode = hasRadiance ? (radiance.renderSkybox != 0 ? 1 : 2) : 0;
+        const bool useVisualSky = hasRadiance && radiance.visualRgba != nullptr && radiance.renderSkybox != 0;
+        const int environmentMode = hasRadiance ? (radiance.renderSkybox == 0 ? 2 : (useVisualSky ? 3 : 1)) : 0;
         const uint32_t hasRadianceWord = hasRadiance ? 1u : 0u;
 
         if (hasRadiance) {
@@ -111,16 +116,18 @@ class IBLProcessor {
             impl.allocator.DestroyBuffer(state.shCpu);
         });
 
-        auto shGpu = Buffer::Create(
-            impl.allocator.Get(), kSHBytes,
-            BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst | BufferUsage::ShaderDeviceAddress,
-            MemoryUsage::GPUOnly
-        );
-        if (!shGpu) return std::unexpected(shGpu.error());
-        state.shGpu = std::move(*shGpu);
-        auto shCpu = Buffer::Create(impl.allocator.Get(), kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
-        if (!shCpu) return std::unexpected(shCpu.error());
-        state.shCpu = std::move(*shCpu);
+        if (!hasPreparedSH) {
+            auto shGpu = Buffer::Create(
+                impl.allocator.Get(), kSHBytes,
+                BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst | BufferUsage::ShaderDeviceAddress,
+                MemoryUsage::GPUOnly
+            );
+            if (!shGpu) return std::unexpected(shGpu.error());
+            state.shGpu = std::move(*shGpu);
+            auto shCpu = Buffer::Create(impl.allocator.Get(), kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
+            if (!shCpu) return std::unexpected(shCpu.error());
+            state.shCpu = std::move(*shCpu);
+        }
 
         auto lutImg = ImageBuilder {}
             .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, 1)
@@ -134,6 +141,14 @@ class IBLProcessor {
         state.payload.prefilteredImage  = std::move(*specImg);
         state.payload.prefilteredFormat = cubeFormat;
         state.payload.environmentMode   = environmentMode;
+        if (useVisualSky) {
+            auto skyImg = ImageBuilder {}
+                .Texture2D(radiance.width, radiance.height, VK_FORMAT_R32G32B32A32_SFLOAT,
+                           ImageUsage::TransferDst | ImageUsage::Sampled, 1)
+                .Build(impl.allocator.Get());
+            if (!skyImg) return std::unexpected(skyImg.error());
+            state.payload.visualSkyImage = std::move(*skyImg);
+        }
 
         const uint32_t uploadWidth  = hasRadiance ? radiance.width : 1u;
         const uint32_t uploadHeight = hasRadiance ? radiance.height : 1u;
@@ -167,6 +182,8 @@ class IBLProcessor {
                 stagedFloats += static_cast<size_t>(std::max(1u, uploadWidth >> mip)) * std::max(1u, uploadHeight >> mip) * 4u;
             }
         }
+        const size_t visualOffsetFloats = stagedFloats;
+        if (useVisualSky) stagedFloats += static_cast<size_t>(uploadWidth) * uploadHeight * 4u;
         auto radianceImage = ImageBuilder {}
             .Texture2D(uploadWidth, uploadHeight, VK_FORMAT_R32G32B32A32_SFLOAT,
                        ImageUsage::TransferDst | ImageUsage::Sampled | (gpuSourceMips ? ImageUsage::TransferSrc : ImageUsage::None),
@@ -189,11 +206,14 @@ class IBLProcessor {
                                        std::max(1u, uploadWidth >> mip), std::max(1u, uploadHeight >> mip));
                 }
             }
+            if (useVisualSky) {
+                std::memcpy(static_cast<float*>(mapped.data) + visualOffsetFloats, radiance.visualRgba, uploadBytes);
+            }
         }
 
         const BRDFLUTPush lutPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128};
         const IBLBakePush shPush {
-            .outAddr      = impl.ctx.BufferAddress(state.shGpu.Handle()),
+            .outAddr      = hasPreparedSH ? 0 : impl.ctx.BufferAddress(state.shGpu.Handle()),
             .sampleCount  = 16384,
             .hasRadiance  = hasRadianceWord,
             .skyZenith    = skyZenith,
@@ -222,11 +242,14 @@ class IBLProcessor {
                 Vk::Slot<"radianceMap">(radianceWrite)
             );
         }
-        const auto shMipInfo =
-            MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, 0);
-        const HeapBlockBase shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-            impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {shMipInfo}), Vk::Slot<"radianceMap">(radianceWrite)
-        );
+        HeapBlockBase shBlock {};
+        if (!hasPreparedSH) {
+            const auto shMipInfo =
+                MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, 0);
+            shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {shMipInfo}), Vk::Slot<"radianceMap">(radianceWrite)
+            );
+        }
 
         ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
             impl.heapManager.BindHeaps(cmd);
@@ -275,12 +298,31 @@ class IBLProcessor {
                 );
             }
 
+            if (useVisualSky) {
+                TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.visualSkyImage.Handle());
+                VkBufferImageCopy2 visualRegion = region;
+                visualRegion.bufferOffset = visualOffsetFloats * sizeof(float);
+                CopyBufferToImage<1>(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), {visualRegion});
+                ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
+                    .image      = state.payload.visualSkyImage.Handle(),
+                    .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                    .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+                    .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                    .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                    .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .base_mip   = 0,
+                    .mip_count  = 1,
+                });
+            }
+
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
             brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
-            shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(impl.ctx, cmd, shBlock, 64, 1, 1, shPush);
+            if (!hasPreparedSH) shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(impl.ctx, cmd, shBlock, 64, 1, 1, shPush);
 
             for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                 const uint32_t mipSize   = kBaseSize >> mip;
@@ -308,30 +350,26 @@ class IBLProcessor {
                 }
             }
 
-            MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Transfer, BarrierAccess::TransferRead);
-            CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
+            if (!hasPreparedSH) {
+                MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Transfer, BarrierAccess::TransferRead);
+                CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
+            }
 
             TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
             TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.prefilteredImage.Handle());
         });
 
-        auto mappedSH = state.shCpu.Map(impl.allocator.Get());
-        if (mappedSH.data == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
-        std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
-        if (hasRadiance) {
-            const auto pixels = std::span<const float> {radiance.rgba, static_cast<size_t>(radiance.width) * radiance.height * 4u};
-            if (auto separated = SeparateCompactEnvironmentEmitter(pixels, radiance.width, radiance.height)) {
-                // Keep the existing nine-vec4 frame ABI: SH consumes xyz;
-                // the previously unused w lanes carry a compact emitter's
-                // direction and cosine-convolved RGB strength. The original
-                // panorama still drives the specular cube and skybox.
-                for (size_t c = 0; c < state.payload.shCoeffs.size(); ++c) {
-                    const float w = c < 3 ? separated->emitterDirection[c] :
-                                    c < 6 ? separated->emitterIrradiance[c - 3] : 0.0f;
-                    const auto& rgb = separated->coefficients[c];
-                    state.payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], w);
-                }
-                ZHLN::Log("[IBL] Separated compact HDR emitter from diffuse SH (specular unchanged).");
+        if (!hasPreparedSH) {
+            auto mappedSH = state.shCpu.Map(impl.allocator.Get());
+            if (mappedSH.data == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
+            std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
+        } else {
+            // The conditioned map has no tiny emitter for either bake path.
+            // Preserve the cooker's exact SH integration of the smooth sky;
+            // GPU's 16k-sample estimate can differ at bright subpixel texels.
+            for (size_t c = 0; c < state.payload.shCoeffs.size(); ++c) {
+                const auto& rgb = radiance.diffuseSH[c];
+                state.payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
             }
         }
 
@@ -343,6 +381,12 @@ class IBLProcessor {
         auto cubeView = ImageView::Create(impl.ctx.Device(), cubeInfo);
         if (!cubeView) return std::unexpected(cubeView.error());
         state.payload.prefilteredView = std::move(*cubeView);
+        if (useVisualSky) {
+            const auto skyInfo = MakeViewCreateInfo2D(state.payload.visualSkyImage.Handle(), VK_FORMAT_R32G32B32A32_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+            auto skyView = ImageView::Create(impl.ctx.Device(), skyInfo);
+            if (!skyView) return std::unexpected(skyView.error());
+            state.payload.visualSkyView = std::move(*skyView);
+        }
         return std::move(state.payload);
 
     }

@@ -8,6 +8,8 @@ namespace ZHLN::Passes {
 auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs {
     return ReflectionInputs {
         .prefiltered = Vk::ImageWrite {impl.iblPayload.prefilteredView},
+        .visualSky   = Vk::ImageWrite {impl.iblPayload.visualSkyView.Valid() ? impl.iblPayload.visualSkyView :
+                                      impl.textureManager.View(kFallbackBlackTextureIndex)},
         .brdfLut     = Vk::ImageWrite {impl.iblPayload.brdfLutView},
         .blueNoise   = Vk::ImageWrite {impl.textureManager.View(impl.blueNoiseTexIdx)},
         .tlas =

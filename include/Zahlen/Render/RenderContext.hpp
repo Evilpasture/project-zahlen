@@ -43,7 +43,12 @@ class PipelineStatsCapture;
 class PresentationTarget;
 
 struct EnvironmentRadianceDesc {
+    // Original top-down HDR is retained for the visible sky. When supplied,
+    // the conditioned lighting map drives BOTH SH and specular prefiltering.
     std::span<const float> rgba {};
+    std::span<const float> lightingRgba {};
+    // Exact smooth irradiance from asset preparation; empty = GPU SH bake.
+    std::span<const std::array<float, 3>> diffuseSH {};
     Extent2D               extent {};
     uint64_t               contentHash  = 0;
     bool                   renderSkybox = false;

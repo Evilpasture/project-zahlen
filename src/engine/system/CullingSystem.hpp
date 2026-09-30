@@ -25,7 +25,7 @@ class ZHLN_API CullingSystem {
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
         const Components::GlobalSettingsTagComponent, const Components::PostProcessSettingsComponent,
         const Components::ShadowSettingsComponent, const Components::LightComponent, const Components::SunTagComponent,
-        const Components::TransformComponent>;
+        const Components::EnvironmentSunTagComponent, const Components::TransformComponent>;
 
     // Reflected graph entry point. The stateful culler and both output lists
     // are injected by type, not extracted in SystemWiring.cpp.

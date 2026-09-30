@@ -18,6 +18,7 @@ void TranslucentReflectionPass::operator()(Vk::RasterPassContextBase& ctx) const
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(impl.graphResources.transDepthBuffer)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(impl.graphResources.transNormalBuffer)),
         Vk::Slot<"texEnvMap">(inputs.prefiltered),
+        Vk::Slot<"texSkyEquirect">(inputs.visualSky),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"brdfLUT">(inputs.brdfLut),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(impl.graphResources.lightingTarget)),

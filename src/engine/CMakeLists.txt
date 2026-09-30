@@ -35,6 +35,7 @@ set(RAW_ENGINE_SOURCES
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
+    system/EnvironmentSunSystem.cpp
     system/CameraSystem.cpp
     Scene.cpp
     ScriptRunner.cpp

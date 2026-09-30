@@ -11,6 +11,7 @@
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
+#include "EnvironmentSunSystem.hpp"
 #include "LightingSystem.hpp"
 #include "ParticleSystem.hpp"
 #include "PhysicsStateSystem.hpp"
@@ -177,6 +178,7 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem<&ParticleSystem::Update>();
 
     renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
+    renderGraph.AddSystem<&EnvironmentSunSystem::Update>();
     renderGraph.AddSystem<&CullingSystem::GraphUpdate>();
     renderGraph.AddSystem<&DecalSystem::Update>();
     renderGraph.AddSystem<&LightingSystem::Update>();

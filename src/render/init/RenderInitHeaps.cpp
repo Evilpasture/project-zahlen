@@ -21,6 +21,12 @@ namespace {
     uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
     hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
     hash ^= Hash64(reinterpret_cast<const char*>(desc.rgba.data()), desc.rgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    if (!desc.lightingRgba.empty()) {
+        hash ^= Hash64(reinterpret_cast<const char*>(desc.lightingRgba.data()), desc.lightingRgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    }
+    if (!desc.diffuseSH.empty()) {
+        hash ^= Hash64(reinterpret_cast<const char*>(desc.diffuseSH.data()), desc.diffuseSH.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    }
     return hash == 0 ? 1 : hash;
 }
 
@@ -218,6 +224,9 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
     const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
     const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo { return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info(); }();
+    VkSamplerCreateInfo skyInfo = Vk::SamplerBuilder {}.Linear().Repeat().Info();
+    skyInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    skyInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 
     Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointInfo));
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
@@ -228,11 +237,11 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
@@ -406,7 +415,9 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
     }
     if ((hasPixels &&
          (desc.extent.width == 0 || desc.extent.height == 0 || desc.rgba.size() != static_cast<size_t>(desc.extent.width) * desc.extent.height * 4)) ||
-        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0))) {
+        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0)) ||
+        (!desc.lightingRgba.empty() && desc.lightingRgba.size() != desc.rgba.size()) ||
+        (!desc.diffuseSH.empty() && (desc.lightingRgba.empty() || desc.diffuseSH.size() != 9))) {
         return std::unexpected(Vk::EnvironmentBakeError::InvalidRadianceData);
     }
 
@@ -414,12 +425,11 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
     int      mode = 0;
     if (hasPixels) {
         hash = desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc);
-        mode = static_cast<int>(desc.renderSkybox) != 0 ? 1 : 2;
+        mode = !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3);
     }
-    if (impl->iblPayload.contentHash == hash && impl->iblPayload.environmentMode == mode) {
-        return {};
-    }
-    if (impl->iblPayload.contentHash == hash) {
+    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyView.Valid())) {
+        // Mode-only changes do not need a new IBL bake, EXCEPT when enabling
+        // the original sky for a cooked map whose hidden mode never uploaded it.
         impl->iblPayload.environmentMode = mode;
         return {};
     }
@@ -430,7 +440,9 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 
     Vk::IBLProcessor::RadianceSource source {};
     if (hasPixels) {
-        source.rgba         = desc.rgba.data();
+        source.rgba         = desc.lightingRgba.empty() ? desc.rgba.data() : desc.lightingRgba.data();
+        source.visualRgba   = desc.lightingRgba.empty() ? nullptr : desc.rgba.data();
+        source.diffuseSH    = desc.diffuseSH;
         source.width        = desc.extent.width;
         source.height       = desc.extent.height;
         source.renderSkybox = desc.renderSkybox ? 1 : 0;

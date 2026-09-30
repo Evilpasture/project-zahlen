@@ -9,8 +9,8 @@
 
 namespace ZHLN::AssetCooking {
 
-// Offline-only ZRD1 writer. The engine consumes prepared float pixels, not
-// this container or its reader/writer.
+// Offline-only ZRD2 writer. It prepares raw pixels if necessary. The engine
+// consumes prepared float pixels/metadata, not this container or its codec.
 [[nodiscard]] auto EncodeCookedRadiance(const EnvironmentImage& image) -> std::vector<std::byte>;
 
 } // namespace ZHLN::AssetCooking

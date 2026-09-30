@@ -36,7 +36,9 @@ SamplerState smp;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 SamplerState pointSampler;
-TextureCube<float4> texEnvMap;
+TextureCube<float4> texEnvMap; // conditioned IBL, never used as the cooked visible sky
+Texture2D<float4> texSkyEquirect; // original HDR only when environmentMode == 3
+SamplerState skySampler;
 ConstantBuffer<FrameUniforms> frame;
 Texture2D brdfLUT;
 SamplerState clampSampler;
@@ -226,7 +228,13 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
-        if (frame.environmentMode == 1) {
+        if (frame.environmentMode == 3) {
+            // Equirectangular convention matches ibl_bake.slang. The original
+            // high-energy disk remains visible, but never enters specular IBL.
+            float2 uv = float2(atan2(rayDir.z, rayDir.x) * (0.5f / 3.141592653589793f) + 0.5f,
+                               acos(clamp(rayDir.y, -1.0f, 1.0f)) / 3.141592653589793f);
+            litColor = texSkyEquirect.SampleLevel(skySampler, uv, 0).rgb * frame.ambientExposure;
+        } else if (frame.environmentMode == 1) {
             litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
         } else {
             rayDir = RotateVector(rayDir, frame.lightDir.xyz);

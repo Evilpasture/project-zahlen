@@ -77,6 +77,10 @@ struct IBLPayload {
     ImageView                brdfLutView;
     Image                    prefilteredImage;
     ImageView                prefilteredView;
+    // Original RGBA32F sky, only retained when the lighting cube was cooked
+    // from a different (sunless) panorama and the skybox is visible.
+    Image                    visualSkyImage;
+    ImageView                visualSkyView;
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
@@ -85,8 +89,10 @@ struct IBLPayload {
     void Destroy(Allocator& allocator) noexcept {
         brdfLutView     = {};
         prefilteredView = {};
+        visualSkyView   = {};
         allocator.DestroyImage(brdfLutImage);
         allocator.DestroyImage(prefilteredImage);
+        allocator.DestroyImage(visualSkyImage);
     }
 };
 

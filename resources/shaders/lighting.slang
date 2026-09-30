@@ -262,13 +262,13 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 spec  = SpecularGGX(N, V, L_sun, H_sun, roughness, F, T, B, anisoStrength);
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
-    float sunIntensity = frame.lightDir.w;
+    float3 sunRadiance = frame.sunRadiance.xyz;
     float sheenAttSun = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotL_sun);
     float3 sheenSun = sheenColor * SheenCharlieBRDF(N, V, L_sun, H_sun, sheenRaw.a);
     float3 directSun   = ((kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sheenAttSun + sheenSun) *
-                         coatAtt * sunIntensity * NdotL_sun * shadow;
+                         coatAtt * sunRadiance * NdotL_sun * shadow;
     if (coatFactor > 1.0f / 255.0f) {
-        directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunIntensity * shadow * coatFactor;
+        directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunRadiance * shadow * coatFactor;
     }
 
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);

@@ -3,6 +3,7 @@
 
 #include "RadianceDecoder.hpp"
 #include "CookedRadianceFormat.hpp"
+#include "EnvironmentPreparation.hpp"
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <stb_image.h>
@@ -32,6 +33,22 @@ using RadianceMap = EnvironmentImage;
     hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
     const size_t bytes = sizeof(float) * 4u * static_cast<size_t>(width) * static_cast<size_t>(height);
     hash ^= Hash64(reinterpret_cast<const char*>(rgba), bytes) + kGolden64 + (hash << 6) + (hash >> 2);
+    return hash == 0 ? 1 : hash;
+}
+
+[[nodiscard]] auto HashRadianceImage(const RadianceMap& image) noexcept -> uint64_t {
+    uint64_t hash = HashRadiancePixels(image.rgba.data(), image.width, image.height);
+    if (!image.lightingRgba.empty()) {
+        const auto mix = [&](const void* bytes, size_t size) {
+            hash ^= Hash64(static_cast<const char*>(bytes), size) + kGolden64 + (hash << 6) + (hash >> 2);
+        };
+        mix(image.lightingRgba.data(), image.lightingRgba.size() * sizeof(float));
+        if (image.sun) {
+            mix(image.sun->direction.data(), sizeof(image.sun->direction));
+            mix(image.sun->irradiance.data(), sizeof(image.sun->irradiance));
+            mix(image.sun->diffuseSH.data(), sizeof(image.sun->diffuseSH));
+        }
+    }
     return hash == 0 ? 1 : hash;
 }
 
@@ -298,7 +315,6 @@ auto DecodeRgbe(std::span<const std::byte> bytes) -> std::expected<RadianceMap, 
         }
     }
 
-    map.contentHash = HashRadiancePixels(map.rgba.data(), width, height);
     return map;
 }
 
@@ -327,13 +343,74 @@ auto DecodeCooked(std::span<const std::byte> bytes) -> std::expected<RadianceMap
     map.height = header.height;
     map.rgba.resize(pixels);
     std::memcpy(map.rgba.data(), bytes.data() + sizeof(header), bytesNeeded);
-    map.contentHash = HashRadiancePixels(map.rgba.data(), map.width, map.height);
+    return map;
+}
+
+auto DecodePrepared(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
+    if (bytes.size() < sizeof(PreparedRadianceHeader)) return std::unexpected(RadianceAssetError::Truncated);
+    PreparedRadianceHeader header {};
+    std::memcpy(&header, bytes.data(), sizeof(header));
+    if (header.magic != kPreparedRadianceMagic) return std::unexpected(RadianceAssetError::BadMagic);
+    if (header.version != kPreparedRadianceVersion) return std::unexpected(RadianceAssetError::UnsupportedVersion);
+    if (header.width == 0 || header.height == 0 || header.width > kMaxRadianceExtent || header.height > kMaxRadianceExtent)
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    const size_t pixels = static_cast<size_t>(header.width) * header.height * 4u;
+    const size_t bytesNeeded = pixels * sizeof(float);
+    if (header.visualDataSize != bytesNeeded ||
+        (header.lightingDataSize != 0 && header.lightingDataSize != bytesNeeded) ||
+        header.hasSun > 1 || (header.hasSun != 0 && header.lightingDataSize == 0) ||
+        bytesNeeded > kMaxRadianceFileBytes - sizeof(header) ||
+        header.lightingDataSize > kMaxRadianceFileBytes - sizeof(header) - bytesNeeded ||
+        bytes.size() != sizeof(header) + bytesNeeded + header.lightingDataSize) {
+        return std::unexpected(RadianceAssetError::BadDimensions);
+    }
+
+    RadianceMap map;
+    map.width = header.width;
+    map.height = header.height;
+    map.rgba.resize(pixels);
+    std::memcpy(map.rgba.data(), bytes.data() + sizeof(header), bytesNeeded);
+    if (header.lightingDataSize != 0) {
+        map.lightingRgba.resize(pixels);
+        std::memcpy(map.lightingRgba.data(), bytes.data() + sizeof(header) + bytesNeeded, bytesNeeded);
+    }
+    if (header.hasSun != 0) {
+        EnvironmentSun sun {};
+        float dirLength = 0.0f;
+        for (int channel = 0; channel < 3; ++channel) {
+            const float direction = header.sunDirection[channel];
+            const float strength = header.sunIrradiance[channel];
+            if (!std::isfinite(direction) || !std::isfinite(strength) || strength < 0.0f)
+                return std::unexpected(RadianceAssetError::BadHeader);
+            sun.direction[channel] = direction;
+            sun.irradiance[channel] = strength;
+            dirLength += direction * direction;
+        }
+        if (!std::isfinite(dirLength) || std::abs(dirLength - 1.0f) > 0.01f)
+            return std::unexpected(RadianceAssetError::BadHeader);
+        for (size_t c = 0; c < sun.diffuseSH.size(); ++c) {
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float value = header.diffuseSH[c][channel];
+                if (!std::isfinite(value)) return std::unexpected(RadianceAssetError::BadHeader);
+                sun.diffuseSH[c][channel] = value;
+            }
+        }
+        map.sun = sun;
+    }
+    for (const auto& panorama: {std::span<const float> {map.rgba}, std::span<const float> {map.lightingRgba}}) {
+        for (size_t i = 0; i < panorama.size(); i += 4) {
+            for (size_t channel = 0; channel < 3; ++channel) {
+                if (!std::isfinite(panorama[i + channel]) || panorama[i + channel] < 0.0f)
+                    return std::unexpected(RadianceAssetError::BadHeader);
+            }
+        }
+    }
     return map;
 }
 
 // Khronos' MetalRoughSpheres-LDR intentionally names a JPEG equirect instead
 // of an HDR file. Convert its display-space sRGB texels to the linear float4
-// data consumed by the same IBL bake as RGBE/ZRD1; do not substitute the HDR
+// data consumed by the same IBL bake as RGBE/ZRD1/ZRD2; do not substitute the HDR
 // panorama, which would change what that fidelity scenario measures.
 auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
     if (bytes.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
@@ -384,7 +461,6 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
         }
         map.rgba[i * 4u + 3u] = 1.0f;
     }
-    map.contentHash = HashRadiancePixels(map.rgba.data(), map.width, map.height);
     return map;
 }
 
@@ -421,17 +497,28 @@ auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> 
 }
 
 auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode> {
+    // A ZRD2 load only copies and validates prepared data. Legacy ZRD1 and
+    // source HDRs are conditioned once by the optional host-side library;
+    // no renderer bake ever scans raw HDR pixels looking for a sun.
+    const auto finish = [](std::expected<EnvironmentImage, ErrorCode> decoded, bool prepare) -> std::expected<EnvironmentImage, ErrorCode> {
+        if (decoded) {
+            if (prepare) PrepareEnvironmentImage(*decoded);
+            decoded->contentHash = HashRadianceImage(*decoded);
+        }
+        return decoded;
+    };
     if (bytes.size() >= sizeof(uint32_t)) {
         uint32_t magic = 0;
         std::memcpy(&magic, bytes.data(), sizeof(magic));
-        if (magic == kCookedRadianceMagic) {
-            return DecodeCooked(bytes);
-        }
+        if (magic == kCookedRadianceMagic) return finish(DecodeCooked(bytes), true);
+        if (magic == kPreparedRadianceMagic) return finish(DecodePrepared(bytes), false);
     }
     if (bytes.size() >= 3 && bytes[0] == std::byte {0xff} && bytes[1] == std::byte {0xd8} && bytes[2] == std::byte {0xff}) {
-        return DecodeLdrJpeg(bytes);
+        // LDR conformance skies retain their previous JPEG -> linear IBL
+        // path. The compact HDR emitter policy applies to HDR sources only.
+        return finish(DecodeLdrJpeg(bytes), false);
     }
-    return DecodeRgbe(bytes);
+    return finish(DecodeRgbe(bytes), true);
 }
 
 auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {

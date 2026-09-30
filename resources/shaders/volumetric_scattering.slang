@@ -96,7 +96,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         shadow              = lerp(1.0f, shadow, fade);
     }
 
-    accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
+    accumulatedLight += frame.sunRadiance.xyz * phaseSun * shadow * scattering;
 
     uint clusterIdx = ClusterIndex(uint(uv.x * float(Cluster.Width)), uint(uv.y * float(Cluster.Height)), ViewDepthToClusterZWith(depthVS, frame.nearZ, frame.farZ));
     ClusterVolume cluster = clusterGrid[clusterIdx];

@@ -400,6 +400,7 @@ auto Engine::MakeSystemContext(float dt) -> SystemContext {
     return SystemContext {
         .registry              = _impl->world->GetRegistry(),
         .render                = &_impl->kernel->GetRenderContext(),
+        .assets                = &_impl->kernel->GetAssetManager(),
         .physics               = &_impl->world->GetPhysics(),
         .audio                 = &_impl->kernel->GetAudioContext(),
         .camera                = &_impl->world->GetCamera(),

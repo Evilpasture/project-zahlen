@@ -57,6 +57,48 @@ struct EnvironmentImageTestSuite {
             return {};
         }
 
+        auto validates_prepared_sun_and_both_panorama_lifetimes() -> std::expected<void, ZHLN::ErrorCode> {
+            ZHLN::AssetManager assets;
+            auto prepared = Pixels(2.0f);
+            prepared.lightingRgba = Pixels(0.5f).rgba;
+            prepared.sun.emplace();
+            prepared.sun->direction = {1.0f, 0.0f, 0.0f};
+            prepared.sun->irradiance = {2.0f, 1.0f, 0.5f};
+            prepared.contentHash = 42;
+            if (!assets.CacheEnvironmentImage("cooked", std::move(prepared)))
+                return std::unexpected(EnvironmentImageTestError::CacheFailed);
+            const auto first = assets.FindEnvironmentImage("cooked");
+            if (!first || !first->sun || first->lightingRgba.size() != 8u ||
+                !ZHLN::Test::ExpectEq(first->rgba[0], 2.0f) ||
+                !ZHLN::Test::ExpectEq(first->lightingRgba[0], 0.5f) ||
+                !ZHLN::Test::ExpectEq(first->sun->irradiance[0], 2.0f) ||
+                !ZHLN::Test::ExpectEq(first->contentHash, 42ull)) {
+                return std::unexpected(EnvironmentImageTestError::CacheFailed);
+            }
+            auto invalid = Pixels(3.0f);
+            invalid.sun.emplace();
+            invalid.sun->direction = {1.0f, 0.0f, 0.0f};
+            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+                return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            invalid = Pixels(3.0f);
+            invalid.lightingRgba = {0.0f};
+            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+                return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            invalid = Pixels(3.0f);
+            invalid.lightingRgba = invalid.rgba;
+            invalid.sun.emplace(); // zero is not a valid direction
+            if (assets.CacheEnvironmentImage("cooked", std::move(invalid)))
+                return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            const auto retained = assets.FindEnvironmentImage("cooked");
+            if (!retained || !ZHLN::Test::ExpectEq(retained->rgba.data(), first->rgba.data()) ||
+                !ZHLN::Test::ExpectEq(retained->lightingRgba.data(), first->lightingRgba.data())) {
+                return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            }
+            assets.ClearCache();
+            if (assets.FindEnvironmentImage("cooked")) return std::unexpected(EnvironmentImageTestError::InvalidRegistration);
+            return {};
+        }
+
         auto replacement_and_clear_manage_borrowed_pixels() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::AssetManager assets;
             if (!assets.CacheEnvironmentImage("lighting", Pixels(1.0f))) {

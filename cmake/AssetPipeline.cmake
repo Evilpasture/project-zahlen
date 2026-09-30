@@ -16,7 +16,7 @@
 # add_dependencies(zahlen cook_assets), so the root CMakeLists calls it only
 # after both targets exist.
 
-# Source-image and ZRD1 codecs are optional to the engine, but always needed
+# Source-image and ZRD1/ZRD2 codecs are optional to the engine, but always needed
 # by the offline cooker. Keep them in one extras target so an application (e.g.
 # FidelityHarness) can explicitly supply decoded pixels without pulling any
 # file formats into the runtime libraries.

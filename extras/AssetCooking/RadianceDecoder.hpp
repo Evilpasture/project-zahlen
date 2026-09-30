@@ -21,17 +21,18 @@ namespace ZHLN::AssetCooking {
 enum class RadianceAssetError : uint8_t {
     NotFound ZHLN_ANNOTATION(ZHLN::Description<"radiance asset was not in the VFS or on disk"> {}) = 1,
     Truncated ZHLN_ANNOTATION(ZHLN::Description<"radiance blob ends before its payload"> {}),
-    BadMagic ZHLN_ANNOTATION(ZHLN::Description<"cooked radiance magic is not 'ZRD1'"> {}),
+    BadMagic ZHLN_ANNOTATION(ZHLN::Description<"cooked radiance magic is not ZRD1 or ZRD2"> {}),
     UnsupportedVersion ZHLN_ANNOTATION(ZHLN::Description<"cooked radiance version is not supported"> {}),
-    BadHeader ZHLN_ANNOTATION(ZHLN::Description<"Radiance header is not #?RADIANCE / #?RGBE"> {}),
+    BadHeader ZHLN_ANNOTATION(ZHLN::Description<"Radiance header or prepared metadata is invalid"> {}),
     UnsupportedFormat ZHLN_ANNOTATION(ZHLN::Description<"Radiance format is not 32-bit_rle_rgbe"> {}),
     BadDimensions ZHLN_ANNOTATION(ZHLN::Description<"radiance dimensions are missing, inconsistent, or too large"> {}),
     RleCorrupt ZHLN_ANNOTATION(ZHLN::Description<"Radiance RLE scanline is truncated or inconsistent"> {}),
     LdrDecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"LDR JPEG radiance image could not be decoded"> {}),
 };
 
-// Offline/host-side codecs. Detect RGBE .hdr, cooked ZRD1, or JPEG by
-// signature; sRGB JPEG texels are linearized before being passed to core.
+// Offline/host-side codecs. Detect RGBE .hdr, legacy ZRD1, prepared ZRD2,
+// or JPEG by signature. Raw HDR and legacy ZRD1 are conditioned once here;
+// JPEG is left unchanged. ZRD2 copies already-prepared data without re-extracting.
 [[nodiscard]] auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode>;
 
 // Convenience for applications that source images from a mounted VFS asset or

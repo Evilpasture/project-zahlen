@@ -166,8 +166,8 @@ int CookTexture(int argc, char** argv) {
     }
 
     // Non-.hdr stays a verbatim copy (offline_texture_cooking_passthrough).
-    // .hdr becomes ZRD1 for packaged assets. A host can explicitly decode
-    // either format with AssetCooking and supply pixels to the engine.
+    // .hdr becomes prepared ZRD2 (original sky, sunless IBL, optional sun).
+    // A host can explicitly decode source or cooked assets with AssetCooking.
     const auto ext = fs::path(inPath).extension().string();
     const bool isHdr = ext == ".hdr" || ext == ".HDR";
     if (isHdr) {
@@ -179,7 +179,11 @@ int CookTexture(int argc, char** argv) {
             return 1;
         }
         const auto cooked = AssetCooking::EncodeCookedRadiance(*decoded);
-        std::fwrite(cooked.data(), 1, cooked.size(), out);
+        if (cooked.empty() || std::fwrite(cooked.data(), 1, cooked.size(), out) != cooked.size()) {
+            std::println(stderr, "[zcook] ERROR: Could not write prepared HDR '{}'", outPath);
+            std::fclose(out);
+            return 1;
+        }
         std::fclose(out);
         return 0;
     }

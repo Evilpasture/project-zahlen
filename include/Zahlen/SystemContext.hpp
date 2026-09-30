@@ -16,6 +16,7 @@
 namespace ZHLN {
 
 class RenderContext;
+class AssetManager;
 class PhysicsContext;
 class AudioContext;
 class CullingSystem;
@@ -40,6 +41,7 @@ struct SystemContext {
     ECS::Registry& registry;
 
     RenderContext*     render       = nullptr;
+    AssetManager*      assets       = nullptr;
     PhysicsContext*    physics      = nullptr;
     AudioContext*      audio        = nullptr;
     Camera*            camera       = nullptr;

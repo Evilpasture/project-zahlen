@@ -91,7 +91,7 @@ constexpr uint32_t kDevicePixelRatio = 2;
 
 // The fidelity suite defines each test case as a scenario (a JSON object). The
 // fields the harness consumes are quoted below. `lighting` is the radiance
-// asset (raw .hdr, LDR .jpg, or cooked ZRD1) the engine bakes IBL from.
+// asset (raw .hdr, LDR .jpg, legacy ZRD1, or prepared ZRD2) the engine bakes IBL from.
 // `renderSkybox` defaults to false: the background is omitted (alpha 0) unless the scenario
 // asks for the panorama as a skybox.
 struct Vector3D {
@@ -748,8 +748,8 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[Fidelity] Antialiasing: {}.", noAA ? "none (--no-aa)" : "SMAA (spatial)");
 
     // The environment is an ECS key, not a renderer-side file load. Decode
-    // the scenario's raw HDR/JPEG (or cooked ZRD1) through the optional asset
-    // tooling and supply owned linear pixels to core before the first frame.
+    // the scenario's raw HDR/JPEG (or cooked ZRD1/ZRD2) through the optional
+    // asset tooling and supply owned linear pixels to core before first frame.
     // String256 is the component's key; truncating it would select the wrong
     // image. Preflight here: Engine::Tick does not surface all render errors.
     if (!scenario.lighting.empty()) {

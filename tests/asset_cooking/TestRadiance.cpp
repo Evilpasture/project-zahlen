@@ -3,7 +3,9 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/CookerFixture.hpp"
+#include <AssetCooking/EnvironmentPreparation.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
+#include <AssetCooking/RadianceEncoder.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <algorithm>
 #include <array>
@@ -14,6 +16,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -21,7 +24,7 @@
 
 enum class RadianceTestError : uint8_t {
     DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"A synthetic radiance blob did not decode to the expected pixels.">{}) = 1,
-    CookedRoundTripFailed ZHLN_ANNOTATION(ZHLN::Description<"The cooked ZRD1 container did not round-trip.">{}),
+    CookedRoundTripFailed ZHLN_ANNOTATION(ZHLN::Description<"The cooked ZRD2 container did not round-trip.">{}),
     CacheFailed ZHLN_ANNOTATION(ZHLN::Description<"AssetManager did not cache or drop the radiance map.">{}),
     FixtureFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not write or cook the synthetic radiance fixture.">{}),
 };
@@ -80,6 +83,28 @@ std::vector<std::byte> RleHdr() {
         AppendByte(out, value);
     }
     return out;
+}
+
+[[nodiscard]] auto HotspotEnvironment(bool secondSun = false) -> ZHLN::EnvironmentImage {
+    ZHLN::EnvironmentImage image;
+    image.width = 128;
+    image.height = 64;
+    image.rgba.resize(static_cast<size_t>(image.width) * image.height * 4u);
+    for (size_t i = 0; i < image.rgba.size(); i += 4) {
+        image.rgba[i] = 0.20f;
+        image.rgba[i + 1] = 0.25f;
+        image.rgba[i + 2] = 0.30f;
+        image.rgba[i + 3] = 1.0f;
+    }
+    const auto set = [&](uint32_t x, uint32_t y) {
+        const size_t i = (static_cast<size_t>(y) * image.width + x) * 4u;
+        image.rgba[i] = 50000.0f;
+        image.rgba[i + 1] = 38000.0f;
+        image.rgba[i + 2] = 12000.0f;
+    };
+    set(52, 32);
+    if (secondSun) set(20, 32);
+    return image;
 }
 
 // 2x1 JPEG, both texels sRGB (128,64,32), quality 100, generated with:
@@ -253,11 +278,12 @@ struct RadianceTestSuite {
                 return std::unexpected(RadianceTestError::FixtureFailed);
             }
             std::ifstream cookedFile(cookedPath, std::ios::binary);
-            std::array<uint32_t, 5> header {};
+            std::array<uint32_t, 7> header {};
             cookedFile.read(reinterpret_cast<char*>(header.data()), sizeof(header));
-            if (!ZHLN::Test::ExpectTrue(cookedFile.good()) || !ZHLN::Test::ExpectEq(header[0], 0x3144525Au) ||
-                !ZHLN::Test::ExpectEq(header[1], 1u) || !ZHLN::Test::ExpectEq(header[2], 8u) ||
-                !ZHLN::Test::ExpectEq(header[3], 1u) || !ZHLN::Test::ExpectEq(header[4], 8u * 4u * sizeof(float))) {
+            if (!ZHLN::Test::ExpectTrue(cookedFile.good()) || !ZHLN::Test::ExpectEq(header[0], 0x3244525Au) ||
+                !ZHLN::Test::ExpectEq(header[1], 2u) || !ZHLN::Test::ExpectEq(header[2], 8u) ||
+                !ZHLN::Test::ExpectEq(header[3], 1u) || !ZHLN::Test::ExpectEq(header[4], 8u * 4u * sizeof(float)) ||
+                !ZHLN::Test::ExpectEq(header[5], 0u) || !ZHLN::Test::ExpectEq(header[6], 0u)) {
                 return std::unexpected(RadianceTestError::CookedRoundTripFailed);
             }
             auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(fixture.assets.VFS(), rawPath.string());
@@ -273,6 +299,87 @@ struct RadianceTestSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> cooked_sun_separates_diffuse_and_specular_without_changing_sky() {
+            auto image = HotspotEnvironment();
+            const auto visibleSky = image.rgba;
+            ZHLN::AssetCooking::PrepareEnvironmentImage(image);
+            const size_t hotspot = (32u * 128u + 52u) * 4u;
+            if (!image.sun || image.lightingRgba.size() != image.rgba.size() ||
+                !ZHLN::Test::ExpectEq(image.rgba[hotspot], 50000.0f) ||
+                !ZHLN::Test::ExpectLt(image.lightingRgba[hotspot], 1.0f) ||
+                !ZHLN::Test::ExpectGt(image.sun->irradiance[0], 30.0f) ||
+                !ZHLN::Test::ExpectLt(image.sun->direction[2], -0.4f) ||
+                !std::ranges::equal(image.rgba, visibleSky)) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            // N=+Z faces away from the extracted sun. Its diffuse SH must be
+            // the original flat RGB sky, not the teal/clamped SH of the spike.
+            for (int channel = 0; channel < 3; ++channel) {
+                const auto& sh = image.sun->diffuseSH;
+                const float irradiance = sh[0][channel] * 0.282095f + sh[2][channel] * 0.488603f + sh[6][channel] * 0.630784f;
+                if (std::abs(irradiance - visibleSky[channel]) > 0.005f)
+                    return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            // Idempotent for host callers; a second pass must never extract
+            // another sun from the conditioned copy or change the visible HDR.
+            ZHLN::AssetCooking::PrepareEnvironmentImage(image);
+            const auto cooked = ZHLN::AssetCooking::EncodeCookedRadiance(image);
+            auto restored = ZHLN::AssetCooking::DecodeRadiance(cooked);
+            if (cooked.empty() || !restored || !restored->sun || restored->contentHash == 0 ||
+                !std::ranges::equal(restored->rgba, image.rgba) ||
+                !std::ranges::equal(restored->lightingRgba, image.lightingRgba) ||
+                !ZHLN::Test::ExpectEq(restored->sun->direction[0], image.sun->direction[0]) ||
+                !ZHLN::Test::ExpectEq(restored->sun->irradiance[1], image.sun->irradiance[1]) ||
+                !ZHLN::Test::ExpectEq(restored->sun->diffuseSH[3][2], image.sun->diffuseSH[3][2])) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            // Cooked metadata/lengths must not be treated as trusted input.
+            auto bad = cooked;
+            const float invalidDir = std::numeric_limits<float>::quiet_NaN();
+            std::memcpy(bad.data() + 7u * sizeof(uint32_t), &invalidDir, sizeof(invalidDir));
+            if (ZHLN::AssetCooking::DecodeRadiance(bad)) return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            bad = cooked;
+            const uint32_t missingLighting = 0;
+            std::memcpy(bad.data() + 5u * sizeof(uint32_t), &missingLighting, sizeof(missingLighting));
+            if (ZHLN::AssetCooking::DecodeRadiance(bad)) return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            bad = cooked;
+            bad.pop_back();
+            if (ZHLN::AssetCooking::DecodeRadiance(bad)) return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> legacy_zrd1_conditions_only_at_host_load() {
+            const auto image = HotspotEnvironment();
+            const std::array<uint32_t, 5> header {0x3144525Au, 1u, image.width, image.height,
+                                                  static_cast<uint32_t>(image.rgba.size() * sizeof(float))};
+            std::vector<std::byte> legacy(sizeof(header) + image.rgba.size() * sizeof(float));
+            std::memcpy(legacy.data(), header.data(), sizeof(header));
+            std::memcpy(legacy.data() + sizeof(header), image.rgba.data(), image.rgba.size() * sizeof(float));
+            auto prepared = ZHLN::AssetCooking::DecodeRadiance(legacy);
+            if (!prepared || !prepared->sun || prepared->lightingRgba.size() != image.rgba.size() ||
+                !ZHLN::Test::ExpectEq(prepared->rgba[(32u * 128u + 52u) * 4u], 50000.0f)) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            const auto newFormat = ZHLN::AssetCooking::EncodeCookedRadiance(*prepared);
+            auto reloaded = ZHLN::AssetCooking::DecodeRadiance(newFormat);
+            if (!reloaded || !reloaded->sun || !ZHLN::Test::ExpectEq(reloaded->contentHash, prepared->contentHash) ||
+                !std::ranges::equal(reloaded->lightingRgba, prepared->lightingRgba)) {
+                return std::unexpected(RadianceTestError::CookedRoundTripFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> multiple_bright_sources_stay_in_ordinary_ibl() {
+            auto image = HotspotEnvironment(true);
+            ZHLN::AssetCooking::PrepareEnvironmentImage(image);
+            if (image.sun || !image.lightingRgba.empty()) return std::unexpected(RadianceTestError::DecodeFailed);
+            const auto cooked = ZHLN::AssetCooking::EncodeCookedRadiance(image);
+            auto decoded = ZHLN::AssetCooking::DecodeRadiance(cooked);
+            if (!decoded || decoded->sun || !decoded->lightingRgba.empty() ||
+                !std::ranges::equal(decoded->rgba, image.rgba)) return std::unexpected(RadianceTestError::DecodeFailed);
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> ldr_jpeg_is_linearized_for_ibl() {
             const auto bytes = std::as_bytes(std::span {kLdrJpeg});
             RadianceFixture fixture;
@@ -281,7 +388,7 @@ struct RadianceTestSuite {
                 return std::unexpected(decoded.error());
             }
             if (!ZHLN::Test::ExpectEq(decoded->width, 2u) || !ZHLN::Test::ExpectEq(decoded->height, 1u) ||
-                !ZHLN::Test::ExpectEq(decoded->rgba.size(), 8u)) {
+                !ZHLN::Test::ExpectEq(decoded->rgba.size(), 8u) || decoded->sun || !decoded->lightingRgba.empty()) {
                 return std::unexpected(RadianceTestError::DecodeFailed);
             }
             // sRGB 128 must become ~0.216, not 128/255 or stb_image's

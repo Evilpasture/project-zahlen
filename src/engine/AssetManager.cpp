@@ -5,6 +5,7 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -123,8 +124,25 @@ uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t m
 auto AssetManager::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
     if (key.empty() || image.width == 0 || image.height == 0 ||
         static_cast<size_t>(image.width) > std::numeric_limits<size_t>::max() / 4u / image.height ||
-        image.rgba.size() != static_cast<size_t>(image.width) * image.height * 4u) {
+        image.rgba.size() != static_cast<size_t>(image.width) * image.height * 4u ||
+        (!image.lightingRgba.empty() && image.lightingRgba.size() != image.rgba.size()) ||
+        (image.sun.has_value() && image.lightingRgba.empty())) {
         return false;
+    }
+    if (image.sun) {
+        float directionLength = 0.0f;
+        for (int c = 0; c < 3; ++c) {
+            const float dir = image.sun->direction[c];
+            const float strength = image.sun->irradiance[c];
+            if (!std::isfinite(dir) || !std::isfinite(strength) || strength < 0.0f) return false;
+            directionLength += dir * dir;
+        }
+        if (!std::isfinite(directionLength) || std::abs(directionLength - 1.0f) > 0.01f) return false;
+        for (const auto& coeff: image.sun->diffuseSH) {
+            for (float channel: coeff) {
+                if (!std::isfinite(channel)) return false;
+            }
+        }
     }
     _environmentImages.Insert(HashAssetPath(key), std::make_unique<EnvironmentImage>(std::move(image)));
     return true;
@@ -139,10 +157,12 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
         return std::nullopt;
     }
     return EnvironmentImageView {
-        .rgba        = image->rgba,
-        .width       = image->width,
-        .height      = image->height,
-        .contentHash = image->contentHash,
+        .rgba         = image->rgba,
+        .lightingRgba = image->lightingRgba,
+        .sun          = image->sun,
+        .width        = image->width,
+        .height       = image->height,
+        .contentHash  = image->contentHash,
     };
 }
 

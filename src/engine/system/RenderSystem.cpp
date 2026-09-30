@@ -53,7 +53,7 @@ namespace {
     return skeleton.skinnedScratch;
 }
 
-[[nodiscard]] auto HasAuthoredSun(const ECS::Registry& reg) noexcept -> bool {
+[[nodiscard]] auto HasSceneSun(const ECS::Registry& reg) noexcept -> bool {
     for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         if (const auto* light = reg.Get<Components::LightComponent>(e); light != nullptr && light->type == LightType::Sun) {
             return true;
@@ -78,8 +78,13 @@ namespace {
         Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
         return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
     }
+    const std::span<const std::array<float, 3>> sh = pixels->sun
+        ? std::span<const std::array<float, 3>> {pixels->sun->diffuseSH}
+        : std::span<const std::array<float, 3>> {};
     return rc.SetEnvironmentRadiance({
         .rgba         = pixels->rgba,
+        .lightingRgba = pixels->lightingRgba,
+        .diffuseSH    = sh,
         .extent       = {.width = pixels->width, .height = pixels->height},
         .contentHash  = pixels->contentHash,
         .renderSkybox = env->renderSkybox != 0,
@@ -357,12 +362,18 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         }
     }
 
-    auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(LightingSystem::SunQuery {reg});
-    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasAuthoredSun(reg)) {
+    auto sun = LightingSystem::GetSun(LightingSystem::SunQuery {reg});
+    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasSceneSun(reg)) {
         if (const auto* env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env != nullptr && !env->source.empty()) {
-            sunIntensity = 0.0f;
+            sun.intensity = 0.0f;
         }
     }
+    const JPH::Vec3 sunDirection = sun.direction;
+    // The extracted emitter used to live in EvaluateSH and inherited the
+    // environment exposure. Convert its irradiance/pi to directional radiance
+    // (pi * irradiance), then apply that same exposure only to cooked suns.
+    const float sunIntensity = sun.intensity * (sun.fromEnvironment ? gfx.environment.ambientExposure : 1.0f);
+    const JPH::Vec3 sunRadiance = sun.color * sunIntensity;
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;
@@ -395,6 +406,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3] = sunIntensity;
+    uniforms.sunRadiance = JPH::Vec4(sunRadiance, 0.0f);
     uniforms.probeMin =
         JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);

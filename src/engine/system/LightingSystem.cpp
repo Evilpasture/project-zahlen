@@ -16,44 +16,55 @@
 
 namespace ZHLN {
 
-std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
-    JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-    float     sunIntensity = 180.0f;
-    bool      sunFound     = false;
+auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
+    SunLight sun {
+        .direction = JPH::Vec3(0.5f, 1.0f, 0.2f),
+        .color = JPH::Vec3::sReplicate(1.0f),
+        .intensity = 180.0f,
+        .fromEnvironment = false,
+    };
+    bool found = false;
 
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            if (light.type == LightType::Sun) {
-                if (light.direction.LengthSq() > 1e-4f) {
-                    sunDirection = light.direction;
-                } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                               sunDirection = worldTrans.world.GetColumn3(2);
-                           })) {
-                    reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
-                }
-                sunIntensity = light.intensity;
-                sunFound     = true;
+            if (light.type != LightType::Sun) return;
+            if (light.direction.LengthSq() > 1e-4f) {
+                sun.direction = light.direction;
+            } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                           sun.direction = worldTrans.world.GetColumn3(2);
+                       })) {
+                reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
+            sun.intensity = light.intensity;
+            // Preserve the white legacy default for tag-only sun entities.
+            sun.color = light.color.LengthSq() > 1e-8f ? light.color : JPH::Vec3::sReplicate(1.0f);
+            sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e) != nullptr;
+            found = true;
         });
-
-        if (sunFound) {
-            break;
-        }
+        if (found) break;
     }
 
-    if (!sunFound) {
-        auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
+    if (!found) {
+        const auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
         if (!sunEntities.empty()) {
-            Entity sunEnt = sunEntities[0];
-            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sunDirection = worldTrans.world.GetColumn3(2); })) {
-                reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
+            const Entity sunEnt = sunEntities[0];
+            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sun.direction = worldTrans.world.GetColumn3(2); })) {
+                reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
-
-            reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) { sunIntensity = light.intensity; });
+            reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) {
+                sun.intensity = light.intensity;
+                if (light.color.LengthSq() > 1e-8f) sun.color = light.color;
+            });
         }
     }
 
-    return {sunDirection.Normalized(), sunIntensity};
+    sun.direction = sun.direction.LengthSq() > 1e-8f ? sun.direction.Normalized() : JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+    return sun;
+}
+
+std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
+    const SunLight sun = GetSun(reg);
+    return {sun.direction, sun.intensity};
 }
 
 void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,

@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Host-side RGBE/JPEG/ZRD1 decoding is exercised separately from the core-only
+# Host-side RGBE/JPEG/ZRD1/ZRD2 decoding is exercised separately from the core-only
 # CPU_Assets group. zcook and this suite exist even with ZHLN_BUILD_EXTRAS=OFF.
 set(TARGET_NAME TestRadianceCooking)
 add_executable(${TARGET_NAME} RunRadianceTests.cpp TestRadiance.cpp)

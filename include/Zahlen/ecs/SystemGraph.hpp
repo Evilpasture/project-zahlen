@@ -61,6 +61,8 @@ struct ResourceSlot {
     static auto Get(SystemContext& ctx) noexcept -> T* {
         if constexpr (std::is_same_v<T, RenderContext>) {
             return ctx.render;
+        } else if constexpr (std::is_same_v<T, AssetManager>) {
+            return ctx.assets;
         } else if constexpr (std::is_same_v<T, PhysicsContext>) {
             return ctx.physics;
         } else if constexpr (std::is_same_v<T, AudioContext>) {

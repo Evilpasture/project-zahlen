@@ -29,10 +29,12 @@ ACES grading, `ambientExposure = 4`, an extra sun with two punctual fills and a
 0.03-roughness mirror floor). None of those exist in a conformance render, and
 this harness builds none of them. Specifically:
 
-* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`. Prefab
-  virtual point lights are disabled (they are opt-in anyway); the harness
-  defensively destroys any that exist. The unauthored 180-intensity fill is
-  dropped while the environment map is set.
+* **No extra authored lights.** `InitializeDefaultScene` spawns no authored
+  `LightComponent`. Prefab virtual point lights are disabled; the harness
+  destroys any authored lights that exist. With no cooked sun, the unauthored
+  180-intensity fill is suppressed while an environment is set. A single
+  compact HDR emitter, when detected during asset preparation, becomes one
+  scene-owned `LightType::Sun` instead.
 * **Authored emissive units.** The import uses `emissiveFactorScale = 1`: an
   emissive factor is its glTF linear value, multiplied by
   `KHR_materials_emissive_strength` when present and by the sRGB-decoded
@@ -64,10 +66,12 @@ this harness builds none of them. Specifically:
   obvious one-pixel stair steps even at the goldens' native 2x resolution.
   Use `--no-aa` to capture the unfiltered baseline for A/B comparison. Spatial
   AA cannot recover geometry smaller than a rendered pixel like coverage AA can.
-* **No SSR/RTR reflections and no shadows** — the only illumination is the IBL.
+* **No SSR/RTR reflections.** Smooth sky illumination comes from IBL; a cooked
+  compact HDR sun uses the existing cascaded-shadow directional-light path.
+  Authored suns take precedence, rather than doubling that direct light.
 * **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving
-  diffuse IBL (SH plus an analytic compact HDR emitter where applicable) and
-  the pre-filtered specular environment. No screen-space bounce light is added.
+  diffuse SH of the sunless panorama, pre-filtered sunless specular IBL and,
+  where applicable, a shadowed sun. No screen-space bounce light is added.
 * **Camera from the scenario**: Khronos `{theta, phi, radius}` around
   `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFoV`,
   near 0.01 / far 100. Radius **0 is valid**: upstream uses it for
@@ -95,7 +99,7 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
 
 1. **Environment lighting comes from the scenario asset.** The harness uses
    the optional `AssetCooking` decoder to read raw Radiance `.hdr`, cooked
-   `ZRD1`, or an LDR JPEG equirect (linearizing its sRGB bytes before the bake).
+   legacy `ZRD1`, prepared `ZRD2`, or an LDR JPEG equirect (linearizing its sRGB bytes before the bake).
    In particular, `khronos-MetalRoughSpheres-LDR` uses
    `spruit_sunrise_1k_LDR.jpg`, not the HDR version. The harness preflights the
    source and registers owned linear pixels under the scenario's lighting key.
@@ -333,38 +337,46 @@ unsaturated pixels, not to the metallic gold leaf (blackening its base color
 also zeroes its colored specular F0). Background pixels shared by both captures
 subtract to black.
 
-The user-observed residual **is still teal**. The scene's actual HDR panorama
-has an extremely compact, intense sun. Nine-term SH truncation gives the
-shadow-side unit normal `(-0.940, 0, 0.342)` irradiance approximately
-`(-0.117, -0.000, 0.176)` in linear RGB: the shader clamps red/green to zero,
-leaving blue behind even after removing specular. Direct cosine integration of
-the HDR at that same normal instead gives `(0.130, 0.170, 0.229)`. Increasing
-SH sample count cannot fix this: the *full-resolution* SH projection has the
-same negative-red lobe. Nor did the earlier HDR specular-footprint change fix
-it. Filament windows SH to reduce ringing, but for this sharp sun it makes
-shadow-side irradiance much brighter than the physically integrated value.
+The original teal residual was caused by an extremely compact, intense HDR
+sun. At the olive's shadow-side normal `(-0.940, 0, 0.342)`, nine-term SH of
+the entire panorama produced `(-0.117, -0.000, 0.176)` in linear RGB and clamped
+red/green away. Direct cosine integration gives `(0.130, 0.170, 0.229)`. The
+earlier emitter-separated SH fix produced `(0.122, 0.162, 0.225)` and its olive
+rendering was **confirmed fixed**. Merely increasing SH samples or adjusting
+specular footprint did not solve it; a fixed SH window was not a substitute.
 
-The renderer now detects a single compact HDR emitter carrying a substantial
-fraction of the panorama's energy, integrates the **remaining** source pixels
-into SH by exact texel solid angle, and adds the emitter's nonnegative cosine
-term at shading time. For this HDR the computed irradiance at the normal above
-is `(0.122, 0.162, 0.225)`, close to direct integration. The specular cube and
-skybox remain sourced from the unmodified HDR. Ordinary skies and multi-light
-panoramas keep their existing GPU SH bake, avoiding an indiscriminate material
-or exposure change. The bake logs `[IBL] Separated compact HDR emitter...` when
-this path is taken.
+The longer-term pipeline retains the proven compact-source selection and exact
+smooth SH integration in **asset preparation** (`zcook` writes `ZRD2`). The
+visible HDR remains original. The bright pixels are locally inpainted in a
+separate lighting panorama, which drives **both** diffuse SH and all specular
+mips. The sun's direction and RGB irradiance are stored in the cooked asset.
+Before culling/lighting each frame, ECS owns one generated directional
+`LightComponent`; its RGB radiance is `pi * cookedIrradianceOverPi`, scaled by
+`ambientExposure` to match the prior Lambertian energy. On the official Spruit
+HDR, the new cooked smooth SH at the shadow-side normal is
+`(0.1213, 0.1619, 0.2245)` (CPU-checked against the actual source image).
+Direct light uses the regular CSM/RTR visibility path rather than an
+unshadowed addition inside `EvaluateSH()`.
+There is no raw-pixel sun search inside the renderer. The optional host decoder
+prepares raw HDR and legacy ZRD1 on import for backward compatibility; ZRD2
+load merely copies and validates the conditioned pixels and metadata.
 
-**This is a mathematically validated candidate, not a verified image match.**
-Rebuild and re-run `SCENARIO=khronos-IridescentDishWithOlives
-./scripts/run_fidelity.sh -j1`, inspect the new `opaque-only` and
-`olives-diffuse-residual.pam` alongside the same golden, and check unrelated HDR
-scenarios as well. Filament's nonlinear roughness-to-LOD curve cannot be copied
-into Zahlen alone: cmgen also bakes its cube levels with the inverse curve,
-whereas Zahlen currently uses linear roughness for both bake and lookup. A new
-GPU capture and golden comparison are still needed to confirm visual fidelity.
-`GPU_Lighting` also contains a public-API headless regression: adding a
-point-like HDR hotspot *behind* a diffuse box must not tint its front face
-relative to the same panorama without that hotspot.
+**Policy:** an authored `LightType::Sun` or legacy `SunTagComponent` replaces the
+extracted direct sun; it never adds on top. The conditioned lighting panorama
+still excludes the photographed emitter and the original sky remains visible.
+Removing the authored sun, changing environments, or clearing the scene
+reconciles the generated entity. Broad/multi-source HDRs retain the previous
+GPU IBL path and do not create a new Sun. This is a direct-light/shadow
+solution, not sky visibility in caves: low-frequency ambient skylight still
+requires AO/probes/occlusion.
+Small occluders also need CSM width/resolution tuned to their scene scale.
+
+**The cooked-shadow migration still needs GPU/visual verification.** Rebuild and
+re-run `SCENARIO=khronos-IridescentDishWithOlives ./scripts/run_fidelity.sh -j1`,
+check the olive residual and unrelated HDR scenarios, and run `GPU_Lighting`
+(headless backside-color, authored-sun, and occluder-shadow regressions).
+Filament's nonlinear roughness-to-LOD curve is paired with its own cube bake;
+changing Zahlen's lookup alone would not be a justified fidelity fix.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.
