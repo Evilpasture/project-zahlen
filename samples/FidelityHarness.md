@@ -196,6 +196,28 @@ headless GPU regression checks culling and double-sided normals on both raster
 paths. Neither is a pixel-perfect match to the Sample Viewer golden, so compare
 a new capture as well.
 
+**MultiUVTest's `<model-viewer>` golden is not a neutral brightness target.**
+The official material samples base color from `TEXCOORD_0` and the emissive
+logo from `TEXCOORD_1` (`emissiveFactor = [1, 1, 1]`). It specifies no
+metallic/roughness factors or texture, so glTF defaults both factors to **1**:
+the panel is a fully rough **metal**, lit predominantly by specular IBL rather
+than diffuse light. The fidelity generator gives both renderers the same
+`lightroom_14b.hdr`, but its `<model-viewer>` page explicitly selects Three.js
+`tone-mapping="aces"`; the Zahlen harness uses PBR Neutral at exposure 1.
+Three.js's ACES shader includes a subjective `exposure / 0.6` lift before
+its filmic color transform. For illustration, a uniform linear gray value
+of 0.25 maps to approximately sRGB 152 in that ACES shader versus 126 with
+Zahlen's Neutral shader, even before IBL differences. Three.js also adds
+indirect *specular multiscattering* for rough metals; Zahlen's current IBL
+uses the single-scattering `F0 * BRDF.x + BRDF.y` term only. That missing
+energy-compensation term can darken this panel but is distinct from a UV,
+emissive-factor, or color-texture import error. A correctly positioned logo
+supports the UV routing, not photometric agreement. Do not change the asset's
+metallic factor or globally raise exposure to chase one viewer's golden; for
+closer parity, compare a common tone map and inspect the HDR prefilter and
+rough-metal specular energy across other scenarios before changing the PBR
+model. Zahlen's simpler `ACESFilm` option is **not** the Three.js ACES shader.
+
 For `SheenCloth`, the blue/black weave should repeat across the cloth instead
 of stretching into broad blue bands: its per-texture transform includes
 `scale: [30, -30]`. The importer regression checks that factor, the UV-set
