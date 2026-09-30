@@ -75,9 +75,10 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         // vertex color. Emission, normals, PBR and AO are not shading inputs.
         // Keep the depth/velocity in the opaque G-buffer so glass can sample
         // this surface in the subsequent opaque scene copy.
+        float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
         output.color           = albedo;
         output.emissive        = float4(0.0f);
-        output.normalRoughness = float4(PackNormalOctahedron(normalize(input.normal)) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
         output.clearcoat       = float4(0.0f);
         output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f); // Reserved G-buffer unlit marker.
         output.sheen           = float4(0.0f);
