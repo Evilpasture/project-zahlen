@@ -19,6 +19,7 @@
 
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <cstdint>
 #include <span>
 #include <string_view>
 
@@ -33,9 +34,13 @@ namespace GLTF {
 // emissiveFactor * KHR_materials_emissive_strength then stays in glTF's
 // authored linear units. Emissive texture sampling remains sRGB -> linear in
 // either mode. A virtualPath identifies one prefab AND one set of options;
-// reusing a cached path with a different scale is rejected.
+// reusing a cached path with different options is rejected.
 struct ImportOptions {
     float emissiveFactorScale = kGLTFEmissiveDisplayScale;
+    // Preserve authored detail up to this edge length. The default keeps the
+    // engine's existing texture memory budget; fidelity stills can opt into
+    // higher resolution without changing other clients' imports.
+    uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 };
 
 auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ModelPrefab*;

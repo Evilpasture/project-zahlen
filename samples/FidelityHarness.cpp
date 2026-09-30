@@ -231,9 +231,12 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // The suite specifies glTF emissive factors in linear radiometric units.
     // Do not use the engine's 100x low-exposure presentation boost here: it
     // drives bright green emitters into neutral tonemapping's desaturation.
+    // The default importer downsizes images to 1024 for runtime memory. Keep
+    // authored 2048px shoe/cloth normal and color textures in fidelity stills;
+    // the renderer's trilinear/aniso samplers select the right mip at a distance.
     ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
         engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath,
-        ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f}
+        ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
     );
     if (prefab == nullptr) {
         ZHLN::Log("[Fidelity] '{}' is not a glTF this importer can read.", virtualPath);

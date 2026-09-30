@@ -47,6 +47,12 @@ this harness builds none of them. Specifically:
   renderer does not play animations for its stills. Authored node/mesh morph
   weights are preserved while the harness settles eight frames. Auto-playing
   the first clip made the captured pose depend on render/load time.
+* **Authored texture detail through 2048 px.** The usual glTF runtime cap is
+  1024 px, but the harness opts into 2048 px for stills. The importer retains
+  that choice on the prefab for device-lost rebuilds and refuses to reuse the
+  same cache path with a different resolution limit. Material samplers already
+  use trilinear mipmapping and hardware anisotropic filtering; texture detail
+  cannot be recovered from an image downsampled before GPU upload.
 * **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
   `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
   `saturation = 1`, identity colour filter. The blit writes linear color; the
@@ -222,6 +228,18 @@ metallic factor or globally raise exposure to chase one viewer's golden; for
 closer parity, compare a common tone map and inspect the HDR prefilter and
 rough-metal specular energy across other scenarios before changing the PBR
 model. Zahlen's simpler `ACESFilm` option is **not** the Three.js ACES shader.
+
+For **`MaterialsVariantsShoe`**, run
+`SCENARIO=khronos-MaterialsVariantsShoe ./scripts/run_fidelity.sh -j1` and
+compare the blue fabric, laces and eyelets with `blender-cycles-golden.png`.
+The shoe's base color, normal and packed occlusion/roughness/metallic images
+are authored at 2048×2048; the old 1024px importer cap discarded three
+quarters of their texels. The fidelity harness now retains all their source
+pixels. This improves *available texture detail*, not Cycles' 128 adaptive
+samples, denoising, self-shadowing or indirect light from nearby geometry.
+Zahlen's IBL-only still has spatial SMAA and prefiltered environment lighting;
+it cannot acquire path-traced contact shadows simply by brightening the render
+or sharpening the final screenshot.
 
 For **`MorphStressTest`**, run
 `SCENARIO=khronos-MorphStressTest ./scripts/run_fidelity.sh -j1` and compare

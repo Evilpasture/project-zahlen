@@ -64,11 +64,12 @@ struct NodeExtras {
 struct CPUTextureJob {
     cgltf_image*   image = nullptr;
     std::string    glbPath;
-    bool           isSRGB        = true;
-    unsigned char* decodedPixels = nullptr;
-    int            width         = 0;
-    int            height        = 0;
-    bool           wasRescaled   = false;
+    bool           isSRGB              = true;
+    uint32_t       maxTextureDimension = kGLTFDefaultMaxTextureDimension;
+    unsigned char* decodedPixels       = nullptr;
+    int            width               = 0;
+    int            height              = 0;
+    bool           wasRescaled         = false;
 };
 
 struct CPUPrimitiveJob {
@@ -212,11 +213,10 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
         return;
     }
 
-    const auto         w           = static_cast<uint32_t>(job.width);
-    const auto         h           = static_cast<uint32_t>(job.height);
-    constexpr uint32_t MAX_TEX_DIM = 1024;
+    const auto w = static_cast<uint32_t>(job.width);
+    const auto h = static_cast<uint32_t>(job.height);
 
-    if (w <= MAX_TEX_DIM && h <= MAX_TEX_DIM) {
+    if (w <= job.maxTextureDimension && h <= job.maxTextureDimension) {
         job.decodedPixels = pixels;
         return;
     }
@@ -225,7 +225,7 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
     uint32_t targetH    = h;
     uint32_t scaleSteps = 0;
 
-    while (targetW > MAX_TEX_DIM || targetH > MAX_TEX_DIM) {
+    while (targetW > job.maxTextureDimension || targetH > job.maxTextureDimension) {
         targetW /= 2;
         targetH /= 2;
         scaleSteps++;
@@ -791,11 +791,15 @@ void ProcessCPUTasks(
     const std::vector<ImportedTextureRef>& uniqueImages,
     std::vector<CPUPrimitiveJob>&    primitiveJobs,
     JPH::Array<CPUTextureJob>&       outTextureJobs,
-    float                            emissiveFactorScale
+    float                            emissiveFactorScale,
+    uint32_t                         maxTextureDimension
 ) {
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
-        outTextureJobs[i] = {.image = uniqueImages[i].image, .glbPath = textureSearchPath, .isSRGB = uniqueImages[i].srgb};
+        outTextureJobs[i] = {
+            .image = uniqueImages[i].image, .glbPath = textureSearchPath,
+            .isSRGB = uniqueImages[i].srgb, .maxTextureDimension = maxTextureDimension
+        };
     }
 
     if (!outTextureJobs.empty()) {
@@ -994,6 +998,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);
     prefab->emissiveFactorScale = options.emissiveFactorScale;
+    prefab->maxTextureDimension = options.maxTextureDimension;
 
     // ------------------------------------------------------------------------
     // 1. Flatten Nodes with Aggregate Initialization
@@ -1186,7 +1191,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(std::string(textureSearchPath), uniqueImages, primitiveJobs, textureJobs, options.emissiveFactorScale);
+    ProcessCPUTasks(std::string(textureSearchPath), uniqueImages, primitiveJobs, textureJobs, options.emissiveFactorScale, options.maxTextureDimension);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, virtualPath, textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
@@ -1268,7 +1273,7 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs, prefab.emissiveFactorScale);
+    ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs, prefab.emissiveFactorScale, prefab.maxTextureDimension);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, prefab.virtualPath.c_str(), textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
@@ -1291,10 +1296,15 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     });
 }
 
-[[nodiscard]] bool MatchesCachedEmissiveScale(const ModelPrefab* cached, std::string_view path, float requestedScale) {
-    if (cached != nullptr && cached->emissiveFactorScale != requestedScale) {
-        ZHLN::Log("[glTF] '{}' is already cached with emissive scale {}; requested {}. Use a distinct virtualPath for a different import.",
-                  path, cached->emissiveFactorScale, requestedScale);
+[[nodiscard]] bool MatchesCachedImportOptions(const ModelPrefab* cached, std::string_view path, ImportOptions options) {
+    if (cached == nullptr) {
+        return true;
+    }
+    if (cached->emissiveFactorScale != options.emissiveFactorScale || cached->maxTextureDimension != options.maxTextureDimension) {
+        ZHLN::Log(
+            "[glTF] '{}' is cached with emissive scale {} and texture limit {}; requested {} and {}. Use a distinct virtualPath for different import options.",
+            path, cached->emissiveFactorScale, cached->maxTextureDimension, options.emissiveFactorScale, options.maxTextureDimension
+        );
         return false;
     }
     return true;
@@ -1322,9 +1332,13 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", path, options.emissiveFactorScale);
         return nullptr;
     }
+    if (options.maxTextureDimension == 0) {
+        Log("[glTF] '{}' requested a zero texture dimension limit.", path);
+        return nullptr;
+    }
     const uint64_t hash = HashAssetPath(path);
     auto* const cached = cwMgr.GetCachedPrefab(hash);
-    if (!MatchesCachedEmissiveScale(cached, path, options.emissiveFactorScale)) {
+    if (!MatchesCachedImportOptions(cached, path, options)) {
         return nullptr;
     }
     if (cached != nullptr && !NeedsGPURefresh(*cached)) {
@@ -1370,9 +1384,13 @@ auto LoadGLBPrefabFromMemory(
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", virtualPath, options.emissiveFactorScale);
         return nullptr;
     }
+    if (options.maxTextureDimension == 0) {
+        Log("[glTF] '{}' requested a zero texture dimension limit.", virtualPath);
+        return nullptr;
+    }
     const uint64_t hash = HashAssetPath(virtualPath);
     auto* const cached = cwMgr.GetCachedPrefab(hash);
-    if (!MatchesCachedEmissiveScale(cached, virtualPath, options.emissiveFactorScale)) {
+    if (!MatchesCachedImportOptions(cached, virtualPath, options)) {
         return nullptr;
     }
     if (cached != nullptr && !NeedsGPURefresh(*cached)) {

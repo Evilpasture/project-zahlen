@@ -1243,7 +1243,8 @@ struct GLTFImportTestSuite {
             const auto strengthBytes = MakeEmissiveStrengthFixture();
             const auto* strong = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
             if (plain == nullptr || strong == nullptr || plain->parts.size() != 1 || strong->parts.size() != 1 ||
-                plain->emissiveFactorScale != 1.0f || strong->emissiveFactorScale != 1.0f) {
+                plain->emissiveFactorScale != 1.0f || strong->emissiveFactorScale != 1.0f ||
+                plain->maxTextureDimension != ZHLN::kGLTFDefaultMaxTextureDimension) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
@@ -1267,9 +1268,17 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
 
-            // A cached path must not silently reuse a prefab with a different
-            // import scale; reloading in the same mode must preserve identity.
-            if (ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant) != plain ||
+            // Both texture-resolution policy and emissive scale belong to the
+            // prefab cache identity. Fidelity can retain 2048px images while
+            // other import clients continue using the default 1024px cap.
+            constexpr ZHLN::GLTF::ImportOptions detailed {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
+            const auto* highRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            if (highRes == nullptr || highRes->maxTextureDimension != 2048 ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed) != highRes ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant) != nullptr ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {},
+                                                    ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}) != nullptr ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant) != plain ||
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb") != nullptr) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }

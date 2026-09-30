@@ -12,6 +12,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Physics/Collision/Shape/Shape.h>
+#include <cstdint>
 #include <vector>
 
 namespace ZHLN {
@@ -19,6 +20,7 @@ namespace ZHLN {
 // Artistic boost for the engine's low-exposure scene preset, not a glTF
 // requirement. Conformance imports use an explicit scale of 1 instead.
 inline constexpr float kGLTFEmissiveDisplayScale = 100.0f;
+inline constexpr uint32_t kGLTFDefaultMaxTextureDimension = 1024;
 
 struct ModelNode {
     String64   name;
@@ -62,6 +64,9 @@ struct ModelPrefab {
     // same material units and opt-in virtual lights can recover authored
     // emission. Procedural prefabs keep the engine's presentation default.
     float emissiveFactorScale = kGLTFEmissiveDisplayScale;
+    // Kept with the prefab so device-lost texture rebuilds preserve the
+    // importer's resolution choice instead of silently reverting to 1024.
+    uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 
     std::vector<ModelPart>     parts;
     std::vector<ModelNode>     nodes;
