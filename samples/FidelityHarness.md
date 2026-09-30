@@ -281,9 +281,13 @@ render or identify which layer contributes a visible patch.
 
 The official olives' base-color image has dark red/green flecks, but little
 blue (maximum 64/255). Their ORM texture's metallic (blue) channel is zero at
-every pixel; their normal map is close to flat. A teal patch could instead be
-from diffuse irradiance, dielectric specular IBL, or the forward-rendered,
-transmissive/iridescent glass cover. **None has been established as the source.**
+every pixel; their normal map is close to flat. The `opaque-only` capture still
+has conspicuous teal on the olives. `transmission-coverage` shows that the glass
+does not cover all of these areas, and `transmission-no-iridescence` leaves the
+color intact: **the glass is not the cause.** The `dielectric-specular` capture
+shows blue reflections on the opaque olives, but is too dark by itself to prove
+how much of a bright teal patch is specular rather than diffuse. Compare matched
+pixels instead of concluding that blue in the diagnostic is necessarily the fix.
 Run the baseline and the opt-in diagnostics with the *same* camera, environment,
 and AA setting. After the regular runner generates the scenario JSON, for
 example:
@@ -305,16 +309,39 @@ done
 | `transmission-coverage` | Renders transmitting meshes unlit white, using their original forward pipeline and depth test over the unmodified opaque scene. White over an olive means a glass surface is actually in front at that pixel; white elsewhere can also be the glass dish. To avoid a false coverage mask, the harness refuses this mode for textured or alpha-covered glass. |
 | `transmission-no-iridescence` | Preserves glass geometry, refraction, and ordinary Fresnel but removes its iridescent film. Use only after the coverage comparison implicates glass. |
 
-Compare **matching pixels** in the baseline and the opaque-only stills first.
-If a patch disappears, check whether the white glass coverage still actually
-covers that olive, then compare the no-iridescence image. If a patch survives
-without glass, compare the dielectric-specular image: a matching patch there
-implicates the opaque specular contribution; if it does not survive, investigate
-the remaining diffuse/albedo/AO contribution instead. The opaque-only and
-specular-only pair separates the olive's dielectric specular term from its
-remaining diffuse term; neither the mask nor the no-iridescence image is a
-replacement for a normal fidelity capture. This isolation produces evidence,
-**not** a new parity fix.
+Compare **matching pixels** in `opaque-only` and `dielectric-specular`. To see
+what remains without the olive's specular IBL using the **existing captures**:
+
+```bash
+python3 scripts/inspect_olive_layers.py \
+    "$OUT/olives-opaque-only.pam" "$OUT/olives-dielectric-specular.pam" \
+    --output "$OUT/olives-diffuse-residual.pam" --point X,Y
+```
+
+Replace `X,Y` with the original-image coordinates of an *interior* teal olive
+pixel from GIMP; repeat `--point X,Y` for a yellow control. Inspect the output
+PAM alongside the baseline. The script decodes sRGB and **inverts the PBR Neutral
+tonemapper** (including its common minimum-channel offset and bright-range
+desaturation), subtracts specular in linear HDR, then tone-maps the residual
+again. Subtracting the two PAM byte values directly is incorrect. The script
+prints the HDR RGB terms and specular fraction per channel at each requested
+point. Fully clipped pixels cannot be inverted and are marked magenta; alpha
+mismatches are transparent. Use `--no-aa` for both input captures: interior
+pixels are the reliable comparison, not SMAA-blended edges. Apart from 8-bit
+quantization, the separation applies to the **nonmetallic olives** at
+unsaturated pixels, not to the metallic gold leaf (blackening its base color
+also zeroes its colored specular F0). Background pixels shared by both captures
+subtract to black.
+
+If an olive's residual is warm and the measured blue specular term makes the
+original teal, investigate the opaque specular lookup/BRDF at those coordinates.
+If the residual is still teal, prioritize diffuse/albedo/AO instead. Filament's
+nonlinear roughness-to-LOD curve cannot be copied into Zahlen alone: cmgen also
+bakes its cube levels with the **inverse** curve, whereas Zahlen currently uses
+linear roughness for both bake and lookup. Nor did the earlier fourfold HDR
+source-footprint change improve the reported teal. These diagnostics provide a
+way to establish the responsible contribution; **no rendering fix is claimed
+without a new GPU capture and golden comparison**.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.
