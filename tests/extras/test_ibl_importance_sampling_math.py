@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Independent numerical checks of GGX PDF normalization and HDR footprint LOD.
+"""Independent numerical checks of GGX PDF normalization and panorama LOD.
 
 This does not inspect source code or claim to test the implementation: zshader
 compiles and reflects the Slang, and the Vulkan fidelity captures test the
@@ -31,9 +31,7 @@ def source_lod(width: int, height: int, samples: int, roughness: float, directio
     pdf = ggx_reflection_pdf(roughness, 1, 1)
     sample_solid_angle = 1 / (samples * max(pdf, 1e-6))
     texel_solid_angle = equirect_texel_solid_angle(width, height, direction_y)
-    # cmgen overlaps adjacent importance-sample footprints 4x. The mirror
-    # pass bypasses this LOD calculation; only rough specular uses it.
-    return max(0, min(mip_count - 1, 0.5 * math.log2(4 * sample_solid_angle / texel_solid_angle)))
+    return max(0, min(mip_count - 1, 0.5 * math.log2(sample_solid_angle / texel_solid_angle)))
 
 
 class IBLImportanceSamplingMathTest(unittest.TestCase):
@@ -59,16 +57,7 @@ class IBLImportanceSamplingMathTest(unittest.TestCase):
 
     def test_lod_preserves_mirror_and_filters_rough_hdr(self) -> None:
         self.assertEqual(source_lod(1, 1, 512, 0.6, 0), 0)
-        # A sharp HDR source texel covers nearly the same area as one GGX
-        # sample at the first roughness level. With no overlap this stays at
-        # source mip 0; fourfold overlap blends roughly one mip instead.
-        width, height, samples, roughness = 1024, 512, 512, 0.2
-        pdf = ggx_reflection_pdf(roughness, 1, 1)
-        unoverlapped = 0.5 * math.log2(
-            1 / (samples * pdf * equirect_texel_solid_angle(width, height, 0)))
-        self.assertGreater(unoverlapped, 0)
-        self.assertLess(unoverlapped, 0.1)
-        self.assertAlmostEqual(source_lod(width, height, samples, roughness, 0), unoverlapped + 1)
+        self.assertLess(source_lod(1024, 512, 512, 0.2, 0), 0.2)
         self.assertGreater(source_lod(1024, 512, 1024, 0.8, 0), 2)
         self.assertLess(source_lod(1024, 512, 1024, 0.8, 0), 10)
         # Finer source texels at high latitude have smaller solid angles.

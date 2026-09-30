@@ -142,11 +142,9 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    for procedural sky; mip 0 samples the environment directly. The radiance
    panorama has a full FP32 mip chain; rough specular rays read a source LOD
    derived from their GGX reflection-direction PDF and the equirectangular
-   texel's latitude-dependent solid angle. Adjacent sample footprints overlap
-   fourfold (one source mip), matching cmgen's HDR prefilter bias rather than
-   admitting isolated bright texels at the first rough mip. Smooth reflections
-   and diffuse SH still read source mip 0; procedural sky is unchanged. The
-   area-light LTC and split-sum BRDF LUT remain isotropic approximations.
+   texel's latitude-dependent solid angle. Smooth reflections and diffuse SH
+   still read source mip 0; procedural sky is unchanged. The area-light LTC
+   and split-sum BRDF LUT remain isotropic approximations.
    The baseline diffuse SH/GI is gated by `(1 - F) * (1 - metallic)`, so metal
    no longer receives diffuse IBL on top of its specular term. Sheen now
    imports its linear color factor, sRGB color texture and independent
@@ -273,35 +271,10 @@ For HDR IBL speckles, rebuild `FidelityHarness` and run both
 `SCENARIO=khronos-MetalRoughSpheres-HDR ./scripts/run_fidelity.sh -j1` and
 `SCENARIO=khronos-IridescentDishWithOlives ./scripts/run_fidelity.sh -j1`.
 Inspect the PAM captures against their goldens: the higher-roughness spheres
-and the glass/olives should show fewer *lighting* sparkles, while smooth metal
-reflections retain their sharp environment detail. For the olives, the official
-asset also paints dark flecks in `olives_col.png`, with varying red-channel AO
-and green-channel roughness in `olives_orm.png`; filtering HDR lighting cannot
-(and must not) erase authored texture detail. Check residual dark patches
-separately from bright HDR speckles before changing AO or material sampling.
-Filament's [glTF material](https://github.com/google/filament/blob/v1.44.0/libs/gltfio/materials/base.mat.in)
-reads the same red AO channel and `aoStrength` (with a separate roughness-
-dependent specular-AO term); disabling the olive's occlusion texture just to
-hide the dark pattern would not be a general parity fix.
-
-The Filament viewer's explicit 90-degree IBL rotation is **not** a reason to
-rotate Zahlen's IBL. Its pinned [cmgen](https://github.com/google/filament/blob/v1.4.5/tools/cmgen/src/cmgen.cpp)
-[maps the panorama](https://github.com/google/filament/blob/v1.4.5/libs/ibl/src/CubemapUtils.cpp)
-with `atan2(x, z)` and mirrors X by default. Its
-[viewer](https://github.com/KhronosGroup/glTF-Render-Fidelity-Generator/blob/main/src/components/renderers/filament-viewer.ts)
-rotates IBL lookup directions `(x, y, z)` to `(-z, y, x)`; after cmgen's mirror,
-`atan2(-(-z), x) = atan2(z, x)`, exactly Zahlen's `SampleEquirect` azimuth.
-Both use the same polar coordinate. Filament loads the skybox separately; its
-orientation relative to the IBL need not match Zahlen's, so compare skybox
-backgrounds independently of the olives' lighting.
-
-At a 1024x512 HDR and the first rough cube level (roughness 0.2, 512 samples),
-the GGX peak formerly selected source LOD ~0.03: effectively raw, sharp HDR
-texels. Fourfold overlap, as used by cmgen, selects ~1.03 there. This reduces
-undersampling of small bright lights without blurring the mirror mip or
-changing diffuse SH. The independent
+and the glass/olives should no longer show isolated bright dots, while the
+smooth metal reflections retain their sharp environment detail. The independent
 `tests/extras/test_ibl_importance_sampling_math.py` checks numerical properties
-of the GGX PDF, panorama solid angle, and overlap; it does **not** inspect
+of the GGX PDF and equirectangular texel solid angle; it does **not** inspect
 shader source, execute the shader, or replace these Vulkan captures.
 
 For `TransmissionRoughnessTest`, run
