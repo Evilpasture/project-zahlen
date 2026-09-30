@@ -164,7 +164,8 @@ inline bool ReadValue(std::istream& stream, T& outValue) {
 // Resolved against the process working directory, which CTest sets to the
 // directory holding the add_test() call. zcook itself is built at the root of
 // the build tree, so the candidate list has to cover one level per nesting
-// step between there and the group: tests/ is one down, tests/extras/ is two.
+// step between there and the group: tests/ is one down, tests/asset_cooking/
+// is two.
 fs::path FindZcookExecutable() {
     std::vector<fs::path> candidates = {"zcook",
                                         "./zcook",

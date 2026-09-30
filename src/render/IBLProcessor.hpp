@@ -20,8 +20,7 @@
 
 namespace ZHLN::Vk {
 
-// GPU bake budget; the filesystem decoder enforces the same maximum before
-// handing pixels to the renderer.
+// GPU bake budget for caller-supplied linear environment pixels.
 inline constexpr uint32_t kMaxEnvironmentRadianceExtent = 8192;
 
 enum class EnvironmentBakeError : uint8_t {

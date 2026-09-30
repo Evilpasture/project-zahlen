@@ -5,8 +5,8 @@
 #pragma once
 
 #include <Zahlen/FileSystem/AssetCache.hpp>
-#include <Zahlen/FileSystem/EnvironmentImage.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
+#include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -14,6 +14,8 @@
 #include <Zahlen/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -24,7 +26,7 @@ class RenderContext;
 // Borrowed linear RGBA pixels from AssetManager's cache. The view remains
 // valid until ClearCache or the manager's destruction; never hold it across
 // either operation (or concurrently with a cache clear).
-struct RadianceView {
+struct EnvironmentImageView {
     std::span<const float> rgba {};
     uint32_t               width       = 0;
     uint32_t               height      = 0;
@@ -141,9 +143,17 @@ class AssetManager {
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
-    // Decode a VFS or direct-path environment once, then return a borrowed
-    // view of the cached pixels. No filesystem decoder types escape this API.
-    [[nodiscard]] auto LoadRadiance(std::string_view path) -> std::expected<RadianceView, ErrorCode>;
+    // The application or an optional asset tool supplies prepared linear RGBA
+    // pixels under the key named by EnvironmentMapComponent::source. Core does
+    // not read files or decode radiance formats. Zero dimensions and mismatched
+    // pixel counts are rejected without changing the cache; RenderContext also
+    // enforces its GPU bake size limit. A zero contentHash is valid: the
+    // renderer hashes the pixels when needed.
+    [[nodiscard]] auto CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool;
+    // Missing keys do not trigger I/O. The returned pixels are borrowed until
+    // ClearCache or AssetManager destruction; registering a new image for a key
+    // leaves earlier views alive until then.
+    [[nodiscard]] auto FindEnvironmentImage(std::string_view key) const noexcept -> std::optional<EnvironmentImageView>;
 
     // Cached model parts own their GPU buffers, shared by all instances of
     // each prefab. The context must outlive the cache (Kernel enforces this).
@@ -173,7 +183,7 @@ class AssetManager {
 
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
-    FS::AssetCache<FS::LinearImage> _radianceCache;
+    FS::AssetCache<EnvironmentImage> _environmentImages;
 };
 
 }

@@ -33,6 +33,7 @@ namespace ZHLN {
 
 enum class RenderSystemError : uint8_t {
     NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
+    EnvironmentImageUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The scene's environment image was not supplied to AssetManager"> {}),
 };
 
 namespace {
@@ -72,15 +73,15 @@ namespace {
     if (env == nullptr || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
-    auto loaded = engine.GetAssetManager().LoadRadiance(std::string_view(env->source));
-    if (!loaded) {
-        Log("[IBL] Failed to load radiance '{}': {}", std::string_view(env->source), loaded.error());
-        return std::unexpected(loaded.error());
+    const auto pixels = engine.GetAssetManager().FindEnvironmentImage(std::string_view(env->source));
+    if (!pixels) {
+        Log("[IBL] No prepared environment pixels registered for '{}'", std::string_view(env->source));
+        return std::unexpected(RenderSystemError::EnvironmentImageUnavailable);
     }
     return rc.SetEnvironmentRadiance({
-        .rgba         = loaded->rgba,
-        .extent       = {.width = loaded->width, .height = loaded->height},
-        .contentHash  = loaded->contentHash,
+        .rgba         = pixels->rgba,
+        .extent       = {.width = pixels->width, .height = pixels->height},
+        .contentHash  = pixels->contentHash,
         .renderSkybox = env->renderSkybox != 0,
     });
 }

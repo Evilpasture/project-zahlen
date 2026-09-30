@@ -5,6 +5,8 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <cstddef>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -91,7 +93,7 @@ void AssetManager::InvalidateGPUMeshes() noexcept {
 void AssetManager::ClearCache() noexcept {
     ReleaseCachedMeshBuffers();
     _prefabCache.Clear();
-    _radianceCache.Clear();
+    _environmentImages.Clear();
 }
 
 uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
@@ -118,23 +120,29 @@ uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t m
     return _fontCache.GetAll(outFonts, maxCount);
 }
 
-auto AssetManager::LoadRadiance(std::string_view path) -> std::expected<RadianceView, ErrorCode> {
-    const uint64_t id = HashAssetPath(path);
-    const FS::LinearImage* map = _radianceCache.Find(id);
-    if (map == nullptr) {
-        auto decoded = FS::ReadEnvironmentImage(_vfs, path);
-        if (!decoded) {
-            return std::unexpected(decoded.error());
-        }
-        auto owned = std::make_unique<FS::LinearImage>(std::move(*decoded));
-        map = owned.get();
-        _radianceCache.Insert(id, std::move(owned));
+auto AssetManager::CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool {
+    if (key.empty() || image.width == 0 || image.height == 0 ||
+        static_cast<size_t>(image.width) > std::numeric_limits<size_t>::max() / 4u / image.height ||
+        image.rgba.size() != static_cast<size_t>(image.width) * image.height * 4u) {
+        return false;
     }
-    return RadianceView {
-        .rgba        = map->rgba,
-        .width       = map->width,
-        .height      = map->height,
-        .contentHash = map->contentHash,
+    _environmentImages.Insert(HashAssetPath(key), std::make_unique<EnvironmentImage>(std::move(image)));
+    return true;
+}
+
+auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> std::optional<EnvironmentImageView> {
+    if (key.empty()) {
+        return std::nullopt;
+    }
+    const EnvironmentImage* image = _environmentImages.Find(HashAssetPath(key));
+    if (image == nullptr) {
+        return std::nullopt;
+    }
+    return EnvironmentImageView {
+        .rgba        = image->rgba,
+        .width       = image->width,
+        .height      = image->height,
+        .contentHash = image->contentHash,
     };
 }
 

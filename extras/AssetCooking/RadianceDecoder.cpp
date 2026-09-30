@@ -1,7 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RadianceMap.hpp"
+#include "RadianceDecoder.hpp"
+#include "CookedRadianceFormat.hpp"
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <stb_image.h>
 
@@ -14,21 +16,24 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
-namespace ZHLN::FS {
+namespace ZHLN::AssetCooking {
 
 namespace {
 
-struct CookedRadianceHeader {
-    uint32_t magic    = 0;
-    uint32_t version  = 0;
-    uint32_t width    = 0;
-    uint32_t height   = 0;
-    uint32_t dataSize = 0;
-};
-static_assert(sizeof(CookedRadianceHeader) == 20, "cooked radiance header gained padding; the file format is these five words");
-
+constexpr uint32_t kMaxRadianceExtent = 8192;
 constexpr size_t kMaxRadianceFileBytes = 512u * 1024u * 1024u;
+
+using RadianceMap = EnvironmentImage;
+
+[[nodiscard]] auto HashRadiancePixels(const float* rgba, uint32_t width, uint32_t height) noexcept -> uint64_t {
+    uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
+    hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
+    const size_t bytes = sizeof(float) * 4u * static_cast<size_t>(width) * static_cast<size_t>(height);
+    hash ^= Hash64(reinterpret_cast<const char*>(rgba), bytes) + kGolden64 + (hash << 6) + (hash >> 2);
+    return hash == 0 ? 1 : hash;
+}
 
 struct Cursor {
     std::span<const std::byte> bytes;
@@ -383,7 +388,7 @@ auto DecodeLdrJpeg(std::span<const std::byte> bytes) -> std::expected<RadianceMa
     return map;
 }
 
-auto ReadAssetBytes(const VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
+auto ReadAssetBytes(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<std::vector<std::byte>, ErrorCode> {
     const size_t vfsSize = vfs.ReadFile(path, nullptr, 0);
     if (vfsSize > 0 && vfsSize <= kMaxRadianceFileBytes) {
         std::vector<std::byte> bytes(vfsSize);
@@ -415,7 +420,7 @@ auto ReadAssetBytes(const VirtualFileSystem& vfs, std::string_view path) -> std:
 
 }
 
-auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
+auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<EnvironmentImage, ErrorCode> {
     if (bytes.size() >= sizeof(uint32_t)) {
         uint32_t magic = 0;
         std::memcpy(&magic, bytes.data(), sizeof(magic));
@@ -429,25 +434,7 @@ auto DecodeRadiance(std::span<const std::byte> bytes) -> std::expected<RadianceM
     return DecodeRgbe(bytes);
 }
 
-auto EncodeCookedRadiance(const RadianceMap& map) -> std::vector<std::byte> {
-    const size_t pixels = static_cast<size_t>(map.width) * map.height * 4u;
-    const size_t payload = pixels * sizeof(float);
-    CookedRadianceHeader header {
-        .magic    = kCookedRadianceMagic,
-        .version  = kCookedRadianceVersion,
-        .width    = map.width,
-        .height   = map.height,
-        .dataSize = static_cast<uint32_t>(payload),
-    };
-    std::vector<std::byte> out(sizeof(header) + payload);
-    std::memcpy(out.data(), &header, sizeof(header));
-    if (payload > 0 && map.rgba.size() >= pixels) {
-        std::memcpy(out.data() + sizeof(header), map.rgba.data(), payload);
-    }
-    return out;
-}
-
-auto ReadEnvironmentImage(const VirtualFileSystem& vfs, std::string_view path) -> std::expected<LinearImage, ErrorCode> {
+auto ReadEnvironmentImage(const FS::VirtualFileSystem& vfs, std::string_view path) -> std::expected<EnvironmentImage, ErrorCode> {
     if (path.empty()) {
         return std::unexpected(RadianceAssetError::NotFound);
     }
@@ -458,4 +445,4 @@ auto ReadEnvironmentImage(const VirtualFileSystem& vfs, std::string_view path) -
     return DecodeRadiance(*bytes);
 }
 
-} // namespace ZHLN::FS
+} // namespace ZHLN::AssetCooking

@@ -53,6 +53,7 @@
 // The extras this harness consumes. Optional targets -- no glTF importer, no
 // serialization; no binary -- and samples/CMakeLists.txt skips a sample whose
 // extras were not built, so none of the includes needs a guard here.
+#include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
 
@@ -69,6 +70,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -610,19 +612,24 @@ auto main(int argc, char* argv[]) -> int {
     ApplyGraphicsSettings(*engine, settings);
     ZHLN::Log("[Fidelity] Antialiasing: {}.", noAA ? "none (--no-aa)" : "SMAA (spatial)");
 
-    // The environment is an ECS component, not a renderer-side file load.
-    // String256 is the component's path; a longer absolute path cannot be
-    // stored without truncating, which would bake the wrong file.
+    // The environment is an ECS key, not a renderer-side file load. Decode
+    // the scenario's raw HDR/JPEG (or cooked ZRD1) through the optional asset
+    // tooling and supply owned linear pixels to core before the first frame.
+    // String256 is the component's key; truncating it would select the wrong
+    // image. Preflight here: Engine::Tick does not surface all render errors.
     if (!scenario.lighting.empty()) {
         if (scenario.lighting.size() > ZHLN::String256::kMaxTextLength) {
             ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
             return EXIT_FAILURE;
         }
-        // RenderSystem loads from AssetManager's cache. Preflight here so a
-        // malformed panorama cannot silently turn into a capture without IBL:
-        // ordinary render errors do not currently change Engine::Tick's status.
-        if (auto radiance = engine->GetAssetManager().LoadRadiance(scenario.lighting); !radiance) {
-            ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, radiance.error());
+        auto& assets = engine->GetAssetManager();
+        auto decoded = ZHLN::AssetCooking::ReadEnvironmentImage(assets.VFS(), scenario.lighting);
+        if (!decoded) {
+            ZHLN::Log("[Fidelity] Cannot decode lighting '{}': {}", scenario.lighting, decoded.error());
+            return EXIT_FAILURE;
+        }
+        if (!assets.CacheEnvironmentImage(scenario.lighting, std::move(*decoded))) {
+            ZHLN::Log("[Fidelity] Lighting '{}' has invalid pixel dimensions or data.", scenario.lighting);
             return EXIT_FAILURE;
         }
         auto& registry = engine->GetRegistry();

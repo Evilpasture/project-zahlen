@@ -34,9 +34,10 @@ file(GLOB SAMPLE_SOURCES
 #                              ZHLN::GitHub (zahlen_github, over extras/HTTP
 #                              and extras/json).
 #   FidelityHarness            headless glTF-Render-Fidelity runner: imports
-#                              with ZHLN.glTF (zahlen_gltf) and reads the
-#                              Khronos scenario JSONs with ZHLN::ReflectJSON
-#                              (zahlen_serialization -- extras/json).
+#                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
+#                              scenario JSONs with ZHLN::ReflectJSON
+#                              (zahlen_serialization -- extras/json), and
+#                              supplies images through zahlen_asset_cooking.
 #
 # Linking the named domains instead of the zahlen_extras aggregate is the point
 # of the decomposition: a sample's build waits only on extras it uses, and a
@@ -44,7 +45,7 @@ file(GLOB SAMPLE_SOURCES
 set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
 set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
-set(ZHLN_SAMPLE_EXTRAS_FidelityHarness zahlen_gltf zahlen_serialization)
+set(ZHLN_SAMPLE_EXTRAS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

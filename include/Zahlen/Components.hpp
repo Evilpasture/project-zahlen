@@ -224,6 +224,8 @@ struct Components {
     };
 
     struct EnvironmentMapComponent {
+        // Key for linear pixels supplied through AssetManager; not a file path
+        // that RenderSystem will read or decode.
         ZHLN::String256 source;
         int             renderSkybox = 0;
     };

@@ -81,15 +81,18 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
 
 ## Environment wiring and remaining fidelity approximations
 
-1. **Environment lighting comes from the scenario asset.** `EnvironmentMapComponent`
-   names it; the engine decodes raw Radiance `.hdr`, cooked `ZRD1`, or an LDR
-   JPEG equirect (linearizing its sRGB bytes before the bake). In particular,
-   `khronos-MetalRoughSpheres-LDR` uses `spruit_sunrise_1k_LDR.jpg`, not the
-   HDR version. The harness preflights the decoder before its first frame and
-   reuses the cached map. `RenderSystem` passes the floats to
-   `SetEnvironmentRadiance` for SH and specular prefiltering. `ambientExposure`
-   is applied at shade time, not in the bake. An unauthored fallback sun is
-   suppressed while that component is set, so the panorama is the only light.
+1. **Environment lighting comes from the scenario asset.** The harness uses
+   the optional `AssetCooking` decoder to read raw Radiance `.hdr`, cooked
+   `ZRD1`, or an LDR JPEG equirect (linearizing its sRGB bytes before the bake).
+   In particular, `khronos-MetalRoughSpheres-LDR` uses
+   `spruit_sunrise_1k_LDR.jpg`, not the HDR version. The harness preflights the
+   source and registers owned linear pixels under the scenario's lighting key.
+   `EnvironmentMapComponent` names that key; core never decodes the source.
+   `RenderSystem` looks up the prepared pixels and passes them to
+   `SetEnvironmentRadiance` for SH and specular prefiltering. A missing key is
+   a render error, not a request to read a file. `ambientExposure` is applied
+   at shade time, not in the bake. An unauthored fallback sun is suppressed
+   while that component is set, so the panorama is the only light.
 2. **Specular LOD.** The reflection pass samples `roughness * 5.0` of the 6
    mips (`mipCount - 1`). That is the live shader, not `roughness * 5/6`.
 3. **Background.** `renderSkybox` false (the generator default, and the

@@ -6,9 +6,10 @@
 #include "BinaryReader.hpp"
 #include "GLB.hpp"
 #include "Transform.hpp"
+#include <AssetCooking/RadianceDecoder.hpp>
+#include <AssetCooking/RadianceEncoder.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Error.hpp>
-#include "filesystem/RadianceMap.hpp"
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -165,20 +166,19 @@ int CookTexture(int argc, char** argv) {
     }
 
     // Non-.hdr stays a verbatim copy (offline_texture_cooking_passthrough).
-    // .hdr becomes the cooked radiance container the runtime already decodes,
-    // so a pak does not have to carry the raw panorama. The harness can load
-    // a raw .hdr through AssetManager's environment reader instead.
+    // .hdr becomes ZRD1 for packaged assets. A host can explicitly decode
+    // either format with AssetCooking and supply pixels to the engine.
     const auto ext = fs::path(inPath).extension().string();
     const bool isHdr = ext == ".hdr" || ext == ".HDR";
     if (isHdr) {
-        const auto decoded = FS::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
+        const auto decoded = AssetCooking::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
         if (!decoded) {
             const ZHLN::Error err = decoded.error();
             std::println(stderr, "[zcook] ERROR: HDR decode failed: {} ({})", err.Message(), err.Name());
             std::fclose(out);
             return 1;
         }
-        const auto cooked = FS::EncodeCookedRadiance(*decoded);
+        const auto cooked = AssetCooking::EncodeCookedRadiance(*decoded);
         std::fwrite(cooked.data(), 1, cooked.size(), out);
         std::fclose(out);
         return 0;
