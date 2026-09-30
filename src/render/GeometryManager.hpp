@@ -80,7 +80,10 @@ class GeometryManager {
     Vk::CommandRing<Vk::QueueType::Transfer, 8>& _transferCmdRing;
     Vk::DeletionQueue&                           _deletionQueue;
 
-    GenerationalPool<NativeMesh, 8192, BufferHandle> _buffers;
+    // The geometry throughput scene holds 1,600 distinct boxes, each with
+    // position, tangent-frame, surface, and three meshlet buffers: 9,600 live
+    // handles before other scene resources. Keep headroom for other streams.
+    GenerationalPool<NativeMesh, 16384, BufferHandle> _buffers;
 
     ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;

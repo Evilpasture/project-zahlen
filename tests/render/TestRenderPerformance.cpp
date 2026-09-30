@@ -235,12 +235,27 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         for (size_t c = 0; c < kGridCols; ++c) {
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
-            ZHLN::PrefabFactory::CreateBox(
+            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat
                 }
             );
+            // A box has three vertex streams and three meshlet buffers. Fail
+            // immediately rather than timing a scene with invalid geometry.
+            const auto* owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue(owner != nullptr)) {
+                return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
+            }
+            const auto& mesh = owner->mesh;
+            if (!ZHLN::Test::ExpectNe(mesh.posBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.tangentFrameBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.surfaceBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletVertexBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletTriBuffer, ZHLN::BufferHandle::Invalid)) {
+                return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
+            }
         }
     }
 
