@@ -433,6 +433,49 @@ struct GltfSheenDocument {
     std::vector<GltfAnisotropyTexture> textures {GltfAnisotropyTexture {}};
 };
 
+struct GltfTransmissionPbr {
+    std::array<float, 4> baseColorFactor {0.8f, 0.4f, 0.2f, 0.75f};
+    float metallicFactor = 0.25f;
+    float roughnessFactor = 0.35f;
+    GltfAnisotropyTextureInfo baseColorTexture {.index = 0};
+};
+
+struct KhrMaterialsTransmission {
+    float transmissionFactor = 0.625f;
+    GltfTransformedTextureInfo transmissionTexture {.index = 1, .extensions = {.KHR_texture_transform = {
+        .offset = {0.25f, -0.25f}, .rotation = 1.5707963f, .scale = {2.0f, 0.5f}, .texCoord = 1
+    }}};
+};
+
+struct GltfTransmissionExtensions {
+    KhrMaterialsTransmission KHR_materials_transmission;
+};
+
+struct GltfTransmissionMaterial {
+    std::string_view name = "Masked transmitting glass";
+    std::string_view alphaMode = "MASK";
+    float alphaCutoff = 0.37f;
+    GltfTransmissionPbr pbrMetallicRoughness;
+    GltfTransmissionExtensions extensions;
+};
+
+struct GltfTransmissionDocument {
+    GltfAsset asset;
+    std::vector<std::string_view> extensionsUsed {"KHR_materials_transmission", "KHR_texture_transform"};
+    int32_t scene = 0;
+    std::vector<GltfScene> scenes {GltfScene {.nodes = {0}}};
+    std::vector<GltfMeshNode> nodes {GltfMeshNode {.name = "TransmissionTriangle"}};
+    std::vector<GltfSheenMesh> meshes {GltfSheenMesh {}};
+    std::vector<GltfTransmissionMaterial> materials {GltfTransmissionMaterial {}};
+    std::vector<GltfAccessor> accessors;
+    std::vector<GltfAnisotropyBufferView> bufferViews;
+    std::vector<GltfBuffer> buffers;
+    std::vector<GltfSheenImage> images {GltfSheenImage {}};
+    std::vector<GltfAnisotropyTexture> textures {GltfAnisotropyTexture {.sampler = 0}, GltfAnisotropyTexture {.sampler = 1}};
+    std::vector<GltfSamplerWrap> samplers {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648},
+                                           GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}};
+};
+
 // Same document with a root `extensions` object. A separate type rather than
 // an optional member, for the omission reason above.
 template <typename NodeT, typename MaterialT>
@@ -664,6 +707,49 @@ constexpr float                kEmissiveStrength = 4.0f;
         {.byteOffset = kPositionBytes + uvSize, .byteLength = uvSize},
         {.byteOffset = indexOffset, .byteLength = kIndexBytes},
         {.byteOffset = pngOffset, .byteLength = static_cast<int32_t>(png.size())}
+    };
+    document.buffers = {{.byteLength = static_cast<int32_t>(bin.size())}};
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
+}
+
+// The same PNG is baseColor (sRGB, with alpha coverage) and transmission
+// (linear R). The two textureInfo objects have independent samplers and UV
+// transforms, as in Khronos TransmissionTest's blue masked spheres.
+[[nodiscard]] auto MakeTransmissionFixture(std::string_view alphaMode) -> std::vector<uint8_t> {
+    constexpr std::array<float, 6> uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6> uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
+    constexpr std::array<uint8_t, 70> png {
+        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
+        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
+        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
+        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
+        0x60u, 0x82u
+    };
+    constexpr int32_t uvBytes = static_cast<int32_t>(sizeof(uv0));
+    constexpr int32_t indexOffset = kPositionBytes + uvBytes * 2;
+    constexpr int32_t imageOffset = indexOffset + kIndexBytes;
+
+    std::vector<uint8_t> bin(static_cast<size_t>(imageOffset) + png.size());
+    std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
+    std::memcpy(bin.data() + kPositionBytes, uv0.data(), uvBytes);
+    std::memcpy(bin.data() + kPositionBytes + uvBytes, uv1.data(), uvBytes);
+    std::memcpy(bin.data() + indexOffset, kTriangleIndices, kIndexBytes);
+    std::memcpy(bin.data() + imageOffset, png.data(), png.size());
+
+    GltfTransmissionDocument document {};
+    document.materials[0].alphaMode = alphaMode;
+    document.accessors = {
+        GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
+        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 3, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
+    };
+    document.bufferViews = {
+        {.byteOffset = 0, .byteLength = kPositionBytes},
+        {.byteOffset = kPositionBytes, .byteLength = uvBytes},
+        {.byteOffset = kPositionBytes + uvBytes, .byteLength = uvBytes},
+        {.byteOffset = indexOffset, .byteLength = kIndexBytes},
+        {.byteOffset = imageOffset, .byteLength = static_cast<int32_t>(png.size())}
     };
     document.buffers = {{.byteLength = static_cast<int32_t>(bin.size())}};
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
@@ -1217,6 +1303,59 @@ struct GLTFImportTestSuite {
             const ZHLN::Material defaults {};
             if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
                 defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            return {};
+        }
+
+        /**
+         * Transmission is not alpha blending: glTF MASK still describes holes
+         * in the glass, and transmissionTexture uses a separate linear R map.
+         * The same image can have a different sampler/UV set as baseColor.
+         */
+        std::expected<void, ZHLN::ErrorCode> importer_preserves_transmission_texture_and_alpha_coverage() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Transmission");
+            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto maskedBytes = MakeTransmissionFixture("MASK");
+            const auto opaqueBytes = MakeTransmissionFixture("OPAQUE");
+            SourceDocument source;
+            if (!source.Parse(maskedBytes) || source.data->materials_count != 1 || !source.data->materials[0].has_transmission ||
+                source.data->materials[0].alpha_mode != cgltf_alpha_mode_mask ||
+                !source.data->materials[0].transmission.transmission_texture.has_transform ||
+                source.data->textures_count != 2 || source.data->textures[0].image != source.data->textures[1].image) {
+                return std::unexpected(GLTFImportError::AssetUnavailable);
+            }
+
+            auto& rc = engine->GetRenderContext();
+            auto& assets = engine->GetAssetManager();
+            const auto* masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
+            const auto* opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
+            if (masked == nullptr || opaque == nullptr || masked->parts.size() != 1 || opaque->parts.size() != 1) {
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            }
+
+            const auto& expected = source.data->materials[0];
+            const auto& mat = masked->parts[0].defaultMaterial;
+            const auto& opaqueMat = opaque->parts[0].defaultMaterial;
+            if (mat.alphaMode != 1u || opaqueMat.alphaMode != 0u || std::abs(mat.alphaCutoff - expected.alpha_cutoff) > 1e-5f ||
+                std::abs(mat.baseColorFactor[3] - expected.pbr_metallic_roughness.base_color_factor[3]) > 1e-5f ||
+                std::abs(mat.metallicFactor - expected.pbr_metallic_roughness.metallic_factor) > 1e-5f ||
+                std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f ||
+                mat.albedoMap == ZHLN::TextureHandle::Invalid || mat.transmissionMap == ZHLN::TextureHandle::Invalid ||
+                mat.albedoMap == mat.transmissionMap || rc.GetBindlessIndex(mat.transmissionMap) <= 2u ||
+                opaqueMat.transmissionMap == ZHLN::TextureHandle::Invalid) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            const auto albedoSlot = static_cast<size_t>(ZHLN::MaterialTextureSlot::Albedo);
+            const auto transSlot = static_cast<size_t>(ZHLN::MaterialTextureSlot::Transmission);
+            if (mat.textureSamplers[albedoSlot] != ZHLN::TextureSamplerAddress {ZHLN::TextureWrap::ClampToEdge, ZHLN::TextureWrap::MirroredRepeat} ||
+                mat.textureSamplers[transSlot] != ZHLN::TextureSamplerAddress {ZHLN::TextureWrap::MirroredRepeat, ZHLN::TextureWrap::ClampToEdge}) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            const auto& transform = mat.textureTransforms[transSlot];
+            if (transform.texCoord != 1u || transform.offset != std::array<float, 2> {0.25f, -0.25f} ||
+                transform.scale != std::array<float, 2> {2.0f, 0.5f} || std::abs(transform.rotation - 1.5707963f) > 1e-5f ||
+                mat.textureTransforms[albedoSlot].texCoord != 0u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};

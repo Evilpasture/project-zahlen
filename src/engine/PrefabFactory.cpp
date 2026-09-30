@@ -333,7 +333,9 @@ auto InstantiateMeshPart(
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }
-    if (activeMat.alphaMode == 2) {
+    // Both alpha blending and optical transmission are composited in the
+    // forward pass. A masked transmissive surface is still forward-only.
+    if (activeMat.alphaMode == 2 || activeMat.transmissionFactor > 0.0f) {
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 

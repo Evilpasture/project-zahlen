@@ -48,7 +48,7 @@ public struct GlobalSceneRegistry {
 public ParameterBlock<GlobalSceneRegistry> scene;
 
 // MaterialTextureSlot in Render/Types.hpp uses this exact order. The first
-// eight four-bit sampler codes are packed in x and the remaining six in y.
+// eight four-bit sampler codes are packed in x and the remaining seven in y.
 public static const uint kSamplerAlbedo             = 0u;
 public static const uint kSamplerNormal             = 1u;
 public static const uint kSamplerPbr                = 2u;
@@ -63,6 +63,7 @@ public static const uint kSamplerVolumeThickness    = 10u;
 public static const uint kSamplerSheenColor         = 11u;
 public static const uint kSamplerSheenRoughness     = 12u;
 public static const uint kSamplerOcclusion          = 13u;
+public static const uint kSamplerTransmission       = 14u;
 
 [ForceInline]
 public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
@@ -401,6 +402,7 @@ public struct ForwardGeometryOutput {
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
     public nointerpolation float4 transmissionParams : TEXCOORD9;
     public nointerpolation float4 volumeParams : TEXCOORD10;
@@ -461,6 +463,7 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.materialIndices     = v.materialIndices;
     o.baseColorFactor     = v.baseColorFactor;
     o.pbrFactors          = v.pbrFactors;
+    o.alphaMode           = v.alphaMode;
     o.emissiveFactor         = v.emissiveFactor;
     o.transmissionParams     = v.transmissionParams;
     o.volumeParams           = v.volumeParams;

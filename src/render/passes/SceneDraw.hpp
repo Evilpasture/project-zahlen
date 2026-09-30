@@ -15,7 +15,9 @@ namespace ZHLN::Passes {
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 [[nodiscard]] constexpr auto IsForwardOnly(uint32_t instanceFlags) noexcept -> bool {
-    return (instanceFlags & 0xFF) == 2;
+    // Low bits are the authored coverage mode, not the pipeline family.
+    // Bit 10 routes optically transmissive OPAQUE/MASK materials forward too.
+    return (instanceFlags & 0xFFu) == 2u || (instanceFlags & (1u << 10)) != 0u;
 }
 
 [[nodiscard]] auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool;

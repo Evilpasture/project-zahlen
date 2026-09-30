@@ -104,10 +104,14 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    lit opaque scene: roughness and IOR select its blur even for thin-walled
    (zero-thickness) surfaces, while `KHR_materials_volume` thickness also
    offsets the refraction UV. Reflection strength comes from IOR-dependent
-   dielectric F0; without iridescence, IOR 1 has neither refraction blur nor
-   Fresnel reflection. The composite writes depth, so only the nearest
-   surface shows (the sample viewer's single layer). It does not apply volume
-   attenuation, a transmission texture, or a second glass layer.
+   dielectric F0; without iridescence, dielectric regions at IOR 1 have
+   neither refraction blur nor Fresnel reflection. The linear R channel of
+   `transmissionTexture` multiplies the factor; glTF `alphaMode` remains an
+   independent coverage control (MASK
+   discards holes, BLEND fades the composite). Metallic regions absorb
+   transmitted light. The composite writes depth, so only the nearest surface
+   shows (the sample viewer's single layer). It does not apply volume
+   attenuation or render a second glass layer.
    `KHR_materials_iridescence` samples the factor and thickness textures.
    `KHR_materials_clearcoat` is a second dielectric GGX lobe (F0 0.04) with
    its own normal, in direct light and image-based lighting. The base is
@@ -178,6 +182,30 @@ the opaque scene; higher IOR rows should reflect more strongly, while the IOR 1
 row remains clear regardless of roughness. `zshader` compiles and reflects the
 forward shader, but it cannot verify the runtime mip views or the appearance:
 a new GPU capture and golden comparison are still required.
+
+**ToyCar's smooth windshield is a viewer difference, not an asset correction.**
+The `Glass` material in the generator's pinned GLB authors roughness 0,
+`transmissionFactor: 1`, no volume thickness and no roughness map. Zahlen's
+transmission shader keeps zero-thickness screen UVs, floors roughness at 0.001,
+and bilinearly samples the full-resolution scene near mip 0. The generator's
+`<model-viewer>` 4.0.0 golden uses Three.js r169, which floors effective
+roughness at 0.0525 *plus geometric-normal derivatives* and bicubically
+reconstructs the transmission target. The resulting blur around the car's
+interior frames is renderer-specific filtering, not frosted glass in the glTF.
+We deliberately leave Zahlen's sharp thin-glass filtering alone rather than
+forcing an invented roughness or thickness just to match that golden.
+
+For **`TransmissionTest`**, run
+`SCENARIO=khronos-TransmissionTest ./scripts/run_fidelity.sh -j1` and compare
+with `gltf-sample-viewer-golden.png`. The red/blue columns use a striped
+transmission texture (linear R); the green/blue columns also use alpha MASK
+textures, leaving holes in otherwise transmissive spheres. These are separate
+controls: a zero transmission texel leaves an *opaque surface*, while a failed
+alpha mask leaves *no surface*. The bottom row's metallic map attenuates
+transmission. The importer test in `tests/render/TestGLTFImport.cpp` checks the
+factor/texture/coverage/UV/sampler pipeline, and `TestTransparentMaterials.cpp`
+checks masked/textured transmission in a headless GPU frame. Those small tests
+do not replace a capture of the complete scenario against the golden.
 
 For `TextureSettingsTest`, compare the clamp S/T rows (solid green) and
 mirror S/T rows (checkmarks) against the golden; repeat S/T should remain

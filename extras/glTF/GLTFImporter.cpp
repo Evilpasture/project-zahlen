@@ -105,6 +105,7 @@ struct CPUPrimitiveJob {
     cgltf_image* normalImage          = nullptr;
     cgltf_image* pbrImage             = nullptr;
     cgltf_image* emissiveImage        = nullptr;
+    cgltf_image* transmissionImage    = nullptr;
     cgltf_image* filmThicknessImage   = nullptr;
     cgltf_image* iridescenceImage     = nullptr;
     cgltf_image* volumeThicknessImage = nullptr;
@@ -425,13 +426,11 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
             job.alphaBlend  = true;
         }
 
-        // KHR_materials_transmission keeps alphaMode OPAQUE and baseColor alpha
-        // at 1. The forward pass samples a copy of the lit scene and writes
-        // the composite; the shadow pass skips it. The transmission texture
-        // itself is not sampled.
+        // KHR_materials_transmission is optical transparency, independent of
+        // alpha-as-coverage. Route it forward without changing the authored
+        // alphaMode: MASK must still discard holes in the surface.
         if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
             job.transmissionFactor = prim.material->transmission.transmission_factor;
-            job.alphaMode          = 2;
             job.alphaBlend         = true;
         }
         if (prim.material->has_ior) {
@@ -725,6 +724,10 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
                 }
                 RegisterTexture(job, prim.material->normal_texture, job.normalImage, MaterialTextureSlot::Normal);
                 RegisterTexture(job, prim.material->emissive_texture, job.emissiveImage, MaterialTextureSlot::Emissive);
+                if (prim.material->has_transmission) {
+                    // Transmission is linear data in the texture's R channel.
+                    RegisterTexture(job, prim.material->transmission.transmission_texture, job.transmissionImage, MaterialTextureSlot::Transmission);
+                }
                 if (prim.material->has_iridescence) {
                     RegisterTexture(job, prim.material->iridescence.iridescence_texture, job.iridescenceImage, MaterialTextureSlot::Iridescence);
                     RegisterTexture(
@@ -904,6 +907,7 @@ auto GetOrCreateCompiledPrimitive(
                             .baseColor          = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
                             .emissive           = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
                             .transmissionFactor = primJob.transmissionFactor,
+                            .transmissionMap    = textureHandle(primJob.transmissionImage),
                             .iridescenceFactor  = primJob.iridescenceFactor,
                             .filmThicknessNm    = primJob.filmThicknessNm,
                             .filmThicknessMinNm = primJob.filmThicknessMinNm,

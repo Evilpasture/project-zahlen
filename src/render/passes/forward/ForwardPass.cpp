@@ -37,7 +37,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
 
-                if ((drawCmd.instanceData.flags & 0xFF) != 2) {
+                if (!IsForwardOnly(drawCmd.instanceData.flags)) {
                     continue;
                 }
 

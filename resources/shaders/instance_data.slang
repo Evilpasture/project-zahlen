@@ -54,7 +54,7 @@ public struct InstanceData {
     public float anisotropyRotation;
     public uint anisotropyTexIndex;
     public uint samplerCodes0; // Slots 0..7, four bits each; reuses anisotropy padding.
-    public uint samplerCodes1; // Slots 8..13.
+    public uint samplerCodes1; // Slots 8..14.
 
     // Linear-space sheen RGB and independent alpha-channel roughness. A zero
     // color disables the layer; these fields are not part of the film/coat union.
@@ -65,11 +65,23 @@ public struct InstanceData {
     public uint occlusionTexIndex;
     public float occlusionStrength;
 
+    // Transmission is independent of alpha coverage, metallicity and emission.
+    // Do not alias those authored factors to store optical parameters: masked
+    // glass still needs its baseColor alpha and cutoff in the forward shader.
+    public float transmissionValue;
+    public float transmissionIor;
+    public float transmissionThicknessM;
+    public float transmissionNormalScale;
+    public float iridescenceFactor;
+    public float filmThicknessNm;
+    public float filmThicknessMinNm;
+    public uint transmissionTexIndex; // 0xFFFF when absent; linear R channel.
+
     // One affine transform per textureInfo (not per shared image). Each row is
     // (u coefficient, v coefficient, offset, unused/UV set). Keep them in
     // InstanceData so vertex, fragment, meshlet and shadow paths agree.
-    public float4 uvRow0[14];
-    public float4 uvRow1[14];
+    public float4 uvRow0[15];
+    public float4 uvRow1[15];
 };
 
 [CxxSkip]
@@ -151,9 +163,7 @@ public extension InstanceData {
     }
     public property float transmissionFactor {
         [ForceInline]
-        get {
-            return float(this.flags >> 24) * (1.0f / 255.0f);
-        }
+        get { return this.transmissionValue; }
     }
     public property uint filmThicknessTexIndex {
         [ForceInline]
@@ -167,28 +177,23 @@ public extension InstanceData {
         [ForceInline]
         get { return this._paddingMeshlet & 0xFFFFu; }
     }
-    public property float filmThicknessMinNm {
-        [ForceInline]
-        get { return float(this._paddingMeshlet >> 16); }
-    }
     [ForceInline]
     public float4 transmissionParams() {
-        float t = this.transmissionFactor;
-        if (t <= 0.0f) {
-            return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        if (this.transmissionValue <= 0.0f) {
+            return float4(0.0f);
         }
-        return float4(t, this.emissiveFactor.w, this.alphaCutoff, this.filmThicknessMinNm);
+        return float4(this.transmissionValue, this.iridescenceFactor, this.filmThicknessNm, this.filmThicknessMinNm);
     }
     [ForceInline]
     public float4 volumeParams() {
-        if (this.transmissionFactor <= 0.0f) {
+        if (this.transmissionValue <= 0.0f) {
             return float4(0.0f, 1.5f, 1.0f, 1.0f);
         }
-        return float4(this.baseColorFactor.a, this.metallicFactor, 1.0f, this.emissiveFactor.x);
+        return float4(this.transmissionThicknessM, this.transmissionIor, 1.0f, this.transmissionNormalScale);
     }
     [ForceInline]
     public uint4 transmissionTextures() {
-        return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, 0u);
+        return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, this.transmissionTexIndex);
     }
 
     [ForceInline]

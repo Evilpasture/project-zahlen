@@ -140,6 +140,7 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     float4 pbr = SampleMaterialTexture(indices.z, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerPbr), input.samplerCodes, kSamplerPbr);
     float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
+    float metallic  = saturate(pbr.b * input.pbrFactors.x);
 
     float4 params = input.transmissionParams;
     uint4 tex = input.transmissionTextures;
@@ -155,10 +156,10 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     float ior = max(input.volumeParams.y, 1.0f);
     float eta = (ior - 1.0f) / (ior + 1.0f);
-    float3 F0 = float3(eta * eta);
-    // At IOR 1 there is no index boundary. Schlick's grazing term must not
-    // manufacture reflection on air, even when its surface is rough.
-    float3 F = ior > 1.0f ? FresnelSchlickRoughness(NdotV, F0, roughness) : float3(0.0f);
+    float3 F0 = lerp(float3(eta * eta), albedo, metallic);
+    // A metal reflects rather than transmitting; at IOR 1 the dielectric
+    // component alone has no index boundary and must not reflect air.
+    float3 F = (ior > 1.0f || metallic > 0.0f) ? FresnelSchlickRoughness(NdotV, F0, roughness) : float3(0.0f);
     if (iridescence > 0.0f && thicknessNm > 0.0f) {
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
@@ -188,7 +189,9 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     // the fractional max LOD to the last mip for non-power-of-two targets.
     float maxLod = log2(max(scene.frame.screenResolution.x, scene.frame.screenResolution.y));
     float lod = transRoughness * maxLod;
-    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, lod).rgb * albedo;
+    // A metallic surface absorbs refracted light. The extension's linear R
+    // channel independently modulates optical transmission, not alpha coverage.
+    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, lod).rgb * albedo * (1.0f - metallic);
     float3 T = OrthogonalTangent(N, input.tangent.xyz);
     float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
     float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
@@ -197,27 +200,37 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
     float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z) *
                       scene.frame.ambientExposure;
     float transmission = saturate(params.x);
-    float3 color = lerp(albedo * scene.frame.ambientExposure * 0.5f, transmitted, transmission);
+    if (tex.w != 0xFFFFu) {
+        transmission *= SampleMaterialTexture(tex.w, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerTransmission),
+                                              input.samplerCodes, kSamplerTransmission).r;
+    }
+    float3 diffuse = albedo * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    float3 color = lerp(diffuse, transmitted, transmission);
     color = RgbMix(color, specular, F);
     return float4(min(color, 32768.0f), 1.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
-                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, 0u);
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
     ConfigureSceneMaterial(material, input.uv1, input.instanceId);
     float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
+        discard;
+    }
     float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
     float3 emissive = sampledEmissive * albedo.a;
 
     if (scene.frame.fullBright != 0) {
-        return float4(albedo.rgb + emissive, albedo.a);
+        return float4(albedo.rgb + emissive, input.alphaMode == 2u ? albedo.a : 1.0f);
     }
 
     float4 params = input.transmissionParams;
     float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     if (params.x > 0.0f) {
-        return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
+        float4 color = ShadeTransmission(input, N, albedo.rgb, isFrontFace);
+        color.a = input.alphaMode == 2u ? albedo.a : 1.0f;
+        return color;
     }
 
     // Transmission orients its normal inside ShadeTransmission. Non-transmitting

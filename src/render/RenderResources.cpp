@@ -346,7 +346,9 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     }
 
     Material mat        = *basicMat;
-    mat.alphaMode       = transmission ? 2u : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
+    // Transmission chooses a forward pipeline, not an alpha-as-coverage mode.
+    // Preserve MASK (or OPAQUE) so the forward shader can apply the glTF mask.
+    mat.alphaMode       = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
     mat.alphaCutoff     = desc.alphaCutoff;
     mat.metallicFactor  = desc.metallic;
     mat.roughnessFactor = desc.roughness;
@@ -355,6 +357,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.pbrMap          = desc.pbrMap;
     mat.emissiveMap     = desc.emissiveMap;
     mat.transmissionFactor = desc.transmissionFactor;
+    mat.transmissionMap    = desc.transmissionMap;
     mat.iridescenceFactor  = desc.iridescenceFactor;
     mat.filmThicknessNm    = desc.filmThicknessNm;
     mat.filmThicknessMinNm = desc.filmThicknessMinNm;

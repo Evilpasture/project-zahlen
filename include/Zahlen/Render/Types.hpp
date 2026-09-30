@@ -43,6 +43,7 @@ enum class MaterialTextureSlot : uint8_t {
     SheenColor,
     SheenRoughness,
     Occlusion,
+    Transmission,
     Count
 };
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
@@ -92,6 +93,7 @@ struct Material {
     uint32_t            alphaMode          = 0;
     bool                doubleSided        = false;
     float               transmissionFactor = 0.0f;
+    TextureHandle       transmissionMap    = TextureHandle::Invalid;
     float               iridescenceFactor  = 0.0f;
     float               filmThicknessNm    = 0.0f;
     float               filmThicknessMinNm = 0.0f;
@@ -163,6 +165,7 @@ struct MaterialDesc {
     std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
     float                transmissionFactor = 0.0f;
+    TextureHandle        transmissionMap    = TextureHandle::Invalid;
     float                iridescenceFactor  = 0.0f;
     float                filmThicknessNm    = 0.0f;
     float                filmThicknessMinNm = 0.0f;

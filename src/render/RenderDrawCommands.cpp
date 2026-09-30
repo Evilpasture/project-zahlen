@@ -39,6 +39,11 @@ constexpr MaterialSamplerAddresses kAllAddressModes = [] {
 static_assert(EncodeMaterialSamplerWord(kAllAddressModes, 0) == 0x76543210u);
 static_assert(EncodeMaterialSamplerWord(kAllAddressModes, 8) == 0x8u);
 static_assert(EncodeMaterialSamplerWord(MaterialSamplerAddresses {}, 0) == 0u);
+static_assert([] {
+    MaterialSamplerAddresses modes {};
+    modes[static_cast<size_t>(MaterialTextureSlot::Transmission)] = {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge};
+    return EncodeMaterialSamplerWord(modes, 8) == (7u << 24);
+}());
 
 struct ResolvedMeshMaterial {
     NativeMesh*     posMesh         = nullptr;
@@ -73,7 +78,7 @@ struct BindlessIndices {
 
 constexpr uint32_t kNoFilmTexture = 0xFFFFu;
 
-[[nodiscard]] uint32_t FilmTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
+[[nodiscard]] uint32_t OptionalTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
     if (handle == TextureHandle::Invalid) {
         return kNoFilmTexture;
     }
@@ -129,6 +134,7 @@ struct InstanceDataDesc {
     float volumeThicknessM   = 0.0f;
     float ior                = 1.5f;
     float normalScale        = 1.0f;
+    uint32_t transmissionTex  = kNoFilmTexture;
     uint32_t filmThicknessTex = kNoFilmTexture;
     uint32_t iridescenceTex   = kNoFilmTexture;
     uint32_t volumeThicknessTex = kNoFilmTexture;
@@ -156,25 +162,15 @@ struct InstanceDataDesc {
 
     const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
     const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
-    const uint32_t doubleSided = desc.doubleSided ? 1u : 0u;
-    const float    clampedT    = std::clamp(desc.transmissionFactor, 0.0f, 1.0f);
-    const uint32_t transmission8 = static_cast<uint32_t>(clampedT * 255.0f + 0.5f);
+    const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
+    const uint32_t hasTransmission = desc.transmissionFactor > 0.0f ? 1u : 0u;
 
     std::array<float, 4> emissive = desc.emissiveFactor;
-    std::array<float, 4> baseColor = desc.baseColorFactor;
-    float                alphaCutoff = desc.alphaCutoff;
-    float                metallic = desc.metallicFactor;
     uint32_t             paddingCenter = 0;
     uint32_t             paddingMeshlet = 0;
-    if (transmission8 != 0) {
-        emissive[0] = desc.normalScale;
-        emissive[3] = desc.iridescenceFactor;
-        alphaCutoff = desc.filmThicknessNm;
-        metallic    = desc.ior;
-        baseColor[3] = desc.volumeThicknessM;
-        const uint32_t filmMin = static_cast<uint32_t>(std::clamp(desc.filmThicknessMinNm, 0.0f, 65535.0f));
+    if (hasTransmission != 0) {
         paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
-        paddingMeshlet = (filmMin << 16) | (desc.iridescenceTex & kNoFilmTexture);
+        paddingMeshlet = desc.iridescenceTex & kNoFilmTexture;
     } else {
         const uint32_t coat8 = static_cast<uint32_t>(std::clamp(desc.clearcoatFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
         if (coat8 != 0) {
@@ -213,20 +209,19 @@ struct InstanceDataDesc {
         .texIndices0         = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
         .texIndices1         = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
         .cullRadius          = desc.cullRadius,
-        .metallicFactor      = metallic,
+        .metallicFactor      = desc.metallicFactor,
         .roughnessFactor     = desc.roughnessFactor,
-        .alphaCutoff         = alphaCutoff,
-        // Bit 9 tells the task shader to keep back-facing meshlets of a
-        // double-sided material. Rasterizer CullNone cannot restore a meshlet
-        // rejected by the task stage.
-        .flags                = (transmission8 << 24) | (isViewmodel << 16) | (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .alphaCutoff         = desc.alphaCutoff,
+        // Bit 9 keeps back-facing meshlets of a double-sided material. Bit 10
+        // routes transmission forward without overwriting glTF alphaMode MASK.
+        .flags                = (isViewmodel << 16) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset          = desc.jointOffset,
         .morphOffset          = desc.morphOffset,
         .activeMorphCount     = desc.activeMorphCount,
         .localCenter          = desc.localCenter,
         ._paddingCenter       = paddingCenter,
         .morphWeights         = desc.morphWeights,
-        .baseColorFactor      = baseColor,
+        .baseColorFactor      = desc.baseColorFactor,
         .emissiveFactor       = emissive,
         .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
@@ -243,6 +238,14 @@ struct InstanceDataDesc {
         .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
         .occlusionTexIndex      = desc.occlusionTex,
         .occlusionStrength      = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
+        .transmissionValue       = desc.transmissionFactor,
+        .transmissionIor         = desc.ior,
+        .transmissionThicknessM  = desc.volumeThicknessM,
+        .transmissionNormalScale = desc.normalScale,
+        .iridescenceFactor       = desc.iridescenceFactor,
+        .filmThicknessNm         = desc.filmThicknessNm,
+        .filmThicknessMinNm      = desc.filmThicknessMinNm,
+        .transmissionTexIndex    = desc.transmissionTex,
         .uvRow0                 = uvRow0,
         .uvRow1                 = uvRow1,
     };
@@ -453,23 +456,24 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .volumeThicknessM         = material.volumeThicknessM,
                  .ior                      = material.ior,
                  .normalScale              = material.normalScale,
-                 .filmThicknessTex         = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
-                 .iridescenceTex           = FilmTextureIndex(_impl.get(), material.iridescenceMap),
-                 .volumeThicknessTex       = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                 .transmissionTex          = OptionalTextureIndex(_impl.get(), material.transmissionMap),
+                 .filmThicknessTex         = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
+                 .iridescenceTex           = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
+                 .volumeThicknessTex       = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
                  .clearcoatFactor          = material.clearcoatFactor,
                  .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
                  .clearcoatNormalScale     = material.clearcoatNormalScale,
-                 .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
-                 .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
-                 .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                 .clearcoatTex             = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
+                 .clearcoatRoughnessTex    = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                 .clearcoatNormalTex       = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
                  .anisotropyStrength       = material.anisotropyStrength,
                  .anisotropyRotation       = material.anisotropyRotation,
-                 .anisotropyTex            = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                 .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
                  .sheenColorFactor         = material.sheenColorFactor,
                  .sheenRoughnessFactor     = material.sheenRoughnessFactor,
-                 .sheenColorTex            = FilmTextureIndex(_impl.get(), material.sheenColorMap),
-                 .sheenRoughnessTex        = FilmTextureIndex(_impl.get(), material.sheenRoughnessMap),
-                 .occlusionTex             = FilmTextureIndex(_impl.get(), material.occlusionMap),
+                 .sheenColorTex            = OptionalTextureIndex(_impl.get(), material.sheenColorMap),
+                 .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
+                 .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
                  .occlusionStrength        = material.occlusionStrength,
                  .textureSamplers          = material.textureSamplers,
                  .textureTransforms        = material.textureTransforms,
@@ -530,18 +534,19 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .volumeThicknessM         = material.volumeThicknessM,
                     .ior                      = material.ior,
                     .normalScale              = material.normalScale,
-                    .filmThicknessTex         = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
-                    .iridescenceTex           = FilmTextureIndex(_impl.get(), material.iridescenceMap),
-                    .volumeThicknessTex       = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                    .transmissionTex          = OptionalTextureIndex(_impl.get(), material.transmissionMap),
+                    .filmThicknessTex         = OptionalTextureIndex(_impl.get(), material.filmThicknessMap),
+                    .iridescenceTex           = OptionalTextureIndex(_impl.get(), material.iridescenceMap),
+                    .volumeThicknessTex       = OptionalTextureIndex(_impl.get(), material.volumeThicknessMap),
                     .clearcoatFactor          = material.clearcoatFactor,
                     .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
                     .clearcoatNormalScale     = material.clearcoatNormalScale,
-                    .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
-                    .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
-                    .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
+                    .clearcoatTex             = OptionalTextureIndex(_impl.get(), material.clearcoatMap),
+                    .clearcoatRoughnessTex    = OptionalTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                    .clearcoatNormalTex       = OptionalTextureIndex(_impl.get(), material.clearcoatNormalMap),
                     .anisotropyStrength       = material.anisotropyStrength,
                     .anisotropyRotation       = material.anisotropyRotation,
-                    .anisotropyTex            = FilmTextureIndex(_impl.get(), material.anisotropyMap),
+                    .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
                     .textureSamplers          = material.textureSamplers,
                     .textureTransforms        = material.textureTransforms,
                 }

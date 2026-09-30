@@ -317,7 +317,8 @@ void DrawModelNodeRows(
     const bool sameMaps    = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
     const bool sameFactors = (a.baseColorFactor == b.baseColorFactor) && (a.emissiveFactor == b.emissiveFactor);
     return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
-           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.iridescenceFactor == b.iridescenceFactor) &&
+           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.transmissionMap == b.transmissionMap) &&
+           (a.iridescenceFactor == b.iridescenceFactor) &&
            (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&
            (a.ior == b.ior) && (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
            (a.volumeThicknessMap == b.volumeThicknessMap) && (a.clearcoatFactor == b.clearcoatFactor) &&
@@ -478,6 +479,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         addTextureSlot(mat.normalMap, "normal", pName);
         addTextureSlot(mat.pbrMap, "pbr", pName);
         addTextureSlot(mat.emissiveMap, "emissive", pName);
+        addTextureSlot(mat.transmissionMap, "transmission", pName);
     }
 
     const std::string texturesPath = modelPath + "/textures";
