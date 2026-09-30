@@ -41,7 +41,14 @@ The host checks its C++ structs against the compiled `gpu_abi` SPIR-V at compile
 time (`src/render/GpuAbi.hpp`, which the renderer compiles, plus
 `Vk::PushConstantLayoutMatchesAll` in every dispatch that writes a payload) and
 dispatches the bake / cluster-bounds compute kernels instead of re-authoring the
-layouts or integrators in C++.
+layouts or integrators in C++. One deliberately narrow exception is a prepared
+float HDR panorama dominated by one compact emitter: the host integrates the
+*smooth remainder* into diffuse SH with exact source-texel solid angles, and
+stores the emitter's direction and cosine-convolved RGB in the otherwise-unused
+`FrameUniforms.sh[0..5].w` lanes. `EvaluateSH` adds that emitter analytically,
+avoiding the negative SH ringing caused by a point-like HDR sun. Ordinary HDRs,
+procedural skies, the BRDF LUT and the specular cube remain GPU-baked. The
+pre-filtered specular cube always uses the original, complete panorama.
 
 `zshader --abi <gpu_abi.spv> --out-gpu-types ...` additionally reflects that
 same module into the generated host structs (`GeneratedGpuTypes.hpp`, re-exported

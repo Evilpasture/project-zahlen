@@ -345,8 +345,8 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     gfx.post.colorFilter       = {1.0f, 1.0f, 1.0f};
 
     // Ambient: mode 0 disables the screen-space AO/GI gather entirely, leaving
-    // only the baked SH diffuse irradiance, which is what the fidelity contract
-    // cares about. GI intensity is irrelevant at mode 0 but pinned neutral.
+    // only the diffuse IBL (SH with an analytic compact emitter if applicable).
+    // GI intensity is irrelevant at mode 0 but pinned neutral.
     gfx.post.mode        = 0;
     gfx.post.giIntensity = 1.0f;
     gfx.post.enableSSR   = 0;

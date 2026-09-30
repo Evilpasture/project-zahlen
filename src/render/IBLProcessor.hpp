@@ -3,6 +3,7 @@
 
 #pragma once
 #include "RenderInternal.hpp"
+#include "IrradianceSH.hpp"
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Resources.hpp"
@@ -16,6 +17,7 @@
 #include <cstddef>
 #include <cstring>
 #include <expected>
+#include <span>
 #include <utility>
 
 namespace ZHLN::Vk {
@@ -316,6 +318,22 @@ class IBLProcessor {
         auto mappedSH = state.shCpu.Map(impl.allocator.Get());
         if (mappedSH.data == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
         std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
+        if (hasRadiance) {
+            const auto pixels = std::span<const float> {radiance.rgba, static_cast<size_t>(radiance.width) * radiance.height * 4u};
+            if (auto separated = SeparateCompactEnvironmentEmitter(pixels, radiance.width, radiance.height)) {
+                // Keep the existing nine-vec4 frame ABI: SH consumes xyz;
+                // the previously unused w lanes carry a compact emitter's
+                // direction and cosine-convolved RGB strength. The original
+                // panorama still drives the specular cube and skybox.
+                for (size_t c = 0; c < state.payload.shCoeffs.size(); ++c) {
+                    const float w = c < 3 ? separated->emitterDirection[c] :
+                                    c < 6 ? separated->emitterIrradiance[c - 3] : 0.0f;
+                    const auto& rgb = separated->coefficients[c];
+                    state.payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], w);
+                }
+                ZHLN::Log("[IBL] Separated compact HDR emitter from diffuse SH (specular unchanged).");
+            }
+        }
 
         const auto lutInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
         auto lutView = ImageView::Create(impl.ctx.Device(), lutInfo);

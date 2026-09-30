@@ -414,7 +414,14 @@ public float3 EvaluateSH(float3 N, float4 sh[9]) {
     float3 result = sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z + sh[3].xyz * -0.488603f * N.x +
                     sh[4].xyz * 1.092548f * N.x * N.y + sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
                     sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
-    return max(result, float3(0.0f, 0.0f, 0.0f));
+    // A compact HDR sun is too sharp for nine SH coefficients: ringing makes
+    // red/green irradiance negative on its shadowed side while blue survives.
+    // The bake keeps the smooth remainder in SH and packs the emitter's
+    // direction (sh[0..2].w) and irradiance/pi (sh[3..5].w) into unused lanes.
+    // GPU-baked procedural skies and ordinary HDRs leave those lanes at zero.
+    float3 emitterDir = float3(sh[0].w, sh[1].w, sh[2].w);
+    float3 emitterIrradiance = float3(sh[3].w, sh[4].w, sh[5].w);
+    return max(result, float3(0.0f, 0.0f, 0.0f)) + emitterIrradiance * max(dot(N, emitterDir), 0.0f);
 }
 
 public float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float3 boxMax, float3 probePos) {

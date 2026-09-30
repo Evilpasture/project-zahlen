@@ -3,16 +3,19 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +23,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ============================================================================
@@ -31,6 +35,8 @@ enum class PBRTestError : uint8_t {
     RenderOutputBlank            ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
     SpecularHighlightNotDetected ZHLN_ANNOTATION(ZHLN::Description<"PBR specular reflection highlight was not observed on target surface."> {}),
     MaterialCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed to construct GPU pipeline."> {}),
+    EnvironmentBakeFailed       ZHLN_ANNOTATION(ZHLN::Description<"The prepared HDR environment could not be registered or baked."> {}),
+    ShadowSideDiffuseTinted     ZHLN_ANNOTATION(ZHLN::Description<"A compact HDR emitter behind an opaque surface changed its diffuse color."> {}),
 };
 
 // ============================================================================
@@ -385,6 +391,109 @@ struct PBRTestSuite {
                 "    [PASS] PBR roughness: smooth spread={:.1f} peak={:.3f} maxL={:.1f}; rough spread={:.1f} peak={:.3f} maxL={:.1f}.", smoothSpread,
                 smoothPeak, smooth.maxL, roughSpread, roughPeak, rough.maxL
             );
+            return {};
+        }
+
+        // ====================================================================
+        // HDR IBL: a compact sun must not ring into the shadowed diffuse lobe
+        // ====================================================================
+        std::expected<void, ZHLN::ErrorCode> pbr_hdr_sun_does_not_tint_shadowed_dielectric() {
+            auto engine = CreateTestEngine();
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(PBRTestError::EngineInitFailed);
+            }
+            auto& reg = engine->GetRegistry();
+            auto& rc = engine->GetRenderContext();
+            ZHLN::Test::Headless::DisableTAA(*engine);
+            const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+            if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
+            for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
+                reg.Remove<ZHLN::Components::FreeCamTagComponent>(camera);
+            }
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
+                pp.giMode = 0;
+                pp.fullBright = 0;
+                pp.ambientExposure = 1.0f;
+                pp.exposure = 1.0f;
+                pp.tonemapper = 3;
+                pp.bloomStrength = 0.0f;
+                pp.glowIntensity = 0.0f;
+                pp.vignetteIntensity = 0.0f;
+                pp.enableSSR = 0;
+                pp.enableRTR = 0;
+            });
+            auto material = rc.CreateMaterial(ZHLN::MaterialDesc {
+                .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}
+            });
+            if (!material) return std::unexpected(PBRTestError::MaterialCreationFailed);
+            auto& cam = engine->GetCamera();
+            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+            cam.yaw = -90.0f;
+            cam.pitch = 0.0f;
+            ZHLN::PrefabFactory::CreateBox(
+                *engine, JPH::Vec3(1.5f, 1.5f, 0.2f),
+                ZHLN::PrefabFactory::SpawnParams {
+                    .position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *material
+                }
+            );
+
+            // Flat HDR vs. the same sky with a single-pixel point-like
+            // hotspot at N dot L ~= -0.53 on the +Z face. The 9-coefficient SH
+            // projection alone makes all three channels *negative* there, so
+            // the old renderer clamped this otherwise lit surface to black.
+            // Exact cosine irradiance from the hotspot is zero at this face.
+            constexpr uint32_t w = 128, h = 64;
+            ZHLN::EnvironmentImage flat {.width = w, .height = h};
+            flat.rgba.resize(static_cast<size_t>(w) * h * 4u);
+            for (size_t i = 0; i < flat.rgba.size(); i += 4u) {
+                flat.rgba[i + 0] = 0.20f;
+                flat.rgba[i + 1] = 0.25f;
+                flat.rgba[i + 2] = 0.30f;
+                flat.rgba[i + 3] = 1.0f;
+            }
+            ZHLN::EnvironmentImage hotspot = flat;
+            const size_t pixel = (static_cast<size_t>(h / 2) * w + 52u) * 4u;
+            hotspot.rgba[pixel + 0] = 50000.0f;
+            hotspot.rgba[pixel + 1] = 38000.0f;
+            hotspot.rgba[pixel + 2] = 12000.0f;
+            auto& assets = engine->GetAssetManager();
+            if (!assets.CacheEnvironmentImage("pbr_flat_hdr", std::move(flat)) ||
+                !assets.CacheEnvironmentImage("pbr_compact_hdr", std::move(hotspot))) {
+                return std::unexpected(PBRTestError::EnvironmentBakeFailed);
+            }
+            ZHLN::Components::EnvironmentMapComponent environment;
+            environment.source.assign("pbr_flat_hdr");
+            reg.Add(settings, std::move(environment));
+            ZHLN::Test::Headless::TickFrames(*engine, 5, 1.0f / 60.0f);
+            const auto baseline = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_flat.ppm");
+            reg.Patch<ZHLN::Components::EnvironmentMapComponent>(settings, [](auto& env) { env.source.assign("pbr_compact_hdr"); });
+            ZHLN::Test::Headless::TickFrames(*engine, 5, 1.0f / 60.0f);
+            const auto candidate = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_hdr_compact.ppm");
+            if (!baseline.Valid() || !candidate.Valid() || baseline.width != candidate.width || baseline.height != candidate.height) {
+                return std::unexpected(PBRTestError::RenderOutputBlank);
+            }
+
+            // Compare the interior of the front face, away from the box edges,
+            // AO and antialiasing. The hotspot is behind this face, so neither
+            // its diffuse nor specular lobe can physically receive that light.
+            // The flat environment and the material are otherwise identical.
+            const auto middle = [](const auto& image) {
+                std::array<double, 3> average {};
+                for (int y = image.height / 2 - 4; y <= image.height / 2 + 4; ++y) {
+                    for (int x = image.width / 2 - 4; x <= image.width / 2 + 4; ++x) {
+                        const size_t i = (static_cast<size_t>(y) * image.width + x) * 3u;
+                        for (int c = 0; c < 3; ++c) average[c] += image.rgb[i + c] / 81.0;
+                    }
+                }
+                return average;
+            };
+            const auto before = middle(baseline), after = middle(candidate);
+            if (before[0] < 20.0 || before[1] < 20.0 || before[2] < 20.0 ||
+                std::abs(before[0] - after[0]) > 10.0 ||
+                std::abs(before[1] - after[1]) > 10.0 ||
+                std::abs(before[2] - after[2]) > 10.0) {
+                return std::unexpected(PBRTestError::ShadowSideDiffuseTinted);
+            }
             return {};
         }
 

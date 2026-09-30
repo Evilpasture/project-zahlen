@@ -32,6 +32,7 @@ set(RAW_RENDER_SOURCES
     RenderDocInit.cpp
     RenderProcedural.cpp
     RenderSetup.cpp
+    IrradianceSH.cpp
     pipelines/ComputeSimPipeline.cpp
     pipelines/DeferredPbrPipeline.cpp
     pipelines/UIPipeline.cpp

@@ -65,9 +65,9 @@ this harness builds none of them. Specifically:
   Use `--no-aa` to capture the unfiltered baseline for A/B comparison. Spatial
   AA cannot recover geometry smaller than a rendered pixel like coverage AA can.
 * **No SSR/RTR reflections and no shadows** — the only illumination is the IBL.
-* **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving the
-  baked SH diffuse irradiance plus the pre-filtered specular environment, which
-  is what the split-sum model the contract exercises.
+* **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving
+  diffuse IBL (SH plus an analytic compact HDR emitter where applicable) and
+  the pre-filtered specular environment. No screen-space bounce light is added.
 * **Camera from the scenario**: Khronos `{theta, phi, radius}` around
   `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFoV`,
   near 0.01 / far 100. Radius **0 is valid**: upstream uses it for
@@ -333,15 +333,38 @@ unsaturated pixels, not to the metallic gold leaf (blackening its base color
 also zeroes its colored specular F0). Background pixels shared by both captures
 subtract to black.
 
-If an olive's residual is warm and the measured blue specular term makes the
-original teal, investigate the opaque specular lookup/BRDF at those coordinates.
-If the residual is still teal, prioritize diffuse/albedo/AO instead. Filament's
-nonlinear roughness-to-LOD curve cannot be copied into Zahlen alone: cmgen also
-bakes its cube levels with the **inverse** curve, whereas Zahlen currently uses
-linear roughness for both bake and lookup. Nor did the earlier fourfold HDR
-source-footprint change improve the reported teal. These diagnostics provide a
-way to establish the responsible contribution; **no rendering fix is claimed
-without a new GPU capture and golden comparison**.
+The user-observed residual **is still teal**. The scene's actual HDR panorama
+has an extremely compact, intense sun. Nine-term SH truncation gives the
+shadow-side unit normal `(-0.940, 0, 0.342)` irradiance approximately
+`(-0.117, -0.000, 0.176)` in linear RGB: the shader clamps red/green to zero,
+leaving blue behind even after removing specular. Direct cosine integration of
+the HDR at that same normal instead gives `(0.130, 0.170, 0.229)`. Increasing
+SH sample count cannot fix this: the *full-resolution* SH projection has the
+same negative-red lobe. Nor did the earlier HDR specular-footprint change fix
+it. Filament windows SH to reduce ringing, but for this sharp sun it makes
+shadow-side irradiance much brighter than the physically integrated value.
+
+The renderer now detects a single compact HDR emitter carrying a substantial
+fraction of the panorama's energy, integrates the **remaining** source pixels
+into SH by exact texel solid angle, and adds the emitter's nonnegative cosine
+term at shading time. For this HDR the computed irradiance at the normal above
+is `(0.122, 0.162, 0.225)`, close to direct integration. The specular cube and
+skybox remain sourced from the unmodified HDR. Ordinary skies and multi-light
+panoramas keep their existing GPU SH bake, avoiding an indiscriminate material
+or exposure change. The bake logs `[IBL] Separated compact HDR emitter...` when
+this path is taken.
+
+**This is a mathematically validated candidate, not a verified image match.**
+Rebuild and re-run `SCENARIO=khronos-IridescentDishWithOlives
+./scripts/run_fidelity.sh -j1`, inspect the new `opaque-only` and
+`olives-diffuse-residual.pam` alongside the same golden, and check unrelated HDR
+scenarios as well. Filament's nonlinear roughness-to-LOD curve cannot be copied
+into Zahlen alone: cmgen also bakes its cube levels with the inverse curve,
+whereas Zahlen currently uses linear roughness for both bake and lookup. A new
+GPU capture and golden comparison are still needed to confirm visual fidelity.
+`GPU_Lighting` also contains a public-API headless regression: adding a
+point-like HDR hotspot *behind* a diffuse box must not tint its front face
+relative to the same panorama without that hotspot.
 
 For `TransmissionRoughnessTest`, run
 `SCENARIO=khronos-TransmissionRoughnessTest ./scripts/run_fidelity.sh -j1`.
