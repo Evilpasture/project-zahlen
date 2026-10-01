@@ -12,7 +12,7 @@ template <typename LayoutT>
 std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     VkDevice                        device,
     HeapManager&                    heap,
-    const ShaderStages&             shaders,
+    ShaderStagesView             shaders,
     std::initializer_list<VkFormat> colorFormats,
     uint32_t                        indexPushOffset,
     HeapLifecycle                   lifecycle,
@@ -52,7 +52,7 @@ template <typename LayoutT>
 std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     VkDevice                              device,
     HeapManager&                          heap,
-    const ShaderStages&                   shaders,
+    ShaderStagesView                   shaders,
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     uint32_t                              indexPushOffset,

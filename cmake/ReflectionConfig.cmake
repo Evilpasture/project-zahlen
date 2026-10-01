@@ -15,6 +15,19 @@ check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
 
 if(COMPILER_HAS_REFLECTION)
     message(STATUS "C++26 Static Reflection supported via -freflection")
+    # Bloomberg Clang gates P3096's std::meta::parameters_of behind a second
+    # flag; -freflection alone supplies only P2996. GCC exposes it with
+    # -freflection, so the extra flag is Clang-specific.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        check_cxx_compiler_flag("-freflection -fparameter-reflection" COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+        if(NOT COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+            # Newer forks also provide a unified flag for companion proposals.
+            check_cxx_compiler_flag("-freflection -freflection-latest" COMPILER_HAS_REFLECTION_LATEST_FLAG)
+            if(NOT COMPILER_HAS_REFLECTION_LATEST_FLAG)
+                message(FATAL_ERROR "This Clang supports -freflection but not P3096 parameter reflection (-fparameter-reflection or -freflection-latest).")
+            endif()
+        endif()
+    endif()
 else()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
@@ -118,6 +131,13 @@ endfunction()
 function(zahlen_enable_reflection TARGET_NAME)
     if(COMPILER_HAS_REFLECTION)
         target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+        if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+            # CallableInspector is public API: consumers compiling its
+            # templates need the same P3096 flag as Zahlen itself.
+            target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fparameter-reflection>")
+        elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
+            target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-freflection-latest>")
+        endif()
         if(ZHLN_HAS_ANNOTATION_ATTRIBUTES)
             target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()

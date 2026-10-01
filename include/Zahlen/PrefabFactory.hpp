@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -26,6 +27,15 @@ class Registry;
 
 namespace ZHLN::PrefabFactory {
 
+// Standalone Registry+RenderContext scenes must release generated meshes
+// before removing components or clearing the registry. Engine scenes use
+// DespawnEntity, Engine::ClearScene and SceneResources::Attach/Detach instead.
+void AttachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component);
+void DetachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity);
+void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg);
+
+// Standalone builders return caller-owned buffers: use DestroyMesh after their
+// last draw. Entity spawners below attach scene-owned cleanup instead.
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
 auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
 auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
@@ -45,7 +55,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
 auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
 auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
 
-auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureHandle;
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();

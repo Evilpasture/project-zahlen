@@ -8,7 +8,6 @@
 #include "Rendering.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Error.hpp>
@@ -29,7 +28,7 @@ class GeometryManager {
         Vk::DeletionQueue&                          deletionQueue
     ) noexcept
         : _ctx(ctx), _allocator(allocator), _transferRing(transferRingBuffer), _transferCmdRing(transferCmdRing), _deletionQueue(deletionQueue) {}
-    ~GeometryManager() = default;
+    ~GeometryManager() { RetireAll(); }
 
     GeometryManager(const GeometryManager&)                = delete;
     auto operator=(const GeometryManager&) -> GeometryManager& = delete;
@@ -55,49 +54,25 @@ class GeometryManager {
     [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> NativeMesh* { return _buffers.Resolve(handle); }
 
 
+    // AssetID lookup only: the creator of the buffers owns their lifetime.
     void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, mesh); }
+    void UnregisterMesh(AssetID id) { _meshes.Erase(id); }
     void RegisterMaterial(MaterialID id, Material material) { _materials.Insert(id, material); }
+    void UnregisterMaterial(MaterialID id) { _materials.Erase(id); }
 
     [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* { return _meshes.Find(id); }
     [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> const Material* { return _materials.Find(id); }
 
-    void ReleaseMeshBuffers();
     void ClearMeshes() noexcept { _meshes.Clear(); }
 
-    template <typename Fn>
-    void ForEachMaterial(Fn&& fn) {
-        _materials.ForEach(std::forward<Fn>(fn));
-    }
     void ClearMaterials() noexcept { _materials.Clear(); }
 
-    void ReleaseParticleBuffers();
-    void ReleaseLedgers();
-
-
-    void TrackEmitter2D(uint64_t packedOwner, BufferHandle buffer) { _emitters2D.push_back({packedOwner, buffer}); }
-    void TrackEmitter3D(uint64_t packedOwner, BufferHandle buffer) { _emitters3D.push_back({packedOwner, buffer}); }
-    void TrackEntityBuffer(uint64_t packedOwner, BufferHandle buffer) { _entityBuffers.push_back({packedOwner, buffer}); }
-
-    [[nodiscard]] auto Emitters2D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters2D; }
-    [[nodiscard]] auto Emitters3D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters3D; }
-    [[nodiscard]] auto EntityBufferCount() const noexcept -> size_t { return _entityBuffers.size(); }
-
-    void ReleaseOwner(uint64_t packedOwner);
-
-    void Reconcile(EntityAliveQuery alive);
-
-
-    [[nodiscard]] auto GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle;
-    void             ClearParticleBuffers();
-
-
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
-    [[nodiscard]] auto GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle;
-    void             ReleaseSkinnedScratchBuffers();
+    // After GPU idle the renderer drains the queue before releasing the allocator.
+    void RetireAll() noexcept;
 
   private:
-    template <typename DeadFn>
-    void SweepLedgers(DeadFn&& isDead);
+    void Retire(NativeMesh& mesh) noexcept;
 
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
@@ -105,18 +80,13 @@ class GeometryManager {
     Vk::CommandRing<Vk::QueueType::Transfer, 8>& _transferCmdRing;
     Vk::DeletionQueue&                           _deletionQueue;
 
-    GenerationalPool<NativeMesh, 8192, BufferHandle> _buffers;
+    // The geometry throughput scene holds 1,600 distinct boxes, each with
+    // position, tangent-frame, surface, and three meshlet buffers: 9,600 live
+    // handles before other scene resources. Keep headroom for other streams.
+    GenerationalPool<NativeMesh, 16384, BufferHandle> _buffers;
 
     ZHLN::HashMap<AssetID, Mesh>        _meshes;
     ZHLN::HashMap<MaterialID, Material> _materials;
-
-    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> _particleBuffers;
-
-    ZHLN::HashMap<uint64_t, BufferHandle> _skinnedScratch;
-
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters2D;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters3D;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _entityBuffers;
 };
 
 }

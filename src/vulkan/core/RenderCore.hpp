@@ -12,7 +12,9 @@
 #include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 
+#include "FrameStorage.hpp"
 #include "RenderCore.h"
+#include "../execution/CommandRecorder.hpp"
 
 #include "../VkError.hpp"
 
@@ -22,90 +24,9 @@ struct Color4 {
     float r, g, b, a;
 };
 
+}
+
 // NOLINTBEGIN(misc-misplaced-const, readability-avoid-const-params-in-decls)
-
-template <typename T>
-struct PerFrame {
-    std::array<T, 2> data {};
-    uint32_t         idx = 0;
-
-    PerFrame() = default;
-
-    constexpr PerFrame(T first, T second) noexcept: data {{std::move(first), std::move(second)}} {
-    }
-
-    [[nodiscard]] constexpr T& operator[]() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& operator[]() const noexcept {
-        return data[idx];
-    }
-
-    [[nodiscard]] constexpr T& operator[](uint32_t i) noexcept {
-        return data[i % 2];
-    }
-    [[nodiscard]] constexpr const T& operator[](uint32_t i) const noexcept {
-        return data[i % 2];
-    }
-
-    [[nodiscard]] constexpr T& operator*() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& operator*() const noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr T* operator->() noexcept {
-        return &data[idx];
-    }
-    [[nodiscard]] constexpr const T* operator->() const noexcept {
-        return &data[idx];
-    }
-    [[nodiscard]] constexpr T& Current() noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr const T& Current() const noexcept {
-        return data[idx];
-    }
-    [[nodiscard]] constexpr T& Next() noexcept {
-        return data[idx ^ 1];
-    }
-    [[nodiscard]] constexpr const T& Next() const noexcept {
-        return data[idx ^ 1];
-    }
-
-    void Advance() noexcept {
-        idx ^= 1;
-    }
-    void Flip() noexcept {
-        idx ^= 1;
-    }
-};
-
-template <typename T>
-using DoubleBuffered = PerFrame<T>;
-
-template <typename T>
-concept CanFlipDirect = requires(T& t) { t.Flip(); };
-
-template <typename T>
-concept CanFlipIterable = requires(T& t) {
-    requires !CanFlipDirect<T>;
-    t.begin();
-    t.end();
-    requires requires(typename T::value_type& item) { item.Flip(); };
-};
-
-inline void FlipObject(auto& obj) noexcept {
-    if constexpr (CanFlipDirect<decltype(obj)>) {
-        obj.Flip();
-    } else if constexpr (CanFlipIterable<decltype(obj)>) {
-        for (auto& item: obj) {
-            item.Flip();
-        }
-    }
-}
-
-}
 
 namespace ZHLN::Vk {
 
@@ -118,33 +39,98 @@ template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
 
 
-template <size_t ColorCount, bool HasDepth>
+// A runtime-format pipeline remains available for legacy render paths. A
+// format-specialized pipeline can only be created by the corresponding typed
+// PipelineBuilder; its attachment formats are not a caller-supplied label.
+struct RuntimeAttachmentFormats {};
+
+template <VkFormat DepthFormat, VkFormat... ColorFormats>
+struct AttachmentFormats {
+    static constexpr VkFormat depth_format = DepthFormat;
+    static constexpr std::array<VkFormat, sizeof...(ColorFormats)> color_formats {ColorFormats...};
+};
+
+template <typename Formats, VkFormat... Added>
+struct AppendAttachmentColors {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors, VkFormat... Added>
+struct AppendAttachmentColors<AttachmentFormats<Depth, Colors...>, Added...> {
+    using type = std::conditional_t<
+        ((Added != VK_FORMAT_UNDEFINED) && ...), AttachmentFormats<Depth, Colors..., Added...>, RuntimeAttachmentFormats
+    >;
+};
+
+template <typename Formats, VkFormat Depth>
+struct SetAttachmentDepth {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat OldDepth, VkFormat... Colors, VkFormat Depth>
+struct SetAttachmentDepth<AttachmentFormats<OldDepth, Colors...>, Depth> {
+    using type = std::conditional_t<Depth == VK_FORMAT_UNDEFINED, RuntimeAttachmentFormats, AttachmentFormats<Depth, Colors...>>;
+};
+
+template <typename Formats>
+struct WithoutAttachmentDepth {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors>
+struct WithoutAttachmentDepth<AttachmentFormats<Depth, Colors...>> {
+    using type = AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>;
+};
+
+template <typename Formats>
+struct ClearAttachmentColors {
+    using type = RuntimeAttachmentFormats;
+};
+
+template <VkFormat Depth, VkFormat... Colors>
+struct ClearAttachmentColors<AttachmentFormats<Depth, Colors...>> {
+    using type = AttachmentFormats<Depth>;
+};
+
+template <size_t ColorCount, bool HasDepth, typename Formats>
+class PipelineBuilder;
+
+template <size_t ColorCount, bool HasDepth, typename Formats = RuntimeAttachmentFormats>
 class TypedPipeline {
   public:
-    Pipeline handle;
+    using FormatSet = Formats;
 
     TypedPipeline() = default;
-    explicit TypedPipeline(Pipeline&& p) noexcept: handle(std::move(p)) {
+    explicit TypedPipeline(Pipeline&& p) noexcept requires std::same_as<Formats, RuntimeAttachmentFormats>: handle(std::move(p)) {
     }
 
-    TypedPipeline& operator=(Pipeline&& p) noexcept {
+    auto operator=(Pipeline&& p) noexcept -> TypedPipeline& requires std::same_as<Formats, RuntimeAttachmentFormats> {
         handle = std::move(p);
         return *this;
     }
 
-    [[nodiscard]] VkPipeline Get() const noexcept {
+    [[nodiscard]] auto Get() const noexcept -> VkPipeline {
         return handle.Get();
     }
-    [[nodiscard]] bool Valid() const noexcept {
+    [[nodiscard]] auto Valid() const noexcept -> bool {
         return handle.Valid();
     }
     explicit operator bool() const noexcept {
         return Valid();
     }
 
-    [[nodiscard]] Pipeline Release() noexcept {
+    [[nodiscard]] auto Release() noexcept -> Pipeline {
         return std::move(handle);
     }
+
+  private:
+    template <size_t, bool, typename>
+    friend class PipelineBuilder;
+    struct BuilderToken {};
+    explicit TypedPipeline(Pipeline&& p, BuilderToken) noexcept: handle(std::move(p)) {
+    }
+
+    Pipeline handle;
 };
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
@@ -184,27 +170,6 @@ class ScopedRendering {
     VkCommandBuffer _cmd;
 };
 
-class CommandBufferGuard {
-  public:
-    explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
-    CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept;
-    ~CommandBufferGuard() noexcept;
-
-    void End() noexcept;
-
-    [[nodiscard]] VkCommandBuffer get() const noexcept {
-        return cmd;
-    }
-
-    CommandBufferGuard(const CommandBufferGuard&)            = delete;
-    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
-    CommandBufferGuard(CommandBufferGuard&& other) noexcept;
-    CommandBufferGuard& operator=(CommandBufferGuard&& other) noexcept;
-
-  private:
-    VkCommandBuffer cmd {};
-};
-
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
@@ -240,10 +205,6 @@ inline void CopyBufferToImage(
 template <GpuTriviallyCopyable T>
 void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages, const T& value) noexcept;
 
-[[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
-    return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
-}
-
 inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -252,17 +213,19 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
 }
 
+// Only an ended command buffer can be submitted. The token is consumed even
+// if submission fails; the pool still owns the underlying buffer.
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
-    VkQueue                                        queue,
-    std::span<const VkCommandBufferSubmitInfo>     cmds,
-    std::span<const VkSemaphoreSubmitInfo>         waits   = {},
-    std::span<const VkSemaphoreSubmitInfo>         signals = {},
-    VkFence                                        fence   = VK_NULL_HANDLE
+    VkQueue                                queue,
+    ExecutableCommands                    cmds,
+    std::span<const VkSemaphoreSubmitInfo> waits   = {},
+    std::span<const VkSemaphoreSubmitInfo> signals = {},
+    VkFence                                fence   = VK_NULL_HANDLE
 ) noexcept;
 
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue               queue,
-    VkCommandBuffer       cmd,
+    ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
     uint64_t              waitValue       = 0,
     VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -275,7 +238,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
 template <QueueType QType>
 [[nodiscard]] inline std::expected<void, ErrorCode> QueueSubmit(
     const Context&        ctx,
-    CommandBuffer<QType>  cmd,
+    ExecutableCommands   cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
     uint64_t              waitValue       = 0,
     VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -284,7 +247,7 @@ template <QueueType QType>
     VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkFence               fence           = VK_NULL_HANDLE
 ) noexcept {
-    return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
+    return QueueSubmit(ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
@@ -362,7 +325,8 @@ void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) 
 template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t;
 
-void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height);
+void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height,
+                     VkPipelineStageFlags2 shaderReadStage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
 // NOLINTEND(misc-misplaced-const, readability-avoid-const-params-in-decls)
 

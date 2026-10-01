@@ -3,13 +3,16 @@
 
 #pragma once
 
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
+class RenderContext;
 
 class DecalSystem {
   public:
-    static void Update(SystemContext& ctx);
+    static void Update(ECS::Query<const Components::DecalComponent, const Components::WorldTransformComponent> decals,
+                       ECS::ResMut<RenderContext> render);
 };
 
 }

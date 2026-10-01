@@ -61,7 +61,7 @@ void SystemGraph::DeclareExternalWrites(const char* label, std::vector<Component
 [[nodiscard]] bool SystemGraph::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
     for (const auto& accA: systemA.access_pattern) {
         for (const auto& accB: systemB.access_pattern) {
-            if (accA.familyId == accB.familyId) {
+            if (accA.familyId == accB.familyId || accA.familyId == AllComponents || accB.familyId == AllComponents) {
                 if (accA.mode == Access::Write || accB.mode == Access::Write) {
                     return true;
                 }

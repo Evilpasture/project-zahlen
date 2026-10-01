@@ -22,16 +22,18 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     impl.BindHeapsAndPushFrame(cmd);
 
-    FrameRecorder recorder(cmd, impl);
+    PassContext passCtx(cmd, impl);
     const GBufferTargets in = GBufferSceneTargets(impl);
 
-    Vk::DynamicPass(in.sceneColor.extent)
+    Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(impl.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.clearcoat, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.anisotropy, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
+        .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < impl.queues.Draws().size(); ++i) {
@@ -41,12 +43,12 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
                     continue;
                 }
 
-                if (!drawCmd.material->pipeline.Valid()) {
+                if (drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive());
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive());
             }
         });
 }

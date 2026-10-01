@@ -6,15 +6,34 @@
 
 #include <Zahlen/FileSystem/AssetCache.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
+#include <Zahlen/Render/EnvironmentImage.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/RadianceMap.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <cstdint>
+#include <expected>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
+
+class RenderContext;
+
+// Borrowed linear RGBA pixels from AssetManager's cache. The view remains
+// valid until ClearCache or the manager's destruction; never hold it across
+// either operation (or concurrently with a cache clear).
+struct EnvironmentImageView {
+    std::span<const float> rgba {};
+    std::span<const float> lightingRgba {};
+    std::optional<EnvironmentSun> sun;
+    uint32_t               width       = 0;
+    uint32_t               height      = 0;
+    uint64_t               contentHash = 0;
+};
 
 namespace TaskSystem {
 struct Counter;
@@ -36,6 +55,9 @@ struct CookedTextureHeader {
     uint32_t dataSize;
 };
 
+// Version 6 payload: positions[vertexCount], tangentFrames[vertexCount],
+// surfaces[vertexCount], optional skins[vertexCount], indices[indexCount],
+// then the three meshlet streams. All vertices use independent SoA buffers.
 struct CookedMeshHeader {
     uint32_t magic;
     uint32_t version;
@@ -95,7 +117,7 @@ using AssetLoadRequest = FS::LoadRequest;
 class AssetManager {
   public:
     AssetManager() = default;
-    ~AssetManager() = default;
+    ~AssetManager();
 
     AssetManager(const AssetManager&)            = delete;
     AssetManager& operator=(const AssetManager&) = delete;
@@ -114,6 +136,8 @@ class AssetManager {
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
 
     ModelPrefab* GetCachedPrefab(uint64_t hash);
+    // Bind the uploading renderer via UseRenderContext before caching a prefab
+    // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
@@ -121,9 +145,27 @@ class AssetManager {
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
-    RadianceMap* GetCachedRadiance(uint64_t hash);
-    void CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map);
+    // The application or an optional asset tool supplies prepared linear RGBA
+    // pixels under the key named by EnvironmentMapComponent::source. Core does
+    // not read files or decode radiance formats. Zero dimensions and mismatched
+    // pixel counts are rejected without changing the cache; RenderContext also
+    // enforces its GPU bake size limit. A zero contentHash is valid: the
+    // renderer hashes the pixels when needed.
+    [[nodiscard]] auto CacheEnvironmentImage(std::string_view key, EnvironmentImage image) -> bool;
+    // Missing keys do not trigger I/O. The returned pixels are borrowed until
+    // ClearCache or AssetManager destruction; registering a new image for a key
+    // leaves earlier views alive until then.
+    [[nodiscard]] auto FindEnvironmentImage(std::string_view key) const noexcept -> std::optional<EnvironmentImageView>;
 
+    // Cached model parts own their GPU buffers, shared by all instances of
+    // each prefab. The context must outlive the cache (Kernel enforces this).
+    // Importers bind their context before caching newly uploaded parts.
+    void UseRenderContext(RenderContext& ctx) noexcept;
+    // Drop old-device handles without issuing GPU work; Kernel calls this
+    // before destroying the context during device-loss recovery.
+    void InvalidateGPUMeshes() noexcept;
+    // Evicts prefabs and releases their meshes. As with the existing raw
+    // ModelPrefab* API, first remove scene instances referencing those prefabs.
     void ClearCache() noexcept;
     void ClearFontCache() noexcept;
 
@@ -134,11 +176,16 @@ class AssetManager {
     [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem& { return _vfs; }
 
   private:
+    void ReleaseCachedMeshBuffers() noexcept;
+
+    // Borrowed from Kernel/GLTF's upload context, never a renderer-owned
+    // mesh ledger. Cleared before the context is replaced on device loss.
+    RenderContext* _renderContext = nullptr;
     FS::VirtualFileSystem _vfs;
 
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
-    FS::AssetCache<RadianceMap> _radianceCache;
+    FS::AssetCache<EnvironmentImage> _environmentImages;
 };
 
 }

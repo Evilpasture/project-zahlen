@@ -4,8 +4,10 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <cstdint>
 #include <expected>
 #include <string>
+#include <vector>
 
 // --- Mock Components for Testing ---
 struct PositionComponent {
@@ -24,6 +26,20 @@ struct TagComponent {
 
 struct FlagComponent {
     bool active = true;
+};
+
+struct PayloadComponent {
+    uint32_t resource = 0;
+};
+
+struct CountedComponent {
+    uint32_t* destructions = nullptr;
+
+    ~CountedComponent() {
+        if (destructions != nullptr) {
+            ++*destructions;
+        }
+    }
 };
 
 enum class ECSTestError : uint8_t {
@@ -136,6 +152,84 @@ struct ECSTestSuite {
 
             ZHLN::Test::ExpectTrue(reg.Get<FlagComponent>(e2) != nullptr);
 
+            return {};
+        }
+
+        // Plain ECS stays immediate: it owns only component storage, not the
+        // resources a scene's component handles may refer to.
+        std::expected<void, ZHLN::ErrorCode> data_only_registry_lifecycle_is_immediate() {
+            ZHLN::ECS::Registry reg;
+            const auto a = reg.Create(PayloadComponent {.resource = 1});
+            const auto b = reg.Create(PayloadComponent {.resource = 2});
+            reg.Add(a, PayloadComponent {.resource = 3});
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(a)->resource, 3u);
+            reg.Remove<PayloadComponent>(a);
+            ZHLN::Test::ExpectTrue(reg.Get<PayloadComponent>(a) == nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(b)->resource, 2u);
+            reg.Destroy(b);
+            ZHLN::Test::ExpectFalse(reg.IsAlive(b));
+
+            const auto recycled = reg.Create(PayloadComponent {.resource = 4});
+            reg.Remove<PayloadComponent>(b); // stale generation cannot affect the recycled entity
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(recycled)->resource, 4u);
+            reg.Clear();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(recycled));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> dynamic_add_cannot_overwrite_typed_owners() {
+            ZHLN::ECS::Registry reg;
+            reg.RegisterComponent<PositionComponent>("PositionComponent");
+            const auto entity = reg.Create(PositionComponent {.x = 9.0f});
+            const auto typedFamily = ZHLN::ECS::ComponentFamily::GetTypeID<PositionComponent>();
+            ZHLN::Test::ExpectTrue(reg.AddDynamic(entity, typedFamily) == nullptr);
+            ZHLN::Test::ExpectTrue(reg.AddDynamic(entity, 0xFFFFFFFFu) == nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PositionComponent>(entity)->x, 9.0f);
+            ZHLN::Test::ExpectEq(reg.RegisterComponentDynamic("PositionComponent", sizeof(PositionComponent), alignof(PositionComponent)), 0xFFFFFFFFu);
+
+            const auto dynamicFamily = reg.RegisterComponentDynamic("ECSDynamicDataOnlyTest", sizeof(uint32_t), alignof(uint32_t));
+            void* data = reg.AddDynamic(entity, dynamicFamily);
+            ZHLN::Test::ExpectTrue(data != nullptr);
+            ZHLN::Test::ExpectEq(reg.GetRawByFamily(entity, dynamicFamily), data);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> command_buffer_destroy_policy_keeps_components_for_cleanup() {
+            struct Marked {};
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::EntityCommandBuffer ecb(reg, [](ZHLN::ECS::Registry& registry, ZHLN::Entity entity) {
+                if (registry.IsAlive(entity) && registry.Get<Marked>(entity) == nullptr) {
+                    registry.Add(entity, Marked {});
+                }
+            });
+            const auto owner = reg.Create(PayloadComponent {.resource = 42});
+            ecb.DestroyEntity(owner);
+            ecb.DestroyEntity(owner);
+            ecb.Playback();
+            ZHLN::Test::ExpectTrue(reg.IsAlive(owner));
+            ZHLN::Test::ExpectTrue(reg.Get<Marked>(owner) != nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(owner)->resource, 42u);
+
+            // A batch system can inspect every marked component before it
+            // reclaims the entities. Snapshot because Destroy compacts sets.
+            const auto marked = reg.GetEntitiesWith<Marked>();
+            std::vector<ZHLN::Entity> pending(marked.begin(), marked.end());
+            for (auto entity: pending) {
+                reg.Destroy(entity);
+            }
+            ZHLN::Test::ExpectFalse(reg.IsAlive(owner));
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> registry_teardown_runs_component_destructors() {
+            uint32_t destructions = 0;
+            uint32_t beforeTeardown = 0;
+            {
+                ZHLN::ECS::Registry reg;
+                reg.Create(CountedComponent {.destructions = &destructions});
+                beforeTeardown = destructions; // Account for the Add temporary.
+            }
+            ZHLN::Test::ExpectEq(destructions, beforeTeardown + 1);
             return {};
         }
 

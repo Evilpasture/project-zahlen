@@ -268,7 +268,7 @@ auto Simulator::Save(const char* /*filename*/) const -> bool {
     // Let me update the header signature in your actual code to `bool Save(ECS::Registry& reg,
     // const char* filename) const;` For now, if the registry isn't passed, I can't save. I'll just
     // return false here and advise updating the header.)
-    ZHLN::Log("ERROR: Simulator::Save requires an ECS::Registry reference to serialize ALifeComponents!");
+    ZHLN::LogError("Simulator::Save requires an ECS::Registry reference to serialize ALifeComponents!");
     return false;
 }
 

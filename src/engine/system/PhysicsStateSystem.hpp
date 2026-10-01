@@ -4,19 +4,16 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Components.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
-class Engine;
-struct SystemContext;
-
-class ZHLN_API PhysicsStateSystem {
-  public:
-    static void Reconcile(Engine& engine) noexcept;
-};
+class PhysicsContext;
 
 class ZHLN_API VisualInterpolationSystem {
   public:
-    static void Update(SystemContext& ctx) noexcept;
+    static void Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
+                       ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept;
 };
 
 }

@@ -35,6 +35,10 @@ enum class BlueNoiseError : uint8_t {
     UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
+enum class TextureDataError : uint8_t {
+    InvalidPixels ZHLN_ANNOTATION(ZHLN::Description<"RGBA pixels do not match the texture's nonzero extent"> {}) = 1,
+};
+
 }
 
 namespace ZHLN {
@@ -58,23 +62,34 @@ auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optiona
 
 void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
 
+void RenderContext::UnregisterGPUMesh(AssetID id) noexcept { _impl->geometry.UnregisterMesh(id); }
+
+void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
+    // Mesh is a view; callers must unregister all aliases before releasing
+    // shared buffers. DestroyBuffer ignores invalid/already-retired handles.
+    const std::array buffers = {mesh.posBuffer,   mesh.tangentFrameBuffer, mesh.surfaceBuffer,       mesh.skinBuffer,
+                                mesh.indexBuffer, mesh.meshletBuffer,      mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
+    for (const BufferHandle handle: buffers) {
+        DestroyBuffer(handle);
+    }
+}
+
 void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
-auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
-    return _impl->geometry.GetOrCreateSkinnedScratchBuffer(entityKey, vertexCount);
+void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
+    if (const Material* mat = _impl->geometry.FindMaterial(id)) {
+        if (mat->pipeline != PipelineHandle::Invalid) {
+            _impl->pipelines.Destroy(mat->pipeline);
+        }
+        if (mat->prePassPipeline != PipelineHandle::Invalid) {
+            _impl->pipelines.Destroy(mat->prePassPipeline);
+        }
+        _impl->geometry.UnregisterMaterial(id);
+    }
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
     return _impl->geometry.CreateStorageBuffer(size, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
-}
-
-auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles) -> BufferHandle {
-    if (owner == Entity::Null()) {
-        return BufferHandle::Invalid;
-    }
-
-    const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    return _impl->geometry.GetOrCreateParticleBuffer(cacheKey, owner.Pack(), maxParticles * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
@@ -106,52 +121,23 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
-    _impl->geometry.ReleaseMeshBuffers();
+    _impl->geometry.ClearMeshes();
 
-    _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
-        if (mat.pipeline != PipelineHandle::Invalid) {
-            _impl->pipelines.Destroy(mat.pipeline);
-        }
-        if (mat.prePassPipeline != PipelineHandle::Invalid) {
-            _impl->pipelines.Destroy(mat.prePassPipeline);
-        }
-    });
+    _impl->pipelines.RetireAll(); // Also retires materials that were never registered by asset ID.
     _impl->geometry.ClearMaterials();
 
-    _impl->geometry.ReleaseSkinnedScratchBuffers();
-    _impl->geometry.ReleaseParticleBuffers();
-    _impl->geometry.ReleaseLedgers();
-
-    _impl->textureManager.Clear();
-
-    _impl->deletionQueue.BeginFrame(0);
-    _impl->deletionQueue.BeginFrame(1);
-}
-
-auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->geometry.Emitters2D();
-}
-
-auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->geometry.Emitters3D();
-}
-
-void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {
-    if (owner != Entity::Null() && buffer != BufferHandle::Invalid) {
-        _impl->geometry.TrackEntityBuffer(owner.Pack(), buffer);
+    for (const auto& entry: _impl->renderTextures) {
+        _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
     }
+    _impl->renderTextures.clear();
+    _impl->textureManager.Clear();
+    _impl->textureManager.RetireAll(); // WaitIdle above covers all pending texture slots.
+
+    _impl->deletionQueue.Drain();
 }
 
-void RenderContext::ReleaseEntityBuffers(Entity owner) { _impl->geometry.ReleaseOwner(owner.Pack()); }
-
-void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) { _impl->geometry.Reconcile(alive); }
-
-auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
-    return _impl->geometry.EntityBufferCount();
-}
-
-void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
-    Vk::Instance::UseDiagnostics({validationErrors, deviceLost});
+void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {
+    Vk::Instance::UseDiagnostics({&validationErrors, &deviceLost});
 }
 
 uint32_t RenderContext::ValidationErrorCount() noexcept {
@@ -283,21 +269,23 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
     return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
-auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(data, size, stride, Vk::BufferUsage::Storage);
+auto RenderContext::CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
+    return _impl->geometry.CreateStorageBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Storage);
 }
 
-auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateVertexBuffer(data, size, stride, Vk::BufferUsage::Vertex);
+auto RenderContext::CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
+    return _impl->geometry.CreateVertexBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Vertex);
 }
 
-auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->geometry.CreateIndexBuffer(data, size, Vk::BufferUsage::Index);
+auto RenderContext::CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle {
+    return _impl->geometry.CreateIndexBuffer(indices.data(), indices.size_bytes(), Vk::BufferUsage::Index);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
 
-void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
+void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept {
+    _impl->geometry.Update(handle, bytes.data(), bytes.size());
+}
 
 
 namespace {
@@ -350,7 +338,9 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const bool transmission = desc.transmissionFactor > 0.0f;
+    // When two shading models are authored together, unlit wins. Keep its
+    // coverage mode independent of the forward-only optical transmission path.
+    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
     const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
     auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
@@ -358,7 +348,10 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     }
 
     Material mat        = *basicMat;
-    mat.alphaMode       = transmission ? 2u : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
+    mat.unlit           = desc.unlit;
+    // Transmission chooses a forward pipeline, not an alpha-as-coverage mode.
+    // Preserve MASK (or OPAQUE) so the forward shader can apply the glTF mask.
+    mat.alphaMode       = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
     mat.alphaCutoff     = desc.alphaCutoff;
     mat.metallicFactor  = desc.metallic;
     mat.roughnessFactor = desc.roughness;
@@ -367,6 +360,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.pbrMap          = desc.pbrMap;
     mat.emissiveMap     = desc.emissiveMap;
     mat.transmissionFactor = desc.transmissionFactor;
+    mat.transmissionMap    = desc.transmissionMap;
     mat.iridescenceFactor  = desc.iridescenceFactor;
     mat.filmThicknessNm    = desc.filmThicknessNm;
     mat.filmThicknessMinNm = desc.filmThicknessMinNm;
@@ -382,9 +376,20 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.clearcoatMap             = desc.clearcoatMap;
     mat.clearcoatRoughnessMap    = desc.clearcoatRoughnessMap;
     mat.clearcoatNormalMap       = desc.clearcoatNormalMap;
+    mat.anisotropyStrength       = desc.anisotropyStrength;
+    mat.anisotropyRotation       = desc.anisotropyRotation;
+    mat.anisotropyMap            = desc.anisotropyMap;
+    mat.sheenColorFactor        = desc.sheenColorFactor;
+    mat.sheenRoughnessFactor    = desc.sheenRoughnessFactor;
+    mat.sheenColorMap           = desc.sheenColorMap;
+    mat.sheenRoughnessMap       = desc.sheenRoughnessMap;
+    mat.occlusionMap            = desc.occlusionMap;
+    mat.occlusionStrength       = desc.occlusionStrength;
+    mat.textureSamplers          = desc.textureSamplers;
+    mat.textureTransforms        = desc.textureTransforms;
 
-    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
-    std::ranges::copy(desc.emissive, mat.emissiveFactor);
+    mat.baseColorFactor = desc.baseColor;
+    mat.emissiveFactor  = desc.emissive;
 
     return mat;
 }
@@ -410,16 +415,40 @@ void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event)
     }
 }
 
-auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->textureManager.Upload2D(data, width, height, Rgba8Format(isSRGB));
+auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB) -> std::expected<TextureHandle, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->textureManager.UploadCube(faceData, width);
+auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB)
+    -> std::expected<TextureHandle, ErrorCode> {
+    const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
-    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, Rgba8Format(isSRGB));
+auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
+    if (faceSize == 0) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    const uint64_t pixelsPerFace = static_cast<uint64_t>(faceSize) * faceSize;
+    if (pixelsPerFace > std::numeric_limits<size_t>::max() / 4) {
+        return std::unexpected(TextureDataError::InvalidPixels);
+    }
+    const size_t bytesPerFace = static_cast<size_t>(pixelsPerFace) * 4;
+    std::array<const void*, 6> faceData {};
+    for (size_t i = 0; i < faces.size(); ++i) {
+        if (faces[i].size() != bytesPerFace) {
+            return std::unexpected(TextureDataError::InvalidPixels);
+        }
+        faceData[i] = faces[i].data();
+    }
+    return _impl->textureManager.UploadCube(faceData.data(), faceSize);
 }
 
 void RenderContext::UnloadTexture(TextureHandle handle) {
@@ -444,13 +473,13 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         return std::unexpected(imageRes.error());
     }
 
+    Vk::Image image = std::move(*imageRes);
+    defer _([&] { allocator.DestroyImage(image); });
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
     std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
-
-    Vk::Image image = std::move(*imageRes);
 
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
@@ -458,18 +487,18 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         const VkBufferImageCopy2 region = {
             .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
             .pNext             = nullptr,
-            .bufferOffset      = staging.offset,
+            .bufferOffset      = staging.slice.offset,
             .bufferRowLength   = 0,
             .bufferImageHeight = 0,
             .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
             .imageOffset       = {0, 0, 0},
             .imageExtent       = {w, h, 1},
         };
-        Vk::CopyBufferToImage<1>(cmd, staging.buffer, image.Handle(), {region});
+        Vk::CopyBufferToImage<1>(cmd, staging.slice.buffer, image.Handle(), {region});
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
-    auto viewRes = Vk::CreateView<kFormat>(ctx.Device(), image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = Vk::ImageView::Create<kFormat>(ctx.Device(), image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
@@ -485,11 +514,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     blueNoiseSampler     = std::move(*samplerRes);
     blueNoiseSamplerInfo = samplerBuilder.Info();
-    blueNoiseWidth       = w;
-    blueNoiseHeight      = h;
-    blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-
-    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view), kFormat, 1, false);
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }
@@ -504,7 +529,7 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
 }
 
-void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const {
+void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) {
     if (!ctx.RayTracingSupported() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
         return;
     }
@@ -523,7 +548,8 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     ZHLN_AccelerationStructureSizes sizes {};
     Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
 
-    if (!scratchMesh->blas) {
+    const bool creatingBlas = !scratchMesh->blas;
+    if (creatingBlas) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
             Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
@@ -536,6 +562,10 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
             ctx.Device(),
             Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
         );
+        if (!scratchMesh->blas.Valid()) {
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            return;
+        }
         scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
     }
 
@@ -543,55 +573,79 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!scratchBufOpt) {
+        // No build was recorded: do not leave an uninitialized AS for the
+        // next frame to treat as an existing, updateable BLAS.
+        if (creatingBlas) {
+            scratchMesh->blas = {};
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            scratchMesh->blasAddress = 0;
+        }
         return;
     }
-    Vk::Buffer      scratchBuf     = std::move(*scratchBufOpt);
-    VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
-
-    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), scratchAddress, primitiveCount);
+    Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
+    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
+    deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
 }
 
-void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
+uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces) noexcept {
+    if (positions.size() != surfaces.size()) {
+        ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
+        return 0;
+    }
     auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
-        return;
+        return 0;
     }
 
-    size_t maxPosSize  = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
-    size_t maxAttrSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexAttributes);
+    constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
-    auto  mapped  = nativeMesh->buffer.Map();
+    auto  mapped  = nativeMesh->buffer.Map(_impl->allocator.Get());
     char* basePtr = static_cast<char*>(mapped.data);
+    if (basePtr == nullptr) return 0;
 
-    std::memcpy(basePtr, posData, std::min(posSize, maxPosSize));
-    std::memcpy(basePtr + maxPosSize, attrData, std::min(attrSize, maxAttrSize));
-
-    nativeMesh->vertexCount = std::min(vertexCount, RenderContext::Impl::kMaxDebugVertices);
+    const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
+    if (count > 0) {
+        std::memcpy(basePtr, positions.data(), count * sizeof(VertexPosition));
+        std::memcpy(basePtr + maxPosSize, surfaces.data(), count * sizeof(VertexSurface));
+    }
+    nativeMesh->vertexCount = static_cast<uint32_t>(count);
+    return nativeMesh->vertexCount;
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
     return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
 }
 
-void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
-    if (count == 0) {
+void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices) {
+    if (matrices.empty()) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->presenter.frameIndex].Map();
-    auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
-
-    std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
+    auto& buffer = _impl->frames.jointBuffers[_impl->presenter.frameIndex];
+    if (offset > buffer.Size() / sizeof(JPH::Mat44) || matrices.size() > buffer.Size() / sizeof(JPH::Mat44) - offset) {
+        ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
+        return;
+    }
+    auto mapped = buffer.Map(_impl->allocator.Get());
+    auto* gpuJoints = mapped.As<JPH::Mat44>();
+    if (gpuJoints != nullptr) {
+        std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
+    }
 }
 
-auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> uint32_t {
-    uint32_t offset = _impl->nextMorphDeltaIndex;
-
-    auto   mappedRegion = _impl->morphDeltasBuffer.Map();
-    float* gpuDeltas    = std::bit_cast<float*>(mappedRegion.data) + (static_cast<size_t>(offset * 4));
-
-    std::memcpy(gpuDeltas, deltas, count * sizeof(float) * 4);
-
-    _impl->nextMorphDeltaIndex += count;
+auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
+    const uint32_t offset = _impl->nextMorphDeltaIndex;
+    const size_t capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
+    if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
+        ZHLN::Assert(false, "morph deltas must fit in the buffer as complete float4s");
+        return offset;
+    }
+    if (!deltas.empty()) {
+        auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator.Get());
+        if (auto* gpuDeltas = mapped.As<float>()) {
+            std::memcpy(gpuDeltas + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
+        }
+    }
+    _impl->nextMorphDeltaIndex += static_cast<uint32_t>(deltas.size() / 4);
     return offset;
 }
 
@@ -617,8 +671,8 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
         if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
-            ZHLN::Log(
-                "WARN: failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
+            ZHLN::LogWarning(
+                "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
             );
             incoming.shadows.resolution = settings.shadows.resolution;
@@ -650,118 +704,88 @@ void RenderContext::SetAAState(const AAState& state) {
 #endif
 
 auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
-    auto* impl = _impl.get();
+    auto& impl = *_impl;
+    if (!impl.ctx.RayTracingSupported()) return std::unexpected(RenderFeatureError::FeatureNotSupported);
+    // MeshBuilder and the glTF importer report this specific resolution error.
+    auto* posMesh = impl.geometry.Resolve(mesh.posBuffer);
+    if (posMesh == nullptr) return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+    auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    struct BuildContext {
-        NativeMesh*                     posMesh;
-        NativeMesh*                     indexMesh;
-        ZHLN_BlasGeometryDesc           geom;
-        uint32_t                        primitiveCount;
-        ZHLN_AccelerationStructureSizes sizes;
-        Vk::Buffer                      blasBuffer;
-        Vk::AccelerationStructure       blas;
-        Vk::Buffer                      scratch;
+    const ZHLN_BlasGeometryDesc geom {
+        .vertex_data = posMesh->vboAddress,
+        .vertex_stride = sizeof(VertexPosition),
+        .max_vertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
+        .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
+        .index_data = indexMesh != nullptr ? indexMesh->vboAddress : 0,
+        .index_type = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
+    const uint32_t primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    ZHLN_AccelerationStructureSizes sizes {};
+    Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount, sizes);
 
-    return std::expected<void, ErrorCode>()
-        .and_then([&]() -> std::expected<BuildContext, ErrorCode> {
-            if (!impl->ctx.RayTracingSupported()) {
-                return std::unexpected(RenderFeatureError::FeatureNotSupported);
-            }
-            // The only caller chain that ever read the resolve failure: it is
-            // logged as a warning by MeshBuilder and the glTF importer, so it
-            // keeps a code of its own rather than collapsing into nullopt.
-            auto* pos = impl->geometry.Resolve(mesh.posBuffer);
-            if (pos == nullptr) [[unlikely]] {
-                return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
-            }
+    auto bufferRes = Vk::Buffer::Create(
+        impl.allocator.Get(), sizes.acceleration_structure_size,
+        Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+    );
+    if (!bufferRes) return std::unexpected(bufferRes.error());
+    defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
+    Vk::AccelerationStructure blas(
+        impl.ctx.Device(), Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+    );
+    if (!blas.Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
 
-            auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
-            return BuildContext {
-                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
-            };
-        })
-        .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.geom = {
-                .vertex_data   = b.posMesh->vboAddress,
-                .vertex_stride = sizeof(VertexPosition),
-                .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
-                .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-                .index_data    = (b.indexMesh != nullptr) ? b.indexMesh->vboAddress : 0,
-                .index_type    = (b.indexMesh != nullptr) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
-            };
-            b.primitiveCount = (b.indexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    auto scratchRes = Vk::Buffer::Create(
+        impl.allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+        Vk::MemoryUsage::GPUOnly
+    );
+    if (!scratchRes) return std::unexpected(scratchRes.error());
+    defer _([&] { impl.allocator.DestroyBuffer(*scratchRes); });
 
-            Vk::GetBLASSizes(impl->ctx.Device(), b.geom, b.primitiveCount, b.sizes);
+    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphics_family);
+    auto allocated = tempPool.Allocate(1);
+    if (!allocated) return std::unexpected(allocated.error());
+    auto recording = Vk::CommandRecorder::Begin(tempPool[0]);
+    if (!recording) return std::unexpected(recording.error());
+    const VkCommandBuffer cmd = recording->Handle();
+    Vk::MemoryBarrier(cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
+                      Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead);
+    Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
+    auto executable = std::move(*recording).End();
+    if (!executable) return std::unexpected(executable.error());
 
-            return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
-            )
-                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
-                    b.blasBuffer = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b);
-                });
-        })
-        .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.blas = Vk::AccelerationStructure(
-                impl->ctx.Device(),
-                Vk::CreateAccelerationStructure(impl->ctx.Device(), b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
-            );
-            if (!b.blas) {
-                return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
-            }
+    auto submitted = Vk::SubmitAndWait(
+        impl.ctx.GraphicsQueue(), std::move(*executable), impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
+        VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+    );
+    if (!submitted) {
+        vkQueueWaitIdle(impl.ctx.GraphicsQueue());
+        return std::unexpected(submitted.error());
+    }
 
-            return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                       Vk::MemoryUsage::GPUOnly
-            )
-                .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
-                    b.scratch = std::forward<decltype(buffer)>(buffer);
-                    return std::move(b);
-                });
-        })
-        .and_then([&](BuildContext b) -> std::expected<void, ErrorCode> {
-            Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl->ctx.Device(), impl->ctx.PhysicalInfo().graphics_family);
-            auto                                     alloc_res = tempPool.Allocate(1);
-            if (!alloc_res) [[unlikely]] {
-                return std::unexpected(alloc_res.error());
-            }
-
-            VkCommandBuffer tempCmd = tempPool[0];
-            {
-                Vk::CommandBufferGuard guard(tempCmd);
-
-                Vk::MemoryBarrier(
-                    tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
-                    Vk::BarrierAccess::AccelerationStructureRead
-                );
-                Vk::BuildBLAS(tempCmd, b.geom, b.blas.Get(), Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
-            }
-
-            return Vk::SubmitAndWait(
-                       impl->ctx.GraphicsQueue(), tempCmd, impl->transferRingBuffer.GetSemaphore(), impl->transferRingBuffer.GetCurrentValue(),
-                       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
-            )
-                .transform_error([](auto err) -> ErrorCode { return err; })
-                .transform([&]() -> void {
-                    b.posMesh->blasBuffer  = std::move(b.blasBuffer);
-                    b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas.Get());
-                    b.posMesh->blas        = std::move(b.blas);
-                });
-        });
+    // The old BLAS may still be referenced by another in-flight frame.
+    impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
+    impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
+    posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get());
+    posMesh->blasBuffer = std::move(*bufferRes);
+    posMesh->blas = std::move(blas);
+    return {};
 }
 
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
-    -> std::expected<uint32_t, ErrorCode> {
+    -> std::expected<TextureHandle, ErrorCode> {
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
-    const auto uploaded = _impl->textureManager.Upload(name, pixels, width, height, Rgba8Format(isSRGB));
+auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB) -> TextureHandle {
+    const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
+    if (expectedPixels == 0 || expectedPixels != pixels.size()) {
+        ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
+        return TextureHandle::Invalid;
+    }
+    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
     if (!uploaded) {
-        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, width, height, uploaded.error());
+        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureHandle::Invalid;
     }
     return *uploaded;
@@ -771,53 +795,25 @@ enum class ScreenshotError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
     ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
     DestinationNotRecorded
-        ZHLN_ANNOTATION(ZHLN::Description<"The frame's destination was never drawn into; the image holds the background fill, not a frame"> {}),
+        ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
 
     if (!impl->presenter.swapchain.Valid()) {
-        VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
-        VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
-        VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        if (auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
-            const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
-            if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
-                const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
-
-                const auto receipt = record.GetRenderedContent();
-                if (!receipt) {
-                    ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-                if (!receipt->has_value()) {
-                    ZHLN::Log(
-                        "[Test Capture] Destination 0x{:016X} was not written this frame (its contents are undefined); capture refused.",
-                        record.handle.Raw()
-                    );
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-                if (!(*receipt)->Drawn()) {
-                    ZHLN::Log(
-                        "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
-                        record.handle.Raw()
-                    );
-                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
-                }
-
-                if (record.image.handle != source) {
-                    ZHLN::Log(
-                        "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                        reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
-                    );
-                }
-                source = record.image.handle;
-                extent = record.image.Extent2D();
-                sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
-            }
+        const auto* dest = impl->destinations.Find(impl->presentationTarget);
+        if (impl->frameOpen || dest == nullptr || !dest->acquired || !dest->acquired->drawn) {
+            // A headless target starts UNDEFINED. If rendering failed before
+            // acquisition, treating it as COLOR_ATTACHMENT here makes the
+            // readback barrier invalid and writes a black success image.
+            ZHLN::Log("[Test Capture] No completed headless frame was drawn; capture refused.");
+            return std::unexpected(ScreenshotError::DestinationNotRecorded);
         }
+        const auto& frameImage = *dest->acquired;
+        VkImage       source       = frameImage.image.Handle();
+        VkExtent2D    extent       = frameImage.image.Extent2D();
+        VkImageLayout sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
 
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
@@ -826,6 +822,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(stagingRes.error());
         }
         auto stagingBuffer = std::move(*stagingRes);
+        defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
             const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
@@ -859,7 +856,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
         });
 
-        auto mapped = stagingBuffer.Map();
+        auto mapped = stagingBuffer.Map(impl->allocator.Get());
         if (mapped.data == nullptr) {
             return std::unexpected(ScreenshotError::ReadbackFailed);
         }
@@ -934,6 +931,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         return std::unexpected(stagingRes.error());
     }
     auto stagingBuffer = std::move(*stagingRes);
+    defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
     Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
         auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
@@ -943,7 +941,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
     });
 
-    auto mapped = stagingBuffer.Map();
+    auto mapped = stagingBuffer.Map(impl->allocator.Get());
     if (mapped.data == nullptr) {
         return std::unexpected(ScreenshotError::ReadbackFailed);
     }

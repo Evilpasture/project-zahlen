@@ -6,21 +6,10 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Log.hpp>
+#include <atomic>
+
 namespace ZHLN::Vk {
-
-struct SecondaryInheritance {
-    std::span<const VkFormat> colorFormats;
-    VkFormat                  depthFormat = VK_FORMAT_UNDEFINED;
-    VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
-
-    const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
-    const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;
-
-    std::span<const uint32_t>        pushDataFrameOffsets;
-    std::span<const VkDeviceAddress> pushDataFrameAddresses;
-
-    VkViewport viewport {};
-};
 
 namespace detail {
 struct ParallelForCallback {
@@ -36,7 +25,6 @@ template <ParallelScheduler SchedulerT, typename CmdProviderFn, typename RecordF
 inline void ParallelDrawDispatch(
     VkCommandBuffer             primaryCmd,
     const SecondaryInheritance& inheritDesc,
-    VkExtent2D                  extent,
     uint32_t                    drawCount,
     uint32_t                    chunkSize,
     SchedulerT&&                scheduler,
@@ -49,6 +37,8 @@ inline void ParallelDrawDispatch(
     }
 
     std::vector<VkCommandBuffer> secondaries(num_chunks, VK_NULL_HANDLE);
+    std::atomic<bool> recordingFailed {false};
+    std::atomic<uint32_t> recordedCount {0};
 
     const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
         .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
@@ -57,13 +47,14 @@ inline void ParallelDrawDispatch(
         .pResourceHeapBindInfo = inheritDesc.resourceHeapBindInfo,
     };
 
+    const auto colorFormats = inheritDesc.ColorFormats();
     VkCommandBufferInheritanceRenderingInfo inherit = {
         .sType                   = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
         .pNext                   = nullptr,
         .flags                   = 0,
-        .viewMask                = 0,
-        .colorAttachmentCount    = static_cast<uint32_t>(inheritDesc.colorFormats.size()),
-        .pColorAttachmentFormats = inheritDesc.colorFormats.data(),
+        .viewMask                = inheritDesc.viewMask,
+        .colorAttachmentCount    = static_cast<uint32_t>(colorFormats.size()),
+        .pColorAttachmentFormats = colorFormats.empty() ? nullptr : colorFormats.data(),
         .depthAttachmentFormat   = inheritDesc.depthFormat,
         .stencilAttachmentFormat = inheritDesc.stencilFormat,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT
@@ -86,14 +77,13 @@ inline void ParallelDrawDispatch(
     std::forward<SchedulerT>(scheduler).ParallelFor(drawCount, chunkSize, [&](uint32_t start, uint32_t end, uint32_t chunkIdx) noexcept {
         VkCommandBuffer sec_cmd = std::forward<CmdProviderFn>(cmdProvider)(chunkIdx);
 
-        const VkCommandBufferBeginInfo begin_info = {
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext            = nullptr,
-            .flags            = VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = &p_inherit
-        };
-
-        CommandBufferGuard recordGuard(sec_cmd, begin_info);
+        auto recording = CommandRecorder::Begin(
+            sec_cmd, VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT | VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &p_inherit
+        );
+        if (!recording) {
+            recordingFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
 
         if (!inheritDesc.pushDataFrameAddresses.empty()) {
             PushHeapFrameAddresses(sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
@@ -101,25 +91,10 @@ inline void ParallelDrawDispatch(
 
         CommandEncoder encoder(sec_cmd);
 
-        const bool useVp = inheritDesc.viewport.width > 1.0F && inheritDesc.viewport.height > 1.0F;
-        const VkViewport viewport = useVp ? inheritDesc.viewport :
-            VkViewport {
-                .x        = 0.0F,
-                .y        = 0.0F,
-                .width    = static_cast<float>(extent.width),
-                .height   = static_cast<float>(extent.height),
-                .minDepth = 0.0F,
-                .maxDepth = 1.0F
-            };
+        const VkViewport viewport = inheritDesc.viewport;
         const VkRect2D scissor = {
-            .offset = {
-                .x = useVp ? static_cast<int32_t>(inheritDesc.viewport.x) : 0,
-                .y = useVp ? static_cast<int32_t>(inheritDesc.viewport.y) : 0
-            },
-            .extent = {
-                .width  = useVp ? static_cast<uint32_t>(inheritDesc.viewport.width) : extent.width,
-                .height = useVp ? static_cast<uint32_t>(inheritDesc.viewport.height) : extent.height
-            }
+            .offset = {.x = static_cast<int32_t>(viewport.x), .y = static_cast<int32_t>(viewport.y)},
+            .extent = {.width = static_cast<uint32_t>(viewport.width), .height = static_cast<uint32_t>(viewport.height)}
         };
         vkCmdSetViewport(sec_cmd, 0, 1, &viewport);
         vkCmdSetScissor(sec_cmd, 0, 1, &scissor);
@@ -128,11 +103,24 @@ inline void ParallelDrawDispatch(
             recordFn(encoder, i);
         }
 
-        recordGuard.End();
-        secondaries[chunkIdx] = sec_cmd;
+        auto executable = std::move(*recording).End();
+        if (!executable) {
+            recordingFailed.store(true, std::memory_order_relaxed);
+            return;
+        }
+        secondaries[chunkIdx] = executable->Handle();
+        recordedCount.fetch_add(1, std::memory_order_relaxed);
     });
 
-    Vk::ExecuteCommands(primaryCmd, secondaries);
+    if (recordingFailed.load(std::memory_order_relaxed)) {
+        ZHLN::Log("[Vk] Secondary command recording failed; skipping parallel draw batch.");
+        return;
+    }
+    // Some schedulers coalesce chunks, so execute only the buffers actually
+    // recorded (their indices are contiguous from zero).
+    if (const uint32_t count = recordedCount.load(std::memory_order_relaxed); count > 0) {
+        Vk::ExecuteCommands(primaryCmd, std::span<const VkCommandBuffer> {secondaries.data(), count});
+    }
 }
 
 }

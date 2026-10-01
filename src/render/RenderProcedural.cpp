@@ -17,16 +17,9 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    const void*           cs_code = nullptr;
-    size_t                cs_size = 0;
-    std::vector<uint32_t> disk_cs;
-
-    LoadShaderData(
-        MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>(), cs_code, cs_size,
-        disk_cs
-    );
-
-    ZHLN_ShaderDesc shaderDesc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
+    const auto source = MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>();
+    const auto loaded = LoadShaderData(source);
+    const ZHLN_ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
 
     struct BakeSpec {
         int bakeType = 0;
@@ -58,23 +51,23 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 #endif
 
 auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-    -> std::expected<uint32_t, ErrorCode> {
+    -> std::expected<TextureHandle, ErrorCode> {
     auto* const device = ctx.Device();
 
     return Vk::ImageBuilder {}
         .Texture2D(width, height, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
-        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
-            auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
+            defer _([&] { allocator.DestroyImage(gpuImage); });
+            auto view_res = Vk::ImageView::Create<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!view_res) {
                 return std::unexpected(view_res.error());
             }
             auto writeView = std::move(*view_res);
 
-            const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
-                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(writeView)
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
@@ -92,7 +85,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            return textureManager.Adopt(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
+            return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), width, height);
         });
 }
 

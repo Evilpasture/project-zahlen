@@ -25,7 +25,7 @@ file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
 # The shared slang the entry points import: every cook and the catalog's
 # in-process replay read these, so both commands depend on them. Stated once
-# because the alternative is two thirteen-file lists drifting apart -- the
+# because the alternative is two shared-source lists drifting apart -- the
 # last file added to one and not the other is a stale catalog nobody notices.
 set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/uniforms.slang"
@@ -39,6 +39,10 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/vertex_format.slang"
     "${SHADER_SRC_DIR}/particles.slang"
     "${SHADER_SRC_DIR}/material_model.slang"
+    "${SHADER_SRC_DIR}/gpu_buffer.slang"
+    "${SHADER_SRC_DIR}/math/math.slang"
+    "${SHADER_SRC_DIR}/math/phase.slang"
+    "${SHADER_SRC_DIR}/math/transform.slang"
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
 )
@@ -140,15 +144,17 @@ else()
             message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
         endif()
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
-        if(TARGET slang-bootstrap)
+        # The vendored bootstrap needs a console entry point on Windows. These
+        # MinGW/Clang linker flags are not understood by macOS ld or Linux.
+        if(WIN32 AND TARGET slang-bootstrap)
             target_link_options(slang-bootstrap PRIVATE
-            -mconsole
-            -municode
-            -Wl,-subsystem,console
-        )
+                -mconsole
+                -municode
+                -Wl,-subsystem,console
+            )
             set_target_properties(slang-bootstrap PROPERTIES
-            WIN32_EXECUTABLE FALSE
-        )
+                WIN32_EXECUTABLE FALSE
+            )
         endif()
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)

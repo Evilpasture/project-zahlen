@@ -19,11 +19,10 @@ set_target_properties(zahlen_filesystem PROPERTIES
 target_include_directories(zahlen_filesystem
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/src
     PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
 target_link_libraries(zahlen_filesystem
     PUBLIC
         zahlen_threading

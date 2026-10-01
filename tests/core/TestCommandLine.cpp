@@ -4,7 +4,9 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/CommandLine.hpp>
 #include <array>
+#include <charconv>
 #include <expected>
+#include <string>
 
 struct CommandLineTestSuite {
     struct Tests {
@@ -40,6 +42,69 @@ struct CommandLineTestSuite {
             if (fennelRes) {
                 ZHLN::Test::ExpectEq(fennelRes->driver, ZHLN::GameplayDriver::Scripted);
             }
+
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> application_handlers_extend_the_engine_menu() {
+            std::string scenario;
+            float       ambientScale = 1.0f;
+            bool        engineWon    = false;
+
+            const std::array appHandlers = {
+                ZHLN::CommandHandler {
+                    .key         = "--scenario",
+                    .placeholder = "<file.json>",
+                    .description = "Path to the scenario (test only)",
+                    .action =
+                        [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                            scenario = v;
+                            return {};
+                        },
+                },
+                ZHLN::CommandHandler {
+                    .key         = "--ambient-scale",
+                    .placeholder = "<f>",
+                    .description = "Ambient scale (test only)",
+                    .action =
+                        [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                            const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), ambientScale);
+                            if (ec != std::errc {} || ptr != v.data() + v.size()) {
+                                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                            }
+                            return {};
+                        },
+                },
+                // Engine handlers win on key collisions: this must stay unreachable.
+                ZHLN::CommandHandler {
+                    .key         = "--vsync",
+                    .description = "Shadowed by the engine handler (test only)",
+                    .action =
+                        [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                            engineWon = true;
+                            return {};
+                        },
+                },
+            };
+
+            // Mixed spellings: `--flag=value` and `--flag value` both reach actions.
+            std::array<char*, 5> argv = {(char*) "zahlen", (char*) "--vsync=off", (char*) "--scenario", (char*) "level.json", (char*) "--ambient-scale=2.5"};
+            auto                 result = ZHLN::HandleCommandLine(argv, appHandlers);
+            ZHLN::Test::ExpectTrue(result.has_value());
+            if (result) {
+                ZHLN::Test::ExpectFalse(result->vsync);
+            }
+            ZHLN::Test::ExpectTrue(scenario == "level.json");
+            ZHLN::Test::ExpectTrue(ambientScale == 2.5f);
+            ZHLN::Test::ExpectFalse(engineWon);
+
+            // A failing application action fails the parse like an engine one.
+            std::array<char*, 2> badArgv = {(char*) "zahlen", (char*) "--ambient-scale=hot"};
+            ZHLN::Test::ExpectFalse(ZHLN::HandleCommandLine(badArgv, appHandlers).has_value());
+
+            // Application handlers do not weaken unknown-argument rejection.
+            std::array<char*, 3> unknownArgv = {(char*) "zahlen", (char*) "--some-unknown-flag", (char*) "--scenario=x"};
+            ZHLN::Test::ExpectFalse(ZHLN::HandleCommandLine(unknownArgv, appHandlers).has_value());
 
             return {};
         }

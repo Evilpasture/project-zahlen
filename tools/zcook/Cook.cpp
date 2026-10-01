@@ -6,9 +6,10 @@
 #include "BinaryReader.hpp"
 #include "GLB.hpp"
 #include "Transform.hpp"
+#include <AssetCooking/RadianceDecoder.hpp>
+#include <AssetCooking/RadianceEncoder.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -69,7 +70,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 4; // Version 4: separated SoA layouts + meshlet streams
+    meshHeader.version = 6; // Version 6: separate 8-byte tangent-frame and 12-byte surface streams
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =
@@ -101,8 +102,11 @@ int CookMesh(int argc, char** argv) {
         if (!compiled.positions.empty()) {
             std::fwrite(compiled.positions.data(), 1, compiled.positions.size() * sizeof(VertexPosition), out);
         }
-        if (!compiled.attributes.empty()) {
-            std::fwrite(compiled.attributes.data(), 1, compiled.attributes.size() * sizeof(VertexAttributes), out);
+        if (!compiled.tangentFrames.empty()) {
+            std::fwrite(compiled.tangentFrames.data(), 1, compiled.tangentFrames.size() * sizeof(VertexTangentFrame), out);
+        }
+        if (!compiled.surfaces.empty()) {
+            std::fwrite(compiled.surfaces.data(), 1, compiled.surfaces.size() * sizeof(VertexSurface), out);
         }
         if (compiled.isSkinned && !compiled.skins.empty()) {
             std::fwrite(compiled.skins.data(), 1, compiled.skins.size() * sizeof(VertexSkin), out);
@@ -162,21 +166,24 @@ int CookTexture(int argc, char** argv) {
     }
 
     // Non-.hdr stays a verbatim copy (offline_texture_cooking_passthrough).
-    // .hdr becomes the cooked radiance container the runtime already decodes,
-    // so a pak does not have to carry the raw panorama. The harness does not
-    // need this step: DecodeRadiance accepts a raw .hdr.
+    // .hdr becomes prepared ZRD2 (original sky, sunless IBL, optional sun).
+    // A host can explicitly decode source or cooked assets with AssetCooking.
     const auto ext = fs::path(inPath).extension().string();
     const bool isHdr = ext == ".hdr" || ext == ".HDR";
     if (isHdr) {
-        const auto decoded = ZHLN::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
+        const auto decoded = AssetCooking::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
         if (!decoded) {
             const ZHLN::Error err = decoded.error();
             std::println(stderr, "[zcook] ERROR: HDR decode failed: {} ({})", err.Message(), err.Name());
             std::fclose(out);
             return 1;
         }
-        const auto cooked = ZHLN::EncodeCookedRadiance(*decoded);
-        std::fwrite(cooked.data(), 1, cooked.size(), out);
+        const auto cooked = AssetCooking::EncodeCookedRadiance(*decoded);
+        if (cooked.empty() || std::fwrite(cooked.data(), 1, cooked.size(), out) != cooked.size()) {
+            std::println(stderr, "[zcook] ERROR: Could not write prepared HDR '{}'", outPath);
+            std::fclose(out);
+            return 1;
+        }
         std::fclose(out);
         return 0;
     }

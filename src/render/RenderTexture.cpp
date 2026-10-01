@@ -1,14 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "RenderInternal.hpp"
 #include <cstdint>
 #include <utility>
 
 namespace ZHLN {
 
-auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode> {
     if (width == 0 || height == 0 || ctx.Device() == VK_NULL_HANDLE) {
         return std::unexpected(Vk::DescriptorHeapError::AllocationFailed);
     }
@@ -21,51 +20,37 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         return std::unexpected(imageRes.error());
     }
     auto image = std::move(*imageRes);
+    defer _([&] { allocator.DestroyImage(image); });
 
-    auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
     auto view = std::move(*viewRes);
 
-    const VkImage     rawImage = image.Handle();
-    const VkImageView rawView  = view.Get();
-
-    auto bindless = textureManager.Adopt(std::move(image), std::move(view), format, 1, false);
+    auto bindless = textureManager.Adopt(std::move(image), std::move(view));
     if (!bindless) {
         return std::unexpected(bindless.error());
     }
 
-    const auto handle = destinations.Register(DestinationRegistry::Record {
+    const auto handle = static_cast<RenderTextureHandle>(nextRenderTextureId.fetch_add(1, std::memory_order_relaxed));
+    renderTextures.emplace(handle, RenderTexture {
+        .image = textureManager.Slice(*bindless, {width, height}),
         .bindlessIndex = *bindless,
-        .image         = Vk::MakeSlice(rawImage, rawView, {.width = width, .height = height}, format),
-        .presentable   = false,
-        .target        = nullptr,
     });
-
-    return handle.AsTexture();
+    return handle;
 }
 
-void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
-    const auto decoded = DestinationRegistry::Handle::FromTexture(handle);
-    if (!decoded.has_value() || decoded->Index() >= destinations.Records().size()) {
+void RenderContext::Impl::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
+    const auto it = renderTextures.find(handle);
+    if (it == renderTextures.end()) {
         return;
     }
-    DestinationRegistry::Record& record = destinations.Records()[decoded->Index()];
-    if (record.serial != decoded->Serial()) {
-        return;
-    }
-
-    const uint32_t bindlessIndex = record.bindlessIndex;
+    const uint32_t bindlessIndex = it->second.bindlessIndex;
+    renderTextures.erase(it);
     if (bindlessIndex > kFallbackNormalTextureIndex) {
         textureManager.ReleaseSlot(bindlessIndex);
     }
-    record.handle        = {};
-    record.serial        = 0;
-    record.image         = {};
-    record.bindlessIndex = 0;
-    record.trackedLayout = Vk::AttachmentLayout::Undefined;
-    record.content.reset();
 }
 
 }

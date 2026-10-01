@@ -41,10 +41,39 @@ public struct GlobalSceneRegistry {
     public Texture2D brdfLUT;
     public SamplerState clampSampler;
     public Texture2D<float4> texTransLighting;
+    public SamplerState materialSamplers[9]; // Three wrap modes on S x three on T.
     public Texture2D globalTextures[];
 };
 
 public ParameterBlock<GlobalSceneRegistry> scene;
+
+// MaterialTextureSlot in Render/Types.hpp uses this exact order. The first
+// eight four-bit sampler codes are packed in x and the remaining seven in y.
+public static const uint kSamplerAlbedo             = 0u;
+public static const uint kSamplerNormal             = 1u;
+public static const uint kSamplerPbr                = 2u;
+public static const uint kSamplerEmissive           = 3u;
+public static const uint kSamplerClearcoat          = 4u;
+public static const uint kSamplerClearcoatRoughness = 5u;
+public static const uint kSamplerClearcoatNormal    = 6u;
+public static const uint kSamplerAnisotropy         = 7u;
+public static const uint kSamplerIridescence        = 8u;
+public static const uint kSamplerFilmThickness      = 9u;
+public static const uint kSamplerVolumeThickness    = 10u;
+public static const uint kSamplerSheenColor         = 11u;
+public static const uint kSamplerSheenRoughness     = 12u;
+public static const uint kSamplerOcclusion          = 13u;
+public static const uint kSamplerTransmission       = 14u;
+
+[ForceInline]
+public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
+    uint packed = slot < 8u ? codes.x : codes.y;
+    uint code = (packed >> ((slot & 7u) * 4u)) & 0xFu;
+    // An absent sampler encodes Repeat/Repeat (0). Both image and sampler
+    // indices may differ across materials in the same wavefront.
+    return scene.globalTextures[NonUniformResourceIndex(index)]
+        .Sample(scene.materialSamplers[NonUniformResourceIndex(min(code, 8u))], uv);
+}
 
 [vk::push_constant]
 public ObjectConstants obj;
@@ -213,6 +242,8 @@ public struct SceneGeometryVertex {
     public float3 normal;
     public float4 tangent;
     public float2 uv;
+    public float2 uv1;
+    public uint instanceId;
     public float4 color;
     public uint4 materialIndices;
     public float4 baseColorFactor;
@@ -224,17 +255,122 @@ public struct SceneGeometryVertex {
     public uint4 transmissionTextures;
     public float4 coatParams;
     public uint4 coatTextures;
+    public float2 anisotropyParams; // Strength, rotation (radians).
+    public uint anisotropyTexIndex;
+    public uint2 samplerCodes;
 };
 
+// Both indexed draws and meshlet draws supply their own vertex ID. Everything
+// after that lookup -- attribute defaults, morphing, skinning and material
+// payload -- is the same. Callers select SV_Position for their pass; motion
+// clips are computed here only when requested.
+public extension InstanceData {
+    [ForceInline]
+    public SceneGeometryVertex EvaluateVertex<bool withMotion>(uint actualVertexId, out float4 worldPos) {
+        actualVertexId = min(actualVertexId, max(this.vertexCount, 1u) - 1u);
+        SceneGeometryVertex output;
+
+        float3 position     = this.fetchPosition(actualVertexId);
+        float2 localUV      = float2(0, 0);
+        float2 localUV1     = float2(0, 0);
+        float4 localColor   = float4(1, 1, 1, 1);
+        float3 localNormal  = float3(0, 1, 0);
+        float4 localTangent = float4(1, 0, 0, 1);
+
+        if (this.tangentFrameAddress != 0) {
+            VertexTangentFrame frame = this.fetchTangentFrame(actualVertexId);
+            localNormal = frame.unpackedNormal.xyz;
+            localTangent = frame.unpackedTangent;
+        }
+        if (this.surfaceAddress != 0) {
+            VertexSurface surface = this.fetchSurface(actualVertexId);
+            localUV = surface.unpackedUV;
+            localUV1 = surface.unpackedUV1;
+            localColor = surface.unpackedColor;
+        }
+
+        float4 localPos = float4(position, 1.0f);
+
+        uint4 localJoints = uint4(0, 0, 0, 0);
+        float4 weights    = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+        if (this.isSkinned && this.skinAddress != 0) {
+            SkinVertex skin = this.fetchSkin(actualVertexId);
+            localJoints     = skin.unpackedJoints;
+            weights         = skin.unpackedWeights;
+        }
+
+        uint vertexCount      = this.vertexCount;
+        uint morphOffset      = this.morphOffset;
+        uint activeMorphCount = this.activeMorphCount;
+        float4 morphWeights   = this.morphWeights;
+        if (activeMorphCount > 0) {
+            localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset, activeMorphCount, morphWeights);
+        }
+
+        float3x3 world3x3        = (float3x3) this.world;
+        float4x4 worldMatrix     = this.world;
+        float4x4 prevWorldMatrix = this.prevWorld;
+        uint jointOffset         = this.jointOffset;
+
+        if (this.isSkinned) {
+            worldPos           = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
+            output.normal      = normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
+            output.tangent.xyz = normalize(mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
+        } else {
+            worldPos           = mul(worldMatrix, localPos);
+            output.normal      = normalize(mul(world3x3, localNormal));
+            output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
+        }
+
+        // A reflected world transform reverses the cross product of the
+        // transformed tangent and normal. Preserve the authored tangent's
+        // local handedness while constructing the world-space bitangent.
+        output.tangent.w            = this.isMirrored ? -localTangent.w : localTangent.w;
+        output.uv                   = localUV;
+        output.uv1                  = localUV1;
+        output.color                = localColor;
+        output.materialIndices      = uint4(this.albedoIndex, this.normalIndex, this.pbrIndex, this.emissiveIndex);
+        output.baseColorFactor      = this.baseColorFactor;
+        output.emissiveFactor       = this.emissiveFactor;
+        output.pbrFactors           = float3(this.metallicFactor, this.roughnessFactor, this.alphaCutoff);
+        output.alphaMode            = this.alphaMode;
+        output.transmissionParams   = this.transmissionParams();
+        output.volumeParams         = this.volumeParams();
+        output.volumeParams.z       = AverageWorldScale(this.world);
+        output.transmissionTextures = this.transmissionTextures();
+        output.coatParams           = float4(this.clearcoatFactor(), this.clearcoatRoughnessFactor(), this.clearcoatNormalScale(), 0.0f);
+        output.coatTextures         = uint4(this.clearcoatTexIndex(), this.clearcoatRoughnessTexIndex(), this.clearcoatNormalTexIndex(), 0u);
+        output.anisotropyParams     = float2(this.anisotropyStrength, this.anisotropyRotation);
+        output.anisotropyTexIndex   = this.anisotropyTexIndex;
+        output.samplerCodes         = uint2(this.samplerCodes0, this.samplerCodes1);
+
+        if (withMotion) {
+            float4 prevWorldPos;
+            if (this.isSkinned) {
+                prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
+            } else {
+                prevWorldPos = mul(prevWorldMatrix, localPos);
+            }
+            float4x4 activeVP = this.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
+            output.currClip = mul(activeVP, worldPos);
+            output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
+        }
+        return output;
+    }
+}
 
 public struct ShadowGeometryOutput {
     public float4 pos : SV_Position;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public struct GBufferGeometryOutput {
@@ -244,6 +380,8 @@ public struct GBufferGeometryOutput {
     public float3 normal : NORMAL;
     public float4 tangent : TANGENT;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
@@ -252,31 +390,44 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
     public nointerpolation float4 coatParams : TEXCOORD12;
     public nointerpolation uint4 coatTextures : TEXCOORD13;
+    public nointerpolation float2 anisotropyParams : TEXCOORD14;
+    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public struct ForwardGeometryOutput {
     public float4 pos : SV_Position;
     public float3 normal : NORMAL;
     public float2 uv : TEXCOORD2;
+    public float2 uv1 : TEXCOORD17;
+    public nointerpolation uint instanceId : TEXCOORD18;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
+    public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
     public nointerpolation float4 transmissionParams : TEXCOORD9;
     public nointerpolation float4 volumeParams : TEXCOORD10;
     public nointerpolation uint4 transmissionTextures : TEXCOORD11;
+    public float4 tangent : TANGENT;
+    public nointerpolation float2 anisotropyParams : TEXCOORD14;
+    public nointerpolation uint anisotropyTexIndex : TEXCOORD15;
+    public nointerpolation uint2 samplerCodes : TEXCOORD16;
 }
 
 public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
     ShadowGeometryOutput o;
     o.pos              = v.pos;
     o.uv               = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color            = v.color;
     o.materialIndices  = v.materialIndices;
     o.baseColorFactor  = v.baseColorFactor;
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
+    o.samplerCodes     = v.samplerCodes;
     return o;
 }
 
@@ -288,14 +439,19 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.normal           = v.normal;
     o.tangent          = v.tangent;
     o.uv               = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color            = v.color;
     o.materialIndices  = v.materialIndices;
     o.baseColorFactor  = v.baseColorFactor;
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
-    o.emissiveFactor   = v.emissiveFactor;
-    o.coatParams       = v.coatParams;
-    o.coatTextures     = v.coatTextures;
+    o.emissiveFactor      = v.emissiveFactor;
+    o.coatParams          = v.coatParams;
+    o.coatTextures        = v.coatTextures;
+    o.anisotropyParams    = v.anisotropyParams;
+    o.anisotropyTexIndex  = v.anisotropyTexIndex;
+    o.samplerCodes        = v.samplerCodes;
     return o;
 }
 
@@ -304,14 +460,21 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.pos                 = v.pos;
     o.normal              = v.normal;
     o.uv                  = v.uv;
+    o.uv1 = v.uv1;
+    o.instanceId = v.instanceId;
     o.color               = v.color;
     o.materialIndices     = v.materialIndices;
     o.baseColorFactor     = v.baseColorFactor;
     o.pbrFactors          = v.pbrFactors;
+    o.alphaMode           = v.alphaMode;
     o.emissiveFactor         = v.emissiveFactor;
     o.transmissionParams     = v.transmissionParams;
     o.volumeParams           = v.volumeParams;
     o.transmissionTextures   = v.transmissionTextures;
+    o.tangent                = v.tangent;
+    o.anisotropyParams       = v.anisotropyParams;
+    o.anisotropyTexIndex     = v.anisotropyTexIndex;
+    o.samplerCodes           = v.samplerCodes;
     return o;
 }
 

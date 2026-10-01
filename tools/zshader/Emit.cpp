@@ -314,7 +314,8 @@ auto EmitSource(const Options& options) -> std::string {
 
     out.Raw(kSourcePreamble);
     for (const BytesInput& input: BytesInputsOf(options)) {
-        out.Line("constexpr uint8_t {}_bytes[] = {{", input.symbol);
+        // A descriptor's C ABI exposes these bytes as uint32_t SPIR-V words.
+        out.Line("alignas(uint32_t) constexpr uint8_t {}_bytes[] = {{", input.symbol);
         out.Line("#embed \"{}\"", AsLiteral(input.path));
         out.Verbatim("};");
         out.Line("static_assert(sizeof({}_bytes) == {});", input.symbol, input.size);

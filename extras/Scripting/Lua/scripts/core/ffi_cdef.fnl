@@ -30,7 +30,7 @@
       uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, uint32_t cmdID, const void* args);
 
       typedef struct ZHLN_RaycastResult {
-          uint64_t entity;
+          uint64_t bodyHandle;
           double px, py, pz;
           float nx, ny, nz;
           float fraction;
@@ -38,7 +38,7 @@
       } ZHLN_RaycastResult;
 
       typedef struct ZHLN_RaycastPenetrationResult {
-          uint64_t entity;
+          uint64_t bodyHandle;
           double epx, epy, epz;
           double xpx, xpy, xpz;
           float enx, eny, enz;
@@ -140,17 +140,15 @@
           bool  wantsToSprint;
       } InputComponent;
 
+      // Mirrors the ECS's borrowed, generational physics ragdoll handle.
       typedef struct RagdollComponent {
-          void*            ragdollInstance;
-          uint32_t         state;
-          uint32_t         prevState;
-          uint32_t         isAddedToPhysics;
-          uint32_t         jointOffset;
-          uint32_t         jointCount;
-          void*            skeleton;
-          ZHLN_Array_float jointBlendWeights;
-          ZHLN_Array_float jointStiffness;
-          ZHLN_Array_float jointBlendDecay;
+          uint64_t ragdollHandle;
+          uint64_t skeletonAsset;
+          uint8_t  state;
+          uint8_t  prevState;
+          uint32_t jointOffset;
+          uint32_t jointCount;
+          bool     isAddedToPhysics;
       } RagdollComponent;
 
       typedef struct NameComponent {
@@ -365,11 +363,12 @@
 
       typedef struct ParticleEmitterComponent {
           ParticleEmitterParams params;
+          uint64_t              textureAsset;
           uint32_t              maxParticles;
           bool                  active;
           bool                  attachToCamera;
           uint64_t              gpuBuffer;
-          char                  _pad[2];
+          uint32_t              bufferCapacity;
       } ParticleEmitterComponent;
 
       #pragma pack(push, 1)
@@ -386,9 +385,9 @@
       typedef struct PlayOneShot3DArgs { const char* filepath; float x; float y; float z; float volume; } PlayOneShot3DArgs;
       typedef struct PlayProceduralBeepArgs { float frequency; float duration; float volume; } PlayProceduralBeepArgs;
       typedef struct SetCharVelArgs { uint64_t entityRaw; float x; float y; float z; } SetCharVelArgs;
-      typedef struct AddImpulseAtArgs { uint64_t entityRaw; float ix; float iy; float iz; double px; double py; double pz; } AddImpulseAtArgs;
-      typedef struct RaycastArgs { double ox; double oy; double oz; float dx; float dy; float dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastResult* outResult; } RaycastArgs;
-      typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
+      typedef struct AddImpulseAtArgs { uint64_t bodyRaw; float ix; float iy; float iz; double px; double py; double pz; } AddImpulseAtArgs;
+      typedef struct RaycastArgs { double ox; double oy; double oz; float dx; float dy; float dz; float maxDist; uint64_t ignoreBody; ZHLN_RaycastResult* outResult; } RaycastArgs;
+      typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreBody; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
       typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
       typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
       typedef struct RegisterDynamicComponentArgs {

@@ -153,6 +153,11 @@ set(COMPILER_FLAGS_LIST
 if(COMPILER_HAS_REFLECTION)
   set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
 endif()
+if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
+  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -fparameter-reflection")
+elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
+  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection-latest")
+endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
@@ -257,7 +262,6 @@ target_compile_options(
   PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
   PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 if(WIN32)
-  target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
   target_compile_options(
     zahlen_engine
     PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter

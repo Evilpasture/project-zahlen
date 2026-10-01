@@ -14,7 +14,8 @@ namespace ZHLN {
 
 struct CompiledMesh {
     std::vector<VertexPosition>        positions;
-    std::vector<VertexAttributes>      attributes;
+    std::vector<VertexTangentFrame>    tangentFrames;
+    std::vector<VertexSurface>         surfaces;
     std::vector<VertexSkin>            skins;
     std::vector<uint32_t>              indices;
     std::vector<Compiler::IRPrimitive> primitives;

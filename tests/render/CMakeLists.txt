@@ -121,7 +121,7 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
 # TestDecal pins its framing through the extras target camera rig
 # (extras/Camera); the component and the rig's frame step live in that
 # domain, so the group links it and publishes the extras include root.
-target_link_libraries(GPU_Lighting PRIVATE zahlen_camera)
+target_link_libraries(GPU_Lighting PRIVATE zahlen_camera zahlen_asset_cooking)
 target_include_directories(GPU_Lighting PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 
 # Pipeline, resource and culling mechanics.
@@ -138,7 +138,10 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
     TestGLTFImport.cpp
+    TestNegativeScale.cpp
+    TestTextureTransforms.cpp
     TestTransparentMaterials.cpp
+    TestUnlitMaterials.cpp
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
@@ -159,8 +162,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # extras target camera rig (extras/Camera); the component and the rig's
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
-# ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime instead of
-# embedding a 100 KB rig.
+# ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
 target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)

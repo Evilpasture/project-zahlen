@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -483,13 +488,13 @@ void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44
 
 /** Stage 3: terrain projection, pelvis reach correction, and analytic leg IK. */
 void SolveLegGrounding(
-    SystemContext&                 ctx,
+    const PhysicsContext&          physics,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle,
+    Physics::BodyHandle            ignoredPhysicsHandle,
     float                          ikWeight,
     bool                           preserveAuthoredFootXZ,
     bool                           worldLockFeet,
@@ -505,7 +510,6 @@ void SolveLegGrounding(
         return;
     }
 
-    auto&           physics        = *ctx.physics;
     const JPH::Quat inverseRootRot = rootRotation.Inversed();
     const auto      toWorld        = [&](JPH::Vec3Arg local) { return JPH::Vec3(rootPosition) + rootRotation * local; };
     const auto      toModel        = [&](JPH::Vec3Arg world) { return inverseRootRot * (world - JPH::Vec3(rootPosition)); };

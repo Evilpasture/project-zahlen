@@ -40,12 +40,10 @@ class ShadowRenderer {
 
     // --- resources ----------------------------------------------------------
 
-    // Allocates the indirect-command buffer the cascade/punctual passes draw
-    // from. The buffer is double-buffered, so `Flip()` has to run with the rest
-    // of the frame's ring at `EndFrame`.
+    // The CPU writes shadow commands while the GPU consumes earlier frames;
+    // allocate one physical buffer for each in-flight frame slot.
     [[nodiscard]] auto InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
-
-    void Flip() noexcept;
+    void DestroyResources(Vk::Allocator& allocator) noexcept;
 
     // --- pipelines ----------------------------------------------------------
 
@@ -65,8 +63,8 @@ class ShadowRenderer {
     [[nodiscard]] auto PunctualPipeline() const noexcept -> VkPipeline;
     [[nodiscard]] auto PunctualLayout() const noexcept -> VkPipelineLayout;
 
-    [[nodiscard]] auto IndirectCommands() noexcept -> Vk::Buffer&;
-    [[nodiscard]] auto IndirectCommands() const noexcept -> const Vk::Buffer&;
+    [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer&;
+    [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) const noexcept -> const Vk::Buffer&;
 
     // --- cascade math -------------------------------------------------------
 

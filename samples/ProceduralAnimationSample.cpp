@@ -18,6 +18,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Camera/TargetCamera.hpp>
+#include <CharacterController/CharacterController.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
@@ -580,7 +581,7 @@ auto AttachCharacterRig(
             ZHLN::Log("[Sample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, clip.name, clip.duration, clip.channels.size());
             ZHLN::Log("[Sample] Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
-            ZHLN::Log("[Sample] WARNING: '{}' contains no authored animation track; bind pose will be shown.", glbPath);
+            ZHLN::LogWarning("[Sample] '{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
@@ -659,7 +660,7 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
@@ -668,7 +669,7 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -680,9 +681,15 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF. Installed before the scene boots, so the HUD and any
     // other UI text come from that atlas.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
+
+    // The visual spawner creates a CharacterVirtual and input/movement
+    // components, but it does not install the controller. Do that before the
+    // scene build so WASD intent, physics steering/gravity and grounding hooks
+    // (and the orientation graph node) all enter the initial schedules.
+    ZHLN::Character::Install(*engine);
 
     // Third-person camera rig: registers its component and contributes its
     // frame step (re-seeding the boot camera's rig component), before the
@@ -838,7 +845,5 @@ auto main(int argc, char* argv[]) -> int {
             });
         }
     }
-
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

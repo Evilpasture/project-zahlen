@@ -14,6 +14,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/SystemContext.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 
 struct cgltf_data;
 struct cgltf_node;
@@ -51,7 +52,13 @@ class ZHLN_API AnimationSystem {
     using NodeWorldTransformMap = JPH::UnorderedMap<const cgltf_node*, JPH::Mat44, PointerHash, std::equal_to<>>;
     using SampledTransformMap   = JPH::UnorderedMap<const cgltf_node*, SampledTransform, PointerHash, std::equal_to<>>;
 
-    void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt, BonePosePostProcessor postProcessor = nullptr);
+    // The optional pose callback uses a raw Registry&, so the graph treats
+    // this pass as a structural/wildcard writer even if no callback is set.
+    static void Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
+                                  const Components::HierarchyComponent, const Components::MeshComponent,
+                                  Components::MorphTargetComponent&, Components::TransformComponent&> query,
+                       ECS::Registry& registry, ECS::ResMut<RenderContext> render, FrameDt frameDt,
+                       BonePosePostProcessor postProcessor);
 
   private:
     void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;

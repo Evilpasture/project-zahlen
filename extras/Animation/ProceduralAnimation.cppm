@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -14,6 +19,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/physics/PhysicsHandles.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -543,13 +549,13 @@ void   ApplyIKReachTilt(
 ) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
-    SystemContext&                 ctx,
+    const PhysicsContext&          physics,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
     JPH::Mat44*                    nodeTransforms,
     const RigBoneMap&              map,
-    Entity                         ignoredPhysicsHandle    = {},
+    Physics::BodyHandle            ignoredPhysicsHandle    = {},
     float                          ikWeight                = 1.0f,
     bool                           preserveAuthoredFootXZ  = true,
     bool                           worldLockFeet           = false,
@@ -589,7 +595,8 @@ void SolveUpperBody(
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
 void  UpdateItemDynamics(
-    SystemContext&         ctx,
+    const ECS::Registry&   registry,
+    const PhysicsContext&  physics,
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
     JPH::Vec3Arg           rootPosition,

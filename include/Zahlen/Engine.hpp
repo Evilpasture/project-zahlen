@@ -69,6 +69,9 @@ class ZHLN_API Engine {
     using FreeCamSpeedQuery = std::optional<float> (*)(ECS::Registry&, Entity target);
 
     using TeardownHook = void (*)(Engine&);
+    // Bulk extension systems run while marked components still exist. `all`
+    // selects scene teardown rather than just PendingDestroy entities.
+    using SceneCleanupPass = void (*)(Engine&, bool all);
 
     using DeviceLostCallback = std::function<void(Engine&)>;
 
@@ -90,10 +93,10 @@ class ZHLN_API Engine {
     auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> Window*;
     void RemoveWindow(Window& window);
 
-    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<RenderAttachment>;
-    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment>;
-    [[nodiscard]] auto GetTargetAttachment() noexcept -> std::optional<RenderAttachment>;
-    [[nodiscard]] auto GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget() noexcept -> std::optional<FrameTarget>;
+    [[nodiscard]] auto GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget>;
 
     auto GetKernel() -> Kernel&;
     auto GetWorld() -> World&;
@@ -113,6 +116,13 @@ class ZHLN_API Engine {
     auto GetUpdateGraph() -> ECS::SystemGraph&;
     auto GetRenderGraph() -> ECS::SystemGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
+    // Run the batched cleanup pass now (normally after ECB playback each frame).
+    void ProcessPendingDestroy();
+    // Release every scene-owned resource before clearing the registry/ECB.
+    void ClearScene();
+    // Register an extra bulk cleanup system once per Engine, not per entity.
+    [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
+    void RunSceneCleanupPasses(bool all);
     [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
     auto               GetCullingSystem() -> CullingSystem&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
@@ -181,6 +191,8 @@ class ZHLN_API Engine {
     std::unique_ptr<EngineImpl> _impl;
 };
 
+// Mark an entity and its hierarchy for the Engine's batched scene cleanup.
+// Components remain readable until ProcessPendingDestroy/SceneCleanup runs.
 void DespawnEntity(Engine& engine, Entity entity);
 
 }

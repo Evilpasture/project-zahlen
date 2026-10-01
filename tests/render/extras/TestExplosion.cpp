@@ -6,6 +6,7 @@
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -90,7 +91,19 @@ struct ExplosionTestSuite {
             ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::LightComponent>(expRoot) != nullptr);
 
             constexpr float dt = 1.0f / 60.0f;
-            // Advance for 3.0s (StandardFireball duration is 2.5s)
+            ZHLN::ExplosionSystem::Update(*engine, dt);
+            const auto* active = reg.Get<ZHLN::ExplosionComponent>(expRoot);
+            if (!ZHLN::Test::ExpectTrue(active != nullptr && active->fireBuffer != ZHLN::BufferHandle::Invalid &&
+                                        active->smokeBuffer != ZHLN::BufferHandle::Invalid)) {
+                return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
+            }
+            const auto fireBuffer = active->fireBuffer;
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+            ZHLN::ExplosionSystem::Update(*engine, dt);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(expRoot)->fireBuffer, fireBuffer);
+            engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+
+            // Advance past StandardFireball's 2.5s lifetime.
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
                 ZHLN::ExplosionSystem::Update(*engine, dt);
@@ -100,6 +113,9 @@ struct ExplosionTestSuite {
             // Invariant: Root entity and all particles must be destroyed cleanly
             ZHLN::Test::ExpectFalse(reg.IsAlive(expRoot));
             ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::ExplosionComponent>().empty());
+            const auto subsequent = engine->GetRenderContext().CreateStorageBuffer(sizeof(ZHLN::Particle));
+            ZHLN::Test::ExpectNe(subsequent, fireBuffer);
+            engine->GetRenderContext().DestroyBuffer(subsequent);
 
             return {};
         }

@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cmath>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Terrain {
@@ -47,7 +48,7 @@ TerrainHandle TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
                 return static_cast<TerrainHandle>(handleRaw);
             }
         }
-        ZHLN::Log("[TerrainSystem] ERROR: Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
+        ZHLN::LogError("[TerrainSystem] Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
         return TerrainHandle::Invalid;
     });
 }
@@ -99,20 +100,67 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
     });
 }
 
-void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
+void TerrainSystem::RegisterCleanup(Engine& engine) {
+    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
+}
+
+void TerrainSystem::Detach(Engine& engine, Entity entity) {
+    auto& registry = engine.GetRegistry();
+    if (auto* terrain = registry.Get<TerrainComponent>(entity)) {
+        UnregisterTerrainData(std::exchange(terrain->terrainHandle, TerrainHandle::Invalid));
+        registry.Remove<TerrainComponent>(entity);
+    }
+}
+
+void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
+    RegisterCleanup(engine);
+    Detach(engine, entity);
+    engine.GetRegistry().Add(entity, std::move(component));
+}
+
+void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
+    if (registry.GetEntitiesWith<TerrainComponent>().empty()) {
+        return;
+    }
+    for (auto& terrain: registry.GetRawArray<TerrainComponent>()) {
+        UnregisterTerrainData(std::exchange(terrain.terrainHandle, TerrainHandle::Invalid));
+    }
+}
+
+void TerrainSystem::Cleanup(Engine& engine, bool all) {
+    auto& registry = engine.GetRegistry();
+    const auto entities = registry.GetEntitiesWith<TerrainComponent>();
+    if (!entities.empty()) {
+        auto terrains = registry.GetRawArray<TerrainComponent>();
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (all || registry.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+                UnregisterTerrainData(std::exchange(terrains[i].terrainHandle, TerrainHandle::Invalid));
+            }
+        }
+    }
+    if (all) {
+        Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
+    }
+}
+
+void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+                           ECS::ResMut<RenderContext> render, ECS::Registry& registry) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
-    auto& reg = ctx.registry;
-    auto& rc  = *ctx.render;
+    auto& rc = *render;
 
-    auto entities = reg.GetEntitiesWith<TerrainComponent>();
-    auto terrains = reg.GetRawArray<TerrainComponent>();
+    auto entities = query.Entities<TerrainComponent>();
+    auto terrains = query.Raw<TerrainComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
         auto&  terrain  = terrains[i];
-        auto*  meshComp = reg.Get<Components::MeshComponent>(e);
+        if (registry.Get<Components::PendingDestroy>(e) != nullptr) {
+            continue;
+        }
+        auto*  meshComp = query.Get<Components::MeshComponent>(e);
 
         if (meshComp == nullptr) {
             continue;
@@ -130,12 +178,27 @@ void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
 
         const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
 
-        // 2. Lazy bake or re-bake GPU mesh if invalidated
+        // 2. Cache clears drop only the lookup. Rebind the scene-owned mesh
+        // without baking a second set of buffers; after device loss the owner
+        // has been invalidated, so rebuild from the CPU heightmap instead.
         if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
-            if (tData != nullptr && !tData->heights.empty()) {
+            auto* owned = query.Get<Components::OwnedMeshComponent>(e);
+            if (owned != nullptr && owned->meshAsset != meshComp->meshAsset) {
+                rc.UnregisterGPUMesh(owned->meshAsset);
+                owned->meshAsset = meshComp->meshAsset;
+            }
+            if (owned != nullptr && owned->mesh.posBuffer != BufferHandle::Invalid) {
+                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
+            } else if (tData != nullptr && !tData->heights.empty()) {
                 Mesh tMesh = CreateTerrainMeshFromData(
                     rc, tData->sampleCount, tData->worldSize, tData->heights.data(), tData->colors.empty() ? nullptr : tData->colors.data()
                 );
+                if (owned != nullptr) {
+                    rc.DestroyMesh(owned->mesh);
+                    owned->mesh = tMesh;
+                } else {
+                    registry.Add(e, Components::OwnedMeshComponent {.meshAsset = meshComp->meshAsset, .mesh = tMesh});
+                }
                 rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
             }
         }
@@ -206,26 +269,14 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
 
 namespace {
 
-void Sys_Terrain(SystemContext& ctx) {
-    static TerrainSystem sys;
-    sys.Update(ctx, ctx.dt);
-}
-
-void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
-    // Appended at the end of the update graph, matching its position in the
-    // core wiring before terrain left the engine core.
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {ECS::Write<TerrainComponent>(), ECS::Write<Components::MeshComponent>()},
-        .enabled        = true,
-    });
+void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
+    updateGraph.AddSystem<&TerrainSystem::Update>();
 }
 
 } // namespace
 
 void Install(Engine& engine) {
-    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    TerrainSystem::RegisterCleanup(engine);
     engine.AddSystemGraphsExtension(&AddSystems);
 }
 

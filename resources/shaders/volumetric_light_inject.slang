@@ -2,6 +2,7 @@
 import hash;
 import cluster_grid;
 import cluster_math;
+import math.phase;
 import pbr_helpers;
 import uniforms;
 import volumetric_grid;
@@ -30,16 +31,6 @@ StructuredBuffer<ClusterVolume> clusterGrid;
 StructuredBuffer<uint> clusterIndexList;
 Texture2DArray<float> shadowMap;
 SamplerComparisonState shadowSampler;
-
-float PhaseHG(float cosTheta, float g) {
-    float g2 = g * g;
-    float d = 1.0f + g2 - 2.0f * g * cosTheta;
-    return (1.0f - g2) / (12.5663706f * d * sqrt(d));
-}
-
-float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
-    return lerp(PhaseHG(cosTheta, g2), PhaseHG(cosTheta, g1), k);
-}
 
 float SampleShadowFast(float3 projCoords, float cascade, float angle) {
     const float texelSize    = 1.0f / float(frame.shadowResolution);
@@ -107,7 +98,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         shadow              = lerp(1.0f, shadow, fade);
     }
 
-    accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
+    accumulatedLight += frame.sunRadiance.xyz * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
     uint clusterIdx = ClusterIndex(uint(uv.x * float(Cluster.Width)), uint(uv.y * float(Cluster.Height)), ViewDepthToClusterZWith(depthVS, frame.nearZ, frame.farZ));
     ClusterVolume cluster = clusterGrid[clusterIdx];

@@ -34,7 +34,10 @@ SCRATCH="build/fidelity"
 FIDELITY_REPO_URL="https://github.com/KhronosGroup/glTF-Render-Fidelity-Generator.git"
 SAMPLES_REPO_URL="https://github.com/KhronosGroup/glTF-Sample-Assets.git"
 
-JOBS="-j$(nproc)"
+CORES=$(nproc)
+NUM_JOBS=$(( CORES / 2 ))
+(( NUM_JOBS < 2 )) && NUM_JOBS=2
+JOBS="-j${NUM_JOBS}"
 LIMIT=0
 SCENARIO_FILTER="${SCENARIO:-}"
 KEEP_PPM=0

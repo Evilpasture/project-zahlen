@@ -6,42 +6,74 @@
 // clang-format on
 #include "StagingContext.hpp"
 #include "Allocator.hpp"
+#include <Zahlen/Core/Defer.hpp>
 #include <cstring>
 #include <utility>
 
 namespace ZHLN::Vk {
 
-StagingContext::StagingContext(Allocator& allocator, const Context& ctx): _allocator(&allocator), _ctx(&ctx) {
-}
+SubmittedStagingWork::SubmittedStagingWork(
+    Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer>&& buffers, VkFence fence
+) noexcept:
+    _allocator(&allocator), _ctx(&ctx), _cmdPool(std::move(pool)), _stagingBuffers(std::move(buffers)), _fence(fence) {}
 
-StagingContext::~StagingContext() {
+SubmittedStagingWork::SubmittedStagingWork(SubmittedStagingWork&& other) noexcept:
+    _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)),
+    _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {}
+
+SubmittedStagingWork::~SubmittedStagingWork() noexcept {
+    Wait();
+    for (auto& buffer: _stagingBuffers) {
+        _allocator->DestroyBuffer(buffer);
+    }
     if (_fence != VK_NULL_HANDLE) {
-        Wait();
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
     }
+    // _cmdPool is destroyed after this body, when its GPU work has completed.
 }
+
+void SubmittedStagingWork::Wait() const noexcept {
+    if (_fence != VK_NULL_HANDLE) {
+        vkWaitForFences(_ctx->Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
+    }
+}
+
+StagingContext::StagingContext(
+    Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, CommandRecorder&& recorder
+) noexcept:
+    _allocator(&allocator), _ctx(&ctx), _cmdPool(std::move(pool)), _recorder(std::move(recorder)) {}
 
 StagingContext::StagingContext(StagingContext&& other) noexcept:
-    _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)), _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)),
-    _recording(std::move(other._recording)), _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
+    _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)),
+    _recorder(std::move(other._recorder)), _stagingBuffers(std::move(other._stagingBuffers)) {}
+
+StagingContext::~StagingContext() noexcept {
+    std::move(*this).Abort();
+    for (auto& buffer: _stagingBuffers) {
+        _allocator->DestroyBuffer(buffer);
+    }
 }
 
-auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
-    _cmdPool       = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
-    auto alloc_res = _cmdPool.Allocate(1);
-    if (!alloc_res) [[unlikely]] {
-        return std::unexpected(alloc_res.error());
+void StagingContext::Abort() && noexcept { std::move(_recorder).Abort(); }
+
+auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, ErrorCode> {
+    CommandPool<QueueType::Graphics> pool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    if (auto allocated = pool.Allocate(1); !allocated) [[unlikely]] {
+        return std::unexpected(allocated.error());
     }
-    _cmd = _cmdPool[0];
-    _recording.emplace(_cmd);
-    return {};
+    auto recording = CommandRecorder::Begin(pool[0]);
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+    return StagingContext {allocator, ctx, std::move(pool), std::move(*recording)};
 }
 
 auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
     -> std::expected<void, ErrorCode> {
     return Buffer::Create(_allocator->Get(), bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
         .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
-            auto mapped = staging.Map();
+            defer _([&] { _allocator->DestroyBuffer(staging); });
+            auto mapped = staging.Map(_allocator->Get());
             if (mapped.data != nullptr) {
                 std::memcpy(mapped.data, data, bytes);
             } else {
@@ -56,7 +88,7 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 
     ZHLN_BufferImageCopyDesc copy_region = {
@@ -69,20 +101,20 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .mip_level        = 0,
         .base_array_layer = 0
     };
-    ZHLN_CmdCopyBufferToImage(_cmd, &copy_region);
+    ZHLN_CmdCopyBufferToImage(_recorder.Handle(), &copy_region);
 
     if (mipLevels > 1) {
-        ZHLN_GenerateMipmaps(_cmd, dstImage, w, h, mipLevels);
+        ZHLN_GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     } else {
         TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
+            _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
         );
     }
 }
 
 void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels) {
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 
     size_t current_offset = 0;
@@ -111,13 +143,13 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .regionCount    = 1,
                 .pRegions       = &region,
             };
-            vkCmdCopyBufferToImage2(_cmd, &copy_info);
+            vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info);
         }
         current_offset += (face_size * 6);
     }
 
     TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        _cmd, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
+        _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels
     );
 }
 
@@ -125,29 +157,27 @@ void StagingContext::AddBuffer(Buffer&& buf) {
     _stagingBuffers.push_back(std::move(buf));
 }
 
-void StagingContext::ExecuteAsync() {
-    _recording.reset();
-
-    if (_fence != VK_NULL_HANDLE) {
-        Wait();
-        vkDestroyFence(_ctx->Device(), _fence, nullptr);
-        _fence = VK_NULL_HANDLE;
+auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, ErrorCode> {
+    auto executable = std::move(_recorder).End();
+    if (!executable) {
+        return std::unexpected(executable.error());
     }
 
-    VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
-    vkCreateFence(_ctx->Device(), &fence_info, nullptr, &_fence);
-
-    const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(_cmd);
-    if (!QueueSubmit(_ctx->GraphicsQueue(), std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, {}, {}, _fence)) {
-        vkDestroyFence(_ctx->Device(), _fence, nullptr);
-        _fence = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    const VkFenceCreateInfo fenceInfo {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    if (vkCreateFence(_ctx->Device(), &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        // Never submit untracked work whose staging buffers could be freed.
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-}
 
-void StagingContext::Wait() noexcept {
-    if (_fence != VK_NULL_HANDLE) {
-        vkWaitForFences(_ctx->Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
+    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, fence); !result) {
+        // If a submission failed partway through, keep the pool and buffers
+        // alive until the queue is idle, before the recording batch is freed.
+        vkQueueWaitIdle(_ctx->GraphicsQueue());
+        vkDestroyFence(_ctx->Device(), fence, nullptr);
+        return std::unexpected(result.error());
     }
+    return SubmittedStagingWork {*_allocator, *_ctx, std::move(_cmdPool), std::move(_stagingBuffers), fence};
 }
 
 }

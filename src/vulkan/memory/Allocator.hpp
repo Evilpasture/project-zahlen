@@ -8,18 +8,24 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
 #endif
 
+#include <Zahlen/Threading/Mutex.hpp>
+
 namespace ZHLN::Vk {
 
 class Context;
+class Buffer;
+class Image;
 
 struct DeferredDeletionEntry {
-    enum class Type : uint8_t { Buffer, Image };
+    enum class Type : uint8_t { Buffer, Image, AccelerationStructure, Pipeline };
     Type          type;
-    VmaAllocator  allocator;
-    VmaAllocation allocation;
+    VmaAllocation allocation = nullptr;
+    VkDevice      device = VK_NULL_HANDLE;
     union {
-        VkBuffer buffer;
-        VkImage  image;
+        VkBuffer                   buffer;
+        VkImage                    image;
+        VkAccelerationStructureKHR accelerationStructure;
+        VkPipeline                 pipeline;
     };
 };
 
@@ -31,90 +37,28 @@ class DeletionQueue {
     DeletionQueue(const DeletionQueue&)            = delete;
     DeletionQueue& operator=(const DeletionQueue&) = delete;
 
-    void Init(uint32_t doubleBufferCount) noexcept;
-    void EnqueueBuffer(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
-    void EnqueueImage(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
+    void Init(VmaAllocator allocator) noexcept { _allocator = allocator; }
+    // Consumes the handle. The caller must retire associated views before an
+    // image, or acceleration structures before their backing buffers.
+    void Enqueue(Buffer&& buffer) noexcept;
+    void Enqueue(Image&& image) noexcept;
+    void EnqueueAccelerationStructure(VkDevice device, AccelerationStructure&& handle) noexcept;
+    void EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept;
+    // Called only after the frame slot's GPU fence has been waited on.
     void BeginFrame(uint32_t frameIndex) noexcept;
+    // The caller must wait for the GPU to be idle before flushing every slot.
+    void Drain() noexcept;
 
   private:
     void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
 
-    std::vector<std::vector<DeferredDeletionEntry>> _queues;
-    uint32_t                                        _currentFrameIndex = 0;
+    VmaAllocator _allocator = nullptr; // Must outlive the queue and its final drain.
+    // Mutex is trivially default-constructible in release builds: a cold
+    // renderer can enqueue during teardown without ever calling BeginFrame.
+    ZHLN::Mutex _mutex {};
+    std::array<std::vector<DeferredDeletionEntry>, kFramesInFlight> _queues {};
+    uint32_t _currentFrameIndex = 0;
 };
-
-void                               DeferVmaDestruction(VmaAllocator allocator, VkBuffer buffer, VmaAllocation allocation) noexcept;
-void                               DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation allocation) noexcept;
-extern thread_local DeletionQueue* t_active_deletion_queue;
-
-template <typename T, auto DeleterFn>
-class VmaHandle {
-  public:
-    static_assert(std::is_invocable_v<decltype(DeleterFn), VmaAllocator, T, VmaAllocation>);
-    VmaHandle() noexcept = default;
-    VmaHandle(VmaAllocator allocator, T handle, VmaAllocation allocation) noexcept: _allocator(allocator), _handle(handle), _allocation(allocation) {
-    }
-    ~VmaHandle() noexcept {
-        Cleanup();
-    }
-
-    VmaHandle(const VmaHandle&)                    = delete;
-    auto operator=(const VmaHandle&) -> VmaHandle& = delete;
-
-    VmaHandle(VmaHandle&& other) noexcept:
-        _allocator(std::exchange(other._allocator, nullptr)), _handle(std::exchange(other._handle, T {})),
-        _allocation(std::exchange(other._allocation, nullptr)) {
-    }
-
-    auto operator=(VmaHandle&& other) noexcept -> VmaHandle& {
-        if (this != &other) {
-            Cleanup();
-            _allocator  = std::exchange(other._allocator, nullptr);
-            _handle     = std::exchange(other._handle, T {});
-            _allocation = std::exchange(other._allocation, nullptr);
-        }
-        return *this;
-    }
-
-    [[nodiscard]] auto Get() const noexcept -> T {
-        return _handle;
-    }
-    [[nodiscard]] auto Allocation() const noexcept -> VmaAllocation {
-        return _allocation;
-    }
-    [[nodiscard]] auto Allocator() const noexcept -> VmaAllocator {
-        return _allocator;
-    }
-    [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _handle != T {};
-    }
-    explicit operator bool() const noexcept {
-        return Valid();
-    }
-
-    void Cleanup() noexcept {
-        if (_handle != T {}) {
-            if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
-                if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
-                    DeferVmaDestruction(_allocator, _handle, _allocation);
-                } else {
-                    DeleterFn(_allocator, _handle, _allocation);
-                }
-            } else {
-                DeleterFn(_allocator, _handle, _allocation);
-            }
-            _handle     = T {};
-            _allocation = nullptr;
-            _allocator  = nullptr;
-        }
-    }
-
-  private:
-    VmaAllocator  _allocator  = nullptr;
-    T             _handle     = T {};
-    VmaAllocation _allocation = nullptr;
-};
-
 
 class Allocator {
   public:
@@ -128,23 +72,23 @@ class Allocator {
     auto operator=(Allocator&& other) noexcept -> Allocator&;
 
     [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ZHLN::ErrorCode>;
-
     [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ZHLN::ErrorCode>;
 
-    [[nodiscard]] auto Get() const noexcept -> VmaAllocator {
-        return _handle;
-    }
-    [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _handle != nullptr;
-    }
-    explicit operator bool() const noexcept {
-        return Valid();
-    }
+    // Synchronous destruction: only use once GPU use has finished. Explicitly
+    // consumes and invalidates the handle; neither Buffer nor Image has a
+    // destructor that consults ambient state.
+    void DestroyBuffer(Buffer& buffer) const noexcept;
+    void DestroyImage(Image& image) const noexcept;
+    static void DestroyBuffer(VmaAllocator allocator, Buffer& buffer) noexcept;
+    static void DestroyImage(VmaAllocator allocator, Image& image) noexcept;
+
+    [[nodiscard]] auto Get() const noexcept -> VmaAllocator { return _handle; }
+    [[nodiscard]] auto Valid() const noexcept -> bool { return _handle != nullptr; }
+    explicit operator bool() const noexcept { return Valid(); }
 
   private:
     VmaAllocator _handle = nullptr;
 };
-
 
 
 // NOLINTNEXTLINE(performance-enum-size)
@@ -225,14 +169,14 @@ constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
 
 class Buffer {
   public:
-    Buffer()           = default;
-    ~Buffer() noexcept = default;
+    Buffer() = default;
+    ~Buffer() noexcept = default; // Non-destroying: owner must choose DestroyBuffer or Enqueue.
 
     Buffer(const Buffer&)                    = delete;
     auto operator=(const Buffer&) -> Buffer& = delete;
 
-    Buffer(Buffer&& other) noexcept                    = default;
-    auto operator=(Buffer&& other) noexcept -> Buffer& = default;
+    Buffer(Buffer&& other) noexcept;
+    auto operator=(Buffer&& other) noexcept -> Buffer&;
 
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
@@ -250,12 +194,12 @@ class Buffer {
         std::span<const uint32_t> queueFamilyIndices
     ) noexcept -> std::expected<Buffer, ErrorCode>;
 
-    void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
+    void Flush(VmaAllocator allocator, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
     struct MappedRegion {
         MappedRegion() = default;
         MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept;
-        ~MappedRegion() noexcept = default;
+        ~MappedRegion() noexcept;
 
         MappedRegion(const MappedRegion&)                    = delete;
         auto operator=(const MappedRegion&) -> MappedRegion& = delete;
@@ -264,73 +208,60 @@ class Buffer {
         auto operator=(MappedRegion&& other) noexcept -> MappedRegion&;
 
         template <typename T>
-        auto As() noexcept -> T* {
-            return static_cast<T*>(data);
-        }
+        auto As() noexcept -> T* { return static_cast<T*>(data); }
 
         void* data = nullptr;
 
       private:
-        VmaHandle<
-            void*,
-            [](VmaAllocator allocator, void*, VmaAllocation allocation) {
-                if (allocator != nullptr && allocation != nullptr) {
-                    vmaFlushAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
-                    vmaUnmapMemory(allocator, allocation);
-                }
-            }>
-            _handle;
+        void Cleanup() noexcept;
+        VmaAllocator  _allocator  = nullptr;
+        VmaAllocation _allocation = nullptr;
     };
 
-    [[nodiscard]] auto Map() noexcept -> MappedRegion;
+    [[nodiscard]] auto Map(VmaAllocator allocator) noexcept -> MappedRegion;
+    [[nodiscard]] auto Handle() const noexcept -> VkBuffer { return _handle; }
+    [[nodiscard]] auto Size() const noexcept -> size_t { return _requestedSize; }
+    [[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
+    explicit operator bool() const noexcept { return Valid(); }
 
-    [[nodiscard]] auto Handle() const noexcept -> VkBuffer {
-        return _handle.Get();
-    }
-    [[nodiscard]] auto Size() const noexcept -> size_t {
-        return _requestedSize;
-    }
-    [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _handle.Valid();
-    }
-    explicit operator bool() const noexcept {
-        return Valid();
-    }
+    // Transfers the VMA allocation pair out, leaving this handle empty.
+    [[nodiscard]] auto Release() noexcept -> std::pair<VkBuffer, VmaAllocation>;
 
   private:
-    VmaHandle<VkBuffer, vmaDestroyBuffer> _handle;
-    VmaAllocationInfo                     _info          = {};
-    VkDeviceSize                          _requestedSize = 0;
+    VkBuffer          _handle        = VK_NULL_HANDLE;
+    VmaAllocation     _allocation    = nullptr;
+    VmaAllocationInfo _info          = {};
+    VkDeviceSize      _requestedSize = 0;
 };
 
+inline BufferSlice::BufferSlice(const Buffer& b, VkDeviceAddress base) noexcept:
+    BufferSlice(b.Handle(), base, 0, static_cast<VkDeviceSize>(b.Size())) {
+}
+
+// Caller owns the returned staging buffer and must DestroyBuffer it after the
+// recorded copy has completed (or enqueue it in the frame deletion queue).
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
 
 class Image {
   public:
-    Image()                                = default;
+    Image() = default;
+    ~Image() noexcept = default; // Non-destroying.
     Image(const Image&)                    = delete;
     auto operator=(const Image&) -> Image& = delete;
-    ~Image() noexcept                      = default;
-
-    Image(Image&& other) noexcept                    = default;
-    auto operator=(Image&& other) noexcept -> Image& = default;
+    Image(Image&& other) noexcept;
+    auto operator=(Image&& other) noexcept -> Image&;
 
     [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode>;
 
-    [[nodiscard]] auto Valid() const noexcept -> bool {
-        return _handle.Valid();
-    }
-    explicit operator bool() const noexcept {
-        return Valid();
-    }
-
-    [[nodiscard]] auto Handle() const -> VkImage {
-        return _handle.Get();
-    }
+    [[nodiscard]] auto Valid() const noexcept -> bool { return _handle != VK_NULL_HANDLE; }
+    explicit operator bool() const noexcept { return Valid(); }
+    [[nodiscard]] auto Handle() const noexcept -> VkImage { return _handle; }
+    [[nodiscard]] auto Release() noexcept -> std::pair<VkImage, VmaAllocation>;
 
   private:
-    VmaHandle<VkImage, vmaDestroyImage> _handle;
+    VkImage       _handle     = VK_NULL_HANDLE;
+    VmaAllocation _allocation = nullptr;
 };
 
 class ImageBuilder {
@@ -374,6 +305,16 @@ inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst
     CopyBuffer(cmd, src.Handle(), dst.Handle(), size, srcOffset, dstOffset);
 }
 
+inline void CopyBuffer(VkCommandBuffer cmd, BufferSlice src, BufferSlice dst) {
+    if (!src.Valid() || !dst.Valid()) {
+        return;
+    }
+    const VkDeviceSize bytes = std::min(src.Size(), dst.Size());
+    if (bytes != 0) {
+        CopyBuffer(cmd, src.buffer, dst.buffer, bytes, src.offset, dst.offset);
+    }
+}
+
 inline void BufferBarrier(
     VkCommandBuffer cmd,
     const Buffer&   buffer,
@@ -389,10 +330,9 @@ inline void BufferBarrier(
 class StagingRingBuffer {
   public:
     struct Allocation {
-        VkBuffer     buffer        = VK_NULL_HANDLE;
-        VkDeviceSize offset        = 0;
-        void*        mappedData    = nullptr;
-        uint64_t     timelineValue = 0;
+        BufferSlice slice {};
+        void*       mappedData    = nullptr;
+        uint64_t    timelineValue = 0;
     };
 
     StagingRingBuffer() = default;
@@ -411,7 +351,7 @@ class StagingRingBuffer {
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;
-    auto               Submit(VkCommandBuffer cmd, VkFence fence = VK_NULL_HANDLE) noexcept -> uint64_t;
+    auto               Submit(ExecutableCommands cmds, VkFence fence = VK_NULL_HANDLE) noexcept -> uint64_t;
     void               Recycle() noexcept;
 
     void RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept;
@@ -460,23 +400,11 @@ class StagingRingBuffer {
     std::vector<RetiredPool> _retiredPools;
 };
 
-inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer, VkDeviceSize size) {
-    CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
+inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation stagingAlloc, const Vk::Buffer& buffer) {
+    CopyBuffer(cmd, stagingAlloc.slice, BufferSlice {buffer});
 }
 
 
 
-struct ScopedDeletionQueue {
-    DeletionQueue* prev;
-    explicit ScopedDeletionQueue(DeletionQueue& queue) noexcept: prev(t_active_deletion_queue) {
-        t_active_deletion_queue = &queue;
-    }
-    ~ScopedDeletionQueue() noexcept {
-        t_active_deletion_queue = prev;
-    }
-
-    ScopedDeletionQueue(const ScopedDeletionQueue&)            = delete;
-    ScopedDeletionQueue& operator=(const ScopedDeletionQueue&) = delete;
-};
 
 }

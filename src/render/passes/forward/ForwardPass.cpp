@@ -23,13 +23,13 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     ctx.BindHeapsAndPushFrame(cmd);
 
-    FrameRecorder recorder(cmd, impl);
-    const auto    sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, impl);
+    const auto  sceneVp = impl.EffectiveViewport();
 
     const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor);
     const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(impl.presenter.depthTarget);
 
-    Vk::DynamicPass(litColor.extent)
+    Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -37,17 +37,17 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
 
-                if ((drawCmd.instanceData.flags & 0xFF) != 2) {
+                if (!IsForwardOnly(drawCmd.instanceData.flags)) {
                     continue;
                 }
 
-                if (!drawCmd.material->pipeline.Valid()) {
+                if (drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
@@ -63,7 +63,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                         .textureIndex       = emitter.params.textureIndex
                     };
 
-                    recorder.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
+                    passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
                          .layout        = ctx.particleRenderLayout,
                          .heap          = true,
@@ -79,7 +79,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
                 const RenderContext::Impl::ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
 
-                recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
+                passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),
                      .layout        = ctx.linePipelineLayout,
                      .heap          = true,

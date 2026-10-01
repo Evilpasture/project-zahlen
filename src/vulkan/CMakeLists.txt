@@ -22,6 +22,7 @@ add_library(
   core/Instance.cpp
   core/Context.cpp
   core/Extensions.cpp
+  core/DeviceConfigurator.cpp
   presentation/PresentPacer.cpp
   presentation/Surface.cpp
   presentation/Swapchain.cpp
@@ -29,6 +30,7 @@ add_library(
   memory/VmaImplementation.cpp
   memory/Allocator.cpp
   memory/StagingContext.cpp
+  execution/CommandRecorder.cpp
   execution/Commands.cpp
   execution/SemaphorePool.cpp
   pipeline/PipelineBuilder.cpp

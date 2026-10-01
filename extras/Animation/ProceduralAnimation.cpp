@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -1043,7 +1048,7 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
         const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
         if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
-            ZHLN::Log("[ProceduralAnimation] WARNING: hand constraint not created — forearm={} hand={}", 
+            ZHLN::LogWarning("[ProceduralAnimation] hand constraint not created — forearm={} hand={}",
                       IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
                       IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing");
             return;
@@ -1613,6 +1618,12 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
     outMap.poseValid   = true;
 }
 
+// Structural additions (pose overrides and attachment world transforms) need
+// Registry&: the inspector marks this evaluator as a wildcard component writer.
+// Keep the existing SystemContext entry point below for custom schedules.
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
+                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept;
+
 void ProceduralAnimation::Register(Engine& engine) {
     auto& registry = engine.GetRegistry();
     registry.RegisterComponent<ProceduralLocomotionComponent>("ProceduralLocomotionComponent");
@@ -1624,34 +1635,8 @@ void ProceduralAnimation::Register(Engine& engine) {
     registry.RegisterComponent<Animation::ItemHandlingComponent>("ItemHandlingComponent");
     registry.RegisterComponent<RigBoneMap>("RigBoneMap");
 
-    using namespace ECS;
     auto&      graph    = engine.GetUpdateGraph();
-    const bool inserted = graph.AddSystemBefore(
-        {
-            .update_func = [](SystemContext& ctx) { ProceduralAnimation::Update(ctx, ctx.dt); },
-            .name        = "ProceduralAnimationSystem",
-            .access_pattern =
-                {
-                    Read<Components::PhysicsComponent>(),
-                    Write<Components::TransformComponent>(),
-                    Write<Components::WorldTransformComponent>(),
-                    Read<Components::HierarchyComponent>(),
-                    Read<Components::MeshComponent>(),
-                    Read<ProceduralLookAtComponent>(),
-                    Write<FirstPersonVisibilityComponent>(),
-                    Read<ProceduralAnimationConfigComponent>(),
-                    Read<Components::SkeletalMeshComponent>(),
-                    Write<ProceduralLocomotionComponent>(),
-                    Write<ProceduralLocomotionTracksComponent>(),
-                    Write<Animation::ItemHandlingComponent>(),
-                    Write<HairStrandsComponent>(),
-                    Write<RigBoneMap>(),
-                    Write<Components::KinematicPoseOverrideComponent>(),
-                },
-            .enabled = true,
-        },
-        "ArticulationSystem"
-    );
+    const bool inserted = graph.AddSystemBefore<&ProceduralAnimationSystem>("ArticulationSystem");
     if (inserted) {
         graph.Compile();
         ZHLN::Log("[ProceduralAnimation] Registered optional subsystem before ArticulationSystem.");
@@ -1864,11 +1849,17 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 }
 
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
+    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {ctx.physics},
+                              ECS::ResMut<RenderContext> {ctx.render}, ECS::ResMut<Camera> {ctx.camera});
+}
+
+void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
+                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
-    auto& registry = ctx.registry;
-    auto& physics  = *ctx.physics;
-    auto& renderer = *ctx.render;
+    const float dt = frameDt.value;
+    auto& physics  = *physicsRes;
+    auto& renderer = *renderRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
@@ -1984,10 +1975,10 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
                     clip.name, animator->currentTrackTime, clip.duration, clip.channels.size(), usableTransformChannels
                 );
                 if (usableTransformChannels == 0) {
-                    ZHLN::Log("[ProceduralAnimation] WARNING: selected track has no usable transform channels; bind pose will be shown.");
+                    ZHLN::LogWarning("[ProceduralAnimation] selected track has no usable transform channels; bind pose will be shown.");
                 }
             } else {
-                ZHLN::Log("[ProceduralAnimation] WARNING: no valid authored track selected; bind pose will be shown.");
+                ZHLN::LogWarning("[ProceduralAnimation] no valid authored track selected; bind pose will be shown.");
             }
             if (!complete) {
                 for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {
@@ -2091,18 +2082,18 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            const Entity ignoredHandle          = physicsComponent != nullptr ? physicsComponent->physicsHandle : Entity {};
-            const float  legIKWeight            = config != nullptr ? config->legIKWeight : 1.0f;
-            const float  pelvisDropWeight       = config != nullptr ? config->pelvisDropWeight : 1.0f;
-            const float  maxHeightCorrection    = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
-            const float  maxLegExtension        = config != nullptr ? config->maxLegExtension : 0.98f;
-            const float  maxBodyTilt            = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float  maxAnkleSideways       = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float  maxAnkleForward        = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
-            const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
-            const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
+            const Physics::BodyHandle ignoredHandle        = physicsComponent != nullptr ? physicsComponent->physicsHandle : Physics::BodyHandle {};
+            const float               legIKWeight          = config != nullptr ? config->legIKWeight : 1.0f;
+            const float               pelvisDropWeight     = config != nullptr ? config->pelvisDropWeight : 1.0f;
+            const float               maxHeightCorrection  = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
+            const float               maxLegExtension      = config != nullptr ? config->maxLegExtension : 0.98f;
+            const float               maxBodyTilt          = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float               maxAnkleSideways     = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float               maxAnkleForward      = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
+            const bool                preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
+            const bool                worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
-                ctx, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
         } else {
@@ -2158,7 +2149,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
             const JPH::Mat44 worldToModel = rootWorld.Inversed();
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
-            Animation::UpdateItemDynamics(ctx, entity, *itemHandling, transform->position, rootRotation, dt);
+            Animation::UpdateItemDynamics(registry, physics, entity, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);
@@ -2369,7 +2360,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
                     );
                 }
 
-                Camera& camera            = *ctx.camera;
+                Camera& camera            = *cameraRes;
                 camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
                 const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                 JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
@@ -2411,7 +2402,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
                     skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
                 );
             }
-            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, palette.data(), static_cast<uint32_t>(paletteCount));
+            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, std::span {palette}.first(paletteCount));
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 
             if (skeletalMesh == skin.skeletalMesh) {

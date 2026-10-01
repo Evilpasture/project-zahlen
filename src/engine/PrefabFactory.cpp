@@ -9,6 +9,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -25,6 +26,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <vector>
+#include <span>
+#include <utility>
 #include "ArticulationSystem.hpp"
 #include "LightingSystem.hpp"
 #include <stb_image.h>
@@ -61,6 +64,23 @@ auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& ow
 
 }
 
+void DetachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity) {
+    SceneResources::Detach<Components::OwnedMeshComponent>(ctx, reg, entity);
+}
+
+void AttachOwnedMesh(RenderContext& ctx, ECS::Registry& reg, Entity entity, Components::OwnedMeshComponent component) {
+    SceneResources::Attach(ctx, reg, entity, std::move(component));
+}
+
+void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg) {
+    if (reg.GetEntitiesWith<Components::OwnedMeshComponent>().empty()) {
+        return;
+    }
+    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
+        SceneResources::Release(ctx, owned);
+    }
+}
+
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     return CreateFontAtlasTexture(ctx, registry, nullptr, GUI::kDefaultFontAssetID);
 }
@@ -85,7 +105,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetMa
     }
 
     if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
-        Log("WARNING: No baked font available; text cannot be drawn.");
+        LogWarning("No baked font available; text cannot be drawn.");
         return TextureHandle::Invalid;
     }
 
@@ -94,7 +114,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetMa
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", asset->atlasWidth, asset->atlasHeight, false, rgbaPixels.data());
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false);
 
     FontAtlas& font      = uiSettings->fontAtlas;
     font                 = FontAtlas {};
@@ -149,7 +169,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     assetMgr.FreeMemory(req);
 
     if (!decoded) {
-        Log("WARNING: Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
+        LogWarning("Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
         return std::unexpected(decoded.error());
     }
 
@@ -168,15 +188,15 @@ auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFo
     return assetMgr.GetCachedFont(HashAssetPath(path));
 }
 
-auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> TextureHandle {
     uint64_t hash = HashAssetPath(path);
 
     AssetLoadRequest req;
     req.assetID = hash;
 
     if (!assetMgr.LoadSync(req)) {
-        ZHLN::Log("WARNING: Failed to load texture asset from VFS: {}", path);
-        return 1;
+        ZHLN::LogWarning("Failed to load texture asset from VFS: {}", path);
+        return TextureHandle::Invalid;
     }
 
     int            width    = 0;
@@ -187,14 +207,19 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     assetMgr.FreeMemory(req);
 
     if (pixels == nullptr) {
-        ZHLN::Log("ERROR: stbi_load_from_memory failed for texture: {}", path);
-        return 1;
+        ZHLN::LogError("stbi_load_from_memory failed for texture: {}", path);
+        return TextureHandle::Invalid;
     }
 
-    auto texRes = ctx.CreateTexture(pixels, static_cast<uint32_t>(width), static_cast<uint32_t>(height), isSRGB);
+    auto texRes = ctx.CreateTexture(
+        path, std::span {pixels, static_cast<size_t>(width) * height * 4}, {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB
+    );
     stbi_image_free(pixels);
 
-    return texRes ? *texRes : 1;
+    if (!texRes) {
+        ZHLN::LogError("Failed to upload texture asset {}: {}", path, texRes.error());
+    }
+    return texRes.value_or(TextureHandle::Invalid);
 }
 
 auto LoadModelPrefab(RenderContext& , AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {
@@ -285,8 +310,12 @@ auto InstantiateMeshPart(
 
     Material activeMat = params.materialOverride.pipeline != PipelineHandle::Invalid ? params.materialOverride : part.defaultMaterial;
 
-    ctx.RegisterGPUMesh(meshAsset, part.mesh);
-    ctx.RegisterGPUMaterial(matAsset, activeMat);
+    if (part.mesh.posBuffer != BufferHandle::Invalid) {
+        ctx.RegisterGPUMesh(meshAsset, part.mesh);
+    }
+    if (activeMat.pipeline != PipelineHandle::Invalid) {
+        ctx.RegisterGPUMaterial(matAsset, activeMat);
+    }
 
     uint32_t assignedJointOffset = 0;
     if (part.isSkinned && params.isAnimated && part.skeletonIndex >= 0) {
@@ -304,7 +333,9 @@ auto InstantiateMeshPart(
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }
-    if (activeMat.alphaMode == 2) {
+    // Both alpha blending and optical transmission are composited in the
+    // forward pass. A masked transmissive surface is still forward-only.
+    if (activeMat.alphaMode == 2 || (!activeMat.unlit && activeMat.transmissionFactor > 0.0f)) {
         flags |= DrawFlags::ExcludeFromTLAS;
     }
 
@@ -318,7 +349,7 @@ auto InstantiateMeshPart(
             e, Components::PhysicsComponent {
                    .physicsHandle = pc.CreateRigidBody(
                        prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                       params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
+                       params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
                    ),
                    .isStatic = params.isStaticPhysics
                }
@@ -371,11 +402,13 @@ auto InstantiateMeshPart(
     return e;
 }
 
-auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult) -> Entity {
-    static constexpr float kInvDisplayScale = 1.0f / kGLTFEmissiveDisplayScale;
-
-    const float* raw = part.defaultMaterial.emissiveFactor;
-    const float  ef[3] {raw[0] * kInvDisplayScale, raw[1] * kInvDisplayScale, raw[2] * kInvDisplayScale};
+auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity parentEntity, float scaleMult, float emissiveFactorScale) -> Entity {
+    if (part.defaultMaterial.unlit) return Entity::Null(); // KHR_materials_unlit ignores emissive factors.
+    // Virtual lights approximate authored emission, not the presentation
+    // boost chosen by the importer. Fidelity captures never opt into them.
+    const float invImportScale = 1.0f / emissiveFactorScale;
+    const float* raw = part.defaultMaterial.emissiveFactor.data();
+    const float  ef[3] {raw[0] * invImportScale, raw[1] * invImportScale, raw[2] * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -449,6 +482,8 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
 
     float maxExtent = std::max({halfExtents.GetX(), halfExtents.GetY(), halfExtents.GetZ()});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = maxExtent * 2.0f});
+    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = Components::OwnedMeshComponent::Shape::Box,
+                                               .dimensions = halfExtents, .color = boxColor});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
@@ -458,7 +493,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
         );
         auto body = pc->CreateRigidBody(
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
@@ -478,6 +513,8 @@ auto SpawnPrimitive(
     PhysicsContext* pc,
     std::string_view shapeName,
     Mesh             mesh,
+    Components::OwnedMeshComponent::Shape shape,
+    JPH::Vec3        dimensions,
     float            cullRadius,
     Physics::ShapeType physicsShape,
     float            physP1,
@@ -513,13 +550,15 @@ auto SpawnPrimitive(
     reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
+    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = shape,
+                                               .dimensions = dimensions, .color = shapeColor});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
-        auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
-        auto body  = pc->CreateRigidBody(
-            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
+        auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        auto body      = pc->CreateRigidBody(
+            bodyShape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
@@ -535,7 +574,8 @@ auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, fl
     }
     const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
     return SpawnPrimitive(
-        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), radius * maxScale * 2.0f, Physics::ShapeType::Sphere,
+        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), Components::OwnedMeshComponent::Shape::Sphere,
+        JPH::Vec3(radius, 0.0f, 0.0f), radius * maxScale * 2.0f, Physics::ShapeType::Sphere,
         radius * maxScale, 0.0f, resolved
     );
 }
@@ -551,7 +591,8 @@ auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, 
     }
     const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
     return SpawnPrimitive(
-        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cylinder,
+        JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f,
         Physics::ShapeType::Cylinder, radius * maxScale, height * 0.5f * maxScale, resolved
     );
 }
@@ -567,7 +608,8 @@ auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, floa
     }
     const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
     return SpawnPrimitive(
-        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), Components::OwnedMeshComponent::Shape::Cone,
+        JPH::Vec3(radius, height, 0.0f), std::max(radius, height * 0.5f) * maxScale * 2.0f,
         Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
     );
 }
@@ -607,11 +649,13 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
     reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
     reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = extent * 2.0f});
+    reg.Add(e, Components::OwnedMeshComponent {.meshAsset = meshAsset, .mesh = mesh, .shape = Components::OwnedMeshComponent::Shape::Plane,
+                                               .dimensions = JPH::Vec3(extent, 0.0f, 0.0f), .color = color});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
     if (params.createPhysics && pc != nullptr) {
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask, e);
+        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask);
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
@@ -676,7 +720,7 @@ auto InstantiatePrefab(
         }
         spawnedCount++;
 
-        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult) : Entity::Null();
+        Entity glowEnt = params.emissiveVirtualLights ? TrySpawnEmissiveVPL(reg, prefab.parts[i], meshEnt, scaleMult, prefab.emissiveFactorScale) : Entity::Null();
         if (glowEnt != Entity::Null()) {
             if (outBuffer != nullptr && spawnedCount < maxCount) {
                 outBuffer[spawnedCount] = glowEnt;
@@ -713,10 +757,47 @@ auto InstantiatePrefab(
 }
 
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
-    ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
+    ZHLN::Log("[Engine] Device Lost: Rebuilding procedural resources; other GPU assets re-upload lazily.");
 
     ctx.ClearGPUCaches();
     CreateFontAtlasTexture(ctx, reg);
+
+    // The scene owns its procedural mesh buffers. Its recipes survive device
+    // loss, but its old handles do not; rebuild these with the new context.
+    // Terrain and other data-driven meshes are lazily rebuilt by their systems.
+    using Shape = Components::OwnedMeshComponent::Shape;
+    const auto entities = reg.GetEntitiesWith<Components::OwnedMeshComponent>();
+    auto       owners   = reg.GetRawArray<Components::OwnedMeshComponent>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        auto& owned = owners[i];
+        switch (owned.shape) {
+            case Shape::Box:      owned.mesh = CreateBoxMesh(ctx, owned.dimensions, owned.color); break;
+            case Shape::Plane:    owned.mesh = CreatePlaneMesh(ctx, owned.dimensions.GetX(), owned.color); break;
+            case Shape::Sphere:   owned.mesh = CreateSphereMesh(ctx, owned.dimensions.GetX(), owned.color); break;
+            case Shape::Cylinder: owned.mesh = CreateCylinderMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color); break;
+            case Shape::Cone:     owned.mesh = CreateConeMesh(ctx, owned.dimensions.GetX(), owned.dimensions.GetY(), owned.color); break;
+            case Shape::None:     continue;
+        }
+        if (owned.meshAsset != InvalidAssetID && owned.mesh.posBuffer != BufferHandle::Invalid) {
+            ctx.RegisterGPUMesh(owned.meshAsset, owned.mesh);
+        }
+
+        // Default procedural materials also lived in the lost renderer.
+        // Recreate a drawable baseline from the scene's color/PBR settings;
+        // data-driven materials are restored by their own asset systems.
+        const auto* meshComp = reg.Get<Components::MeshComponent>(entities[i]);
+        if (meshComp != nullptr && !ctx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
+            if (auto created = ctx.CreateBasicMaterial(false, owned.color.GetW() < 1.0f)) {
+                Material mat = *created;
+                mat.baseColorFactor = {owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()};
+                if (const auto* pbr = reg.Get<Components::PBRComponent>(entities[i])) {
+                    mat.roughnessFactor = pbr->roughness;
+                    mat.metallicFactor  = pbr->metallic;
+                }
+                ctx.RegisterGPUMaterial(meshComp->materialAsset, mat);
+            }
+        }
+    }
 }
 
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {

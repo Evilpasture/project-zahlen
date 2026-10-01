@@ -102,7 +102,7 @@
                                     (. view 0))
                                   (. PhysicsWorld key)))})))
 
-(fn PhysicsWorld.raycast [self origin direction max_dist ignore_entity]
+(fn PhysicsWorld.raycast [self origin direction max_dist ignore_body]
   (let [res (ffi.new "ZHLN_RaycastResult[1]")
         args (ffi.new :RaycastArgs [(. origin :x)
                                     (. origin :y)
@@ -111,11 +111,11 @@
                                     (. direction :y)
                                     (. direction :z)
                                     (or max_dist 1000.0)
-                                    (or ignore_entity 0)
+                                    (or ignore_body 0)
                                     res])]
     (ffi.C.ZHLN_DispatchCommand self._raw (get-cmd-id :Raycast) args)
     (if (= (. (. res 0) :hasHit) 1)
-        {:entity (. (. res 0) :entity)
+        {:body_handle (. (. res 0) :bodyHandle)
          :position (vec3.new (. (. res 0) :px) (. (. res 0) :py)
                              (. (. res 0) :pz))
          :normal (vec3.new (. (. res 0) :nx) (. (. res 0) :ny)
@@ -463,12 +463,12 @@
                                             dy
                                             dz
                                             (or (. args :max_dist) 1000.0)
-                                            (or (. args :ignore_entity) 0)
+                                            (or (. args :ignore_body) 0)
                                             res])]
                      (ffi.C.ZHLN_DispatchCommand self._raw
                                                  (get-cmd-id :Raycast) ffi-args)
                      (if (= (. (. res 0) :hasHit) 1)
-                         {:entity (. (. res 0) :entity)
+                         {:body_handle (. (. res 0) :bodyHandle)
                           :position (vec3.new (. (. res 0) :px)
                                               (. (. res 0) :py)
                                               (. (. res 0) :pz))
@@ -643,7 +643,7 @@
         pixels (ffi.new "uint32_t[?]" size)]
     ;; Invoke user callback to fill the pixel buffer
     (callback pixels width height)
-    ;; Dispatch the raw pointer to the C++ engine
+    ;; Dispatch the pixels; the returned uint64 is a texture handle, not a bindless slot (0 on failure).
     (self:dispatch :CreateTexture
                    {:data pixels : width : height :isSRGB (if is-srgb 1 0)})))
 

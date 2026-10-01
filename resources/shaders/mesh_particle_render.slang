@@ -1,5 +1,8 @@
 
 import common;
+import gpu_buffer;
+import material_model;
+import math.transform;
 import pbr_helpers;
 import uniforms;
 
@@ -15,11 +18,11 @@ struct Particle3D {
 struct MeshParticleRenderPushConstants {
     uint64_t particleBufferAddr;
     uint64_t posAddress;
-    uint64_t attrAddress;
-    uint64_t iboAddress;
-
     float4 baseColorFactor;
     float4 emissiveFactor;
+    uint64_t tangentFrameAddress;
+    uint64_t surfaceAddress;
+    uint64_t iboAddress;
 
     uint indexCount;
     uint albedoIdx;
@@ -31,7 +34,9 @@ struct MeshParticleRenderPushConstants {
     float alphaCutoff;
     uint alphaMode;
 
-    uint _padding;
+    uint samplerCodes0;
+    uint samplerCodes1;
+    uint unlit;
 };
 
 [vk::push_constant]
@@ -53,6 +58,7 @@ struct VSOutput {
     nointerpolation float3 pbrFactors : TEXCOORD6;
     nointerpolation uint alphaMode : TEXCOORD7;
     nointerpolation float4 emissiveFactor : TEXCOORD8;
+    nointerpolation uint2 samplerCodes : TEXCOORD16;
 };
 
 struct PSOutput {
@@ -61,26 +67,15 @@ struct PSOutput {
     float4 normalRoughness : SV_Target2;
     float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
+    float4 anisotropy : SV_Target5;
+    float4 sheen : SV_Target6;
 };
-
-public struct Quaternion {
-    public float4 value;
-    public __init(float4 value) {
-        this.value = value;
-    }
-
-    [ForceInline]
-    public float3 rotate(float3 vector) {
-        float3 t = 2.0f * cross(this.value.xyz, vector);
-        return vector + this.value.w * t + cross(this.value.xyz, t);
-    }
-}
 
 VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint viewId: SV_ViewID) {
     VSOutput output;
 
-    Particle3D* particles = (Particle3D*) mp_pc.particleBufferAddr;
-    Particle3D p          = particles[instanceId];
+    GPUBuffer<Particle3D> particles = GPUBuffer<Particle3D>(mp_pc.particleBufferAddr);
+    Particle3D p = particles.load(instanceId);
 
     if (p.params.x >= p.params.y || p.params.y <= 0.0f) {
         output.pos             = float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -97,21 +92,22 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
         output.pbrFactors      = float3(0.0f, 0.0f, 0.0f);
         output.alphaMode       = 0;
         output.emissiveFactor  = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        output.samplerCodes    = uint2(0u, 0u);
         return output;
     }
 
     uint actualVertexId = vertexId;
     if (mp_pc.iboAddress != 0) {
-        uint* indices  = (uint*) mp_pc.iboAddress;
-        actualVertexId = indices[vertexId];
+        GPUBuffer<uint> indices = GPUBuffer<uint>(mp_pc.iboAddress);
+        actualVertexId = indices.load(vertexId);
     }
 
-    float* positionValues = (float*) mp_pc.posAddress;
-    uint positionOffset   = actualVertexId * 3u;
-    float3 localPos       = float3(positionValues[positionOffset], positionValues[positionOffset + 1u], positionValues[positionOffset + 2u]);
-    float3 scaledPos      = localPos * p.position.w;
-    float3 rotatedPos     = Quaternion(p.rotation).rotate(scaledPos);
-    float3 worldPos       = rotatedPos + p.position.xyz;
+    GPUBuffer<float> positionValues = GPUBuffer<float>(mp_pc.posAddress);
+    uint positionOffset = actualVertexId * 3u;
+    float3 localPos = float3(positionValues.load(positionOffset), positionValues.load(positionOffset + 1u), positionValues.load(positionOffset + 2u));
+    float3 scaledPos = localPos * p.position.w;
+    float3 rotatedPos = Quaternion(p.rotation).rotate(scaledPos);
+    float3 worldPos = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
     output.pos      = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
@@ -125,22 +121,19 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.pos = output.shadowPos;
 #endif
 
-    if (mp_pc.attrAddress != 0) {
-        VertexAttributes* attributes        = (VertexAttributes*) mp_pc.attrAddress;
-        VertexAttributes attributesAtVertex = attributes[actualVertexId];
-        Quaternion rotation                 = Quaternion(p.rotation);
-
-        float3 localNormal = attributesAtVertex.unpackedNormal.xyz;
-        output.normal      = normalize(rotation.rotate(localNormal));
-
-        float4 localTangent = attributesAtVertex.unpackedTangent;
-        output.tangent.xyz  = normalize(rotation.rotate(localTangent.xyz));
-        output.tangent.w    = localTangent.w;
-        output.uv           = attributesAtVertex.unpackedUV;
-    } else {
-        output.normal  = float3(0.0f, 1.0f, 0.0f);
-        output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
-        output.uv      = float2(0.0f, 0.0f);
+    output.normal  = float3(0.0f, 1.0f, 0.0f);
+    output.tangent = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    output.uv      = float2(0.0f, 0.0f);
+    if (mp_pc.tangentFrameAddress != 0) {
+        VertexTangentFrame frame = GPUBuffer<VertexTangentFrame>(mp_pc.tangentFrameAddress).load(actualVertexId);
+        Quaternion rotation = Quaternion(p.rotation);
+        output.normal = normalize(rotation.rotate(frame.unpackedNormal.xyz));
+        float4 tangent = frame.unpackedTangent;
+        output.tangent = float4(normalize(rotation.rotate(tangent.xyz)), tangent.w);
+    }
+    if (mp_pc.surfaceAddress != 0) {
+        VertexSurface surface = GPUBuffer<VertexSurface>(mp_pc.surfaceAddress).load(actualVertexId);
+        output.uv = surface.unpackedUV;
     }
 
     output.color           = p.color;
@@ -149,65 +142,62 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     output.emissiveFactor  = mp_pc.emissiveFactor;
     output.pbrFactors      = float3(mp_pc.metallic, mp_pc.roughness, mp_pc.alphaCutoff);
     output.alphaMode       = mp_pc.alphaMode;
+    output.samplerCodes    = uint2(mp_pc.samplerCodes0, mp_pc.samplerCodes1);
 
     return output;
 }
 
 void PSShadow(VSOutput input) {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 }
 
 PSOutput PSMain(VSOutput input) {
     PSOutput output;
-
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float metallicFactor   = input.pbrFactors.x;
-    float roughnessFactor  = input.pbrFactors.y;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
-    float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
-
-    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
-
-    float3 N           = normalize(input.normal);
-    float3 worldNormal = N;
-
-    if (indices.y != 2 && any(input.tangent.xyz)) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
-        if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
-        }
-        float3 T          = normalize(T_unnorm);
-        float tangentSign = input.tangent.w * 2.0f - 1.0f;
-        float3 B          = normalize(cross(N, T) * tangentSign);
-
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+    if (mp_pc.unlit != 0u) {
+        float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+        output.color           = albedo;
+        output.emissive        = float4(0.0f);
+        output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.clearcoat       = float4(0.0f);
+        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f);
+        output.sheen           = float4(0.0f);
+        float currW = max(input.currClip.w, 0.0001f);
+        float prevW = max(input.prevClip.w, 0.0001f);
+        output.velocity = (input.currClip.xy / currW - input.prevClip.xy / prevW) * 0.5f;
+        return output;
     }
+    float3 emissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
 
-    output.color           = float4(albedo.rgb, albedo.a);
-    output.emissive        = float4(emissive, 1.0f);
-    float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
-    output.normalRoughness = float4(packedNormal, roughness, metallic);
+    // Mesh-particle normals use their original tangent fallback and encoded
+    // tangent sign; their G-buffer roughness floor is 0.045 for every mode.
+    material.roughnessFloor = 0.045f;
+    material.geometricNormal = normalize(input.normal);
+    material.hasTangent = any(input.tangent.xyz);
+    if (material.normalIndex != 2 && material.hasTangent) {
+        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, material.geometricNormal) * material.geometricNormal;
+        if (dot(T_unnorm, T_unnorm) < 0.0001f) {
+            T_unnorm = cross(material.geometricNormal, abs(material.geometricNormal.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+        }
+        material.tangentDirection = normalize(T_unnorm);
+        float tangentSign = input.tangent.w * 2.0f - 1.0f;
+        material.bitangentDirection = normalize(cross(material.geometricNormal, material.tangentDirection) * tangentSign);
+    }
+    SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, emissive);
+    output.color           = float4(surface.albedo, surface.alpha);
+    output.emissive        = float4(surface.emissive, 1.0f);
+    float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
+    output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -215,7 +205,9 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcPrev = input.prevClip.xy / prevW;
 
     output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
-    output.clearcoat = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    output.clearcoat  = surface.clearcoat;
+    output.anisotropy = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
+    output.sheen = surface.sheen;
 
     return output;
 }

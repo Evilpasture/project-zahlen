@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
 #include <string_view>
@@ -83,12 +84,21 @@ struct GraphImage {
     static constexpr bool               is_3d         = Is3D;
 };
 
-template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
+// The entry state drives the graph's barrier into a pass. Most passes leave an
+// image in that state; a pass that transitions it internally (e.g. generating
+// mips after a transfer copy) also declares its exit state so the next pass
+// does not issue a barrier from a layout the image no longer has.
+template <
+    typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access>
 struct Usage {
-    using Resource                                = Image;
-    static constexpr VkImageLayout         layout = Layout;
-    static constexpr VkPipelineStageFlags2 stage  = Stage;
-    static constexpr VkAccessFlags2        access = Access;
+    using Resource                                      = Image;
+    static constexpr VkImageLayout         layout       = Layout;
+    static constexpr VkPipelineStageFlags2 stage        = Stage;
+    static constexpr VkAccessFlags2        access       = Access;
+    static constexpr VkImageLayout         final_layout = FinalLayout;
+    static constexpr VkPipelineStageFlags2 final_stage  = FinalStage;
+    static constexpr VkAccessFlags2        final_access = FinalAccess;
 };
 
 template <typename Image>
@@ -129,6 +139,13 @@ using TransferSrcRead = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PI
 
 template <typename Image>
 using TransferDstWrite = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT>;
+
+// The pass copies into mip 0, blits down the chain and transitions every mip
+// to fragment-readable layout before it returns.
+template <typename Image>
+using TransferDstWriteThenShaderRead = Usage<
+    Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
 template <typename Image>
 using ShaderReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
@@ -180,25 +197,19 @@ inline constexpr bool DependentFalse = false;
 }
 
 
-struct ForkBody {
-    void* user                                               = nullptr;
-    void (*record)(void* user, VkCommandBuffer cmd) noexcept = nullptr;
-
-    void operator()(VkCommandBuffer cmd) const noexcept {
-        if (record != nullptr) {
-            record(user, cmd);
-        }
-    }
-};
+// Only borrowed during ExecuteFork; the graph owns the const-callable passes
+// and keeps them alive until recording completes. No pass-specific trampoline
+// or const_cast is needed.
+using ForkCall = ZHLN::FunctionRef<void(VkCommandBuffer) const>;
 
 template <typename Executor>
-concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkBody> bodies) {
+concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkCall> bodies) {
     { executor.ExecuteFork(cmd, bodies) } noexcept;
 };
 
 struct SequentialFork {
-    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) noexcept {
-        for (const ForkBody& body: bodies) {
+    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkCall> bodies) noexcept {
+        for (const ForkCall& body: bodies) {
             body(cmd);
         }
     }
@@ -219,22 +230,10 @@ struct ParallelPass {
     constexpr explicit ParallelPass(SubPasses&&... passes) noexcept: subPasses(std::forward<SubPasses>(passes)...) {
     }
 
-    [[nodiscard]] auto Bodies(std::array<ForkBody, sizeof...(SubPasses)>& out) const noexcept -> std::span<const ForkBody> {
-        size_t index = 0;
-        std::apply(
-            [&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses
+    [[nodiscard]] auto Bodies() const noexcept -> std::array<ForkCall, sizeof...(SubPasses)> {
+        return std::apply(
+            [](const SubPasses&... pass) -> std::array<ForkCall, sizeof...(SubPasses)> { return {ForkCall {pass}...}; }, subPasses
         );
-        return {out.data(), out.size()};
-    }
-
-  private:
-    // A fork body is a pass recorded out of line, on a secondary command
-    // buffer, so it is replayed as a plain functor call -- exactly the shape
-    // `IsForkablePass` admits into a group. There is no record member to
-    // name: the pass *is* the callable.
-    template <typename SubPass>
-    static void RecordBody(void* user, VkCommandBuffer cmd) noexcept {
-        (*static_cast<const SubPass*>(user))(cmd);
     }
 };
 
@@ -248,14 +247,18 @@ namespace TemplatedDetail {
 template <typename U>
 struct IsColorAttachment: std::false_type {};
 
-template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
-struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access>>: std::true_type {};
+template <
+    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
+struct IsColorAttachment<Usage<Image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
 
 template <typename U>
 struct IsDepthAttachment: std::false_type {};
 
-template <typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
-struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access>>: std::true_type {};
+template <
+    typename Image, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
+    VkImageLayout FinalLayout, VkPipelineStageFlags2 FinalStage, VkAccessFlags2 FinalAccess>
+struct IsDepthAttachment<Usage<Image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, Stage, Access, FinalLayout, FinalStage, FinalAccess>>: std::true_type {};
 
 template <typename InList, typename OutList, template <typename> class Predicate>
 struct FilterImpl;
@@ -368,7 +371,7 @@ template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
 
-// Whether a pass may be replayed as a raw fork body on a secondary command
+// Whether a pass may be recorded by a fork worker on a secondary command
 // buffer. A compute or transfer pass always can. A raster pass can only if it
 // manages its own render pass -- that is, if it is callable with a bare
 // `VkCommandBuffer`. A raster pass that takes `RasterPassContext&` is asking
@@ -496,12 +499,6 @@ constexpr auto MakePassPack(Passes&&... passes) {
     return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
 }
 
-struct GraphResource {
-    VkImage     handle = VK_NULL_HANDLE;
-    VkImageView view   = VK_NULL_HANDLE;
-    VkExtent3D  extent {};
-};
-
 template <typename Tag>
 struct ResourceResolver;
 
@@ -512,12 +509,12 @@ class ResourceBinder {
     constexpr void AutoBind(ContextImpl& impl) noexcept;
 
     template <typename Image>
-    constexpr void Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept;
+    constexpr void Bind(ImageSlice slice) noexcept;
 
-    constexpr auto GetBindings() const noexcept -> const std::array<GraphResource, ResourceList::size>&;
+    constexpr auto GetBindings() const noexcept -> const std::array<ImageSlice, ResourceList::size>&;
 
   private:
-    std::array<GraphResource, ResourceList::size> _resources {};
+    std::array<ImageSlice, ResourceList::size> _resources {};
 };
 
 // The part of a rendered pass's context that does not depend on which
@@ -636,7 +633,7 @@ class CompileTimeFrameGraph {
     template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
     void ExecutePass(
         VkCommandBuffer                                cmd,
-        const std::array<GraphResource, NumResources>& bindings,
+        const std::array<ImageSlice, NumResources>& bindings,
         const PassType&                                pass,
         uint32_t                                       frameIndex,
         ProfilerT*                                     profiler,
@@ -662,7 +659,7 @@ struct ClearColorOf {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 class RasterPassContext: public RasterPassContextBase {
   public:
-    RasterPassContext(VkCommandBuffer cmd, const std::array<GraphResource, ResourceList::size>& bindings) noexcept;
+    RasterPassContext(VkCommandBuffer cmd, const std::array<ImageSlice, ResourceList::size>& bindings) noexcept;
 
     ~RasterPassContext() noexcept;
 
@@ -671,40 +668,34 @@ class RasterPassContext: public RasterPassContextBase {
 
     template <typename... Imgs, typename... DImgs>
     void ResolveExtent(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         TypeList<Imgs...> ,
         TypeList<DImgs...>
     ) noexcept;
 
     template <typename... Imgs>
     void BuildColorAttachments(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         uint32_t&                                            colorCount,
         TypeList<Imgs...>
     ) noexcept;
 
     template <typename... DImgs>
     bool BuildDepthAttachment(
-        const std::array<GraphResource, ResourceList::size>& bindings,
+        const std::array<ImageSlice, ResourceList::size>& bindings,
         VkRenderingAttachmentInfo&                           outDepth,
         TypeList<DImgs...>
     ) noexcept;
 };
 
-template <typename Tag>
-struct GraphImageRef {
-    using TagType      = Tag;
-    VkImage     handle = VK_NULL_HANDLE;
-    VkImageView view   = VK_NULL_HANDLE;
-    VkExtent3D  extent {};
-};
-
 template <typename Tag, typename T>
-constexpr auto MakeRef(const T& resource) noexcept;
+constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice;
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view) noexcept;
 template <typename Tag>
-constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noexcept;
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format = Tag::format) noexcept;
+template <typename Tag>
+constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format = Tag::format) noexcept;
 
 }
 

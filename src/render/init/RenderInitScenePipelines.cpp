@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../RenderInternal.hpp"
-#include "../Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -13,13 +12,10 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
-
-
     size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
     auto   pb_res             = Vk::Buffer::Create(
         allocator.Get(), particleBufferSize,
-        Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex,
-        Vk::MemoryUsage::GPUOnly
+        Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex, Vk::MemoryUsage::GPUOnly
     );
     if (!pb_res) {
         return std::unexpected(pb_res.error());
@@ -40,7 +36,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -57,8 +53,6 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 }
 
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
-
-
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
     if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
@@ -67,14 +61,13 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
 
     meshParticleRenderLayout = emptyPipelineLayout;
 
-
     return LoadAndCreateShaders(
                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleRenderVS>(),
                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MeshParticleRenderPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
@@ -87,14 +80,13 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-
             return LoadAndCreateShaders(
                        MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleShadowVS>(),
                        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MeshParticleShadowPS>()
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
-                        .Shaders(shaders)
+                        .Shaders(shaders.View())
                         .Layout(emptyPipelineLayout)
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
@@ -123,26 +115,37 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
 }
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(
-    size_t                           maxVertices,
-    DoubleBuffered<Vk::Buffer>&      bufs,
-    DoubleBuffered<VkDeviceAddress>& addrs,
-    const char*                      label,
-    Vk::BufferUsage                  extraFlags
-) noexcept -> std::expected<void, ErrorCode> {
-    const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
-    for (int i = 0; i < 2; ++i) {
+    size_t                     maxVertices,
+    PerFrame<Vk::Buffer>&      bufs,
+    PerFrame<VkDeviceAddress>& addrs,
+    const char*                label,
+    Vk::BufferUsage            extraFlags
+) const noexcept -> std::expected<void, ErrorCode> {
+    const size_t              bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
+    PerFrame<Vk::Buffer>      created;
+    PerFrame<VkDeviceAddress> createdAddresses;
+    defer                     _([&] {
+        for (auto& buffer: created) {
+            allocator.DestroyBuffer(buffer);
+        }
+    });
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res = Vk::Buffer::Create(
-            allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags,
-            Vk::MemoryUsage::CPUToGPU
+            allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags, Vk::MemoryUsage::CPUToGPU
         );
         if (!res) {
             return std::unexpected(res.error());
         }
-        bufs[i]  = std::move(*res);
-        addrs[i] = ctx.BufferAddress(bufs[i].Handle());
+        created[i]          = std::move(*res);
+        createdAddresses[i] = ctx.BufferAddress(created[i].Handle());
     }
-    ZHLN::Log("Allocated double-buffered dynamic {} VBOs ({} bytes).", label, bufferSize);
+    // This helper is used at initialization; a reinit must be done after idle.
+    for (auto& buffer: bufs) {
+        allocator.DestroyBuffer(buffer);
+    }
+    bufs  = std::move(created);
+    addrs = createdAddresses;
+    ZHLN::Log("Allocated per-frame dynamic {} VBOs ({} bytes).", label, bufferSize);
     return {};
 }
 
@@ -153,15 +156,12 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     linePipelineLayout = emptyPipelineLayout;
 
-
-
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVSForward>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ForwardPS>()
+               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVSForward>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ForwardPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -194,19 +194,13 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 
         .and_then([&]() -> auto {
-            return CreateDoubleBuffered(
-                       allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
-                       Vk::MemoryUsage::CPUToGPU
-            )
+            return CreatePerFrame(allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreateDoubleBuffered(
-                       allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                       Vk::MemoryUsage::CPUToGPU
-            )
+            return CreatePerFrame(allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
@@ -214,15 +208,11 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
-
-
     static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
 
-
-
-    const Vk::ReflectedStageInput reflectInputs[2] = {
-        {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-        {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+    const std::array reflectInputs = {
+        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+        Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
     if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -241,12 +231,11 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     };
 
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::DecalVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::DecalPS>()
+               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::DecalVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::DecalPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
-                .Shaders(shaders)
+                .Shaders(shaders.View())
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&mergedInfo, &mergedInfo)
                 .ColorFormats(decalFormats)
@@ -262,41 +251,35 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 }
 
 auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
+    auto shaders = LoadAndCreateShaders(
+        MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
+    );
+    if (!shaders) {
+        return std::unexpected(shaders.error());
+    }
 
-
-    Vk::ShaderStages shaders;
-
-
-
-    return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
-    )
-        .and_then([&](auto&& compiledShaders) -> auto {
-            shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
-
-            csgPipelineLayout = emptyPipelineLayout;
-
-            return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
-                .Layout(emptyPipelineLayout)
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                .ColorFormats(ActiveGBuffer::array)
-                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
-                .DepthTest(true)
-                .DepthWrite(false)
-                .CullNone()
-                .ColorWriteEnable(false)
-                .StencilWriteMask(1)
-                .Cache(pipelineCache.Get())
-                .Build(ctx.Device())
-                .transform_error([](auto e) -> ErrorCode { return e; });
-        })
+    // One owner outlives all three synchronous builds; the view only carries
+    // pointers into its current SPIR-V buffers.
+    const auto stages = shaders->View();
+    csgPipelineLayout = emptyPipelineLayout;
+    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+        .Shaders(stages)
+        .Layout(emptyPipelineLayout)
+        .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
+        .ColorFormats(ActiveGBuffer::array)
+        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
+        .DepthTest(true)
+        .DepthWrite(false)
+        .CullNone()
+        .ColorWriteEnable(false)
+        .StencilWriteMask(1)
+        .Cache(pipelineCache.Get())
+        .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(stages)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
@@ -313,7 +296,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
             csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
-                .Shaders(shaders)
+                .Shaders(stages)
                 .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
@@ -332,7 +315,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
             shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
-                    ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error());
+                    ZHLN::LogError("Failed to hot-reload CSG stencil pipelines: {}", res.error());
                 } else {
                     ZHLN::Log("[Shader Reload] CSG Stencil pipelines hot-reloaded successfully.");
                 }
@@ -347,8 +330,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
                      .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
                          hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
                          return LoadAndCreateComputeShader(
-                                    MakeStageSource<ShaderStage::Compute, Shaders::Modules::HangGpuCS>(),
-                                    hangGpuPass.pipelineLayout.Get(), hangGpuPass
+                                    MakeStageSource<ShaderStage::Compute, Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
                          )
                              .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
                      });
@@ -375,8 +357,6 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
-
-
     auto cullingShader = Vk::CreateShaderDesc<Shaders::Modules::CullingCS>();
     if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -398,30 +378,29 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
 
     constexpr Vk::BufferUsage kInstanceUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     constexpr Vk::BufferUsage kIndirectUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::Indirect | Vk::BufferUsage::TransferDst |
-                                                   Vk::BufferUsage::TransferSrc | Vk::BufferUsage::ShaderDeviceAddress;
-    constexpr Vk::BufferUsage kCandidateUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
-                                                   Vk::BufferUsage::ShaderDeviceAddress;
+                                                Vk::BufferUsage::TransferSrc | Vk::BufferUsage::ShaderDeviceAddress;
+    constexpr Vk::BufferUsage kCandidateUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
     constexpr Vk::BufferUsage kCountUsage     = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::TransferSrc |
-                                                   Vk::BufferUsage::ShaderDeviceAddress;
+                                                Vk::BufferUsage::ShaderDeviceAddress;
 
     return std::expected<void, ErrorCode> {}
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
+            return CreatePerFrame(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
                 .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb1) {
                     frames.indirectCommandsBuffers = std::forward<decltype(icb1)>(icb1);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb2) {
                     frames.indirectCommandsBuffersPass2 = std::forward<decltype(icb2)>(icb2);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& spcb) {
                     frames.secondPassCandidatesBuffers = std::forward<decltype(spcb)>(spcb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kCountUsage, Vk::MemoryUsage::GPUOnly);
+                    return CreatePerFrame(allocator, sizeof(uint32_t), kCountUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
@@ -429,10 +408,10 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            const auto&    physInfo     = ctx.PhysicalInfo();
-            const uint32_t candFamilies[3] = {physInfo.graphics_family, physInfo.compute_family, physInfo.transfer_family};
-            uint32_t       uniqFamilies[3];
-            uint32_t       uniqCount = 0;
+            const auto&             physInfo     = ctx.PhysicalInfo();
+            const std::array        candFamilies = {physInfo.graphics_family, physInfo.compute_family, physInfo.transfer_family};
+            std::array<uint32_t, 3> uniqFamilies {};
+            uint32_t                uniqCount = 0;
             for (uint32_t cand: candFamilies) {
                 bool seen = false;
                 for (uint32_t j = 0; j < uniqCount; ++j) {
@@ -445,13 +424,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                     uniqFamilies[uniqCount++] = cand;
                 }
             }
-            const VkSharingMode clusterSharing = (uniqCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
-            std::span<const uint32_t> clusterFamilySpan {uniqFamilies, uniqCount};
+            const VkSharingMode       clusterSharing = (uniqCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+            std::span<const uint32_t> clusterFamilySpan {uniqFamilies.data(), uniqCount};
 
             auto bounds = Vk::Buffer::Create(
                 allocator.Get(), sizeof(ClusterBounds) * numClusters,
-                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
-                clusterSharing, clusterFamilySpan
+                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, clusterSharing,
+                clusterFamilySpan
             );
             if (!bounds) {
                 return std::unexpected(bounds.error());
@@ -469,41 +448,26 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(built.error());
             }
 
-            constexpr Vk::BufferUsage kClusterGridUsage   = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
-                                                               Vk::BufferUsage::ShaderDeviceAddress;
+            constexpr Vk::BufferUsage kClusterGridUsage   = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
             constexpr Vk::BufferUsage kLightIndexUsage    = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
-            constexpr Vk::BufferUsage kGlobalCounterUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
-                                                               Vk::BufferUsage::ShaderDeviceAddress;
+            constexpr Vk::BufferUsage kGlobalCounterUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
 
-
-            auto createClusterDoubleBuffered = [&](size_t size, Vk::BufferUsage usage) -> std::expected<DoubleBuffered<Vk::Buffer>, ErrorCode> {
-                auto first = Vk::Buffer::Create(
-                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
-                );
-                if (!first) {
-                    return std::unexpected(first.error());
-                }
-                auto second = Vk::Buffer::Create(
-                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
-                );
-                if (!second) {
-                    return std::unexpected(second.error());
-                }
-                return DoubleBuffered<Vk::Buffer> {std::move(*first), std::move(*second)};
+            auto createClusterPerFrame = [&](size_t size, Vk::BufferUsage usage) {
+                return CreatePerFrame(allocator, size, usage, Vk::MemoryUsage::GPUOnly, VkDeviceSize {0}, clusterSharing, clusterFamilySpan);
             };
 
-            return createClusterDoubleBuffered(sizeof(ClusterVolume) * numClusters, kClusterGridUsage)
+            return createClusterPerFrame(sizeof(ClusterVolume) * numClusters, kClusterGridUsage)
                 .and_then([&](auto&& cgb) {
                     frames.clusterGridBuffers = std::forward<decltype(cgb)>(cgb);
-                    return createClusterDoubleBuffered(sizeof(uint32_t) * numClusters * 64, kLightIndexUsage);
+                    return createClusterPerFrame(sizeof(uint32_t) * numClusters * 64, kLightIndexUsage);
                 })
                 .and_then([&](auto&& lsb) {
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
-                    return createClusterDoubleBuffered(sizeof(uint32_t), kGlobalCounterUsage);
+                    return createClusterPerFrame(sizeof(uint32_t), kGlobalCounterUsage);
                 })
                 .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
-                    for (uint32_t i = 0; i < 2; ++i) {
+                    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
                             Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
                             Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
@@ -529,8 +493,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset,
-                pipelineCache.Get()
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, pipelineCache.Get()
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -540,35 +503,36 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             ZHLN_AccelerationStructureSizes tlasSizes;
             Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances, tlasSizes);
 
-            return CreateDoubleBuffered(
-                       allocator, tlasSizes.acceleration_structure_size,
-                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+            return CreatePerFrame(
+                       allocator, tlasSizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::GPUOnly
             )
                 .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
-                    return CreateDoubleBuffered(
-                        allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                        Vk::MemoryUsage::GPUOnly
+                    return CreatePerFrame(
+                        allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
                     );
                 })
                 .and_then([&](auto&& tsb) {
                     frames.tlasScratchBuffer = std::forward<decltype(tsb)>(tsb);
-                    return CreateDoubleBuffered(
+                    return CreatePerFrame(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-                        Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::AccelerationStructureBuildInput,
-                        Vk::MemoryUsage::CPUToGPU
+                        Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::AccelerationStructureBuildInput, Vk::MemoryUsage::CPUToGPU
                     );
                 })
-                .transform([&](auto&& tib) {
+                .and_then([&](auto&& tib) -> std::expected<void, ErrorCode> {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
-                    for (uint32_t i = 0; i < 2; ++i) {
+                    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         frames.tlas[i] = Vk::AccelerationStructure(
-                            ctx.Device(),
-                            Vk::CreateAccelerationStructure(
-                                ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
-                            )
+                            ctx.Device(), Vk::CreateAccelerationStructure(
+                                              ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
+                                          )
                         );
+                        if (!frames.tlas[i].Valid()) {
+                            return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
+                        }
                     }
+                    return {};
                 });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return BuildSkinningPipeline(); })
@@ -577,7 +541,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 shaderReloads.Register("Skinning", {Shaders::Modules::SkinningCS::Path}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
-                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
+                        ZHLN::LogError("Failed to hot-reload Skinning pipeline: {}", res.error());
                     } else {
                         ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
                     }
@@ -586,4 +550,4 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         });
 }
 
-}
+} // namespace ZHLN

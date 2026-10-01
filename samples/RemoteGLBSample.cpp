@@ -1476,7 +1476,7 @@ auto main(int argc, char* argv[]) -> int {
     // slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
@@ -1490,8 +1490,7 @@ auto main(int argc, char* argv[]) -> int {
          .enableFallbackScene = false}
     );
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -1505,7 +1504,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 
@@ -1627,7 +1626,5 @@ auto main(int argc, char* argv[]) -> int {
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();
     }
-
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

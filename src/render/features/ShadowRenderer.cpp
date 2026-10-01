@@ -13,15 +13,20 @@
 namespace ZHLN {
 
 auto ShadowRenderer::InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    return CreateDoubleBuffered(
+    return CreatePerFrame(
                impl.allocator, sizeof(VkDrawIndirectCommand) * RenderContext::Impl::kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect,
                Vk::MemoryUsage::CPUToGPU
     )
-        .transform([this](auto&& buffers) -> void { _indirectCommands = std::forward<decltype(buffers)>(buffers); });
+        .transform([this, &impl](auto&& buffers) -> void {
+            DestroyResources(impl.allocator);
+            _indirectCommands = std::forward<decltype(buffers)>(buffers);
+        });
 }
 
-void ShadowRenderer::Flip() noexcept {
-    _indirectCommands.Flip();
+void ShadowRenderer::DestroyResources(Vk::Allocator& allocator) noexcept {
+    for (auto& buffer: _indirectCommands) {
+        allocator.DestroyBuffer(buffer);
+    }
 }
 
 auto ShadowRenderer::CascadePipeline() const noexcept -> VkPipeline {
@@ -44,19 +49,19 @@ auto ShadowRenderer::PunctualLayout() const noexcept -> VkPipelineLayout {
     return _punctualLayout;
 }
 
-auto ShadowRenderer::IndirectCommands() noexcept -> Vk::Buffer& {
-    return *_indirectCommands;
+auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer& {
+    return _indirectCommands[frameIndex];
 }
 
-auto ShadowRenderer::IndirectCommands() const noexcept -> const Vk::Buffer& {
-    return *_indirectCommands;
+auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) const noexcept -> const Vk::Buffer& {
+    return _indirectCommands[frameIndex];
 }
 
 auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
     _cascadeLayout = impl.emptyPipelineLayout;
 
-    return Vk::ShaderStages::Create(device, vert, frag)
+    return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
@@ -80,7 +85,9 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                 return {};
             }
 
-            auto shaders = Vk::ShaderStages::CreateMesh<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS>(device);
+            auto shaders = Vk::ShaderStagesView::CreateMesh<
+                Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshShadow, Shaders::Modules::ShadowPS
+            >();
             if (!shaders) {
                 ZHLN::Log("[ShadowRenderer] Shadow mesh-stage creation failed; cascades keep the vertex pipeline.");
                 return {};
@@ -108,7 +115,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
 auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
     _punctualLayout = impl.emptyPipelineLayout;
-    return Vk::ShaderStages::Create(device, vert, frag)
+    return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}

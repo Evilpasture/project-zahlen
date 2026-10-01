@@ -37,26 +37,11 @@ void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
             1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u
         };
 
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
-            .handle   = impl.graphResources.hizMap.image.Handle(),
-            .view     = impl.graphResources.hizMap.mipViews[mip].Get(),
-            .extent   = {.width = impl.graphResources.hizMap.extent.width, .height = impl.graphResources.hizMap.extent.height, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R32_SFLOAT,
-            .viewInfo = &impl.graphResources.hizMap.mipViewInfos[mip]
-        };
-        const Vk::ImageWrite inDepth = mip == 0 ? Vk::ImageWrite {
-                                                      .view     = impl.presenter.depthTarget.view.Get(),
-                                                      .layout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                                      .viewInfo = &impl.presenter.depthTarget.viewInfo
-                                                  } :
-                                                  Vk::ImageWrite {
-                                                      .view     = impl.graphResources.hizMap.mipViews[mip - 1].Get(),
-                                                      .layout   = VK_IMAGE_LAYOUT_GENERAL,
-                                                      .viewInfo = &impl.graphResources.hizMap.mipViewInfos[mip - 1]
-                                                  };
+        const Vk::ImageWrite inDepth = mip == 0 ? Vk::ImageWrite {impl.presenter.depthTarget.view} :
+                                                  Vk::ImageWrite {impl.graphResources.hizMap.mipViews[mip - 1], VK_IMAGE_LAYOUT_GENERAL};
         const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            impl.ctx, impl.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(outMip)
+            impl.ctx, impl.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
+            Vk::Slot<"outDepth">(impl.graphResources.hizMap.mipViews[mip])
         );
         impl.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(impl.ctx, cmd, block, dstW, dstH, 1, hizPC);
     }

@@ -18,6 +18,8 @@ template <typename T>
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMaintenance5FeaturesKHR>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceAccelerationStructureFeaturesKHR>) {
@@ -72,64 +74,171 @@ FeatureChain<Ts...>::FeatureChain(VkPhysicalDevice physicalDevice, std::tuple<Fe
 }
 
 template <typename... Ts>
+template <typename T>
+auto FeatureChain<Ts...>::Add(FeatureNode<T> node) && {
+    static_assert((!std::is_same_v<T, Ts> && ...), "a Vulkan feature struct may appear only once in the device chain");
+    return FeatureChain<Ts..., T>(_physicalDevice, std::tuple_cat(std::move(_features), std::make_tuple(std::move(node))));
+}
+
+template <typename... Ts>
 template <typename T, typename Func>
 auto FeatureChain<Ts...>::Require(Func&& configure) && {
     T feature {};
     std::forward<Func>(configure)(feature);
-    FeatureNode<T> node {.feature = feature, .active = true};
-    return FeatureChain<Ts..., T>(_physicalDevice, std::tuple_cat(std::move(_features), std::make_tuple(node)));
+    feature.sType = GetStructureType<T>();
+    feature.pNext = nullptr;
+    return std::move(*this).Add(FeatureNode<T> {.feature = feature, .active = true});
 }
 
-// Helpers for automated runtime support checking
+template <typename... Ts>
+template <typename T>
+[[nodiscard]] auto FeatureChain<Ts...>::Find() const noexcept -> const T* {
+    static_assert((0 + ... + static_cast<int>(std::is_same_v<T, Ts>)) == 1, "feature type must occur exactly once in the chain");
+    const auto& node = std::get<FeatureNode<T>>(_features);
+    return node.active ? &node.feature : nullptr;
+}
+
+// Vulkan feature structures have a header followed by VkBool32 fields, but
+// many have four bytes of *trailing padding*. Explicitly name the final field
+// so neither masking nor the "any enabled" check can mistake padding for a bit.
+template <typename T>
+[[nodiscard]] consteval auto FeaturePayloadEnd() noexcept -> size_t {
+    if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
+        static_assert(sizeof(VkPhysicalDeviceFeatures) == 55 * sizeof(VkBool32));
+        return offsetof(VkPhysicalDeviceFeatures2, features) + sizeof(VkPhysicalDeviceFeatures);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan11Features>) {
+        return offsetof(VkPhysicalDeviceVulkan11Features, shaderDrawParameters) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan12Features>) {
+        return offsetof(VkPhysicalDeviceVulkan12Features, subgroupBroadcastDynamicId) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceVulkan13Features>) {
+        return offsetof(VkPhysicalDeviceVulkan13Features, maintenance4) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR, swapchainMaintenance1) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMaintenance5FeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceMaintenance5FeaturesKHR, maintenance5) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceAccelerationStructureFeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceAccelerationStructureFeaturesKHR, descriptorBindingAccelerationStructureUpdateAfterBind) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceRayQueryFeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceRayQueryFeaturesKHR, rayQuery) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceRobustness2FeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceRobustness2FeaturesEXT, nullDescriptor) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDescriptorHeapFeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceDescriptorHeapFeaturesEXT, descriptorHeapCaptureReplay) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT, dynamicRenderingUnusedAttachments) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMeshShaderFeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, meshShaderQueries) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceFaultFeaturesKHR, deviceFaultDeviceLostOnMasked) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceFaultFeaturesEXT, deviceFaultVendorBinary) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceShaderConstantDataFeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceShaderConstantDataFeaturesKHR, shaderConstantData) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceShaderAbortFeaturesKHR>) {
+        return offsetof(VkPhysicalDeviceShaderAbortFeaturesKHR, shaderAbort) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDevicePresentModeFifoLatestReadyFeaturesKHR>) {
+        return offsetof(VkPhysicalDevicePresentModeFifoLatestReadyFeaturesKHR, presentModeFifoLatestReady) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDevicePresentTimingFeaturesEXT>) {
+        return offsetof(VkPhysicalDevicePresentTimingFeaturesEXT, presentAtRelativeTime) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDevicePresentId2FeaturesKHR>) {
+        return offsetof(VkPhysicalDevicePresentId2FeaturesKHR, presentId2) + sizeof(VkBool32);
+    } else {
+        static_assert(sizeof(T) == 0, "Vulkan feature payload not registered for this type");
+    }
+}
+
+template <typename T>
+[[nodiscard]] consteval auto FeaturePayloadStart() noexcept -> size_t {
+    static_assert(std::is_standard_layout_v<T>);
+    constexpr size_t start = offsetof(T, pNext) + sizeof(void*);
+    constexpr size_t end   = FeaturePayloadEnd<T>();
+    static_assert(start < end && end <= sizeof(T) && (end - start) % sizeof(VkBool32) == 0);
+    return start;
+}
+
+template <typename T>
+[[nodiscard]] inline auto ReadFeatureBit(const T& feature, size_t offset) noexcept -> VkBool32 {
+    VkBool32 bit = VK_FALSE;
+    std::memcpy(&bit, reinterpret_cast<const char*>(&feature) + offset, sizeof(bit));
+    return bit;
+}
+
+template <typename T>
+inline void WriteFeatureBit(T& feature, size_t offset, VkBool32 bit) noexcept {
+    std::memcpy(reinterpret_cast<char*>(&feature) + offset, &bit, sizeof(bit));
+}
+
+// A Features2 struct is the root of a vkGetPhysicalDeviceFeatures2 query,
+// never an element of its own pNext chain.
 template <typename T>
 [[nodiscard]] inline auto QueryFeatureSupport(VkPhysicalDevice physicalDevice) noexcept -> T {
     T features {};
     features.sType = GetStructureType<T>();
-    features.pNext = nullptr;
-
-    if (physicalDevice != VK_NULL_HANDLE) {
-        VkPhysicalDeviceFeatures2 features2 {};
-        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        features2.pNext = &features;
-        vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+    if (physicalDevice == VK_NULL_HANDLE) {
+        return features;
+    }
+    if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &features);
+    } else {
+        VkPhysicalDeviceFeatures2 root {};
+        root.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        root.pNext = &features;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &root);
+        features.pNext = nullptr;
     }
     return features;
 }
 
 template <typename T>
 [[nodiscard]] inline auto IsSubsetOf(const T& requested, const T& supported) noexcept -> bool {
-    struct DummyHeader {
-        VkStructureType sType;
-        void*           pNext;
-        VkBool32        firstFeature;
-    };
-    constexpr size_t start_offset = offsetof(DummyHeader, firstFeature);
-
-    if constexpr (start_offset < sizeof(T)) {
-        const size_t bool_count = (sizeof(T) - start_offset) / sizeof(VkBool32);
-        const auto*  req_bools  = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(&requested) + start_offset);
-        const auto*  sup_bools  = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(&supported) + start_offset);
-
-        for (size_t i = 0; i < bool_count; ++i) {
-            if (req_bools[i] != VK_FALSE && sup_bools[i] == VK_FALSE) {
-                return false;
-            }
+    constexpr size_t start = FeaturePayloadStart<T>();
+    constexpr size_t end   = FeaturePayloadEnd<T>();
+    for (size_t offset = start; offset < end; offset += sizeof(VkBool32)) {
+        if (ReadFeatureBit(requested, offset) != VK_FALSE && ReadFeatureBit(supported, offset) == VK_FALSE) {
+            return false;
         }
     }
     return true;
 }
 
+template <typename T>
+[[nodiscard]] inline auto MaskFeatures(const T& requested, const T& supported) noexcept -> T {
+    T result {};
+    result.sType = GetStructureType<T>();
+    constexpr size_t start = FeaturePayloadStart<T>();
+    constexpr size_t end   = FeaturePayloadEnd<T>();
+    for (size_t offset = start; offset < end; offset += sizeof(VkBool32)) {
+        const VkBool32 bit = ReadFeatureBit(requested, offset) != VK_FALSE && ReadFeatureBit(supported, offset) != VK_FALSE ? VK_TRUE : VK_FALSE;
+        WriteFeatureBit(result, offset, bit);
+    }
+    return result;
+}
+
+template <typename T>
+[[nodiscard]] inline auto HasAnyEnabledFeature(const T& feature) noexcept -> bool {
+    constexpr size_t start = FeaturePayloadStart<T>();
+    constexpr size_t end   = FeaturePayloadEnd<T>();
+    for (size_t offset = start; offset < end; offset += sizeof(VkBool32)) {
+        if (ReadFeatureBit(feature, offset) != VK_FALSE) {
+            return true;
+        }
+    }
+    return false;
+}
+
 template <typename... Ts>
-template <typename T, typename Func>
-auto FeatureChain<Ts...>::Optional(Func&& configure) && {
+template <typename T, typename Func, typename Predicate>
+auto FeatureChain<Ts...>::Optional(Func&& configure, Predicate&& accept, bool available) && {
     T requested {};
     std::forward<Func>(configure)(requested);
 
-    T    supported = QueryFeatureSupport<T>(_physicalDevice);
-    bool condition = IsSubsetOf(requested, supported);
-
-    FeatureNode<T> node {.feature = requested, .active = condition};
-    return FeatureChain<Ts..., T>(_physicalDevice, std::tuple_cat(std::move(_features), std::make_tuple(node)));
+    T    actual {};
+    bool active = false;
+    if (available && _physicalDevice != VK_NULL_HANDLE) {
+        actual = MaskFeatures(requested, QueryFeatureSupport<T>(_physicalDevice));
+        active = HasAnyEnabledFeature(actual) && std::forward<Predicate>(accept)(_physicalDevice, actual);
+    }
+    return std::move(*this).Add(FeatureNode<T> {.feature = actual, .active = active});
 }
 
 template <typename... Ts>
@@ -139,54 +248,27 @@ FeatureChain<Ts...>& FeatureChain<Ts...>::Build() {
 
 template <typename... Ts>
 const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot(const VkPhysicalDeviceFeatures2* tail) {
-    constexpr size_t n = sizeof...(Ts);
-    if constexpr (n == 0) {
-        return nullptr;
-    }
-
-    const VkPhysicalDeviceFeatures2* root_ptr = nullptr;
-
+    const VkPhysicalDeviceFeatures2* root = tail;
+    bool anyActive = false;
     std::apply(
-        [&root_ptr, tail](auto&... nodes) {
-            std::array<void**, n> p_next_ptrs {};
-            std::array<void*, n>  feature_ptrs {};
-            size_t                active_count = 0;
-
-            auto process_node = [&](auto& node) {
-                if (node.active) {
-                    using FeatureType  = std::remove_reference_t<decltype(node.feature)>;
-                    node.feature.sType = GetStructureType<FeatureType>();
-
-                    p_next_ptrs[active_count]  = reinterpret_cast<void**>(&node.feature.pNext);
-                    feature_ptrs[active_count] = &node.feature;
-                    active_count++;
+        [&](auto&... nodes) {
+            auto link = [&](auto& node) {
+                if (!node.active) {
+                    return;
                 }
+                using FeatureType = std::remove_reference_t<decltype(node.feature)>;
+                node.feature.sType = GetStructureType<FeatureType>();
+                node.feature.pNext = const_cast<VkPhysicalDeviceFeatures2*>(root);
+                root = reinterpret_cast<const VkPhysicalDeviceFeatures2*>(&node.feature);
+                anyActive = true;
             };
-
-            // Fold expression processes nodes sequentially (from first to last)
-            (process_node(nodes), ...);
-
-            // Safely chain active nodes in reverse order: Last -> Second-to-last -> ... -> First ->
-            // nullptr
-            for (size_t i = 0; i < active_count; ++i) {
-                if (i > 0) {
-                    *p_next_ptrs[i] = feature_ptrs[i - 1];
-                } else {
-                    // The tail of this chain either ends the pNext list or
-                    // carries on into a caller's. The cast is the price of
-                    // linking onto a chain handed over as const.
-                    *p_next_ptrs[0] = const_cast<VkPhysicalDeviceFeatures2*>(tail);
-                }
-            }
-
-            if (active_count > 0) {
-                root_ptr = reinterpret_cast<const VkPhysicalDeviceFeatures2*>(feature_ptrs[active_count - 1]);
-            }
+            (link(nodes), ...);
         },
         _features
     );
-
-    return root_ptr;
+    // A caller that supplied a tail already owns it. Report only nodes from
+    // this chain, so it can choose the tail when all optional nodes were off.
+    return anyActive ? root : nullptr;
 }
 
 template <typename... Ts>

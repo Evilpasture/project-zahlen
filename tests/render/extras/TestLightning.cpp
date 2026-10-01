@@ -87,7 +87,8 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectEq(boltComp->phase, ZHLN::LightningPhase::SteppedLeader);
             ZHLN::Test::ExpectEq(boltComp->baseAmbientExposure, kInitialBaselineExposure);
             ZHLN::Test::ExpectTrue(boltComp->vboPos != ZHLN::BufferHandle::Invalid);
-            ZHLN::Test::ExpectTrue(boltComp->vboAttr != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboFrame != ZHLN::BufferHandle::Invalid);
+            ZHLN::Test::ExpectTrue(boltComp->vboSurface != ZHLN::BufferHandle::Invalid);
 
             const ZHLN::Entity flashLight  = boltComp->flashLightEntity;
             const ZHLN::Entity impactLight = boltComp->impactLightEntity;
@@ -220,12 +221,12 @@ struct LightningTestSuite {
         }
 
         // ====================================================================
-        // 3. Raw registry destroy and explicit despawn use distinct safe paths
+        // 3. Explicit despawn and component detach release buffers
         // ====================================================================
-        std::expected<void, ZHLN::ErrorCode> lightning_resources_survive_component_erasure_until_reconciled() {
+        std::expected<void, ZHLN::ErrorCode> lightning_resources_release_on_component_removal() {
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
-                .render  = {.appName = "Lightning Resource Reconciliation Test", .width = 320, .height = 240, .vsync = false,
+                .render  = {.appName = "Lightning Component Resource Test", .width = 320, .height = 240, .vsync = false,
                             .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true},
                 .enableFallbackScene = false,
             };
@@ -240,12 +241,24 @@ struct LightningTestSuite {
             auto& rc  = engine->GetRenderContext();
 
             const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 80, 0), JPH::RVec3(0, 0, 0));
-            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {2});
-            reg.Destroy(rawBolt);
-            // The component is gone, but RenderContext retained the owner/VBO
-            // ledger and its system reconciliation reclaims both buffers.
-            ZHLN::Lightning::Update(*engine, 0.0f);
-            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
+            const auto* raw = reg.Get<ZHLN::LightningComponent>(rawBolt);
+            if (!ZHLN::Test::ExpectTrue(raw != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
+            const auto oldPos = raw->vboPos;
+            const auto oldMesh = raw->meshAssetId;
+            const auto oldMat = raw->matAssetId;
+            ZHLN::DespawnEntity(*engine, rawBolt);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(rawBolt));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(rawBolt) != nullptr);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(rawBolt)->vboPos, oldPos);
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(reg.IsAlive(rawBolt));
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(oldMesh).has_value());
+            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(oldMat).has_value());
+            const auto reusedSlot = rc.CreateStorageBuffer(64);
+            ZHLN::Test::ExpectNe(reusedSlot, oldPos);
+            rc.DestroyBuffer(reusedSlot);
 
             const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(10, 80, 0), JPH::RVec3(10, 0, 0));
             const auto* bolt = reg.Get<ZHLN::LightningComponent>(despawnBolt);
@@ -254,11 +267,46 @@ struct LightningTestSuite {
             }
             const ZHLN::Entity flash  = bolt->flashLightEntity;
             const ZHLN::Entity impact = bolt->impactLightEntity;
+            const auto meshAsset = bolt->meshAssetId;
+            const auto materialAsset = bolt->matAssetId;
             ZHLN::DespawnEntity(*engine, despawnBolt);
+            ZHLN::Test::ExpectTrue(reg.IsAlive(despawnBolt));
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(flash) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(impact) != nullptr);
+            engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
             ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
             ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
-            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshAsset).has_value());
+            ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(materialAsset).has_value());
+
+            const ZHLN::Entity componentBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(20, 80, 0), JPH::RVec3(20, 0, 0));
+            const auto* component = reg.Get<ZHLN::LightningComponent>(componentBolt);
+            if (!ZHLN::Test::ExpectTrue(component != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
+            const auto componentMesh = component->meshAssetId;
+            ZHLN::Lightning::Detach(*engine, componentBolt);
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(componentMesh).has_value());
+            ZHLN::DespawnEntity(*engine, componentBolt);
+            engine->ProcessPendingDestroy();
+
+            const ZHLN::Entity cachedBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 80, 0), JPH::RVec3(30, 0, 0));
+            const auto* cached = reg.Get<ZHLN::LightningComponent>(cachedBolt);
+            if (!ZHLN::Test::ExpectTrue(cached != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
+            const auto componentBuffer = cached->vboPos;
+            const auto meshID = cached->meshAssetId;
+            rc.ClearGPUCaches(); // the lookup disappears, but the component still owns its VBOs
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
+            ZHLN::Lightning::Update(*engine, 0.01f);
+            ZHLN::Test::ExpectTrue(rc.GetGPUMesh(meshID).has_value());
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(cachedBolt)->vboPos, componentBuffer);
+            ZHLN::DespawnEntity(*engine, cachedBolt);
+            engine->ProcessPendingDestroy();
+            ZHLN::Test::ExpectFalse(rc.GetGPUMesh(meshID).has_value());
             return {};
         }
     };

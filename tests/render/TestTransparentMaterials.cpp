@@ -20,6 +20,7 @@
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -30,7 +31,9 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <string>
+#include <vector>
 
 enum class TransparentMaterialError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine for the transparent-material scene.">{}) = 1,
@@ -39,6 +42,8 @@ enum class TransparentMaterialError : uint8_t {
     GlassHidTheWall ZHLN_ANNOTATION(ZHLN::Description<"A blended pane occluded the opaque surface behind it -- it is not compositing in ForwardPass.">{}),
     GlassDidNotTint ZHLN_ANNOTATION(ZHLN::Description<"The wall shows through the pane but the pane contributed no colour of its own.">{}),
     OpaqueTwinDidNotOcclude ZHLN_ANNOTATION(ZHLN::Description<"The non-blended twin of the pane still showed the wall -- both materials took the same path.">{}),
+    TransmissionTextureIgnored ZHLN_ANNOTATION(ZHLN::Description<"Transmission-map R=0 and R=1 regions look the same.">{}),
+    TransmissionMaskIgnored ZHLN_ANNOTATION(ZHLN::Description<"MASK=0 still covers the wall on a transmissive material.">{}),
 };
 
 namespace {
@@ -248,6 +253,93 @@ struct TransparentMaterialsTestSuite {
                 return std::unexpected(TransparentMaterialError::OpaqueTwinDidNotOcclude);
             }
 
+            return {};
+        }
+
+        // Reproduce TransmissionTest's two independent masks on one pane:
+        // baseColor alpha=0 removes the surface (top half), while transmission
+        // R=0 leaves a present, opaque surface (bottom-left). R=1 transmits the
+        // bright wall (bottom-right). This exercises draw routing, the packed
+        // instance parameters, shader sampling, and masked depth writes.
+        std::expected<void, ZHLN::ErrorCode> masked_transmission_and_texture_are_independent() {
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless masked transmission");
+            if (engine == nullptr) return std::unexpected(TransparentMaterialError::EngineInitFailed);
+            ZHLN::Test::Headless::DisableTAA(*engine);
+            auto& rc = engine->GetRenderContext();
+            auto& reg = engine->GetRegistry();
+
+            for (const ZHLN::Entity settings: reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
+                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
+                    pp.fullBright = 0;
+                    pp.ambientExposure = 1.0f;
+                    pp.giMode = 0;
+                    pp.enableSSR = 0;
+                    pp.enableRTR = 0;
+                    pp.vignetteIntensity = 0.0f;
+                    pp.glowIntensity = 0.0f;
+                    pp.bloomStrength = 0.0f;
+                    pp.tonemapper = 3;
+                });
+            }
+            auto& camera = engine->GetCamera();
+            camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
+            camera.yaw = -90.0f;
+            camera.pitch = 0.0f;
+            camera.fov = 60.0f;
+
+            constexpr uint32_t side = 64;
+            std::vector<uint8_t> maskPixels(side * side * 4u, 255u);
+            std::vector<uint8_t> transmissionPixels(side * side * 4u, 255u);
+            for (uint32_t y = 0; y < side; ++y) {
+                for (uint32_t x = 0; x < side; ++x) {
+                    const size_t pixel = (static_cast<size_t>(y) * side + x) * 4u;
+                    maskPixels[pixel + 3] = y < side / 2 ? 0u : 255u;
+                    transmissionPixels[pixel] = x < side / 2 ? 0u : 255u;
+                }
+            }
+            const auto mask = rc.CreateTexture(std::as_bytes(std::span {maskPixels}), {side, side}, true);
+            const auto transmission = rc.CreateTexture(std::as_bytes(std::span {transmissionPixels}), {side, side}, false);
+            if (!mask || !transmission) {
+                if (mask) rc.UnloadTexture(*mask);
+                if (transmission) rc.UnloadTexture(*transmission);
+                return std::unexpected(TransparentMaterialError::MaterialCreationFailed);
+            }
+            ZHLN::defer _([&] {
+                engine->ClearScene();
+                rc.UnloadTexture(*mask);
+                rc.UnloadTexture(*transmission);
+            });
+
+            const auto wallMat = rc.CreateMaterial(ZHLN::MaterialDesc {
+                .metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}, .emissive = {2.0f, 2.0f, 2.0f, 1.0f}
+            });
+            const auto paneMat = rc.CreateMaterial(ZHLN::MaterialDesc {
+                .alphaMode = 1, .alphaCutoff = 0.5f, .metallic = 0.0f, .roughness = 0.05f,
+                .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}, .transmissionFactor = 1.0f, .transmissionMap = *transmission, .albedoMap = *mask
+            });
+            if (!wallMat || !paneMat || paneMat->alphaMode != 1u) {
+                return std::unexpected(TransparentMaterialError::MaterialCreationFailed);
+            }
+            ZHLN::PrefabFactory::CreateBox(
+                *engine, JPH::Vec3(4.0f, 3.0f, 0.04f),
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
+            );
+            const ZHLN::Entity pane = ZHLN::PrefabFactory::CreateBox(
+                *engine, JPH::Vec3(1.0f, 1.0f, 0.02f),
+                ZHLN::PrefabFactory::SpawnParams {.createPhysics = false, .materialOverride = *paneMat}
+            );
+            reg.Patch<ZHLN::Components::MeshComponent>(pane, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });
+            ZHLN::Test::Headless::TickFrames(*engine, 6);
+            const auto frame = ZHLN::Test::Headless::Capture(*engine, "masked_transmission.ppm");
+            if (!frame.Valid()) return std::unexpected(TransparentMaterialError::CaptureFailed);
+
+            const auto hole = ZHLN::Test::Image::MeasureSubRegion(frame, {.x0 = 0.42, .y0 = 0.40, .x1 = 0.46, .y1 = 0.44});
+            const auto opaque = ZHLN::Test::Image::MeasureSubRegion(frame, {.x0 = 0.42, .y0 = 0.56, .x1 = 0.46, .y1 = 0.60});
+            const auto clear = ZHLN::Test::Image::MeasureSubRegion(frame, {.x0 = 0.54, .y0 = 0.56, .x1 = 0.58, .y1 = 0.60});
+            ZHLN::Println("    [INFO] masked transmission meanR: hole={:.1f}, opaque={:.1f}, transmitted={:.1f}",
+                          hole.meanR, opaque.meanR, clear.meanR);
+            if (hole.meanR < opaque.meanR + 18.0) return std::unexpected(TransparentMaterialError::TransmissionMaskIgnored);
+            if (clear.meanR < opaque.meanR + 18.0) return std::unexpected(TransparentMaterialError::TransmissionTextureIgnored);
             return {};
         }
     };

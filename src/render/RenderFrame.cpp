@@ -11,6 +11,7 @@
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
 #include "Zahlen/Profiler.hpp"
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -48,9 +49,12 @@ template <typename... Ptrs>
 
 auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle()),
+        ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -79,21 +83,32 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
     for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             auto* posMesh     = drawCmd.posMesh;
-            auto* attrMesh    = drawCmd.attrMesh;
+            auto* frameMesh   = drawCmd.frameMesh;
             auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
-            if (AnyNull(posMesh, attrMesh, scratchMesh)) {
+            if (AnyNull(posMesh, frameMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
+                continue;
+            }
+
+            // Only position and tangent-frame streams are animated; the
+            // immutable surface stream is read directly by the draw shader.
+            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress};
+            const VkDeviceSize posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
+            const VkDeviceSize frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
+            const auto         positions  = output.Subspan(0, posBytes);
+            const auto         framesOut  = output.Subspan(posBytes, frameBytes);
+            if (positions.Size() != posBytes || framesOut.Size() != frameBytes) {
                 continue;
             }
 
             SkinningConstants pcs {
                 .inPosAddr        = posMesh->vboAddress,
-                .inAttrAddr       = attrMesh->vboAddress,
+                .inFrameAddr      = frameMesh->vboAddress,
                 .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                .outPosAddr       = scratchMesh->vboAddress,
-                .outAttrAddr      = scratchMesh->vboAddress + (scratchMesh->vertexCount * sizeof(VertexPosition)),
-                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers->Handle()),
+                .outPosAddr       = positions.Address(),
+                .outFrameAddr     = framesOut.Address(),
+                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
                 .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
@@ -181,11 +196,15 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
-    std::memcpy(instanceBuf.Map().data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
+    auto mappedInstances = instanceBuf.Map(allocator.Get());
+    if (mappedInstances.data == nullptr) return;
+    std::memcpy(mappedInstances.data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
+    auto& scratch = frames.tlasScratchBuffer[presenter.frameIndex];
+    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())},
+                  tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -208,7 +227,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.camPos[2]          = view.worldPosition.GetZ();
     currentUniforms.camPos[3]          = view.time;
 
-    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map();
+    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator.Get());
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu != nullptr) {
         gpu->viewProj           = view.viewProjMatrix;
@@ -236,8 +255,14 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     auto csgCount  = queues.CsgDraws().size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
+        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator.Get());
         auto* dst    = static_cast<InstanceData*>(mapped.data);
+        if (dst == nullptr) {
+            activeLineVertexCount = 0;
+            queues.Draws().clear();
+            queues.CsgDraws().clear();
+            return;
+        }
 
         for (size_t i = 0; i < drawCount; ++i) {
             dst[i] = queues.Draws()[i].instanceData;
@@ -260,38 +285,32 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
 namespace {
 
-struct ForkBodyCall {
-    const Vk::ForkBody* body = nullptr;
-
-    void operator()(Vk::RecordingSlot slot) const noexcept {
-        (*body)(slot.cmd);
-    }
-};
-
-template <size_t N, typename Recorder, typename Scheduler, size_t... Is>
-void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkBody> bodies, std::index_sequence<Is...>) noexcept {
-    const std::array<ForkBodyCall, N> calls {ForkBodyCall {&bodies[Is]}...};
-    rec.Record(scheduler, calls[Is]...);
+template <typename Recorder, typename Scheduler, size_t... Is>
+auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept
+    -> std::expected<void, ErrorCode> {
+    // Record() waits for its workers before returning. These references cannot
+    // outlive the graph's pass objects or the local array of callable views.
+    return rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
 }
 
-void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept {
+void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkCall> bodies) noexcept {
     auto& self = *impl;
 
-    using Recorder          = std::remove_reference_t<decltype(self.parallelRecorder[0])>;
+    using Recorder          = std::remove_reference_t<decltype(self.parallelRecorders[0])>;
     constexpr size_t kSlots = Recorder::Slots();
     const size_t     count  = bodies.size();
 
     if (Diag::ForkSequentialForced()) {
-        for (const Vk::ForkBody& body: bodies) {
+        for (const Vk::ForkCall& body: bodies) {
             body(cmd);
         }
         return;
     }
 
     if (count < 2 || count > kSlots) {
-        for (const Vk::ForkBody& body: bodies) {
+        for (const Vk::ForkCall& body: bodies) {
             body(cmd);
         }
         return;
@@ -299,7 +318,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     self.BindHeapsAndPushFrame(cmd);
 
-    auto& rec = self.parallelRecorder[0];
+    auto& rec = self.parallelRecorders[self.presenter.frameIndex];
     rec.Reset();
 
     const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
@@ -314,47 +333,69 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     self.frameState.inForkSecondary = true;
 
     TaskSystemScheduler scheduler;
+    std::expected<void, ErrorCode> recorded;
     if (count == 2) {
-        RecordForkBodies<2>(rec, scheduler, bodies, std::make_index_sequence<2> {});
+        recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
     } else if constexpr (kSlots >= 3) {
         if (count == 3) {
-            RecordForkBodies<3>(rec, scheduler, bodies, std::make_index_sequence<3> {});
+            recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<3> {});
         } else if constexpr (kSlots >= 4) {
-            RecordForkBodies<4>(rec, scheduler, bodies, std::make_index_sequence<4> {});
+            recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<4> {});
         }
     }
 
     self.frameState.inForkSecondary = previousInheritance;
-
+    if (!recorded) {
+        ZHLN::Log("[Render] Secondary command recording failed ({}); skipping this fork.", recorded.error());
+        return;
+    }
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
 
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
-    if (const VkResult waited = _impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u); waited != VK_SUCCESS) {
-        return std::unexpected(Vk::ToFrameError(waited));
+    // The two-state accumulation, shadow-map and voxel histories can be reused
+    // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
+    // independently indexed, but increasing N alone does not permit additional
+    // overlapping GPU frames while these history targets remain shared.
+    auto& primarySync = _impl->presenter.sync;
+    const uint32_t slot = _impl->presenter.frameIndex;
+    // The previous frame protects shared two-state histories. The current
+    // slot's older submission must also finish before its pools are reset, even
+    // if the previous frame acquired no image and never submitted graphics.
+    for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
+        if (const VkResult waited = primarySync.Wait(frameSlot); waited != VK_SUCCESS) {
+            return std::unexpected(Vk::ToFrameError(waited));
+        }
+        // Compute can be submitted without a graphics frame (minimized or
+        // skipped acquisition), so its timeline must be waited independently.
+        if (const VkResult waited = primarySync.WaitCompute(frameSlot); waited != VK_SUCCESS) {
+            return std::unexpected(Vk::ToFrameError(waited));
+        }
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
         auto& sess = dest.Presenter();
-        if (const VkResult waited = sess.sync.Wait(sess.frameIndex ^ 1u); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToFrameError(waited));
+        for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(sess.frameIndex), sess.frameIndex}) {
+            if (const VkResult waited = sess.sync.Wait(frameSlot); waited != VK_SUCCESS) {
+                return std::unexpected(Vk::ToFrameError(waited));
+            }
         }
     }
 
-    auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->presenter.frameIndex;
-    auto& deletionQueue  = _impl->deletionQueue;
-    if (stagingContext) {
-        stagingContext->Wait();
-        stagingContext.reset();
+    auto& submittedStaging = _impl->submittedStaging;
+    auto& frame_index      = _impl->presenter.frameIndex;
+    auto& deletionQueue    = _impl->deletionQueue;
+    if (submittedStaging) {
+        submittedStaging->Wait();
+        submittedStaging.reset();
     }
 
     deletionQueue.BeginFrame(frame_index);
     _impl->textureManager.BeginFrame(frame_index);
-    _impl->activeQueueGuard.emplace(deletionQueue);
+    _impl->frameOpen = true;
     _impl->heapManager.BeginFrame(frame_index);
     _impl->uiRenderer.BeginFrame();
 
@@ -388,6 +429,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     }
 
     _impl->destinations.BeginFrame();
+    ++_impl->frameSerial;
     _impl->frameState.Reset();
     _impl->sceneTarget.reset();
 
@@ -417,12 +459,12 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         }
         ~EndFrameGuard() noexcept {
             if (impl != nullptr) {
-                impl->destinations.CloseRecordings();
-                impl->activeQueueGuard.reset();
+                impl->destinations.AbortRecordings();
+                impl->frameOpen = false;
                 impl->queues.Clear();
                 impl->frameState.Reset();
                 impl->sceneTarget.reset();
-                impl->destinations.SetActive(nullptr);
+                impl->destinations.SetActive(0);
             }
         }
         EndFrameGuard(const EndFrameGuard&)                    = delete;
@@ -434,17 +476,18 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
     auto           presented         = _impl->PresentUsedWindows();
     if (_impl->presenter.frameIndex == primarySlotBefore) {
-        _impl->presenter.frameIndex = (primarySlotBefore + 1) & 1u;
+        _impl->presenter.AdvanceFrame();
     }
 
-    if (_impl->stagingContext) {
-        _impl->stagingContext->Wait();
-        _impl->stagingContext.reset();
+    if (_impl->submittedStaging) {
+        _impl->submittedStaging->Wait();
+        _impl->submittedStaging.reset();
     }
 
-    _impl->frames.FlipAll();
-    _impl->shadows.Flip();
+    _impl->accumulationHistory.Swap();
 
+    // These histories remain named graph resources, so exchange their roles
+    // explicitly. BeginFrame's preceding-frame waits protect their reuse.
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
@@ -453,11 +496,11 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 }
 
 
-auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetTargetAttachment(const PresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::GetAcquiredTarget(const PresentationTarget& target) noexcept -> std::optional<FrameTarget> {
     return _impl->TargetAttachment(target);
 }
 
@@ -465,52 +508,30 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<RenderTextureHandle, ErrorCode> {
     return _impl->CreateRenderTexture(width, height, hdr);
 }
 
-void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 
 auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped> {
-    auto resolved = _impl->destinations.Resolve(view.target);
+    auto resolved = _impl->ResolveTarget(view.target);
     if (!resolved) {
-        const DestinationRegistry::Miss& miss = resolved.error();
-        ZHLN::Log(
-            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target: {}.",
-            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, miss.reason
-        );
-
-        if (!miss.Adoptable()) {
-            ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
-            return FrameSkipped {};
-        }
-        ZHLN::Log(
-            "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
-            miss.asked.Serial(), miss.live->handle.Serial()
-        );
-        _impl->sceneTarget = *miss.live;
-    } else {
-        _impl->sceneTarget = *resolved;
+        return std::unexpected(resolved.error());
     }
+    const VkCommandBuffer cmd = resolved->recorder.Handle();
+    _impl->destinations.SetActive(resolved->window.id);
+    _impl->sceneTarget = resolved->image;
     _impl->settings = settings;
 
-    const VkCommandBuffer cmd = _impl->RecordingFor(*_impl->sceneTarget);
-    if (cmd == VK_NULL_HANDLE) {
-        ZHLN::Log(
-            "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
-        );
-        return FrameSkipped {};
-    }
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
-    if (_impl->sceneTarget.has_value()) {
-        _impl->destinations.NoteWritten(
-            RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0},
-            DestinationRegistry::Rendered::By::Scene, Vk::AttachmentLayout::ColorAttachment
-        );
-    }
+    _impl->sceneTarget.reset();
+    resolved->layout = Vk::AttachmentLayout::ColorAttachment;
+    resolved->drawn = true;
+    _impl->warnedUnwrittenTarget = false;
     return std::nullopt;
 }
 

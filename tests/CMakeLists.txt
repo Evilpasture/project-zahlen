@@ -14,11 +14,10 @@
 # the expensive part. The cost is process isolation: a crash or timeout in one
 # suite takes the rest of its group with it.
 
-# Nothing here depends on extras. Every group below links zahlen_engine alone,
-# and the suites that exercise the extras layer -- JSON, TOML, the glTF
-# importer, the perf baselines -- live in tests/extras and are only configured
-# when that layer is built. ZHLN_BUILD_EXTRAS=OFF therefore drops those suites
-# and leaves the rest of the tree building and running.
+# CPU_* groups stay core-only. The offline AssetCooking codec has its own
+# suite, built with zcook regardless of ZHLN_BUILD_EXTRAS. Other extras tests
+# (JSON, TOML, the glTF importer, perf baselines) live in tests/extras and only
+# build when optional gameplay extras are enabled.
 
 # 1. Enable CTest testing framework
 enable_testing()
@@ -139,6 +138,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/RunCoreTests.cpp
     core/TestCommandLine.cpp
     core/TestContainers.cpp
+    core/TestDefer.cpp
     core/TestEnumFlags.cpp
     core/TestError.cpp
     core/TestFileSystemWatcher.cpp
@@ -182,9 +182,16 @@ zahlen_add_cpu_test_group(CPU_Assets
     assets/RunAssetsTests.cpp
     assets/TestCooker.cpp
     assets/TestMeshlets.cpp
-    assets/TestRadiance.cpp
+    assets/TestEnvironmentImage.cpp
     assets/TestPackaging.cpp
 )
+# The core asset suites launch zcook as an external program; building just
+# CPU_Assets must still produce that program.
+add_dependencies(CPU_Assets zcook)
+
+# The codec suite exercises the host-side extra without making CPU_Assets or
+# the engine depend on it. Keep it active when other extras are disabled.
+add_subdirectory(asset_cooking)
 
 zahlen_add_cpu_test_group(CPU_Audio
     audio/RunAudioTests.cpp

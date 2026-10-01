@@ -61,7 +61,7 @@ struct Context::Impl {
     std::deque<std::string> stringArena;
 
     std::vector<VertexPosition>   uiPositions;
-    std::vector<VertexAttributes> uiAttributes;
+    std::vector<VertexSurface>    uiSurfaces;
     std::vector<UIBatch>          uiBatches;
 
     auto Intern(std::string_view sv) -> Clay_String {
@@ -234,7 +234,7 @@ void Context::BeginFrame(float dt) noexcept {
     _impl->currentFrame++;
     _impl->stringArena.clear();
     _impl->uiPositions.clear();
-    _impl->uiAttributes.clear();
+    _impl->uiSurfaces.clear();
     _impl->uiBatches.clear();
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
@@ -308,16 +308,14 @@ auto Context::EndFrame() noexcept -> UIDrawData {
     }
 
     auto& positions  = _impl->uiPositions;
-    auto& attributes = _impl->uiAttributes;
+    auto& surfaces   = _impl->uiSurfaces;
     auto& batches    = _impl->uiBatches;
 
     positions.reserve(static_cast<size_t>(commands.length) * 6);
-    attributes.reserve(static_cast<size_t>(commands.length) * 6);
+    surfaces.reserve(static_cast<size_t>(commands.length) * 6);
 
     auto EmitQuad = [&](float x0, float y0, float x1, float y1, JPH::Vec4 color) -> void {
         PackedRGBA8   c = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
-        Packed1010102 n = Math::PackNormal(0, 0, 1);
-        Packed1010102 t = Math::PackNormal(1, 0, 0, 1);
 
         positions.push_back({{x0, y0, 0.0f}});
         positions.push_back({{x0, y1, 0.0f}});
@@ -326,12 +324,12 @@ auto Context::EndFrame() noexcept -> UIDrawData {
         positions.push_back({{x0, y1, 0.0f}});
         positions.push_back({{x1, y1, 0.0f}});
 
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0, 0), .color = c});
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0, 1), .color = c});
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(1, 0), .color = c});
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(1, 0), .color = c});
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(0, 1), .color = c});
-        attributes.push_back({.normal = n, .tangent = t, .uv = Math::PackUV(1, 1), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(0, 0), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(0, 1), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(1, 0), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(1, 0), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(0, 1), .color = c});
+        surfaces.push_back({.uv = Math::PackUV(1, 1), .color = c});
     };
 
     ScissorRect activeScissor = {};
@@ -369,11 +367,11 @@ auto Context::EndFrame() noexcept -> UIDrawData {
 
                 size_t startIdx = positions.size();
                 positions.resize(startIdx + maxVerts);
-                attributes.resize(startIdx + maxVerts);
+                surfaces.resize(startIdx + maxVerts);
 
-                uint32_t written = AppendTextVertices(&positions[startIdx], &attributes[startIdx], *_impl->activeFont, text, bb.x, bb.y, scale, color);
+                uint32_t written = AppendTextVertices(&positions[startIdx], &surfaces[startIdx], *_impl->activeFont, text, bb.x, bb.y, scale, color);
                 positions.resize(startIdx + written);
-                attributes.resize(startIdx + written);
+                surfaces.resize(startIdx + written);
 
                 batches.push_back(
                     {.texture     = _impl->activeFont->texture,
@@ -405,9 +403,9 @@ auto Context::EndFrame() noexcept -> UIDrawData {
     }
 
     return UIDrawData {
-        .batches    = std::span<const UIBatch>(batches.data(), batches.size()),
-        .positions  = std::span<const VertexPosition>(positions.data(), positions.size()),
-        .attributes = std::span<const VertexAttributes>(attributes.data(), attributes.size()),
+        .batches   = std::span<const UIBatch>(batches.data(), batches.size()),
+        .positions = std::span<const VertexPosition>(positions.data(), positions.size()),
+        .surfaces  = std::span<const VertexSurface>(surfaces.data(), surfaces.size()),
     };
 }
 

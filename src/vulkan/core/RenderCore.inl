@@ -26,41 +26,6 @@ inline ScopedRendering::~ScopedRendering() noexcept {
     ZHLN_EndRendering(_cmd);
 }
 
-inline CommandBufferGuard::CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept: cmd(cmdBuffer) {
-    const VkCommandBufferBeginInfo info = {
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr,
-    };
-    vkBeginCommandBuffer(cmd, &info);
-}
-
-inline CommandBufferGuard::CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept: cmd(cmdBuffer) {
-    vkBeginCommandBuffer(cmd, &info);
-}
-
-inline CommandBufferGuard::~CommandBufferGuard() noexcept {
-    End();
-}
-
-inline CommandBufferGuard::CommandBufferGuard(CommandBufferGuard&& other) noexcept: cmd(std::exchange(other.cmd, VK_NULL_HANDLE)) {
-}
-
-inline auto CommandBufferGuard::operator=(CommandBufferGuard&& other) noexcept -> CommandBufferGuard& {
-    if (this != &other) {
-        End();
-        cmd = std::exchange(other.cmd, VK_NULL_HANDLE);
-    }
-    return *this;
-}
-
-inline void CommandBufferGuard::End() noexcept {
-    if (cmd != VK_NULL_HANDLE) {
-        vkEndCommandBuffer(cmd);
-        cmd = VK_NULL_HANDLE;
-    }
-}
-
 inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept {
     const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
     PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(&barrier, 1));
@@ -321,8 +286,9 @@ consteval auto GetMipLevels() noexcept -> uint32_t {
     return GetMipLevels(Width, Height);
 }
 
-inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height) {
-    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), GetMipLevels(width, height));
+inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height,
+                            VkPipelineStageFlags2 shaderReadStage) {
+    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), GetMipLevels(width, height), shaderReadStage);
 }
 
 } // namespace ZHLN::Vk

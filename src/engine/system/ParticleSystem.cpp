@@ -4,78 +4,61 @@
 #include "ParticleSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Ranges.hpp>
+#include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <cstddef>
 
 namespace ZHLN {
 
-void ParticleSystem::Update(SystemContext& ctx, float ) {
-    using namespace ZHLN::Ranges;
-    auto&       reg = ctx.registry;
-    auto&       rc  = *ctx.render;
-    const auto& cam = *ctx.camera;
+namespace {
 
-    auto& active2D = rc.GetTracked2DEmitters();
-    auto& active3D = rc.GetTracked3DEmitters();
-
-    active2D | EraseIf([&](const auto& pair) {
-        if (!reg.IsAlive(Entity::Unpack(pair.first))) {
-            rc.DestroyBuffer(pair.second);
-            return true;
+template <typename ParticleType, typename Emitter>
+[[nodiscard]] auto EnsureParticleStorage(RenderContext& rc, Emitter& emitter) -> BufferHandle {
+    if (emitter.gpuBuffer != BufferHandle::Invalid && emitter.bufferCapacity != emitter.maxParticles) {
+        rc.DestroyBuffer(emitter.gpuBuffer);
+        emitter.gpuBuffer      = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    if (emitter.gpuBuffer == BufferHandle::Invalid && emitter.maxParticles != 0) {
+        emitter.gpuBuffer = rc.CreateStorageBuffer(static_cast<size_t>(emitter.maxParticles) * sizeof(ParticleType));
+        if (emitter.gpuBuffer != BufferHandle::Invalid) {
+            emitter.bufferCapacity = emitter.maxParticles;
         }
-        return false;
-    });
+    }
+    return emitter.gpuBuffer;
+}
 
-    active3D | EraseIf([&](const auto& pair) {
-        if (!reg.IsAlive(Entity::Unpack(pair.first))) {
-            rc.DestroyBuffer(pair.second);
-            return true;
-        }
-        return false;
-    });
+}
 
-    auto entities = reg.GetEntitiesWith<Components::ParticleEmitterComponent>();
-    auto emitters = reg.GetRawArray<Components::ParticleEmitterComponent>();
+void ParticleSystem::Update(ECS::Query<Components::ParticleEmitterComponent, Components::MeshParticleEmitterComponent> query,
+                            ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
+    auto& rc        = *render;
+    const auto& cam = *camera;
 
-    for (size_t i = 0; i < entities.size(); ++i) {
+    auto emitters = query.Raw<Components::ParticleEmitterComponent>();
+    for (size_t i = 0; i < emitters.size(); ++i) {
         auto& emitter = emitters[i];
         if (!emitter.active) {
             continue;
         }
 
-        Entity       e      = entities[i];
-        BufferHandle buffer = BufferHandle::Invalid;
-
-        auto packId = e.Pack();
-
-        buffer = active2D | FindOrInsert(packId, [&] { return rc.CreateStorageBuffer(emitter.maxParticles * sizeof(Particle)); });
-
+        const BufferHandle buffer = EnsureParticleStorage<Particle>(rc, emitter);
         ParticleEmitterParams params = emitter.params;
         if (emitter.attachToCamera) {
             params.spawnOrigin = {cam.position.GetX(), cam.position.GetY(), cam.position.GetZ()};
         }
-
         rc.SubmitParticleEmitter(buffer, emitter.maxParticles, params);
     }
 
-    auto mesh_entities = reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>();
-    auto mesh_emitters = reg.GetRawArray<Components::MeshParticleEmitterComponent>();
-
-    for (size_t i = 0; i < mesh_entities.size(); ++i) {
-        auto& emitter = mesh_emitters[i];
+    auto meshEmitters = query.Raw<Components::MeshParticleEmitterComponent>();
+    for (size_t i = 0; i < meshEmitters.size(); ++i) {
+        auto& emitter = meshEmitters[i];
         if (!emitter.active) {
             continue;
         }
 
-        Entity       e      = mesh_entities[i];
-        BufferHandle buffer = BufferHandle::Invalid;
-
-        auto packId = e.Pack();
-
-        buffer = active3D | FindOrInsert(packId, [&] { return rc.CreateStorageBuffer(emitter.maxParticles * sizeof(Particle3D)); });
-
+        const BufferHandle buffer = EnsureParticleStorage<Particle3D>(rc, emitter);
         rc.SubmitMeshParticleEmitter(buffer, emitter.maxParticles, emitter.params, emitter.meshAsset, emitter.materialAsset);
     }
 }

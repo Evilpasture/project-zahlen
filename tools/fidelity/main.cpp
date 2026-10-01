@@ -157,7 +157,9 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
             }
         }
 
-        s.verticalFov = GetFloat(*raw, "verticalFov", 45.0f);
+        // Khronos calls the field verticalFoV. Accept our earlier local
+        // spelling too; keep writing the same handoff JSON for stable mtimes.
+        s.verticalFov = GetFloat(*raw, "verticalFoV", GetFloat(*raw, "verticalFov", 45.0f));
 
         if (const auto dims = raw->GetKey("dimensions"); dims) {
             s.dimensions.width  = GetUInt(*dims, "width", 768);
@@ -181,8 +183,9 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
 // Khronos writes these paths relative to a renderer directory three levels
 // under the repo (test/renderers/<name>/), so ../../../environments/foo.hdr
 // is <repo>/environments/foo.hdr and ../../../glTF-Sample-Assets/... is the
-// submodule. Joining them onto test/ walks out of the clone: the .hdr files
-// are in the generator repo, and a depth-1 clone already has them. Models
+// submodule. Joining them onto test/ walks out of the clone: the environment
+// images (.hdr and the LDR .jpg) are in the generator repo, and a depth-1
+// clone already has them. Models
 // still fall back to the stand-alone samples clone the driver passes, because
 // that submodule is often not initialized. Error-code overloads only: this TU
 // compiles under the engine's PUBLIC -fno-exceptions.

@@ -10,27 +10,19 @@
 
 namespace ZHLN {
 
-void DecalSystem::Update(SystemContext& ctx) {
-    auto& rc  = *ctx.render;
-    auto& reg = ctx.registry;
-
-    for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
-        auto* decalComp  = reg.Get<Components::DecalComponent>(e);
-        auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
-        if ((decalComp != nullptr) && (worldTrans != nullptr)) {
-            JPH::Mat44 worldMat = worldTrans->world;
-            JPH::Mat44 invWorld = worldMat.Inversed();
-
-            rc.DrawDecal(
-                {.transform    = worldMat,
-                 .invTransform = invWorld,
-                 .albedoMap    = decalComp->albedoMap,
-                 .normalMap    = decalComp->normalMap,
-                 .roughness    = decalComp->roughness,
-                 .metallic     = decalComp->metallic}
-            );
-        }
-    }
+void DecalSystem::Update(ECS::Query<const Components::DecalComponent, const Components::WorldTransformComponent> decals,
+                         ECS::ResMut<RenderContext> render) {
+    decals.ForEach([&](Entity, const auto& decal, const auto& worldTrans) {
+        JPH::Mat44 worldMat = worldTrans.world;
+        render->DrawDecal(
+            {.transform    = worldMat,
+             .invTransform = worldMat.Inversed(),
+             .albedoMap    = decal.albedoMap,
+             .normalMap    = decal.normalMap,
+             .roughness    = decal.roughness,
+             .metallic     = decal.metallic}
+        );
+    });
 }
 
 }

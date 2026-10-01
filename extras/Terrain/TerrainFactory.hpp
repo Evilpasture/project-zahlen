@@ -23,20 +23,24 @@ class PhysicsContext;
 
 namespace Terrain {
 
-// Builds a heightfield mesh (positions + packed attributes + meshlets + BLAS)
+// Builds a heightfield mesh (positions + tangent frames + surfaces + meshlets + BLAS)
 // from caller-owned height/color arrays. No noise, no tinting -- pure
-// heightmap tessellation.
+// heightmap tessellation. The returned buffers belong to the caller; release
+// them with RenderContext::DestroyMesh unless attached to a scene entity.
 auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
 
 // Generates a heightmap with the terrain noise (FBM with domain warp and
 // ridged components for Snow, plain FBM otherwise), tints it by slope and
 // altitude, and builds the mesh. `outHeights` receives sampleCount*sampleCount
-// heights for physics.
+// heights for physics. As above, the returned mesh is caller-owned.
 auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
     -> Mesh;
 
 // Spawns a terrain entity from caller-provided height/color data: mesh,
 // material, TerrainComponent, and (optionally) a static heightfield body.
+// For a standalone Registry, release TerrainData and OwnedMesh before Clear
+// (TerrainSystem::ReleaseTerrainData, PrefabFactory::ReleaseOwnedMeshes), and
+// release any PhysicsComponent body through the supplied PhysicsContext.
 auto CreateTerrainFromData(
     RenderContext&                             ctx,
     ECS::Registry&                             reg,

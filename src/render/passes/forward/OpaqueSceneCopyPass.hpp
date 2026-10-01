@@ -7,11 +7,10 @@
 
 namespace ZHLN::Passes {
 
-// Seeds the translucent lighting target with the opaque HDR scene color. The
-// forward pass that follows draws translucents over it, so a surface that is
-// not covered by any translucent draw still shows the opaque scene rather than
-// a black hole. It is a plain image copy, hence the transfer usages.
-struct OpaqueSceneCopyPass: Vk::RenderPass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWrite<Res_TransLighting>> {
+// Seeds the transmission target with the opaque HDR scene color, then builds
+// its mip chain for rough refraction in the forward pass. The graph enters in
+// transfer-dst layout; GenerateMipmaps leaves every level shader-readable.
+struct OpaqueSceneCopyPass: Vk::RenderPass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWriteThenShaderRead<Res_TransLighting>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

@@ -5,6 +5,10 @@ if(NOT ZHLN_BUILD_EXTRAS)
     return()
 endif()
 
+# AssetCooking/ is configured separately by cmake/AssetPipeline.cmake even with
+# ZHLN_BUILD_EXTRAS=OFF, because the offline zcook target always needs it; it
+# is not a dependency of the zahlen_extras aggregate or of core.
+#
 # The dependency boundary is one-way: everything in this directory may consume
 # the core engine, and nothing in src/, include/ or modules/ may consume
 # anything here (configure/check_core_extras_boundary.py enforces it at configure

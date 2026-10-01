@@ -13,6 +13,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -310,16 +315,22 @@ void DrawModelNodeRows(
 
 [[nodiscard]] bool SameMaterial(const ZHLN::Material& a, const ZHLN::Material& b) noexcept {
     const bool sameMaps    = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
-    const bool sameFactors = std::equal(std::begin(a.baseColorFactor), std::end(a.baseColorFactor), std::begin(b.baseColorFactor)) &&
-                             std::equal(std::begin(a.emissiveFactor), std::end(a.emissiveFactor), std::begin(b.emissiveFactor));
-    return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
-           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.iridescenceFactor == b.iridescenceFactor) &&
+    const bool sameFactors = (a.baseColorFactor == b.baseColorFactor) && (a.emissiveFactor == b.emissiveFactor);
+    return sameMaps && sameFactors && (a.unlit == b.unlit) && (a.metallicFactor == b.metallicFactor) &&
+           (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
+           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.transmissionMap == b.transmissionMap) &&
+           (a.iridescenceFactor == b.iridescenceFactor) &&
            (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&
            (a.ior == b.ior) && (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
            (a.volumeThicknessMap == b.volumeThicknessMap) && (a.clearcoatFactor == b.clearcoatFactor) &&
            (a.clearcoatRoughnessFactor == b.clearcoatRoughnessFactor) && (a.clearcoatNormalScale == b.clearcoatNormalScale) &&
            (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) &&
-           (a.clearcoatNormalMap == b.clearcoatNormalMap);
+           (a.clearcoatNormalMap == b.clearcoatNormalMap) && (a.anisotropyStrength == b.anisotropyStrength) &&
+           (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap) &&
+           (a.sheenColorFactor == b.sheenColorFactor) && (a.sheenRoughnessFactor == b.sheenRoughnessFactor) &&
+           (a.sheenColorMap == b.sheenColorMap) && (a.sheenRoughnessMap == b.sheenRoughnessMap) &&
+           (a.occlusionMap == b.occlusionMap) && (a.occlusionStrength == b.occlusionStrength) &&
+           (a.textureSamplers == b.textureSamplers) && (a.textureTransforms == b.textureTransforms);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {
@@ -469,6 +480,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         addTextureSlot(mat.normalMap, "normal", pName);
         addTextureSlot(mat.pbrMap, "pbr", pName);
         addTextureSlot(mat.emissiveMap, "emissive", pName);
+        addTextureSlot(mat.transmissionMap, "transmission", pName);
     }
 
     const std::string texturesPath = modelPath + "/textures";

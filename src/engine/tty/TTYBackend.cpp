@@ -382,14 +382,14 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     g_seat.set_log_level(kSeatLogInfo);
     state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
-        ZHLN::Log("[TTY] FATAL: Failed to initialize libseat session.");
+        ZHLN::LogError("[TTY] Failed to initialize libseat session.");
         Shutdown(state);
         return nullptr;
     }
 
     while (!state->active) {
         if (g_seat.dispatch(state->seat, -1) == -1) {
-            ZHLN::Log("[TTY] FATAL: Error dispatching libseat during startup.");
+            ZHLN::LogError("[TTY] Error dispatching libseat during startup.");
             Shutdown(state);
             return nullptr;
         }
@@ -452,7 +452,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     if (state->taken_devices.empty()) {
-        ZHLN::Log("[TTY] FATAL: No input devices could be opened under this seat.");
+        ZHLN::LogError("[TTY] No input devices could be opened under this seat.");
         Shutdown(state);
         return nullptr;
     }

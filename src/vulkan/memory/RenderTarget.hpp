@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <Zahlen/Core/Defer.hpp>
+
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
@@ -14,7 +16,6 @@ struct RenderTarget {
     Image      image;
     ImageView  view;
     VkExtent2D extent {};
-    VkImageViewCreateInfo viewInfo {};
 
     RenderTarget() = default;
 
@@ -38,24 +39,50 @@ struct RenderTarget {
     [[nodiscard]] static auto
         Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
+    }
+
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, F};
+    }
+
     [[nodiscard]] auto Valid() const noexcept -> bool;
     explicit           operator bool() const noexcept;
 };
 
 template <VkFormat F>
 struct RenderTarget3D {
-    Image                 image;
-    ImageView             view;
-    VkExtent3D            extent {};
-    VkImageViewCreateInfo viewInfo {};
+    Image      image;
+    ImageView  view;
+    VkExtent3D extent {};
 
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
 
-    RenderTarget3D(const RenderTarget3D&)                = delete;
-    RenderTarget3D& operator=(const RenderTarget3D&)     = delete;
-    RenderTarget3D(RenderTarget3D&&) noexcept            = default;
-    RenderTarget3D& operator=(RenderTarget3D&&) noexcept = default;
+    RenderTarget3D(const RenderTarget3D&)            = delete;
+    RenderTarget3D& operator=(const RenderTarget3D&) = delete;
+    RenderTarget3D(RenderTarget3D&&) noexcept        = default;
+    auto operator=(RenderTarget3D&& other) noexcept -> RenderTarget3D& {
+        if (this != &other) {
+            view   = std::move(other.view);
+            image  = std::move(other.image);
+            extent = other.extent;
+        }
+        return *this;
+    }
+
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
+    }
+
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, F};
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && view.Valid();
@@ -64,27 +91,33 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
 };
 
 template <VkFormat F>
 struct MipmappedRenderTarget {
-    Image                              image;
-    ImageView                          fullView;
-    std::vector<ImageView>             mipViews;
-    VkExtent2D                         extent {};
-    uint32_t                           mipLevels = 1;
-    VkImageViewCreateInfo              fullViewInfo {};
-    std::vector<VkImageViewCreateInfo> mipViewInfos;
+    Image                  image;
+    ImageView              fullView;
+    std::vector<ImageView> mipViews;
+    VkExtent2D             extent {};
+    uint32_t               mipLevels = 1;
 
     MipmappedRenderTarget() = default;
 
     MipmappedRenderTarget(const MipmappedRenderTarget&)                    = delete;
     auto operator=(const MipmappedRenderTarget&) -> MipmappedRenderTarget& = delete;
 
-    MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept                    = default;
-    auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& = default;
+    MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept = default;
+    auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& {
+        if (this != &other) {
+            mipViews  = std::move(other.mipViews);
+            fullView  = std::move(other.fullView);
+            image     = std::move(other.image);
+            extent    = other.extent;
+            mipLevels = other.mipLevels;
+        }
+        return *this;
+    }
 
     ~MipmappedRenderTarget() = default;
 
@@ -117,26 +150,35 @@ struct MipmappedRenderTarget {
             return std::unexpected(img_res.error());
         }
         target.image = std::move(img_res.value());
+        ZHLN::defer _([&] { target.Destroy(allocator); });
 
-        const VkImageAspectFlags aspect = GetFormatAspect(F);
-        target.fullViewInfo             = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect);
-        auto view_res                   = CreateView(ctx.Device(), target.fullViewInfo);
+        const VkImageAspectFlags aspect   = GetFormatAspect(F);
+        auto                     view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
         target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
-        target.mipViewInfos.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            const VkImageViewCreateInfo mipInfo = MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m);
-            auto                        mip_res = CreateView(ctx.Device(), mipInfo);
+            auto mip_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m));
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }
             target.mipViews.push_back(std::move(*mip_res));
-            target.mipViewInfos.push_back(mipInfo);
         }
-        return target;
+        return std::move(target); // Move before the failure guard runs.
+    }
+
+    void Destroy(Allocator& allocator) noexcept {
+        mipViews.clear();
+        fullView = {};
+        allocator.DestroyImage(image);
+        extent = {};
+        mipLevels = 1;
+    }
+
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), fullView, extent, F};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
@@ -148,7 +190,7 @@ struct MipmappedRenderTarget {
 };
 
 template <VkImageLayout TargetLayout, VkFormat F>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> ) noexcept;
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout>) noexcept;
 
 template <typename T>
 struct TargetFormat;
@@ -166,6 +208,7 @@ struct GBufferLayout {
     using TargetTypeAt = Targets...[Index];
 
     template <size_t Index>
+        requires(Index < count)
     static constexpr VkFormat get() {
         static_assert(Index < count, "GBuffer layout index out of bounds.");
         return TargetFormat<TargetTypeAt<Index>>::value;
@@ -176,20 +219,21 @@ struct GBufferLayout {
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.viewInfo};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::RenderTarget3D<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.view.Get(), rt.extent, aspect, F, &rt.viewInfo};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <VkImageLayout L, VkFormat F>
 Vk::TypedImage<L> AssumeLayout(const Vk::MipmappedRenderTarget<F>& rt, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
-    return {rt.image.Handle(), rt.fullView.Get(), {rt.extent.width, rt.extent.height, 1}, aspect, F, &rt.fullViewInfo};
+    return rt.AsSlice().template Assume<L>(aspect);
 }
 
 template <typename Usage>
+    requires requires { typename Usage::Resource; }
 struct UsageLayout {
     static_assert(requires { typename Usage::Resource; }, "UsageLayout requires a valid Vk::Usage type.");
 
@@ -223,8 +267,21 @@ struct RenderTargetBundle {
     constexpr explicit RenderTargetBundle(Targets&... t) noexcept: targets(t...) {
     }
 
-    void Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) const {
-        std::apply([&](auto&... t) { ((t = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {})), ...); }, targets);
+    [[nodiscard]] auto Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) -> std::expected<void, ErrorCode> {
+        std::expected<void, ErrorCode> result;
+        std::apply([&](auto&... t) {
+            ([&] {
+                if (!result) return;
+                auto created = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {});
+                if (!created) {
+                    result = std::unexpected(created.error());
+                    return;
+                }
+                t.Destroy(alloc); // Caller must have waited for GPU use.
+                t = std::move(*created);
+            }(), ...);
+        }, targets);
+        return result;
     }
 
     template <VkImageLayout TargetLayout>
@@ -246,6 +303,6 @@ template <typename... Images>
     return TransitionAllTo<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, atts);
 }
 
-}
+} // namespace ZHLN::Vk
 
 #include "RenderTarget.inl"

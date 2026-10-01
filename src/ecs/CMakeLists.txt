@@ -23,4 +23,7 @@ target_include_directories(zahlen_ecs
 
 target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
 
-target_link_libraries(zahlen_ecs PRIVATE zahlen_warnings)
+# Signature-driven graph resolution includes SystemContext.hpp, whose public
+# frame callbacks and visible lists use Jolt types. Give this target the same
+# Jolt usage requirements (headers and ABI definitions) as other consumers.
+target_link_libraries(zahlen_ecs PRIVATE Jolt zahlen_warnings)

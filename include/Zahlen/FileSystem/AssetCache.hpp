@@ -74,6 +74,15 @@ class AssetCache {
         });
     }
 
+    template <typename Fn>
+    void ForEach(Fn&& fn) {
+        Lock(_mutex, [&] {
+            for (auto& asset: _owned) {
+                fn(*asset);
+            }
+        });
+    }
+
     [[nodiscard]] auto Count() const noexcept -> size_t {
         return Lock(_mutex, [&]() -> size_t { return _owned.size(); });
     }

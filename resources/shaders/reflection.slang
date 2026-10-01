@@ -1,5 +1,7 @@
 
+import gpu_buffer;
 import instance_data;
+import math.transform;
 import pbr_helpers;
 import uniforms;
 
@@ -11,24 +13,6 @@ const int ENABLE_RTR = 1;
 #else
 static const int ENABLE_RTR = 0;
 #endif
-
-float3 RotateVector(float3 V, float3 lightDir) {
-    float lenB = length(lightDir);
-    if (lenB < 0.001f) {
-        return V;
-    }
-    float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
-    float3 B     = lightDir / lenB;
-    float3 q_xyz = cross(B, A);
-    float q_w    = 1.0f + dot(A, B);
-    float q_len  = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
-    if (q_len > 0.0001f) {
-        q_xyz /= q_len;
-        q_w /= q_len;
-        return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
-    }
-    return V;
-}
 
 struct PushConstants {
     float4x4 invViewProj;
@@ -52,7 +36,9 @@ SamplerState smp;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 SamplerState pointSampler;
-TextureCube<float4> texEnvMap;
+TextureCube<float4> texEnvMap; // conditioned IBL, never used as the cooked visible sky
+Texture2D<float4> texSkyEquirect; // original HDR only when environmentMode == 3
+SamplerState skySampler;
 ConstantBuffer<FrameUniforms> frame;
 Texture2D brdfLUT;
 SamplerState clampSampler;
@@ -66,11 +52,14 @@ SamplerState blueNoiseSampler;
 Texture2D<float4> texRtrHalf;
 
 Texture2D<float4> texClearcoat;
+Texture2D<float4> texSheen;
+Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
-float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out float confidence, out float3 fallbackColor, uint2 pixelPos) {
+float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 anisT, float3 anisB, float strength,
+                   out float confidence, out float3 fallbackColor, uint2 pixelPos) {
     confidence    = 0.0f;
     fallbackColor = float3(0.0f, 0.0f, 0.0f);
 
@@ -80,18 +69,18 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
     }
 
     float3 R;
-    if (roughness < 0.04f) {
+    if (roughness < 0.04f && strength <= 1.0f / 255.0f) {
         R = reflect(-V, N);
     } else {
         float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-        float3 tangentX  = normalize(cross(up, N));
-        float3 tangentY  = cross(N, tangentX);
+        float3 tangentX  = strength > 1.0f / 255.0f ? anisT : normalize(cross(up, N));
+        float3 tangentY  = strength > 1.0f / 255.0f ? anisB : cross(N, tangentX);
         float3x3 toLocal = float3x3(tangentX, tangentY, N);
         float3x3 toWorld = transpose(toLocal);
 
         float3 V_local = mul(toLocal, V);
         float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-        float alpha    = max(roughness * roughness, 1e-5f);
+        float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
 
@@ -143,16 +132,16 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             uint i2      = primIdx * 3 + 2;
 
             if (hitInst.iboAddress != 0) {
-                uint* indices = (uint*) hitInst.iboAddress;
-                i0            = indices[i0];
-                i1            = indices[i1];
-                i2            = indices[i2];
+                GPUBuffer<uint> indices = GPUBuffer<uint>(hitInst.iboAddress);
+                i0 = indices.load(i0);
+                i1 = indices.load(i1);
+                i2 = indices.load(i2);
             }
 
-            float* posValues = (float*) hitInst.posAddress;
-            float3 p0        = float3(posValues[i0 * 3 + 0], posValues[i0 * 3 + 1], posValues[i0 * 3 + 2]);
-            float3 p1        = float3(posValues[i1 * 3 + 0], posValues[i1 * 3 + 1], posValues[i1 * 3 + 2]);
-            float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
+            GPUBuffer<float> posValues = GPUBuffer<float>(hitInst.posAddress);
+            float3 p0 = float3(posValues.load(i0 * 3 + 0), posValues.load(i0 * 3 + 1), posValues.load(i0 * 3 + 2));
+            float3 p1 = float3(posValues.load(i1 * 3 + 0), posValues.load(i1 * 3 + 1), posValues.load(i1 * 3 + 2));
+            float3 p2 = float3(posValues.load(i2 * 3 + 0), posValues.load(i2 * 3 + 1), posValues.load(i2 * 3 + 2));
 
             float3x3 world3x3 = (float3x3) hitInst.world;
             float3 crossN     = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
@@ -167,11 +156,13 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         }
 
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-        float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
-
-        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
-        confidence = 0.0f;
+        if (hitInst.isUnlit) {
+            fallbackColor = hitBaseColor;
+        } else {
+            float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
+            fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
+        }
+        confidence    = 0.0f;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (hitClip.w < 0.1f) {
@@ -237,7 +228,13 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
-        if (frame.environmentMode == 1) {
+        if (frame.environmentMode == 3) {
+            // Equirectangular convention matches ibl_bake.slang. The original
+            // high-energy disk remains visible, but never enters specular IBL.
+            float2 uv = float2(atan2(rayDir.z, rayDir.x) * (0.5f / 3.141592653589793f) + 0.5f,
+                               acos(clamp(rayDir.y, -1.0f, 1.0f)) / 3.141592653589793f);
+            litColor = texSkyEquirect.SampleLevel(skySampler, uv, 0).rgb * frame.ambientExposure;
+        } else if (frame.environmentMode == 1) {
             litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
         } else {
             rayDir = RotateVector(rayDir, frame.lightDir.xyz);
@@ -253,6 +250,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         if (frame.fullBright != 0) {
             return float4(litColorRaw.rgb, 1.0f);
         }
+        float4 anisoRaw = texAnisotropy.SampleLevel(pointSampler, input.uv, 0);
+        if (IsGBufferUnlit(anisoRaw.z)) {
+            return float4(litColorRaw.rgb, 1.0f);
+        }
 
         float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
@@ -265,13 +266,18 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
         float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
-        float3 R = reflect(-V, N);
+        float strength = DecodeGBufferAnisotropy(anisoRaw.z);
+        float3 T = strength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
+        float3 B = cross(N, T);
+        float3 R = AnisotropicReflection(N, V, B, roughness, strength);
 
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
         float NdotV    = saturate(dot(N, V));
         float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
-        float3 F_rough = FresnelSchlickRoughness(NdotV, F0, roughness);
-        float3 FssEss  = F_rough * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+        // The LUT's A/B terms already integrate Schlick Fresnel over the GGX
+        // lobe. Applying the grazing Fresnel again here can wash out dark
+        // metal and amplify white glints on masked foliage and thin chains.
+        float3 FssEss  = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
 
         float3 R_corr = R;
         float boxFade = 0.0f;
@@ -289,19 +295,32 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             R_corr      = lerp(R, boxR, boxFade);
         }
 
-        float ao = litColorRaw.a;
+        float ao = litColorRaw.a * anisoRaw.w;
 
-        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
-        float3 specularIBL = prefilteredColor * FssEss * ao;
+        float3 prefilteredColor = SampleAnisotropicEnvironment(texEnvMap, clampSampler, R_corr, roughness, strength) * frame.ambientExposure;
+        float3 baseSpecularIBL = prefilteredColor * FssEss * ao;
+
+        // Independent Charlie layer above metallic-roughness and beneath the
+        // dielectric clearcoat. The existing GGX cube is an IBL approximation;
+        // direct lighting uses Charlie's distribution and visibility.
+        float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
+        float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
+        float3 sheenIBL = float3(0.0f);
+        if (any(sheenRaw.rgb > 0.0f)) {
+            float3 sheenPref = texEnvMap.SampleLevel(clampSampler, reflect(-V, N), max(sheenRaw.a, 0.2f) * 5.0f).rgb;
+            sheenIBL = sheenPref * frame.ambientExposure * SheenEnvironmentWeight(sheenRaw.rgb, NdotV) * ao;
+        }
         float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+        float coatAtt = 1.0f;
+        float3 coatIBL = float3(0.0f);
         if (coatRaw.a > 1.0f / 255.0f) {
             float3 Nc    = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
             float NcDotV = saturate(dot(Nc, V));
             float Fc     = ClearcoatFresnel(NcDotV) * coatRaw.a;
-            float att    = saturate(1.0f - Fc);
+            coatAtt      = saturate(1.0f - Fc);
             float3 Rc    = reflect(-V, Nc);
             float3 coatPref = texEnvMap.SampleLevel(clampSampler, Rc, coatRaw.z * 5.0f).rgb * frame.ambientExposure;
-            specularIBL = specularIBL * att + coatPref * Fc * ao;
+            coatIBL = coatPref * Fc * ao;
         }
 
         litColor = litColorRaw.rgb;
@@ -316,7 +335,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 #ifndef DISABLE_RTR
             if (wantRTR && roughness < 0.04f) {
                 float3 rtrFallback = float3(0.0f, 0.0f, 0.0f);
-                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, confidence, rtrFallback, uint2(input.pos.xy));
+                float2 hitUV       = RaytraceRTR(worldPos, N, V, roughness, T, B, strength, confidence, rtrFallback, uint2(input.pos.xy));
 
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;
@@ -347,14 +366,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             }
 
-            float3 specReflect = lerp(specularIBL, reflectionColor * FssEss, confidence);
+            float3 specReflect = (lerp(baseSpecularIBL, reflectionColor * FssEss, confidence) * sheenAtt + sheenIBL) *
+                                 coatAtt + coatIBL;
 
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
             litColor += specReflect * horizonOcclusion;
         } else {
-            litColor += specularIBL;
+            litColor += (baseSpecularIBL * sheenAtt + sheenIBL) * coatAtt + coatIBL;
         }
     }
 

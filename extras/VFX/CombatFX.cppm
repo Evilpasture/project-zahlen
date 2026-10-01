@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // Public Engine & Jolt Headers
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -122,7 +127,7 @@ class System {
         auto& rc = engine.GetRenderContext();
 
         // 1. Build default bullet hole texture
-        m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", 128, 128, true, GenerateBulletHoleTexture(128).data());
+        m_defaultHoleTex = rc.CreateProceduralTexture("vfx_combat_bullethole", {128, 128}, GenerateBulletHoleTexture(128), true);
 
         // 2. Setup standard default surface presets
         // Preset 0: Generic Solid / Concrete

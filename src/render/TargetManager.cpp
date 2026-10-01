@@ -15,7 +15,7 @@ auto TargetManager::CreateCascadeViews(VkImage image, ZHLN::Array<Vk::ImageView>
     out.clear();
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(_ctx.Device(), image, i, 1);
+        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(_ctx.Device(), image, i, 1);
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -29,6 +29,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
         if (!e) {
             return std::unexpected(e.error());
         }
+        member.Destroy(_allocator);
         member = std::move(*e);
         return {};
     };
@@ -51,13 +52,13 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                                  rt.mipLevels;
                                  rt.mipViews;
                              }) {
-            result = assign(
-                rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
-                        _allocator, _ctx, ext,
-                        Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::Storage | Vk::ImageUsage::TransferSrc |
-                            Vk::ImageUsage::TransferDst
-                    )
-            );
+            // HiZ is compute-writable; transmission is a color attachment at
+            // mip 0, with the complete chain sampled by the forward shader.
+            Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst;
+            if constexpr (std::is_same_v<Tag, Res_HiZ>) {
+                usage |= Vk::ImageUsage::Storage;
+            }
+            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx, ext, usage));
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt,
@@ -67,9 +68,6 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             Vk::ImageUsage extra = Vk::ImageUsage::None;
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = Vk::ImageUsage::TransferSrc;
-            }
-            if constexpr (std::is_same_v<Tag, Res_TransLighting>) {
-                extra = Vk::ImageUsage::TransferDst;
             }
             if constexpr (Tag::scale_divisor > 1) {
                 extra |= Vk::ImageUsage::Storage;
@@ -99,6 +97,9 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!sm_res) {
         return std::unexpected(sm_res.error());
     }
+    // Retire supplemental views before replacing their backing images.
+    _shadowCascadeViews.clear();
+    _graph.shadowMap.Destroy(_allocator);
     _graph.shadowMap = std::move(*sm_res);
 
     auto smp_res =
@@ -106,6 +107,8 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!smp_res) {
         return std::unexpected(smp_res.error());
     }
+    _shadowCascadeViewsPrev.clear();
+    _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
     if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
@@ -126,19 +129,24 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
     }
-    _graph.shadowAtlas = std::move(*sa_res);
+    _punctualShadowViews.clear();
+    _shadowAtlasCubeView = {};
+    _shadowAtlas2DView   = {};
+    _graph.shadowAtlas.Destroy(_allocator);
+    _graph.shadowAtlas   = std::move(*sa_res);
 
     const VkImage atlas = _graph.shadowAtlas.image.Handle();
-    _shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-    _shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-
-    auto cube_res = Vk::CreateView(_ctx.Device(), _shadowAtlasCubeViewInfo);
+    auto cube_res = Vk::ImageView::Create(
+        _ctx.Device(), Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    );
     if (!cube_res) {
         return std::unexpected(cube_res.error());
     }
     _shadowAtlasCubeView = std::move(*cube_res);
 
-    auto array_res = Vk::CreateView(_ctx.Device(), _shadowAtlas2DViewInfo);
+    auto array_res = Vk::ImageView::Create(
+        _ctx.Device(), Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    );
     if (!array_res) {
         return std::unexpected(array_res.error());
     }
@@ -174,15 +182,21 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             if (!sm_res) {
                 return std::unexpected(sm_res.error());
             }
-            _graph.shadowMap = std::move(*sm_res);
-
             auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
             );
             if (!smp_res) {
+                sm_res->Destroy(_allocator);
                 return std::unexpected(smp_res.error());
             }
-            _shadowMapPrev = std::move(*smp_res);
+
+            // Additional per-cascade views must die before their old images.
+            _shadowCascadeViews.clear();
+            _shadowCascadeViewsPrev.clear();
+            _graph.shadowMap.Destroy(_allocator);
+            _shadowMapPrev.Destroy(_allocator);
+            _graph.shadowMap = std::move(*sm_res);
+            _shadowMapPrev  = std::move(*smp_res);
 
             if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
                 return r;
@@ -208,7 +222,7 @@ void TargetManager::RecreatePunctualShadowViews() noexcept {
     _punctualShadowViews.clear();
     _punctualShadowViews.resize(kPunctualLights);
     for (uint32_t i = 0; i < kPunctualLights; ++i) {
-        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
+        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(
             _ctx.Device(), _graph.shadowAtlas.image.Handle(),
             i * 6,
             6,
@@ -221,33 +235,26 @@ void TargetManager::RecreatePunctualShadowViews() noexcept {
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
-    const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-    const VkImageSubresourceRange clearRange = {
-        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel   = 0,
-        .levelCount     = VK_REMAINING_MIP_LEVELS,
-        .baseArrayLayer = 0,
-        .layerCount     = VK_REMAINING_ARRAY_LAYERS
-    };
-
-    const std::array targets3D = {_graph.voxelMedia.image.Handle(),   _graph.voxelLight.image.Handle(),      _graph.voxelIntegrated.image.Handle(),
-                                  _graph.voxelHistory.image.Handle(), _graph.voxelResolved.image.Handle()};
-    for (auto* const img: targets3D) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f},
+        _graph.voxelMedia, _graph.voxelLight, _graph.voxelIntegrated,
+        _graph.voxelHistory, _graph.voxelResolved
+    );
 
     const std::array colorTargets = {_graph.sceneColor.image.Handle(),
                                      _graph.velocityBuffer.image.Handle(),
                                      _graph.normalRoughnessBuffer.image.Handle(),
                                      _graph.emissiveBuffer.image.Handle(),
                                      _graph.clearcoatBuffer.image.Handle(),
+                                     _graph.anisotropyBuffer.image.Handle(),
+                                     _graph.sheenBuffer.image.Handle(),
                                      _graph.hdrSceneColor.image.Handle(),
                                      _graph.lightingTarget.image.Handle(),
                                      _graph.smaaEdgeTarget.image.Handle(),
                                      _graph.smaaWeightTarget.image.Handle(),
                                      _graph.transNormalBuffer.image.Handle(),
+                                     _graph.transAnisotropyBuffer.image.Handle(),
+                                     _graph.transSheenBuffer.image.Handle(),
                                      _graph.transLightingTarget.image.Handle()};
     for (auto* const img: colorTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -273,10 +280,23 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
     );
 
-    const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
-    vkCmdClearColorImage(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
-    Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, _graph.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT);
+    // Every Hi-Z mip begins at far depth and ends shader-readable.
+    Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
+}
+
+void TargetManager::Clear() noexcept {
+    _shadowCascadeViews.clear();
+    _shadowCascadeViewsPrev.clear();
+    _punctualShadowViews.clear();
+    _shadowAtlasCubeView = {};
+    _shadowAtlas2DView = {};
+    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) {
+        target.Destroy(_allocator);
+    });
+    // These targets are not part of the render graph's reflected resources.
+    _graph.shadowMap.Destroy(_allocator);
+    _graph.bloomBlurTarget.Destroy(_allocator);
+    _shadowMapPrev.Destroy(_allocator);
 }
 
 void TargetManager::NameGraphTargets() const noexcept {

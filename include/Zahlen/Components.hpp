@@ -5,12 +5,12 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Scene.hpp>
@@ -33,6 +33,10 @@ struct Skeleton;
 enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic };
 
 struct Components {
+
+    // Engine scene destruction is two-phase: mark now, release external handles
+    // while the other components are still accessible, then reclaim the entity.
+    struct PendingDestroy {};
 
     struct PBRComponent {
         float roughness = 0.5f;
@@ -66,9 +70,25 @@ struct Components {
         int32_t    nodeIndex     = -1;
     };
 
+    // Scene-owned buffers for a generated mesh. MeshComponent only references
+    // its AssetID; Engine scene cleanup releases these buffers on despawn or
+    // ClearScene. Use SceneResources::Attach/Detach for direct replacement or
+    // removal. Cached model parts belong to AssetManager, not this component.
+    struct OwnedMeshComponent {
+        enum class Shape : uint8_t { None, Box, Plane, Sphere, Cylinder, Cone };
+
+        AssetID   meshAsset  = InvalidAssetID;
+        Mesh      mesh       = {};
+        Shape     shape      = Shape::None;
+        JPH::Vec3 dimensions = JPH::Vec3::sZero(); // box: half extents; others: radius/extent, height
+        JPH::Vec4 color      = JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
     struct SkeletalMeshComponent {
-        uint32_t jointOffset   = 0;
-        int32_t  skeletonIndex = -1;
+        uint32_t     jointOffset        = 0;
+        int32_t      skeletonIndex      = -1;
+        BufferHandle skinnedScratch     = BufferHandle::Invalid;
+        uint32_t     scratchVertexCount = 0;
     };
 
     struct alignas(64) KinematicPoseOverrideComponent {
@@ -97,7 +117,7 @@ struct Components {
     };
 
     struct PhysicsComponent {
-        Entity physicsHandle;
+        Physics::BodyHandle physicsHandle = Physics::BodyHandle::Null();
         bool   isStatic = true;
     };
 
@@ -120,8 +140,8 @@ struct Components {
     };
 
     struct RagdollComponent {
-        JPH::Ref<JPH::Ragdoll> ragdollInstance = nullptr;
-        AssetID                skeletonAsset   = InvalidAssetID;
+        Physics::RagdollHandle ragdollHandle = Physics::RagdollHandle::Invalid;
+        AssetID                skeletonAsset = InvalidAssetID;
 
         RagdollState state     = RagdollState::Inactive;
         RagdollState prevState = RagdollState::Inactive;
@@ -130,8 +150,8 @@ struct Components {
         uint32_t jointCount  = 0;
 
         bool isAddedToPhysics = false;
-
     };
+    static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
 
     struct CameraComponent {
         JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
@@ -156,6 +176,9 @@ struct Components {
     };
 
     struct SceneLightTagComponent {};
+    // Owned by the scene's environment reconciliation system. Never saved as
+    // an authored light; it is recreated from prepared environment metadata.
+    struct EnvironmentSunTagComponent {};
 
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
@@ -204,6 +227,8 @@ struct Components {
     };
 
     struct EnvironmentMapComponent {
+        // Key for linear pixels supplied through AssetManager; not a file path
+        // that RenderSystem will read or decode.
         ZHLN::String256 source;
         int             renderSkybox = 0;
     };
@@ -235,6 +260,7 @@ struct Components {
         String128 filepath;
         float     volume        = 1.0f;
         float     pitch         = 1.0f;
+        float     fadeOut       = 0.05f;
         bool      isLooping     = false;
         bool      isSpatialized = true;
         bool      playOnStart   = true;
@@ -257,6 +283,7 @@ struct Components {
 
         SynthHandle synthHandle = SynthHandle::Invalid;
     };
+    static_assert(std::is_trivially_copyable_v<AudioSourceComponent> && std::is_trivially_copyable_v<LoopSynthComponent>);
     struct InputStateComponent {
         std::bitset<Reflect::EnumCount<KeyCode>()> keys;
 
@@ -388,12 +415,17 @@ struct Components {
         int32_t    shadowLayer = -1;
     };
 
+    // GPU handles live with their ECS components. Scene cleanup releases
+    // them before reclaiming marked entities; use SceneResources::Detach or
+    // Attach for direct component mutations.
     struct ParticleEmitterComponent {
         ParticleEmitterParams params;
         TextureHandle         textureAsset   = TextureHandle::Invalid;
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
         bool                  attachToCamera = false;
+        BufferHandle          gpuBuffer      = BufferHandle::Invalid;
+        uint32_t              bufferCapacity = 0;
     };
 
     struct MeshParticleEmitterComponent {
@@ -402,6 +434,8 @@ struct Components {
         uint32_t                  maxParticles  = 128;
         bool                      active        = true;
         MeshParticleEmitterParams params;
+        BufferHandle             gpuBuffer      = BufferHandle::Invalid;
+        uint32_t                 bufferCapacity = 0;
     };
 
     struct DecalComponent {

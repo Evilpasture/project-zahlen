@@ -4,10 +4,11 @@
 #include "TestsFramework.hpp"
 #include "helpers/CookerFixture.hpp"
 #include <Zahlen/AssetManager.hpp>
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <array>
 #include <chrono>
@@ -129,11 +130,23 @@ struct CookerTestSuite {
             ZHLN::Test::ExpectEq(header.meshletTriByteCount, 4u); // 3 micro-indices, padded to 4B
 
             size_t expectedSize = sizeof(ZHLN::CookedMeshHeader) + (header.vertexCount * sizeof(ZHLN::VertexPosition)) +
-                                  (header.vertexCount * sizeof(ZHLN::VertexAttributes)) + (header.indexCount * sizeof(uint32_t)) +
-                                  (header.meshletCount * sizeof(ZHLN::GPUMeshlet)) + (header.meshletVertexCount * sizeof(uint32_t)) +
-                                  header.meshletTriByteCount;
+                                  (header.vertexCount * sizeof(ZHLN::VertexTangentFrame)) + (header.vertexCount * sizeof(ZHLN::VertexSurface)) +
+                                  (header.indexCount * sizeof(uint32_t)) + (header.meshletCount * sizeof(ZHLN::GPUMeshlet)) +
+                                  (header.meshletVertexCount * sizeof(uint32_t)) + header.meshletTriByteCount;
 
             ZHLN::Test::ExpectEq(static_cast<size_t>(fileSize), expectedSize);
+
+            // The total byte count remains 20 bytes per vertex after the
+            // split. Check the actual on-disk ordering, not just file size.
+            ifs.seekg(sizeof(ZHLN::CookedMeshHeader) + header.vertexCount * sizeof(ZHLN::VertexPosition), std::ios::beg);
+            std::array<ZHLN::VertexTangentFrame, 3> frames {};
+            std::array<ZHLN::VertexSurface, 3>      surfaces {};
+            ifs.read(reinterpret_cast<char*>(frames.data()), sizeof(frames));
+            ifs.read(reinterpret_cast<char*>(surfaces.data()), sizeof(surfaces));
+            if (!ifs || frames[0].normal.data != ZHLN::Math::PackNormal(0.0f, 1.0f, 0.0f).data || surfaces[1].uv.data != ZHLN::Math::PackUV(1.0f, 0.0f).data ||
+                surfaces[0].color.data != ZHLN::Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f).data || surfaces[2].uv1.data != 0) {
+                return std::unexpected(CookerTestError::MeshCompilationFailed);
+            }
             return {};
         }
 

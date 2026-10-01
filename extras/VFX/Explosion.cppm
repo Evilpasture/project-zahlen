@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // Public Engine & Jolt Headers
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -31,6 +36,7 @@ module;
 #include <numbers>
 #include <random>
 #include <span>
+#include <utility>
 #include <vector>
 
 export module ZHLN.Explosions;
@@ -339,6 +345,11 @@ export struct ExplosionComponent {
 
     Entity debrisEntity  = Entity::Null();
     bool   craterSpawned = false;
+
+    BufferHandle fireBuffer       = BufferHandle::Invalid;
+    BufferHandle smokeBuffer      = BufferHandle::Invalid;
+    BufferHandle shockwaveBuffer  = BufferHandle::Invalid;
+    BufferHandle groundRingBuffer = BufferHandle::Invalid;
 };
 
 export struct CraterDecalComponent {
@@ -357,6 +368,35 @@ export struct CraterDecalComponent {
 
 export class ExplosionSystem {
   public:
+    static void Release(Engine& engine, ExplosionComponent& exp) {
+        auto& render = engine.GetRenderContext();
+        render.DestroyBuffer(std::exchange(exp.fireBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.smokeBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.shockwaveBuffer, BufferHandle::Invalid));
+        render.DestroyBuffer(std::exchange(exp.groundRingBuffer, BufferHandle::Invalid));
+    }
+
+    static void Detach(Engine& engine, Entity entity) {
+        if (auto* exp = engine.GetRegistry().Get<ExplosionComponent>(entity)) {
+            Release(engine, *exp);
+            engine.GetRegistry().Remove<ExplosionComponent>(entity);
+        }
+    }
+
+    static void Cleanup(Engine& engine, bool all) {
+        auto& reg = engine.GetRegistry();
+        const auto entities = reg.GetEntitiesWith<ExplosionComponent>();
+        if (entities.empty()) {
+            return;
+        }
+        auto explosions = reg.GetRawArray<ExplosionComponent>();
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (all || reg.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+                Release(engine, explosions[i]);
+            }
+        }
+    }
+
     static void Init(Engine& engine) {
         auto& rc  = engine.GetRenderContext();
         auto& reg = engine.GetRegistry();
@@ -365,33 +405,73 @@ export class ExplosionSystem {
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
         reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
 
-        if (s_LastRenderContext == &rc) {
+        if (engine.AddSceneCleanupPass(&Cleanup)) {
+            engine.AddDeviceLostCallback([](Engine& owner) {
+                for (auto& exp: owner.GetRegistry().GetRawArray<ExplosionComponent>()) {
+                    exp.fireBuffer       = BufferHandle::Invalid;
+                    exp.smokeBuffer      = BufferHandle::Invalid;
+                    exp.shockwaveBuffer  = BufferHandle::Invalid;
+                    exp.groundRingBuffer = BufferHandle::Invalid;
+                }
+                s_LastRenderContext = nullptr;
+            });
+        }
+
+        s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
+        s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
+
+        // Debris is shared by every explosion in this scene, not owned by any
+        // one emitter. Keep its buffers on a dedicated ECS resource entity.
+        Entity resourceEntity = Entity::Null();
+        for (const Entity e: reg.GetEntitiesWith<Components::OwnedMeshComponent>()) {
+            if (const auto* owned = reg.Get<Components::OwnedMeshComponent>(e);
+                owned != nullptr && owned->meshAsset == s_DebrisMeshAsset) {
+                resourceEntity = e;
+                break;
+            }
+        }
+        if (s_LastRenderContext == &rc && resourceEntity != Entity::Null() &&
+            rc.GetGPUMesh(s_DebrisMeshAsset).has_value() && rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
             return;
         }
         s_LastRenderContext = &rc;
 
         // Register procedural textures into TextureManager
-        s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", 256, 256, true, GenerateFireTexture(256).data());
-        s_SoilTexHandle         = rc.CreateProceduralTexture("vfx_artillery_soil", 256, 256, true, GenerateSoilTexture(256).data());
-        s_ShockwaveTexHandle    = rc.CreateProceduralTexture("vfx_artillery_shockwave", 512, 512, true, GenerateShockwaveRingTexture(512).data());
-        s_GroundRingHandle      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", 512, 512, true, GenerateGroundRingTexture(512).data());
-        s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", 256, 256, true, GenerateCraterTexture(256).data());
-        s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", 256, 256, false, GenerateCraterNormalTexture(256).data());
+        s_FireTexHandle         = rc.CreateProceduralTexture("vfx_artillery_fire", {256, 256}, GenerateFireTexture(256), true);
+        s_SoilTexHandle         = rc.CreateProceduralTexture("vfx_artillery_soil", {256, 256}, GenerateSoilTexture(256), true);
+        s_ShockwaveTexHandle    = rc.CreateProceduralTexture("vfx_artillery_shockwave", {512, 512}, GenerateShockwaveRingTexture(512), true);
+        s_GroundRingHandle      = rc.CreateProceduralTexture("vfx_artillery_ground_ring", {512, 512}, GenerateGroundRingTexture(512), true);
+        s_CraterTexHandle       = rc.CreateProceduralTexture("vfx_artillery_crater", {256, 256}, GenerateCraterTexture(256), true);
+        s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
-        // Debris box mesh for physical ejecta chunks
-        Mesh boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
-
-        Material debrisMat = rc.CreateMaterial({
-                                 .roughness = 0.94f,
-                                 .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
-                             })
-                                 .value_or(Material {});
-
-        s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
-        s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
-
+        Mesh boxMesh;
+        if (resourceEntity != Entity::Null()) {
+            auto& owned = *reg.Get<Components::OwnedMeshComponent>(resourceEntity);
+            boxMesh = owned.mesh;
+            if (boxMesh.posBuffer == BufferHandle::Invalid) {
+                boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
+                rc.DestroyMesh(std::exchange(owned.mesh, boxMesh));
+            }
+        } else {
+            boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
+            reg.Create(Components::OwnedMeshComponent {.meshAsset = s_DebrisMeshAsset, .mesh = boxMesh});
+        }
         rc.RegisterGPUMesh(s_DebrisMeshAsset, boxMesh);
-        rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
+
+        if (!rc.GetGPUMaterial(s_DebrisMatAsset).has_value()) {
+            Material debrisMat = rc.CreateMaterial({
+                                     .roughness = 0.94f,
+                                     .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
+                                 })
+                                     .value_or(Material {});
+            rc.RegisterGPUMaterial(s_DebrisMatAsset, debrisMat);
+        }
+    }
+
+    static void Attach(Engine& engine, Entity entity, ExplosionComponent component) {
+        Init(engine);
+        Detach(engine, entity);
+        engine.GetRegistry().Add(entity, std::move(component));
     }
 
     static Entity Spawn(Engine& engine, const JPH::Vec3& origin, float scale = 1.0f, OrdnanceType type = OrdnanceType::ArtilleryMortar) {
@@ -512,6 +592,9 @@ export class ExplosionSystem {
             for (size_t i = 0; i < expEntities.size(); ++i) {
                 Entity              e   = expEntities[i];
                 ExplosionComponent& exp = explosions[i];
+                if (reg.Get<Components::PendingDestroy>(e) != nullptr) {
+                    continue;
+                }
                 exp.age += dt;
 
                 // Flash Decay on Root Entity (Fades sharply to true 0 within ~0.6s)
@@ -563,7 +646,7 @@ export class ExplosionSystem {
                 // Update Particle Emitters
                 UpdateGroup(exp.fireball, dt, false);
                 UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(rc, e, exp);
+                RenderBatchGPU(rc, exp);
 
                 // Clean up explosion particle root and children when particles finish
                 if (exp.age > exp.duration) {
@@ -585,6 +668,9 @@ export class ExplosionSystem {
             for (size_t i = 0; i < craterEntities.size(); ++i) {
                 Entity                craterEnt = craterEntities[i];
                 CraterDecalComponent& crater    = craters[i];
+                if (reg.Get<Components::PendingDestroy>(craterEnt) != nullptr) {
+                    continue;
+                }
                 crater.age += dt;
 
                 // Handle smooth dissolution over the final fadeDuration seconds
@@ -751,8 +837,15 @@ export class ExplosionSystem {
         }
     }
 
-    static void RenderBatchGPU(RenderContext& rc, Entity e, const ExplosionComponent& exp) {
+    static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
         thread_local std::vector<Particle> t_gpuScratch;
+
+        const auto ensureBuffer = [&rc](BufferHandle& buffer, size_t count) -> BufferHandle {
+            if (buffer == BufferHandle::Invalid && count != 0) {
+                buffer = rc.CreateStorageBuffer(count * sizeof(Particle));
+            }
+            return buffer;
+        };
 
         // 1. FIREBALL
         if (!exp.fireball.empty()) {
@@ -775,8 +868,8 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x1111, static_cast<uint32_t>(exp.fireball.size()));
-            rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
+            const BufferHandle buf = ensureBuffer(exp.fireBuffer, exp.fireball.size());
+            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.fireball.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_FireTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
@@ -807,8 +900,8 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x2222, static_cast<uint32_t>(exp.soilSmoke.size()));
-            rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
+            const BufferHandle buf = ensureBuffer(exp.smokeBuffer, exp.soilSmoke.size());
+            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.soilSmoke.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_SoilTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 0}
@@ -842,8 +935,8 @@ export class ExplosionSystem {
                     };
                 }
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x3333, 4);
-                rc.UpdateBuffer(buf, t_gpuScratch.data(), 4 * sizeof(Particle));
+                const BufferHandle buf = ensureBuffer(exp.shockwaveBuffer, 4);
+                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(4));
                 rc.SubmitParticleEmitter(
                     buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
                 );
@@ -872,8 +965,8 @@ export class ExplosionSystem {
                     .params   = JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f)
                 };
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x4444, 1);
-                rc.UpdateBuffer(buf, t_gpuScratch.data(), 1 * sizeof(Particle));
+                const BufferHandle buf = ensureBuffer(exp.groundRingBuffer, 1);
+                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(1));
                 rc.SubmitParticleEmitter(
                     buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}
                 );

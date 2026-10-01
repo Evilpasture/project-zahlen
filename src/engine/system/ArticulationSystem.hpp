@@ -8,23 +8,21 @@
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
-#include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/ecs/SystemParameters.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <span>
-#include <vector>
 
 namespace ZHLN {
 
-class Engine;
 class PhysicsContext;
-struct SystemContext;
+class RenderContext;
 struct Skeleton;
 
 namespace ECS {
@@ -52,10 +50,12 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    void Update(SystemContext& ctx, float dt);
-
-    void Release(Engine& engine, Entity owner) noexcept;
-    void Shutdown(Engine& engine) noexcept;
+    static void Update(ECS::Query<Components::RagdollComponent&, const Components::PhysicsComponent,
+                                  const Components::KinematicPoseOverrideComponent, const Components::SkeletalMeshComponent,
+                                  Components::TransformComponent&, const Components::RagdollHitReactionCommand,
+                                  const Components::RagdollImpulseCommand> query,
+                       ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
+                       ECS::ResMut<PhysicsContext> physics, ECS::ResMut<RenderContext> render, FrameDt frameDt);
 
     [[nodiscard]] bool AttachRagdoll(
         Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
@@ -65,19 +65,8 @@ class ZHLN_API ArticulationSystem {
     uint32_t AllocateJoints(uint32_t count) noexcept;
 
   private:
-    struct TrackedRagdoll {
-        Entity                 owner = Entity::Null();
-        JPH::Ref<JPH::Ragdoll> instance;
-        bool                   isAddedToPhysics = false;
-    };
-
     void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
 
-    void Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept;
-    void Track(Entity owner, const Components::RagdollComponent& component);
-    void ReleaseTracked(ECS::Registry& registry, PhysicsContext& physics, size_t index) noexcept;
-
-    std::vector<TrackedRagdoll> _tracked;
     JointStateBuffer            _jointStates;
     ZHLN::Atomic<uint32_t>      _nextJointOffset {0};
 };

@@ -8,7 +8,6 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/FrameScheduler.hpp"
-#include "Zahlen/SystemContext.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
@@ -87,23 +86,16 @@ std::optional<float> QueryFreeCamSpeed(ECS::Registry& reg, Entity target) {
 // resolves world transforms: AddSystemBefore("TransformSystem") gives it
 // both orderings, because Compile() only builds edges from earlier nodes to
 // later ones.
-void Sys_CharacterOrientation(SystemContext& ctx) {
-    auto&       reg          = ctx.registry;
-    const float clampedAlpha = std::clamp(ctx.alpha, 0.0f, 1.0f);
-
-    for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(e);
-        if (phys == nullptr || phys->isStatic) {
-            continue;
+void CharacterOrientationInterpolation(
+    ECS::Query<const MovementComponent, const Components::PhysicsComponent, Components::TransformComponent&> query,
+    FrameAlpha alpha
+) {
+    const float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
+    query.ForEach([&](Entity, const auto& move, const auto& phys, auto& transform) {
+        if (!phys.isStatic) {
+            transform.rotation = move.prevOrientation.SLERP(move.orientation, clampedAlpha);
         }
-        const auto* move = reg.Get<MovementComponent>(e);
-        if (move == nullptr) {
-            continue;
-        }
-        if (auto* trans = reg.Get<Components::TransformComponent>(e)) {
-            trans->rotation = move->prevOrientation.SLERP(move->orientation, clampedAlpha);
-        }
-    }
+    });
 }
 
 void AddGraphSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
@@ -118,35 +110,9 @@ void AddGraphSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGr
                                    }
     );
 
-    if (!updateGraph.AddSystemBefore(
-            {
-                .update_func    = Sys_CharacterOrientation,
-                .name           = "CharacterOrientationInterpolation",
-                .access_pattern =
-                    {
-                        ECS::Read<MovementComponent>(),
-                        ECS::Read<Components::PhysicsComponent>(),
-                        ECS::Read<Components::TransformComponent>(),
-                        ECS::Write<Components::TransformComponent>(),
-                    },
-                .enabled = true,
-            },
-            "TransformSystem"
-        )) {
-        // Anchor missing (a host trimmed the core graph): append instead of
-        // dropping the pass -- late is better than never for yaw smoothing.
-        updateGraph.AddSystem({
-            .update_func    = Sys_CharacterOrientation,
-            .name           = "CharacterOrientationInterpolation",
-            .access_pattern =
-                {
-                    ECS::Read<MovementComponent>(),
-                    ECS::Read<Components::PhysicsComponent>(),
-                    ECS::Read<Components::TransformComponent>(),
-                    ECS::Write<Components::TransformComponent>(),
-                },
-            .enabled = true,
-        });
+    if (!updateGraph.AddSystemBefore<&CharacterOrientationInterpolation>("TransformSystem")) {
+        // Anchor missing (a host trimmed the core graph): append instead.
+        updateGraph.AddSystem<&CharacterOrientationInterpolation>();
     }
 }
 

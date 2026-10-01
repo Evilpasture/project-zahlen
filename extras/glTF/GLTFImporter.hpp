@@ -19,6 +19,8 @@
 
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <array>
+#include <cstdint>
 #include <span>
 #include <string_view>
 
@@ -28,7 +30,63 @@ class RenderContext;
 class AssetManager;
 
 namespace GLTF {
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path) -> ModelPrefab*;
+
+enum class CapabilityKind : uint8_t { Core, Extension };
+enum class CapabilitySupport : uint8_t { Supported, Partial };
+
+struct Capability {
+    std::string_view name;
+    CapabilityKind kind;
+    CapabilitySupport support = CapabilitySupport::Supported;
+    std::string_view limitation = {};
+};
+
+// What the importer actually consumes (not everything cgltf can parse).
+// "Supported" means the data is routed to our renderer, not that its output
+// is pixel-identical to a reference glTF viewer. Partial capabilities emit a
+// yellow warning. Undeclared extensions are *not* implicitly supported.
+static constexpr std::array kCapabilities {
+    Capability {"glTF 2.0 nodes, transforms and meshes", CapabilityKind::Core},
+    Capability {"TRIANGLES primitives", CapabilityKind::Core},
+    Capability {"pbrMetallicRoughness", CapabilityKind::Core},
+    Capability {"TEXCOORD_0/1", CapabilityKind::Core},
+    Capability {"COLOR_0", CapabilityKind::Core},
+    Capability {"JOINTS_0/WEIGHTS_0", CapabilityKind::Core},
+    Capability {"POSITION morph targets (first four)", CapabilityKind::Core},
+    Capability {"STEP animation", CapabilityKind::Core},
+    Capability {"LINEAR animation", CapabilityKind::Core, CapabilitySupport::Partial, "playback eases between keys"},
+    Capability {"KHR_mesh_quantization", CapabilityKind::Extension},
+    Capability {"KHR_texture_transform", CapabilityKind::Extension},
+    Capability {"KHR_materials_unlit", CapabilityKind::Extension},
+    Capability {"KHR_materials_emissive_strength", CapabilityKind::Extension},
+    Capability {"KHR_materials_clearcoat", CapabilityKind::Extension},
+    Capability {"KHR_materials_transmission", CapabilityKind::Extension},
+    Capability {"KHR_materials_ior", CapabilityKind::Extension},
+    Capability {"KHR_materials_volume", CapabilityKind::Extension, CapabilitySupport::Partial, "attenuation color/distance are ignored"},
+    Capability {"KHR_materials_iridescence", CapabilityKind::Extension},
+    Capability {"KHR_materials_sheen", CapabilityKind::Extension},
+    Capability {"KHR_materials_anisotropy", CapabilityKind::Extension},
+};
+
+// Validation is advisory: even an unsupported *required* extension does not
+// veto an otherwise readable model. E.g. KHR_materials_pbrSpecularGlossiness
+// without a core PBR fallback renders with the default gray material. Parse
+// failures and cgltf buffer-loading failures still fail the import.
+// The engine's default presentation uses a low exposure and boosts imported
+// emission accordingly. A glTF fidelity renderer instead sets this to 1.0f:
+// emissiveFactor * KHR_materials_emissive_strength then stays in glTF's
+// authored linear units. Emissive texture sampling remains sRGB -> linear in
+// either mode. A virtualPath identifies one prefab AND one set of options;
+// reusing a cached path with different options is rejected.
+struct ImportOptions {
+    float emissiveFactorScale = kGLTFEmissiveDisplayScale;
+    // Preserve authored detail up to this edge length. The default keeps the
+    // engine's existing texture memory budget; fidelity stills can opt into
+    // higher resolution without changing other clients' imports.
+    uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
+};
+
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ModelPrefab*;
 
 // Like LoadGLBPrefab, but consumes bytes already read by the caller. Split
 // .gltf assets store geometry and textures in external .bin/image files whose
@@ -41,7 +99,8 @@ auto LoadGLBPrefabFromMemory(
     AssetManager&            cwMgr,
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
-    std::string_view         bytesPath = {}
+    std::string_view         bytesPath = {},
+    ImportOptions            options = {}
 ) -> ModelPrefab*;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 

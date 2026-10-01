@@ -9,16 +9,57 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <format>
 #include <print>
 #include <string>
 #include <string_view>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace ZHLN {
 
 namespace {
 
 std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
+
+constexpr auto SeverityTag(LogSeverity severity) noexcept -> std::string_view {
+    switch (severity) {
+        case LogSeverity::Debug:   return "DEBUG";
+        case LogSeverity::Info:    return "INFO";
+        case LogSeverity::Warning: return "WARN";
+        case LogSeverity::Error:   return "ERROR";
+    }
+    return "INFO";
+}
+
+constexpr auto SeverityColor(LogSeverity severity) noexcept -> const char* {
+    switch (severity) {
+        case LogSeverity::Debug:   return Color::Gray;
+        case LogSeverity::Info:    return "";
+        case LogSeverity::Warning: return Color::Yellow;
+        case LogSeverity::Error:   return Color::Red;
+    }
+    return "";
+}
+
+auto ShouldColorize(FILE* stream) noexcept -> bool {
+    // NO_COLOR (https://no-color.org/): present and non-empty disables color.
+    if (const char* noColor = std::getenv("NO_COLOR"); (noColor != nullptr) && (noColor[0] != '\0')) {
+        return false;
+    }
+    // Piped or redirected output stays plain so logs and captures never
+    // contain escape sequences.
+#if defined(_WIN32)
+    return _isatty(_fileno(stream)) != 0;
+#else
+    return ::isatty(::fileno(stream)) != 0;
+#endif
+}
 
 }
 
@@ -44,7 +85,7 @@ auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
     return logFile;
 }
 
-void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message) {
+void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message) {
     if (s_LogLevel.load(std::memory_order::acquire) == LogLevel::Quiet) {
         return;
     }
@@ -74,12 +115,24 @@ void InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::str
         outStream = stderr;
     }
 
-    std::println(outStream, "[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
+    const auto level = static_cast<LogSeverity>(severity);
+    if (level == LogSeverity::Info) {
+        std::println(outStream, "[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
+        return;
+    }
+    // The log file keeps the tag but never ANSI escapes, whatever the TTY.
+    if ((channel == static_cast<uint8_t>(LogChannel::File)) || !ShouldColorize(outStream)) {
+        std::println(outStream, "[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(level), message);
+        return;
+    }
+    std::println(
+        outStream, "[{}:{}] [Fiber:{}] [{}{}{}] {}", file_name, line, fiberTag, SeverityColor(level), SeverityTag(level), Color::Reset, message
+    );
 }
 
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
     s_LogLevel.store(LogLevel::Verbose, std::memory_order::release);
-    InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), file, line, message);
+    InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), static_cast<uint8_t>(LogSeverity::Error), file, line, message);
     std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());
     std::abort();
 }

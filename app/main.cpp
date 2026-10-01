@@ -115,7 +115,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // InitializeDefaultScene, is what decides which bake the boot atlas uses.
     auto fontID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
@@ -529,8 +529,20 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             const bool  isMouseDown  = state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
 
             if (isMouseDown && !wasMouseDown) {
-                auto hit                           = CastPickingRay(engine, cam, sceneViewport);
-                s_NativeEditorState.selectedEntity = hit.hasHit ? hit.handle : ZHLN::Entity::Null();
+                const auto hit = CastPickingRay(engine, cam, sceneViewport);
+                // Physics returns a body handle, not an ECS entity. Resolve it
+                // through the components only when the editor needs a selection;
+                // unowned bodies and removed components are not selectable.
+                s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
+                if (hit.hasHit) {
+                    for (ZHLN::Entity entity: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+                        const auto* physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
+                        if (physics != nullptr && physics->physicsHandle == hit.handle) {
+                            s_NativeEditorState.selectedEntity = entity;
+                            break;
+                        }
+                    }
+                }
                 // TEMP-DIAG (camera jump investigation): what the click saw.
                 ZHLN::Log(
                     "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}",
@@ -642,7 +654,7 @@ auto main(int argc, char* argv[]) -> int {
 #else
                 ZHLN::Platform::Init();
                 ZHLN::SetupSignalHandler(crashState);
-                ZHLN::TaskSystem::Init();
+                ZHLN::TaskSystem::Scope taskScope;
                 uint32_t w = options.fullscreen ? 0 : 1280;
                 uint32_t h = options.fullscreen ? 0 : 720;
 
@@ -662,7 +674,6 @@ auto main(int argc, char* argv[]) -> int {
 
                 auto engine_res = ZHLN::Engine::Create(config);
                 if (!engine_res) {
-                    ZHLN::TaskSystem::Shutdown();
                     return std::unexpected(engine_res.error());
                 }
 
@@ -681,8 +692,6 @@ auto main(int argc, char* argv[]) -> int {
                 engine->InitializeDefaultScene();
 
                 RunWorldEditor(*engine, options);
-
-                ZHLN::TaskSystem::Shutdown();
                 return {};
 #endif
             }

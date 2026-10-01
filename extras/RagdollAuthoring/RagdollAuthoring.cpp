@@ -75,7 +75,7 @@ auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsCon
     // prefab the skeletons live in.
     const auto* animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
     if (animComp == nullptr || animComp->prefab == nullptr) {
-        ZHLN::Log("[RagdollAuthoring] WARNING: BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefab on entity {}.", rootEntity.index);
+        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefab on entity {}.", rootEntity.index);
         return false;
     }
 
@@ -98,7 +98,7 @@ auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsCon
     }
 
     if (targetSkeleton == nullptr) {
-        ZHLN::Log("[RagdollAuthoring] WARNING: BuildHumanoidBipedRagdoll found no skinned child of entity {}.", rootEntity.index);
+        ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no skinned child of entity {}.", rootEntity.index);
         return false;
     }
 

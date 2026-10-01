@@ -1,14 +1,17 @@
 module;
 
+#if defined(_WIN32)
+// Match the Windows-first intrinsic declarations used by header consumers.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <emmintrin.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
 #endif
 
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -116,6 +119,9 @@ module;
 #include <Jolt/Skeleton/SkeletonPose.h>
 // clang-format on
 
+// Preserve the existing umbrella-module export without exposing this engine
+// graph entry through the audio library's public headers.
+#include <AudioSystem.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
@@ -247,7 +253,12 @@ using ZHLN::GetLogLevel;
 using ZHLN::HashMap;
 using ZHLN::InternalWriteLog;
 using ZHLN::Log;
+using ZHLN::LogDebug;
+using ZHLN::LogError;
+using ZHLN::LogInfo;
 using ZHLN::LogLevel;
+using ZHLN::LogSeverity;
+using ZHLN::LogWarning;
 using ZHLN::ObjectPool;
 using ZHLN::Panic;
 using ZHLN::Print;
@@ -264,6 +275,7 @@ using ZHLN::FS::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
+using ZHLN::Reflect::CallableInspector;
 using ZHLN::Reflect::CustomFormatter;
 using ZHLN::Reflect::EnumToString;
 using ZHLN::Reflect::FieldCount;
@@ -328,8 +340,9 @@ using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
 using ZHLN::UIBatch;
-using ZHLN::VertexAttributes;
 using ZHLN::VertexPosition;
+using ZHLN::VertexTangentFrame;
+using ZHLN::VertexSurface;
 using ZHLN::VertexSkin;
 
 namespace Math {
@@ -372,18 +385,28 @@ using ZHLN::BufferSync;
 using ZHLN::BufferView;
 using ZHLN::Components;
 using ZHLN::Entity;
+using ZHLN::FrameAlpha;
+using ZHLN::FrameDt;
+using ZHLN::FrameIndex;
 using ZHLN::RagdollState;
+using ZHLN::VisibleEntities;
+using ZHLN::VisibleShadowEntities;
 
 namespace ECS {
 using ZHLN::ECS::Access;
 using ZHLN::ECS::ComponentAccess;
 using ZHLN::ECS::ComponentFamily;
 using ZHLN::ECS::EntityCommandBuffer;
+using ZHLN::ECS::OptionRes;
+using ZHLN::ECS::Query;
 using ZHLN::ECS::Read;
 using ZHLN::ECS::Registry;
+using ZHLN::ECS::Res;
+using ZHLN::ECS::ResMut;
 using ZHLN::ECS::SparseSet;
 using ZHLN::ECS::SystemGraph;
 using ZHLN::ECS::SystemInfo;
+using ZHLN::ECS::SystemSignature;
 using ZHLN::ECS::Write;
 }
 
@@ -444,6 +467,7 @@ using ZHLN::AudioWaveformType;
 using ZHLN::ScriptRunner;
 
 using ZHLN::Clock;
+using ZHLN::CommandHandler;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;

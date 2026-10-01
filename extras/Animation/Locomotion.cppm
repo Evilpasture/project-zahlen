@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -247,18 +252,14 @@ auto SpawnCharacter(
         .shape            = Physics::CreateDualShape(config),
         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
     };
-    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), characterParams);
-    const JPH::Mat44 world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
-    const Entity     player   = reg.Create(
+    const Physics::BodyHandle charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), characterParams);
+    const JPH::Mat44          world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
+    const Entity              player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
         Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
         Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
     );
-    // This construction flow must allocate the virtual character before the
-    // entity exists, so bind its durable ECS owner immediately afterwards.
-    pc.SetBodyOwner(charPhys, player);
-
     // Configure third-person follow camera and strip FreeCam. The rig
     // component lives in extras/Camera: this is gameplay camera policy the
     // spawner authors explicitly (a host that wants no follow camera removes
@@ -312,7 +313,8 @@ auto
     // 1. Draw Upper Bumper Oval (Green)
     DrawWireframeEllipsoid(rc, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
 
-    // 2. Draw Lower Lifter Sphere (White) - Touching ground at Y=0.0m
+    // 2. Draw Lower Lifter Sphere (White). Its bottom is the character
+    // origin, which rests on the supporting surface after settling.
     DrawWireframeSphere(rc, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector

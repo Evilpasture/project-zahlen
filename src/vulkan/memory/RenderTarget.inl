@@ -8,29 +8,22 @@ namespace ZHLN::Vk {
 
 template <VkFormat F>
 inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
-    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent), viewInfo(other.viewInfo) {
+    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent) {
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderTarget& {
     if (this != &other) {
-        image    = std::move(other.image);
-        view     = std::move(other.view);
-        extent   = other.extent;
-        viewInfo = other.viewInfo;
+        view   = std::move(other.view);
+        image  = std::move(other.image);
+        extent = other.extent;
     }
     return *this;
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED> {
-    return {
-        .handle = image.Handle(),
-        .view   = view.Get(),
-        .extent = {.width = extent.width, .height = extent.height, .depth = 1}, // Explicit 2D -> 3D conversion
-        .aspect = GetFormatAspect(F),
-        .format = F
-    };
+    return AsSlice().template Assume<VK_IMAGE_LAYOUT_UNDEFINED>();
 }
 
 template <VkFormat F>
@@ -64,16 +57,17 @@ inline auto
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
+    ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    rt.viewInfo = desc.arrayLayers > 1
+    const auto viewDesc = desc.arrayLayers > 1
         ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
         : MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
-    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
+    auto view_res = ImageView::Create(ctx.Device(), viewDesc);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
     rt.view = std::move(*view_res);
-    return rt;
+    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 
 template <VkFormat F>
@@ -114,61 +108,36 @@ inline auto
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
+    ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    rt.viewInfo = MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1);
-    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
+    auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
     rt.view = std::move(*view_res);
-    return rt;
+    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 
 // Transition Helpers
 
 namespace TemplatedDetail {
 
-// Uniformly unpacks RenderTarget<F> or TypedImage<Layout> configurations
 template <typename T>
 struct ResourceTraits;
 
-template <VkImageLayout Layout>
-struct ResourceTraits<TypedImage<Layout>> {
+template <VkImageLayout Layout, VkFormat Format>
+struct ResourceTraits<TypedImage<Layout, Format>> {
     static constexpr VkImageLayout old_layout = Layout;
-    static constexpr auto          GetImage(const TypedImage<Layout>& res) noexcept {
-        return res.handle;
-    }
-    static constexpr auto GetView(const TypedImage<Layout>& res) noexcept {
-        return res.view;
-    }
-    static constexpr auto GetExtent(const TypedImage<Layout>& res) noexcept {
-        return res.extent;
-    }
-    static constexpr auto GetAspect(const TypedImage<Layout>& res) noexcept {
-        return res.aspect;
-    }
-    static constexpr auto GetFormat(const TypedImage<Layout>& res) noexcept {
-        return res.format;
+    static constexpr auto GetSlice(const TypedImage<Layout, Format>& res) noexcept -> const ImageSlice& {
+        return res.Raw();
     }
 };
 
 template <VkFormat F>
 struct ResourceTraits<RenderTarget<F>> {
     static constexpr VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    static constexpr auto          GetImage(const RenderTarget<F>& res) noexcept {
-        return res.image.Handle();
-    }
-    static constexpr auto GetView(const RenderTarget<F>& res) noexcept {
-        return res.view.Get();
-    }
-    static constexpr auto GetExtent(const RenderTarget<F>& res) noexcept {
-        return res.extent;
-    }
-    static constexpr auto GetAspect(const RenderTarget<F>& /*res*/) noexcept {
-        return GetFormatAspect(F);
-    }
-    static constexpr auto GetFormat(const RenderTarget<F>& /*unused*/) noexcept {
-        return F;
+    static auto GetSlice(const RenderTarget<F>& res) noexcept -> ImageSlice {
+        return res.AsSlice();
     }
 };
 
@@ -194,8 +163,9 @@ template <VkImageLayout TargetLayout, typename... Resources>
         auto populate_barrier = [&](const auto& res) {
             using Traits                       = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
+            const ImageSlice&                   slice = Traits::GetSlice(res);
             barriers[idx++]                    = MakeImageBarrier(
-                MakeLayoutBarrierDesc<old_layout, TargetLayout>(Traits::GetImage(res), Traits::GetAspect(res))
+                MakeLayoutBarrierDesc<old_layout, TargetLayout>(slice.image, slice.aspect)
             );
         };
 
@@ -205,13 +175,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
 
         auto make_typed = [&](const auto& res) {
             using Traits = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
-            return TypedImage<TargetLayout> {
-                .handle = Traits::GetImage(res),
-                .view   = Traits::GetView(res),
-                .extent = Traits::GetExtent(res),
-                .aspect = Traits::GetAspect(res),
-                .format = Traits::GetFormat(res)
-            };
+            return TypedImage<TargetLayout> {Traits::GetSlice(res)};
         };
 
         return std::make_tuple(make_typed(resources)...);

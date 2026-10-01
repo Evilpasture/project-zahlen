@@ -9,12 +9,34 @@
 
 namespace ZHLN {
 
+void PipelineRegistry::Retire(NativeMaterial& material) noexcept {
+    if (material.pipeline != VK_NULL_HANDLE) {
+        _deletionQueue.EnqueuePipeline(_ctx.Device(), std::exchange(material.pipeline, VK_NULL_HANDLE));
+    }
+    if (material.meshPipeline != VK_NULL_HANDLE) {
+        _deletionQueue.EnqueuePipeline(_ctx.Device(), std::exchange(material.meshPipeline, VK_NULL_HANDLE));
+    }
+}
+
+void PipelineRegistry::Destroy(PipelineHandle handle) {
+    if (NativeMaterial* material = _materials.Resolve(handle)) {
+        Retire(*material);
+        _materials.Destroy(handle);
+    }
+}
+
+void PipelineRegistry::RetireAll() noexcept {
+    _materials.ForEachLive([this](NativeMaterial& material) { Retire(material); });
+    _materials.Clear();
+}
+
 auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept -> Vk::Pipeline {
     if (!_ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};
     }
 
-    auto shaders = Vk::ShaderStages::CreateMesh(_ctx.Device(), desc.taskShader, desc.meshShader, desc.fragShader);
+    // PipelineDesc remains alive until the synchronous pipeline build returns.
+    auto shaders = Vk::ShaderStagesView::CreateMesh(desc.taskShader, desc.meshShader, desc.fragShader);
     if (!shaders) {
         ZHLN::Log("[PipelineRegistry] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
         return {};
@@ -57,7 +79,7 @@ auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept
 }
 
 auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    return Vk::ShaderStages::Create(_ctx.Device(), desc.vertexShader, desc.fragShader)
+    return Vk::ShaderStagesView::Create(desc.vertexShader, desc.fragShader)
         .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
         .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
             _diagnostics.RegisterShader(desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex");
@@ -94,12 +116,24 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
 
             return pipeline.Build(_ctx.Device())
                 .transform_error([](auto) -> ErrorCode { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([this, &desc](auto&& compiledPipeline) -> auto {
+                .and_then([this, &desc](Vk::Pipeline compiledPipeline) -> std::expected<Material, ErrorCode> {
+                    // Builders retain synchronous RAII until a pool slot exists.
+                    // An exhausted pool leaves both new pipelines to be destroyed
+                    // here, before they can ever be referenced by GPU work.
                     Vk::Pipeline meshPipeline = BuildMeshVariant(desc);
+                    const PipelineHandle handle = _materials.Create();
+                    if (handle == PipelineHandle::Invalid) {
+                        return std::unexpected(MaterialCreationError::MaterialSlotsExhausted);
+                    }
 
+                    NativeMaterial* material = _materials.Resolve(handle);
+                    material->pipeline = compiledPipeline.Release();
+                    material->layout = _layout;
+                    material->meshPipeline = meshPipeline.Release();
                     return Material {
-                        .pipeline  = _materials.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), _layout, std::move(meshPipeline)),
-                        .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
+                        .pipeline    = handle,
+                        .alphaMode   = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u,
+                        .doubleSided = desc.doubleSided
                     };
                 });
         });

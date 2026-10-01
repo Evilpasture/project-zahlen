@@ -264,32 +264,43 @@ struct AsAddressWrite {
 
 namespace TemplatedDetail {
 
+// Return a value, never forward a borrowed pointer into a heap write.
+// A raw slice without view metadata cannot describe its shape: guessing a 2D
+// single-mip view here would be invalid for cube, array and 3D images.
 template <typename T>
-const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateInfo& scratch) noexcept {
+[[nodiscard]] constexpr auto BorrowedSliceOf(const T& img) noexcept -> const ImageSlice& {
     if constexpr (IsTypedImage<T>::value) {
-        if (img.viewInfo != nullptr) {
-            return img.viewInfo;
-        }
-        scratch = MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
-        return &scratch;
-    } else if constexpr (std::is_same_v<T, ImageWrite>) {
-        if (img.viewInfo != nullptr) {
-            return img.viewInfo;
-        }
-        return nullptr;
+        return img.Raw();
+    } else {
+        return img;
     }
-    return nullptr;
+}
+
+template <typename T>
+[[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
+        const ImageSlice& slice = BorrowedSliceOf(img);
+        return slice.info != nullptr ? *slice.info : VkImageViewCreateInfo {};
+    } else if constexpr (std::is_same_v<T, ImageWrite>) {
+        return img.info;
+    } else if constexpr (std::is_same_v<T, ImageView>) {
+        return img.Info();
+    } else if constexpr (requires(const T& resource) { resource.view.Info(); }) {
+        return img.view.Info();
+    }
 }
 
 enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
 
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
-    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite>) {
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
+                  std::is_same_v<T, ImageView> ||
+                  requires(const T& image) { image.view.Info(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
-    } else if constexpr (std::is_same_v<T, BufferWrite> || std::is_same_v<T, VkBuffer> || requires(const T& b) {
+    } else if constexpr (std::is_same_v<T, BufferSlice> || std::is_same_v<T, VkBuffer> || requires(const T& b) {
                              b.Handle();
                              b.Size();
                          }) {
@@ -339,32 +350,35 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
-            VkImageViewCreateInfo        scratch {};
-            const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
-            if (info == nullptr || info->image == VK_NULL_HANDLE) {
+            if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
+                const ImageSlice& slice = BorrowedSliceOf(arg);
+                // A live slice needs its owner's exact create info. Reject
+                // missing or mismatched metadata rather than invent a 2D view;
+                // callers still must not retain slices across owner replacement.
+                if (slice.info == nullptr) {
+                    if (slice.image != VK_NULL_HANDLE) {
+                        return false;
+                    }
+                } else if (slice.info->image != slice.image || slice.info->format != slice.format) {
+                    return false;
+                }
+            }
+            const VkImageViewCreateInfo info = ViewInfoOf(arg);
+            if (info.image == VK_NULL_HANDLE) {
                 return true;
             }
-            const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            if constexpr (IsTypedImage<T>::value) {
-                constexpr VkImageLayout typedLayout = (T::layout == VK_IMAGE_LAYOUT_UNDEFINED) ? layout : T::layout;
-                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
-                } else {
-                    heap.WriteImage(TextureHandle {slot}, *info, typedLayout);
-                }
+            if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                heap.WriteStorageImage(StorageImageHandle {slot}, info, VK_IMAGE_LAYOUT_GENERAL);
             } else {
-                VkImageLayout argLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                if constexpr (requires { arg.layout; }) {
-                    argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
-                } else if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    argLayout = VK_IMAGE_LAYOUT_GENERAL;
+                VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                if constexpr (IsTypedImage<T>::value) {
+                    if constexpr (T::layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                        layout = T::layout;
+                    }
+                } else if constexpr (std::is_same_v<T, ImageWrite>) {
+                    layout = arg.layout;
                 }
-                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
-                } else {
-                    heap.WriteImage(TextureHandle {slot}, *info, argLayout);
-                }
+                heap.WriteImage(TextureHandle {slot}, info, layout);
             }
             return true;
         }
@@ -374,28 +388,29 @@ template <typename Arg>
         if constexpr (source != WriteSource::Buffer) {
             return false;
         } else {
-            VkBuffer     buffer = VK_NULL_HANDLE;
-            VkDeviceSize size   = 0;
-            if constexpr (std::is_same_v<T, BufferWrite>) {
-                buffer = arg.buffer;
-                size   = arg.size;
+            BufferSlice slice;
+            if constexpr (std::is_same_v<T, BufferSlice>) {
+                slice = arg;
             } else if constexpr (requires {
                                      arg.Handle();
                                      arg.Size();
                                  }) {
-                buffer = arg.Handle();
-                size   = static_cast<VkDeviceSize>(arg.Size());
+                slice = BufferSlice {arg};
             } else if constexpr (std::is_same_v<T, VkBuffer>) {
-                buffer = arg;
+                slice.buffer = arg;
             }
-            if (buffer == VK_NULL_HANDLE || size == 0) {
+            if (!slice.Valid() || slice.Size() == 0) {
                 return true;
             }
-            const VkDeviceAddress address = ctx.BufferAddress(buffer);
+            // Resolve a base address only when the slice did not carry one;
+            // Address() adds its relative offset exactly once.
+            if (slice.address == 0) {
+                slice.address = ctx.BufferAddress(slice.buffer);
+            }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                heap.WriteBuffer(UniformBufferHandle {slot}, address, size);
+                heap.WriteBuffer(UniformBufferHandle {slot}, slice);
             } else {
-                heap.WriteBuffer(StorageBufferHandle {slot}, address, size);
+                heap.WriteBuffer(StorageBufferHandle {slot}, slice);
             }
             return true;
         }
@@ -443,7 +458,7 @@ template <typename Declared, typename... Slots>
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
     const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
-                                       _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) :
+                                       _staticResourceCount + (kFramesInFlight * _frameTransientResourceCount) :
                                        _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
     const uint32_t blockBase = block.value_or(partitionBase);
 
@@ -462,7 +477,7 @@ template <typename Declared, typename... Slots>
         const auto& binding = b.resources[*ordinal];
         if (!TemplatedDetail::WriteHeapBinding(*this, ctx, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
-                false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); the value is of the wrong kind", SlotT::name,
+                false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); wrong kind or missing/mismatched image view metadata", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
             );
         }

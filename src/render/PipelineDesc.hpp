@@ -26,6 +26,8 @@ using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>,
+    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,
+    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>
     >;
 

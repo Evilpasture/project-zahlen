@@ -8,6 +8,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Defer.hpp>
+
 namespace ZHLN::Vk {
 
 
@@ -56,6 +58,7 @@ class TextureUploader {
                           .Texture2D(desc.width, desc.height, desc.format, usage, mips)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(byteSize);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
@@ -69,14 +72,14 @@ class TextureUploader {
             const VkBufferImageCopy2 region = {
                 .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
                 .pNext             = nullptr,
-                .bufferOffset      = stagingAlloc.offset,
+                .bufferOffset      = stagingAlloc.slice.offset,
                 .bufferRowLength   = 0,
                 .bufferImageHeight = 0,
                 .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, 1},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
 
             if (desc.generateMips && mips > 1) {
                 GenerateMipmaps(cmd, imgRes->Handle(), desc.width, desc.height);
@@ -87,8 +90,7 @@ class TextureUploader {
             }
         });
 
-        auto viewInfo = MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -97,12 +99,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.width, desc.height, 1},
-            .format    = desc.format,
-            .mipLevels = mips,
-            .isCube    = false
+            .view   = std::move(*viewRes),
+            .extent = {desc.width, desc.height, 1}
         };
     }
 
@@ -116,6 +114,7 @@ class TextureUploader {
                           .Usage(ImageUsage::Sampled | ImageUsage::TransferDst)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(byteSize);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
@@ -128,21 +127,20 @@ class TextureUploader {
             const VkBufferImageCopy2 region = {
                 .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
                 .pNext             = nullptr,
-                .bufferOffset      = stagingAlloc.offset,
+                .bufferOffset      = stagingAlloc.slice.offset,
                 .bufferRowLength   = 0,
                 .bufferImageHeight = 0,
                 .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, desc.depth},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
         });
 
-        auto viewInfo = MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -151,12 +149,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.width, desc.height, desc.depth},
-            .format    = desc.format,
-            .mipLevels = 1,
-            .isCube    = false
+            .view   = std::move(*viewRes),
+            .extent = {desc.width, desc.height, desc.depth}
         };
     }
 
@@ -168,6 +162,7 @@ class TextureUploader {
                           .TextureCube(desc.size, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
                           .Build(_allocator.Get());
         if (!imgRes) return std::unexpected(imgRes.error());
+        ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
         auto stagingAlloc = _staging.Allocate(totalBytes);
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
@@ -180,15 +175,14 @@ class TextureUploader {
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
-            auto regions = CreateCopyRegions<6>(stagingAlloc.offset, faceBytes, {.width = desc.size, .height = desc.size, .depth = 1});
-            CopyBufferToImage<6>(cmd, stagingAlloc.buffer, imgRes->Handle(), regions);
+            auto regions = CreateCopyRegions<6>(stagingAlloc.slice.offset, faceBytes, {.width = desc.size, .height = desc.size, .depth = 1});
+            CopyBufferToImage<6>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), regions);
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
         });
 
-        auto viewInfo = MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1);
-        auto viewRes  = CreateView(_ctx.Device(), viewInfo);
+        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1));
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -197,12 +191,8 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view      = std::move(*viewRes),
-            .viewInfo  = viewInfo,
-            .extent    = {desc.size, desc.size, 1},
-            .format    = desc.format,
-            .mipLevels = 1,
-            .isCube    = true
+            .view   = std::move(*viewRes),
+            .extent = {desc.size, desc.size, 1}
         };
     }
 

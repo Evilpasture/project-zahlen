@@ -116,7 +116,8 @@ struct RayTracedShadowsTestSuite {
                         return false;
                     }
 
-                    reg.Destroy(occluder);
+                    ZHLN::DespawnEntity(eng, occluder);
+                    eng.ProcessPendingDestroy();
                     ZHLN::Test::ExpectFalse(reg.IsAlive(occluder));
 
                     TickFrames(eng, 2);

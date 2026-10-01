@@ -22,12 +22,12 @@ auto GetAccelerationStructureAddress(const VkDevice device, VkAccelerationStruct
     return ZHLN_GetASAddress(device, as);
 }
 
-void BuildBLAS(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc, VkAccelerationStructureKHR dst, VkDeviceAddress scratch, uint32_t primCount) noexcept {
-    ZHLN_CmdBuildBlas(cmd, &desc, dst, scratch, primCount);
+void BuildBLAS(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc, VkAccelerationStructureKHR dst, BufferSlice scratch, uint32_t primCount) noexcept {
+    ZHLN_CmdBuildBlas(cmd, &desc, dst, scratch.Address(), primCount);
 }
 
-void BuildTLAS(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc, VkAccelerationStructureKHR dst, VkDeviceAddress scratch, uint32_t instanceCount) noexcept {
-    ZHLN_CmdBuildTlas(cmd, &desc, dst, scratch, instanceCount);
+void BuildTLAS(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc, VkAccelerationStructureKHR dst, BufferSlice scratch, uint32_t instanceCount) noexcept {
+    ZHLN_CmdBuildTlas(cmd, &desc, dst, scratch.Address(), instanceCount);
 }
 
 }

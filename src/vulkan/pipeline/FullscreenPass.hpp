@@ -22,7 +22,7 @@ struct FullscreenPass {
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice                        device,
         HeapManager&                    heap,
-        const ShaderStages&             shaders,
+        ShaderStagesView             shaders,
         std::initializer_list<VkFormat> colorFormats,
         uint32_t                        indexPushOffset,
         HeapLifecycle                   lifecycle,
@@ -33,7 +33,7 @@ struct FullscreenPass {
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
         VkDevice                              device,
         HeapManager&                          heap,
-        const ShaderStages&                   shaders,
+        ShaderStagesView                   shaders,
         std::initializer_list<VkFormat>       colorFormats,
         std::span<const VkSpecializationInfo> specInfos,
         uint32_t                              indexPushOffset,

@@ -12,15 +12,19 @@
 
 namespace ZHLN::Vk {
 
+// Descriptor writes own the view description: ResourceWriteBatch copies it
+// into its transient arena, so no caller-owned pointer survives the write.
 struct ImageWrite {
-    VkImageView   view   = VK_NULL_HANDLE;
+    VkImageViewCreateInfo info {};
     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    const VkImageViewCreateInfo* viewInfo = nullptr;
-};
 
-struct BufferWrite {
-    VkBuffer     buffer = VK_NULL_HANDLE;
-    VkDeviceSize size   = 0;
+    ImageWrite() = default;
+    explicit ImageWrite(const ImageView& view, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+        info(view.Info()), layout(imageLayout) {
+    }
+    explicit ImageWrite(const VkImageViewCreateInfo& createInfo, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+        info(createInfo), layout(imageLayout) {
+    }
 };
 
 struct HeapBlockBase {
@@ -43,13 +47,17 @@ namespace TemplatedDetail {
 template <ZHLN::StringLiteral Name, bool Unread, typename T>
 [[nodiscard]] constexpr auto MakeNamedSlot(T&& value) noexcept {
     using U = std::remove_cvref_t<T>;
-    if constexpr (requires(const U& b) {
-                      b.Handle();
-                      b.Size();
-                  }) {
-        return NamedSlot<Name, BufferWrite, Unread> {
-            .value = {.buffer = value.Handle(), .size = static_cast<VkDeviceSize>(value.Size())}
-        };
+    if constexpr (std::is_same_v<U, ImageView>) {
+        // Slot stores a value, not a reference: copying the view metadata here
+        // leaves the owning ImageView (and its VkImageView handle) in place.
+        return NamedSlot<Name, ImageWrite, Unread> {.value = ImageWrite {value}};
+    } else if constexpr (requires(const U& image) { image.view.Info(); }) {
+        return NamedSlot<Name, ImageWrite, Unread> {.value = ImageWrite {value.view}};
+    } else if constexpr (requires(const U& b) {
+                             b.Handle();
+                             b.Size();
+                         }) {
+        return NamedSlot<Name, BufferSlice, Unread> {.value = BufferSlice {value}};
     } else {
         return NamedSlot<Name, U, Unread> {.value = std::forward<T>(value)};
     }
@@ -88,7 +96,7 @@ template <ZHLN::StringLiteral Name>
 
 template <typename T>
 struct IsTypedImage: std::false_type {};
-template <VkImageLayout L>
-struct IsTypedImage<TypedImage<L>>: std::true_type {};
+template <VkImageLayout L, VkFormat F>
+struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
 
 }

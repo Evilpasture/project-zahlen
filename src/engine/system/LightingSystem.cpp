@@ -12,52 +12,65 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 namespace ZHLN {
 
-std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
-    JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
-    float     sunIntensity = 180.0f;
-    bool      sunFound     = false;
+auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
+    SunLight sun {
+        .direction = JPH::Vec3(0.5f, 1.0f, 0.2f),
+        .color = JPH::Vec3::sReplicate(1.0f),
+        .intensity = 180.0f,
+        .fromEnvironment = false,
+    };
+    bool found = false;
 
     for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
         reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            if (light.type == LightType::Sun) {
-                if (light.direction.LengthSq() > 1e-4f) {
-                    sunDirection = light.direction;
-                } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                               sunDirection = worldTrans.world.GetColumn3(2);
-                           })) {
-                    reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
-                }
-                sunIntensity = light.intensity;
-                sunFound     = true;
+            if (light.type != LightType::Sun) return;
+            if (light.direction.LengthSq() > 1e-4f) {
+                sun.direction = light.direction;
+            } else if (!reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                           sun.direction = worldTrans.world.GetColumn3(2);
+                       })) {
+                reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
+            sun.intensity = light.intensity;
+            // Preserve the white legacy default for tag-only sun entities.
+            sun.color = light.color.LengthSq() > 1e-8f ? light.color : JPH::Vec3::sReplicate(1.0f);
+            sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e) != nullptr;
+            found = true;
         });
-
-        if (sunFound) {
-            break;
-        }
+        if (found) break;
     }
 
-    if (!sunFound) {
-        auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
+    if (!found) {
+        const auto sunEntities = reg.GetEntitiesWith<Components::SunTagComponent>();
         if (!sunEntities.empty()) {
-            Entity sunEnt = sunEntities[0];
-            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sunDirection = worldTrans.world.GetColumn3(2); })) {
-                reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sunDirection = trans.GetLocalMatrix().GetColumn3(2); });
+            const Entity sunEnt = sunEntities[0];
+            if (!reg.Patch<Components::WorldTransformComponent>(sunEnt, [&](const auto& worldTrans) { sun.direction = worldTrans.world.GetColumn3(2); })) {
+                reg.Patch<Components::TransformComponent>(sunEnt, [&](const auto& trans) { sun.direction = trans.GetLocalMatrix().GetColumn3(2); });
             }
-
-            reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) { sunIntensity = light.intensity; });
+            reg.Patch<Components::LightComponent>(sunEnt, [&](const auto& light) {
+                sun.intensity = light.intensity;
+                if (light.color.LengthSq() > 1e-8f) sun.color = light.color;
+            });
         }
     }
 
-    return {sunDirection.Normalized(), sunIntensity};
+    sun.direction = sun.direction.LengthSq() > 1e-8f ? sun.direction.Normalized() : JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+    return sun;
 }
 
-void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
-    auto& reg = ctx.registry;
-    auto& rc  = *ctx.render;
+std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery reg) noexcept {
+    const SunLight sun = GetSun(reg);
+    return {sun.direction, sun.intensity};
+}
+
+void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
+                                       const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
+                            ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
+    auto& rc = *render;
 
     struct LightImportance {
         Entity entity;
@@ -65,20 +78,20 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
     };
     ZHLN::Array<LightImportance> lightPriorities;
 
-    const JPH::Vec3 viewPos = ctx.camera->position;
+    const JPH::Vec3 viewPos = camera->position;
 
-    for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-        reg.Patch<Components::LightComponent>(e, [&](auto& light) {
+    for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
+        query.Patch<Components::LightComponent>(e, [&](auto& light) {
             light.shadowLayer = -1;
 
             if (light.type == LightType::Point || light.type == LightType::Spot) {
                 JPH::Vec3 lightPos    = JPH::Vec3::sZero();
-                bool      hasLightPos = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                     lightPos = worldTrans.world.GetTranslation();
                 });
 
                 if (!hasLightPos) {
-                    hasLightPos = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
+                    hasLightPos = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
                 }
 
                 if (hasLightPos) {
@@ -91,12 +104,12 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
     std::ranges::sort(lightPriorities, [](const LightImportance& a, const LightImportance& b) { return a.score > b.score; });
 
-    auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
+    auto shadowEntities = query.GetEntitiesWith<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
-        reg.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
+        query.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
             uint32_t shadowCasters = std::min(static_cast<uint32_t>(shadowSettings.maxPunctualShadows), static_cast<uint32_t>(lightPriorities.size()));
             for (uint32_t i = 0; i < shadowCasters; ++i) {
-                reg.Patch<Components::LightComponent>(lightPriorities[i].entity, [&](auto& light) {
+                query.Patch<Components::LightComponent>(lightPriorities[i].entity, [&](auto& light) {
                     light.shadowLayer = static_cast<int32_t>(i);
                 });
             }
@@ -104,12 +117,12 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
     }
 
     ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = ctx.camera->GetViewMatrix();
-    auto               lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
+    JPH::Mat44         viewMatrix    = camera->GetViewMatrix();
+    auto               lightEntities = query.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
-        reg.Patch<Components::LightComponent>(e, [&](const auto& light) {
+        query.Patch<Components::LightComponent>(e, [&](const auto& light) {
             Light packed {};
             packed.type        = light.type;
             packed.intensity   = light.intensity;
@@ -122,13 +135,13 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
-            bool       hasTransform = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+            bool       hasTransform = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                 pos      = worldTrans.world.GetTranslation();
                 worldMat = worldTrans.world;
             });
 
             if (!hasTransform) {
-                hasTransform = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
+                hasTransform = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
                     pos      = trans.position;
                     worldMat = trans.GetLocalMatrix();
                 });
@@ -163,7 +176,7 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
         });
     }
 
-    rc.SetLights(sceneLights.data(), sceneLights.size());
+    rc.SetLights(std::span {sceneLights});
 }
 
 }

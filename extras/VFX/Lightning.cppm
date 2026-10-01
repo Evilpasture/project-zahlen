@@ -3,6 +3,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // --- Global Module Fragment: Preprocessor Directives Only ---
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -44,7 +49,8 @@ export struct LightningComponent {
     JPH::Vec3 groundTarget = JPH::Vec3::sZero();
 
     BufferHandle vboPos          = BufferHandle::Invalid;
-    BufferHandle vboAttr         = BufferHandle::Invalid;
+    BufferHandle vboFrame        = BufferHandle::Invalid;
+    BufferHandle vboSurface      = BufferHandle::Invalid;
     AssetID      meshAssetId     = InvalidAssetID;
     MaterialID   matAssetId      = InvalidMaterialID;
     uint32_t     maxVertices     = 0;
@@ -61,6 +67,10 @@ namespace Lightning {
 export auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, const LightningConfig& cfg = {}) -> Entity;
 
 export auto Update(Engine& engine, float dt) -> void;
+
+// Explicit replacement/removal of a resource-owning LightningComponent.
+export void Attach(Engine& engine, Entity entity, LightningComponent component);
+export void Detach(Engine& engine, Entity entity);
 
 } // namespace Lightning
 

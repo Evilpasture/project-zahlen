@@ -20,7 +20,7 @@ void TAAPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         const Vk::HeapBlockBase block = impl.taaPass.WriteHeapParameters<Shaders::Taa>(
             impl.ctx, impl.heapManager,
             Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor)),
-            Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(impl.frames.accumBuffers.Current())),
+            Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumPrevious>>(impl.accumulationHistory.Previous())),
             Vk::Slot<"texVelocity">(Vk::Assume<Vk::ShaderRead<Res_Velocity>>(impl.graphResources.velocityBuffer)),
             Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
         );

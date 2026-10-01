@@ -6,6 +6,7 @@
 #include "memory/Allocator.hpp"
 
 #include <Zahlen/Threading/Mutex.hpp>
+#include <utility>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -148,6 +149,7 @@ class DescriptorHeap {
     VkDeviceSize _reservedSize = 0;
     VkDeviceSize _nonCoherentAtomSize = 1;
 
+    VmaAllocator         _allocator = nullptr;
     Buffer               _buffer;
     Buffer::MappedRegion _mappedRegion;
     void*                _mappedPtr = nullptr;
@@ -168,15 +170,16 @@ class ResourceWriteBatch {
 
     void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void AddBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
-    void AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
+    void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
 
     void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
     [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
-    [[nodiscard]] auto SlotsData() const noexcept -> const uint32_t*;
+    // The slot ids live alongside their payloads, not in a parallel vector.
+    [[nodiscard]] auto SlotBounds() const noexcept -> std::pair<uint32_t, uint32_t>;
 
   private:
     struct Impl;
@@ -249,8 +252,7 @@ class HeapManager {
         uint32_t       staticResourceCount,
         uint32_t       staticSamplerCount,
         uint32_t       frameTransientResourceCount,
-        uint32_t       immediateTransientResourceCount,
-        uint32_t       doubleBufferCount = 2
+        uint32_t       immediateTransientResourceCount
     ) noexcept -> std::expected<void, ErrorCode>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
@@ -262,6 +264,7 @@ class HeapManager {
     }
 
     [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
 
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
@@ -286,9 +289,26 @@ class HeapManager {
     }
 
     void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        WriteImage(handle, view.Info(), layout);
+    }
+    template <typename Resource>
+        requires requires(const Resource& resource) { resource.view.Info(); }
+    void WriteImage(TextureHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
+        WriteImage(handle, resource.view, layout);
+    }
+
     void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
-    void WriteBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
+    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+        WriteStorageImage(handle, view.Info(), layout);
+    }
+    template <typename Resource>
+        requires requires(const Resource& resource) { resource.view.Info(); }
+    void WriteStorageImage(StorageImageHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
+        WriteStorageImage(handle, resource.view, layout);
+    }
+    void WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
+    void WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
@@ -338,7 +358,6 @@ class HeapManager {
     uint32_t _staticSamplerCount              = 0;
     uint32_t _frameTransientResourceCount     = 0;
     uint32_t _immediateTransientResourceCount = 0;
-    uint32_t _doubleBufferCount               = 2;
     uint32_t _currentFrameIndex               = 0;
 
     VkDeviceSize _maxPushDataSize = 0;

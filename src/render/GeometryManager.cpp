@@ -4,9 +4,7 @@
 
 #include "GeometryManager.hpp"
 
-#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Vertex.hpp>
-#include <array>
 #include <cstring>
 
 namespace ZHLN {
@@ -35,8 +33,10 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
                _allocator.Get(), size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
                sharingMode, {families, familyCount}
     )
-        .transform([this, size, data](auto&& gpu_buf) -> auto {
+        .and_then([this, size, data](Vk::Buffer gpu_buf) -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
+            defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
             auto stagingAlloc = _transferRing.Allocate(size);
+            if (stagingAlloc.mappedData == nullptr) return std::unexpected(Vk::StagingError::MemoryMappingFailed);
 
             if (data != nullptr) {
                 std::memcpy(stagingAlloc.mappedData, data, size);
@@ -45,16 +45,20 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
             }
 
             Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf);
             });
 
             VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
-            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
+            return std::make_pair(std::move(gpu_buf), address);
         });
 }
 
 auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
-    return _buffers.Create(std::move(buffer), vertexCount, address);
+    const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
+    if (handle == BufferHandle::Invalid) {
+        _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the rvalue.
+    }
+    return handle;
 }
 
 auto GeometryManager::CreateVertexBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle {
@@ -99,28 +103,18 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     }
 
     auto stagingAlloc = _transferRing.Allocate(size);
+    if (stagingAlloc.mappedData == nullptr) return;
     std::memcpy(stagingAlloc.mappedData, data, size);
 
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
+        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer);
     });
 }
 
-auto GeometryManager::GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle {
-    const auto* existing = _particleBuffers.Find(cacheKey);
-    if (existing != nullptr && existing->second != BufferHandle::Invalid) {
-        return existing->second;
-    }
-
-    BufferHandle handle = CreateStorageBuffer(byteSize, usage);
-    if (handle != BufferHandle::Invalid) {
-        _particleBuffers.Insert(cacheKey, {packedOwner, handle});
-    }
-    return handle;
-}
-
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-    const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexAttributes));
+    // Deform only positions and the tangent frame. UV/color data stays in
+    // the immutable VertexSurface buffer owned by the source mesh.
+    const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexTangentFrame));
 
     Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     if (_ctx.RayTracingSupported()) {
@@ -135,91 +129,23 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
         .value_or(BufferHandle::Invalid);
 }
 
-auto GeometryManager::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
-    const BufferHandle* existing = _skinnedScratch.Find(entityKey);
-    if (existing != nullptr && *existing != BufferHandle::Invalid) {
-        return *existing;
-    }
-
-    const BufferHandle handle = CreateSkinnedScratchBuffer(vertexCount);
-    if (handle != BufferHandle::Invalid) {
-        _skinnedScratch.Insert(entityKey, handle);
-    }
-    return handle;
-}
-
-void GeometryManager::ReleaseSkinnedScratchBuffers() {
-    _skinnedScratch.ForEach([this](uint64_t , BufferHandle handle) -> void { Destroy(handle); });
-    _skinnedScratch.Clear();
-}
-
-void GeometryManager::ReleaseMeshBuffers() {
-    _meshes.ForEach([this](AssetID, const Mesh& mesh) {
-        const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
-                                    mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
-        for (const BufferHandle handle: buffers) {
-            Destroy(handle);
-        }
-    });
-    _meshes.Clear();
-}
-
-void GeometryManager::ReleaseParticleBuffers() {
-    _particleBuffers.ForEach([this](uint64_t , const auto& tracked) -> void { Destroy(tracked.second); });
-    _particleBuffers.Clear();
-}
-
-void GeometryManager::ReleaseLedgers() {
-    for (auto* ledger: {&_emitters2D, &_emitters3D, &_entityBuffers}) {
-        for (const auto& tracked: *ledger) {
-            Destroy(tracked.second);
-        }
-        ledger->clear();
-    }
-}
-
-template <typename DeadFn>
-void GeometryManager::SweepLedgers(DeadFn&& isDead) {
-    using namespace ZHLN::Ranges;
-
-    auto sweep = [this, &isDead](auto& ledger) {
-        ledger | EraseIf([this, &isDead](const auto& tracked) {
-            if (isDead(tracked.first)) {
-                Destroy(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
-    sweep(_emitters2D);
-    sweep(_emitters3D);
-    sweep(_entityBuffers);
-
-    ZHLN::Array<uint64_t> deadKeys;
-    _particleBuffers.ForEach([&](uint64_t key, const auto& tracked) {
-        if (isDead(tracked.first)) {
-            Destroy(tracked.second);
-            deadKeys.push_back(key);
-        }
-    });
-    for (const uint64_t key: deadKeys) {
-        _particleBuffers.Erase(key);
-    }
-}
-
-void GeometryManager::ReleaseOwner(uint64_t packedOwner) {
-    SweepLedgers([packedOwner](uint64_t owner) noexcept { return owner == packedOwner; });
-}
-
-void GeometryManager::Reconcile(EntityAliveQuery alive) {
-    SweepLedgers([alive](uint64_t owner) { return !alive(Entity::Unpack(owner)); });
+void GeometryManager::Retire(NativeMesh& mesh) noexcept {
+    // The AS is a GPU object too. Retire it ahead of its backing allocation,
+    // then the mesh allocation, in the same frame-delayed batch.
+    _deletionQueue.EnqueueAccelerationStructure(_ctx.Device(), std::move(mesh.blas));
+    _deletionQueue.Enqueue(std::move(mesh.blasBuffer));
+    _deletionQueue.Enqueue(std::move(mesh.buffer));
 }
 
 void GeometryManager::Destroy(BufferHandle handle) {
-    if (handle != BufferHandle::Invalid) {
-        Vk::ScopedDeletionQueue guard(_deletionQueue);
+    if (auto* mesh = _buffers.Resolve(handle)) {
+        Retire(*mesh);
         _buffers.Destroy(handle);
     }
+}
+
+void GeometryManager::RetireAll() noexcept {
+    _buffers.ForEachLive([this](NativeMesh& mesh) { Retire(mesh); });
 }
 
 }

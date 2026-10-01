@@ -27,18 +27,20 @@ constexpr uint32_t kFirstPunctualSlot = 4;
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     using enum LightType;
 
-    FrameRecorder recorder(cmd, impl, impl.InheritsHeaps());
-    auto&         ctx = recorder.ctx;
+    PassContext    passCtx(cmd, impl, impl.InheritsHeaps());
+    auto&          ctx        = passCtx.ctx;
+    const uint32_t frameIndex = ctx.presenter.frameIndex;
 
-    recorder.EnsureHeapState(cmd);
+    passCtx.EnsureHeapState();
 
     std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
     for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
-    auto  mapped           = ctx.shadows.IndirectCommands().Map();
+    auto  mapped           = ctx.shadows.IndirectCommands(frameIndex).Map(ctx.allocator.Get());
     auto* indirectCmdsBase = static_cast<VkDrawIndirectCommand*>(mapped.data);
+    if (indirectCmdsBase == nullptr) return;
 
     std::array<uint32_t, kSlotCount> passWriteOffsets {};
     passWriteOffsets[0] = 0;
@@ -102,15 +104,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         }
     }
 
-    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.Draws().size());
-    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
-    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.MeshParticleEmitters().size());
-    ctx.shadowPass.meshShading   = ctx.MeshShadingActive();
-    for (const uint32_t slotDraws: passDrawCounts) {
-        ctx.shadowPass.shadowDraws += slotDraws;
-    }
-    ctx.shadowPass.ran = ctx.shadowPass.shadowDraws != 0 || ctx.shadowPass.meshParticles != 0;
-
     {
         const bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 
@@ -121,14 +114,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
         const uint32_t csmDrawCount = passDrawCounts[0];
 
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> shadowMapArrayImage = {
-            .handle = ctx.graphResources.shadowMap.image.Handle(),
-            .view   = ctx.graphResources.shadowMap.view.Get(),
-            .extent = {.width = ctx.graphResources.shadowMap.extent.width, .height = ctx.graphResources.shadowMap.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
-        };
+        const auto shadowMapArrayImage = ctx.graphResources.shadowMap.AsSlice().Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
-        Vk::DynamicPass(shadowMapArrayImage.extent)
+        Vk::DynamicPass(shadowMapArrayImage.Extent())
             .ViewMask(ShadowRenderer::kCascadeViewMask)
             .AddDepth(shadowMapArrayImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
             .Execute(cmd, [&]() {
@@ -142,7 +130,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         }
                         const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
-                            recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
+                            passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
                                  .layout        = ctx.shadows.CascadeLayout(),
                                  .heap          = true,
@@ -156,7 +144,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                             continue;
                         }
 
-                        recorder.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
+                        passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
                              .layout      = ctx.shadows.CascadeLayout(),
                              .heap        = true,
@@ -167,11 +155,11 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         );
                     }
                 } else if (csmDrawCount > 0) {
-                    recorder.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
+                    passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
                          .layout         = ctx.shadows.CascadeLayout(),
                          .heap           = true,
-                         .argumentBuffer = ctx.shadows.IndirectCommands().Handle(),
+                         .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
                          .drawCount      = csmDrawCount},
                         RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
@@ -180,14 +168,14 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 if (hasMeshParticles) {
-                    Draw3DParticleShadows(recorder);
+                    Draw3DParticleShadows(passCtx);
                 }
             });
     }
 
     if (ctx.shadows.PunctualPipeline() != VK_NULL_HANDLE && !ctx.targets.PunctualViews().empty()) {
         auto ExecutePunctualPass = [&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage, auto&& recordFn) {
-            Vk::DynamicPass(subViewImage.extent)
+            Vk::DynamicPass(subViewImage.Extent())
                 .ViewMask(ShadowRenderer::kCubemapFaceMask)
                 .AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
                 .Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
@@ -206,22 +194,20 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 continue;
             }
 
-            const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
-                .handle = ctx.graphResources.shadowAtlas.image.Handle(),
-                .view   = ctx.targets.PunctualViews()[light.shadowLayer].Get(),
-                .extent = {.width = 1024, .height = 1024, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
-            };
+            const auto subViewImage = Vk::ImageSlice {
+                ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.PunctualViews()[light.shadowLayer], VkExtent2D {1024, 1024},
+                VK_FORMAT_D32_SFLOAT
+            }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
             ExecutePunctualPass(subViewImage, [&]() {
                 if (drawCount > 0) {
                     const PunctualPush pc = {l_idx};
-                    recorder.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
+                    passCtx.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
                         {
                             .pipeline       = ctx.shadows.PunctualPipeline(),
                             .layout         = ctx.shadows.PunctualLayout(),
                             .heap           = true,
-                            .argumentBuffer = ctx.shadows.IndirectCommands().Handle(),
+                            .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
                             .drawCount      = drawCount,
                         },

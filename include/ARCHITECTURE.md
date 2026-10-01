@@ -39,9 +39,10 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
 
 #### 4. External Resource Lifecycle
-* Components describe resources but do not execute lifecycle callbacks. The owning resource system/context MUST track its external handles with their ECS owner and reconcile dead owners.
-* Use `DespawnEntity` for immediate child-before-parent teardown and resource notification; ordinary `Registry::Destroy` is reclaimed at the owning system's reconciliation point.
-* Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+* Components store plain generational handles. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
+* In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics handles for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned handles (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
+* Raw `Registry::Destroy` and `Registry::Clear` remain **immediate, data-only** primitives. Generic ECBs (including standalone `World` ECBs) likewise destroy immediately; only the Engine opts its ECB into deferred destruction. Never use raw destruction on an Engine scene with external-resource components: use `DespawnEntity` and `Engine::ClearScene` instead. `Engine::ProcessPendingDestroy` allows an explicit synchronous cleanup before the next frame. Standalone registries must explicitly release their owned resources before raw removal/clear (e.g. `PrefabFactory::ReleaseOwnedMeshes` and `TerrainSystem::ReleaseTerrainData`).
+* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; extras supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
@@ -75,12 +76,13 @@ struct LightningComponent {
     float           phaseTime           = 0.0f;
     float           baseAmbientExposure = 4.5f;
 
-    BufferHandle vboPos  = BufferHandle::Invalid;
-    BufferHandle vboAttr = BufferHandle::Invalid;
+    BufferHandle vboPos     = BufferHandle::Invalid;
+    BufferHandle vboFrame   = BufferHandle::Invalid;
+    BufferHandle vboSurface = BufferHandle::Invalid;
 
-    // Component state only. Spawn records the VBOs with RenderContext using
-    // the owning entity; its render lifecycle reconciles them after ordinary
-    // Registry::Destroy, while DespawnEntity releases them immediately.
+    // Component state only. The renderer sees non-owning mesh registrations;
+    // Engine scene cleanup frees these buffers before destroying the component.
+    // Direct replacement/removal must release them explicitly first.
 };
 
 // GOOD: Stateless System Function
@@ -98,7 +100,7 @@ void   Update(Engine& engine, float dt);
 | :--- | :--- | :--- |
 | **Hot-Reloading** | Reloading `.so`/`.dll` modules invalidates class vtables and member offsets, crashing active class instances. | Components reside in C++ host memory. Hot-reloaded code modules simply re-attach to existing Component arrays seamlessly. |
 | **Cache Locality** | Heap-allocated objects (`new MyClass()`) scatter data across RAM pages, causing CPU L1/L2 cache misses. | `SparseSet` arrays store components contiguously in RAM, allowing SIMD vectorization and prefetching. |
-| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` inspects Component Read/Write access patterns (`Read<T>()`, `Write<T>()`) to execute systems in parallel on fibers safely. |
+| **Parallel Execution** | Mutable class methods introduce thread races when accessed concurrently by multiple workers. | `SystemGraph` derives component Read/Write hazards from each system's `Query<const T, U&>` signature (or explicit `Registry&` for structural writers) and orders fiber tasks accordingly. |
 | **State Save/Load** | Private class members cannot be serialized without custom, error-prone boilerplate. | Reflection (`std::meta`) automatically serializes all Component POD structs to disk or network instantly. |
 
 
@@ -340,11 +342,11 @@ type it spells through its own includes.
 | `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
 | `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
 | `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
-| `VertexPosition`, `VertexAttributes`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `VertexPosition`, `VertexTangentFrame`, `VertexSurface`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
 | `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
-| `TextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `RenderAttachment` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
 | `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
 | `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
 
@@ -421,7 +423,42 @@ Each frame executes in a strict, deterministic sequence:
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
    * `RenderSystem`: Records multi-pass Vulkan commands and presents to the swapchain.
 
-### 3.1 Graphics Settings Flow
+### 3.1 Signature-driven ECS systems
+
+Register a free function, static member, or stateless callable with one line:
+
+```cpp
+void MoveUp(ECS::Query<Components::TransformComponent&> transforms, FrameDt dt) {
+    transforms.ForEach([&](Entity, Components::TransformComponent& transform) {
+        transform.position += JPH::Vec3(0.0f, dt.value, 0.0f);
+    });
+}
+
+updateGraph.AddSystem<&MoveUp>();
+// updateGraph.AddSystemBefore<&MoveUp>("TransformSystem"); // ordered insertion
+```
+
+`SystemGraph` reflects the callable's name and parameter types, resolves each
+parameter from `SystemContext`, builds a direct invocation thunk, and infers
+component dependencies from the query: `const T`/`const T&` reads, `T`/`T&`
+writes. `Query::ForEach` iterates the intersection; `Get`, `Entities`, `Raw`,
+`Patch`, and `GetSingleton` support optional lookups/independent passes but
+only for declared families. Queries can be projected to a read-only subset.
+Declare `Registry&` explicitly when making structural ECS changes or calling
+an existing callback that may do so; it conservatively conflicts with all
+component accesses. `Res<T>` and `ResMut<T>` inject required services,
+`OptionRes<T>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
+`FrameIndex` avoid guessing between otherwise identical scalar types. The
+legacy `AddSystem(SystemInfo)` API remains available to external callers.
+`Reflect::CallableInspector` in `Core/Reflection/Callable.hpp` provides
+reusable P2996/P3096 callable names, parameter types, and invocation without
+an ECS dependency. `ECS::SystemSignature` in `ecs/SystemSignature.hpp` applies
+ECS-specific query/registry access rules to those parameter types. Bloomberg
+Clang needs `-freflection` plus P3096's `-fparameter-reflection` (or the
+unified `-freflection-latest`) for this API; `zahlen_enable_reflection()` probes
+and applies the supported flag.
+
+### 3.2 Graphics Settings Flow
 
 Graphics configuration flows in **one direction** through a single canonical model
 (`include/Zahlen/GraphicsSettings.hpp`):
@@ -546,7 +583,7 @@ ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 `GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
 boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
 frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
-`VertexAttributes` the host hands back through
+`VertexSurface` the host hands back through
 `RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
 interface and knows nothing about `GUI::Context`; it forwards the payload to
 the renderer-private `UIRenderer`. The UI shader does not import `common` and
@@ -571,9 +608,9 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
-if (!target) { ... }                              // why there is nothing to draw into
-if (!*target) { ... }                             // nothing to draw into this frame
+const auto target = kernel.AcquireTarget(window); // the kernel owns the presentation seam
+if (!target) { ... }                              // acquisition error
+if (!*target) { ... }                             // no drawable image this frame
 const auto ui = rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 if (!ui) { ... }                                  // hard failure (propagate it)
 else if (ui->has_value()) { ... }                 // FrameSkipped: nowhere drawable this frame
@@ -582,10 +619,17 @@ rc.EndFrame();
 
 `Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
 own window) is the verb that takes the frame's image for a window and opens the
-command stream that window's passes record into. `GetTargetAttachment` is the
-query beside it: it answers what the frame has already acquired for a window and
-nothing more -- it never waits, acquires, or opens a command buffer, so asking
-about a window early in a frame cannot change what the frame does.
+command stream that window's passes record into. `GetAcquiredTarget` is the
+query beside it: it answers only for an open frame and never acquires an image.
+The returned `FrameTarget` identifies the exact renderer, frame, window and
+acquisition. It is a non-owning value: after `EndFrame`, a window release or
+rebuild, or renderer destruction, rendering through it fails instead of
+adopting whatever image has since reused the slot. To render into a persistent
+render texture, create a `RenderTextureHandle` and use
+`frameTarget.ForTexture(renderTexture)`: the output still belongs to the
+explicitly acquired frame's command stream. Window presenters persist; their
+acquired images, layout and written state live only with the frame. The two
+are not stored together in a table of versioned texture handles.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -616,13 +660,13 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into the attachment
+the editor itself: `RenderUI` into the frame target
 `kernel.AcquireTarget(previewWindow)` hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
-window declares what it draws — a destination is image-slot addressing, and the
-caller picks the passes (`RenderScene` / `RenderUI` / `DispatchSimulations`).
+window declares what it draws — the caller picks the passes
+(`RenderScene` / `RenderUI` / `DispatchSimulations`).
 `BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
-targeting a second window's attachment re-executes the graph for it. CameraSystem
+targeting a second window's frame target re-executes the graph for it. CameraSystem
 still writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.

@@ -767,8 +767,9 @@ struct ClusteredLightingTestSuite {
         // graphics submit's wait did not order fragment reads. Also buffers
         // were EXCLUSIVE sharing mode across graphics/compute families.
         //
-        // This test renders a lit scene and scans for any cluster-aligned
-        // tile that is fully black while the rest of the frame is lit.
+        // This test scans for cluster-aligned black pixels on surfaces known
+        // to be visible in a full-bright reference of the same scene. Empty
+        // background tiles must not be diagnosed as a lighting failure.
         std::expected<void, ZHLN::ErrorCode> clustered_lighting_no_flat_black_tile() {
             // Use 640x480 to keep the test cheap; tile size = 40x53
             auto engine = CreateTestEngine(640, 480);
@@ -789,6 +790,16 @@ struct ClusteredLightingTestSuite {
                         pp.ambientExposure = 8.0f;
                         pp.enableSSR       = 1;
                         pp.enableRTR       = 0;
+                        // Full-bright bypasses the display exposure, but the
+                        // procedural sky is still rendered in that mode. Its
+                        // default HDR colors appear bright in the reference
+                        // and almost black after exposure (0.015) in the lit
+                        // capture, falsely marking empty sky as bad geometry.
+                        // Keep the sky black in BOTH captures so the reference
+                        // measures the bright floor alone.
+                        pp.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                        pp.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                        pp.skyGround  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
                     });
                 }
 
@@ -841,10 +852,28 @@ struct ClusteredLightingTestSuite {
                 [&](ZHLN::Engine& eng) -> bool {
                     captureFailed = false;
 
-                    // Render a few frames to let async compute settle
-                    TickFrames(eng, 3);
+                    // A black tile is only a lighting defect if geometry
+                    // should have been visible there. Capture the same static
+                    // scene in full-bright mode for a coverage mask; otherwise
+                    // empty sky in a corner (notably tile 0,0) looks exactly
+                    // like the old false-positive "black cluster tile".
+                    auto& reg = eng.GetRegistry();
+                    const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                    if (!ZHLN::Test::ExpectTrue(!settingsEnts.empty())) {
+                        return false;
+                    }
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                    TickFrames(eng, 2);
+                    const RgbImage coverage = Capture(eng, "cluster_no_black_tile_coverage.ppm");
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 0; });
+                    if (!ZHLN::Test::ExpectTrue(coverage.Valid())) {
+                        captureFailed = true;
+                        return false;
+                    }
+
+                    TickFrames(eng, 3); // Let async compute settle after changing modes.
                     const RgbImage frame = Capture(eng, "cluster_no_black_tile.ppm");
-                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid() && frame.width == coverage.width && frame.height == coverage.height)) {
                         captureFailed = true;
                         return false;
                     }
@@ -866,6 +895,7 @@ struct ClusteredLightingTestSuite {
 
                     bool foundBlackTile = false;
                     uint32_t blackTileX = 0, blackTileY = 0;
+                    uint32_t coveredPixelsAtFailure = 0, blackPixelsAtFailure = 0;
 
                     for (uint32_t ty = 0; ty < kClusterH && !foundBlackTile; ++ty) {
                         for (uint32_t tx = 0; tx < kClusterW && !foundBlackTile; ++tx) {
@@ -875,36 +905,41 @@ struct ClusteredLightingTestSuite {
                             const uint32_t y1 = std::min(y0 + tileH, imgH);
                             if (x1 <= x0 || y1 <= y0) continue;
 
-                            uint32_t blackPixels = 0;
-                            uint32_t totalPixels = 0;
+                            uint32_t coveredPixels = 0;
+                            uint32_t blackOnGeometry = 0;
                             for (uint32_t y = y0; y < y1; ++y) {
                                 for (uint32_t x = x0; x < x1; ++x) {
                                     const size_t idx = (static_cast<size_t>(y) * imgW + x) * 3u;
-                                    const uint8_t r = frame.rgb[idx + 0];
-                                    const uint8_t g = frame.rgb[idx + 1];
-                                    const uint8_t b = frame.rgb[idx + 2];
-                                    // Near-black: R<8,G<8,B<8
-                                    if (r < 8 && g < 8 && b < 8) {
-                                        ++blackPixels;
+                                    // This scene's unlit albedo is bright. A
+                                    // nearly black full-bright pixel is sky,
+                                    // not a surface waiting for illumination.
+                                    if (coverage.rgb[idx + 0] <= 32 && coverage.rgb[idx + 1] <= 32 && coverage.rgb[idx + 2] <= 32) {
+                                        continue;
                                     }
-                                    ++totalPixels;
+                                    ++coveredPixels;
+                                    if (frame.rgb[idx + 0] < 8 && frame.rgb[idx + 1] < 8 && frame.rgb[idx + 2] < 8) {
+                                        ++blackOnGeometry;
+                                    }
                                 }
                             }
 
-                            // If >95% of tile is black, while overall frame is lit (>500 lit pixels),
-                            // that's the artifact: flat black square ON display, not attached to mesh.
-                            if (totalPixels > 0 && blackPixels * 100 / totalPixels > 95 && m.lit > 500) {
+                            const uint32_t tilePixels = (x1 - x0) * (y1 - y0);
+                            // Require actual surface coverage; only then is
+                            // 95% black-on-surface evidence of a lost tile.
+                            if (coveredPixels > tilePixels / 4 && blackOnGeometry * 100 > coveredPixels * 95 && m.lit > 500) {
                                 foundBlackTile = true;
-                                blackTileX     = tx;
-                                blackTileY     = ty;
+                                blackTileX = tx;
+                                blackTileY = ty;
+                                coveredPixelsAtFailure = coveredPixels;
+                                blackPixelsAtFailure = blackOnGeometry;
                             }
                         }
                     }
 
                     if (foundBlackTile) {
-                        ZHLN::Println("    [FAIL] Flat black cluster tile detected at tile ({},{}) size {}x{} — async compute race / NaN tile", blackTileX, blackTileY, tileW, tileH);
-                        // Save amplified diff for debugging
-                        WriteAmplifiedDiff("cluster_black_tile_diff.ppm", frame, frame);
+                        ZHLN::Println("    [FAIL] Black lighting tile ({},{}) size {}x{}: {}/{} visible surface pixels black (full-bright reference: cluster_no_black_tile_coverage.ppm)",
+                                      blackTileX, blackTileY, tileW, tileH, blackPixelsAtFailure, coveredPixelsAtFailure);
+                        WriteAmplifiedDiff("cluster_black_tile_diff.ppm", coverage, frame);
                     }
 
                     return ZHLN::Test::ExpectFalse(foundBlackTile);

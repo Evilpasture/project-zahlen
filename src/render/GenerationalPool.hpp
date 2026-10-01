@@ -38,8 +38,8 @@ class GenerationalPool {
     template <typename... Args>
     HandleType Create(Args&&... args) {
         if (_freeIndices.empty()) [[unlikely]] {
-            ZHLN::Log(
-                "ERROR: GenerationalPool has exceeded its maximum capacity of {}! Returning "
+            ZHLN::LogError(
+                "GenerationalPool has exceeded its maximum capacity of {}! Returning "
                 "invalid handle.",
                 MaxObjects
             );
@@ -53,6 +53,28 @@ class GenerationalPool {
 
         uint64_t packed = (static_cast<uint64_t>(gen) << 32) | index;
         return static_cast<HandleType>(packed);
+    }
+
+    template <typename Fn>
+    void ForEachLive(Fn&& fn) {
+        for (auto* pointer: _pointers) {
+            if (pointer != nullptr) {
+                fn(*pointer);
+            }
+        }
+    }
+
+    // Drop every live slot and invalidate its handle. Callers that own external
+    // resources must retire those resources before clearing the pool.
+    void Clear() noexcept {
+        for (size_t index = 0; index < MaxObjects; ++index) {
+            if (_pointers[index] != nullptr) {
+                _pool.Destroy(_pointers[index]);
+                _pointers[index] = nullptr;
+                ++_generations[index];
+                _freeIndices.push_back(static_cast<uint32_t>(index));
+            }
+        }
     }
 
     void Destroy(HandleType handle) {

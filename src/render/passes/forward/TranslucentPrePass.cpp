@@ -10,32 +10,36 @@ namespace ZHLN::Passes {
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
-    FrameRecorder recorder(cmd, impl);
-    const auto    sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, impl);
+    const auto  sceneVp = impl.EffectiveViewport();
 
     const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(impl.graphResources.transNormalBuffer);
+    const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(impl.graphResources.transAnisotropyBuffer);
+    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(impl.graphResources.transSheenBuffer);
     const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(impl.graphResources.transDepthBuffer);
 
-    Vk::DynamicPass(norm_att.extent)
+    Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
+        .AddColor(aniso_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorAnisotropy)
+        .AddColor(sheen_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
             for (size_t i = 0; i < impl.queues.Draws().size(); ++i) {
                 const auto& drawCmd = impl.queues.Draws()[i];
 
-                if ((drawCmd.instanceData.flags & 0xFF) != 2) {
+                if (!IsForwardOnly(drawCmd.instanceData.flags)) {
                     continue;
                 }
 
-                if (drawCmd.prePassMaterial == nullptr || !drawCmd.prePassMaterial->pipeline.Valid()) {
+                if (drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
+                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline,
                     drawCmd.prePassMaterial->layout
                 );
             }

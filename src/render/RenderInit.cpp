@@ -9,39 +9,25 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <functional>
-#include <vector>
+#include <utility>
 
 namespace ZHLN {
 
-std::expected<Vk::ShaderStages, ErrorCode> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
-    const void*           vs_code = nullptr;
-    size_t                vs_size = 0;
-    const void*           ps_code = nullptr;
-    size_t                ps_size = 0;
-    std::vector<uint32_t> disk_vs;
-    std::vector<uint32_t> disk_ps;
+auto RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept
+    -> std::expected<Vk::OwnedShaderStages, ErrorCode> {
+    auto vertex   = LoadShaderData(vs);
+    auto fragment = LoadShaderData(ps);
 
-    LoadShaderData(vs, vs_code, vs_size, disk_vs);
-    LoadShaderData(ps, ps_code, ps_size, disk_ps);
+    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint), "VSMain");
+    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint), "PSMain");
 
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint}, "VSMain");
-    gpuDiagnostics.RegisterShader({.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}, "PSMain");
-
-    return Vk::ShaderStages::Create(
-        ctx.Device(), {.code = Vk::AsSpirV(vs_code), .size = vs_size, .entry_point = vs.entryPoint},
-        {.code = Vk::AsSpirV(ps_code), .size = ps_size, .entry_point = ps.entryPoint}
-    );
+    return Vk::OwnedShaderStages::Create(std::move(vertex), std::move(fragment), vs.entryPoint, ps.entryPoint);
 }
 
 std::expected<Vk::Pipeline, ErrorCode>
     RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
-    const void*           cs_code = nullptr;
-    size_t                cs_size = 0;
-    std::vector<uint32_t> disk_cs;
-
-    LoadShaderData(cs, cs_code, cs_size, disk_cs);
-
-    const ZHLN_ShaderDesc shader = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = cs.entryPoint};
+    const auto loaded = LoadShaderData(cs);
+    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
@@ -55,7 +41,7 @@ std::expected<Vk::Pipeline, ErrorCode>
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!ctx.RayTracingSupported()) {
-        ZHLN::Log("WARNING: Ray tracing not enabled on this device. RTR will be disabled.");
+        ZHLN::LogWarning("Ray tracing not enabled on this device. RTR will be disabled.");
     } else {
         ZHLN::Log("Ray tracing enabled (acceleration structure + ray query).");
     }
@@ -67,7 +53,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
         return std::unexpected(res.error());
     }
     if (!gpuProfiler.Enabled()) {
-        ZHLN::Log("WARNING: GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
+        ZHLN::LogWarning("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
     }
 
     return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
@@ -112,9 +98,12 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
         }
     }
 
-    return parallelRecorder[0]
-        .Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
-        .and_then([&]() { return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); });
+    for (auto& recorder: parallelRecorders) {
+        if (auto initialized = recorder.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); !initialized) {
+            return std::unexpected(initialized.error());
+        }
+    }
+    return {};
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
@@ -122,6 +111,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
 
     return allocator.Init(ctx)
         .and_then([&]() {
+            deletionQueue.Init(allocator.Get());
             return stagingRingBuffer.Init(
                 allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
@@ -141,7 +131,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() {
             computePools =
-                Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
+                Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -149,8 +139,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
-            deletionQueue.Init(2);
-            auto fvb_res = CreateDoubleBuffered(
+            auto fvb_res = CreatePerFrame(
                 allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                 Vk::MemoryUsage::CPUToGPU
             );

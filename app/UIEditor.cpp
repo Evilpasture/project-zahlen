@@ -572,22 +572,18 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
     auto&                   rc     = kernel.GetRenderContext();
     const ZHLN::UIDrawData  uiData = gui.EndFrame();
     if (!uiData.Empty()) {
-        // The preview window is a destination like every other one: what it
-        // acquires this frame is what the editor draws into, and a refusal is
-        // the reason it did not. Saying it here is the same call that asked.
-        // The kernel is what knows which target that window presents through.
-        const auto                   target = kernel.AcquireTarget(*session.previewWindow);
+        const auto target = kernel.AcquireTarget(*session.previewWindow);
         if (!target) {
-            ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
+            ZHLN::Log("[UIEditor] Preview window acquisition failed: {}", target.error());
+            return;
         }
-        const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
-        // A hard failure is said and the editor keeps going (EndFrame reports
-        // its own result); a skip needs no second word when the acquisition
-        // above already said why there was nothing drawable.
+        if (!target->has_value()) {
+            return;
+        }
         if (const auto drawn = rc.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                    .target     = attachment,
+                    .target     = **target,
                     .frameIndex = rc.GetFrameIndex(),
                 },
                 uiData
@@ -849,20 +845,19 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
     if (uiData.Empty()) {
         return;
     }
-    // Pure 2D frame: no scene, no compute, no deferred passes. The editor
-    // addresses the window's acquired image directly and draws into it; the
-    // kernel is what resolves that window's target.
-    const auto                   target = kernel.AcquireTarget();
+    // Pure 2D frame: the editor draws into this frame's acquired window target.
+    const auto target = kernel.AcquireTarget();
     if (!target) {
-        ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
+        ZHLN::Log("[UIEditor] Window acquisition failed: {}", target.error());
+        return;
     }
-    const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
-    // Same contract as the preview draw: a hard failure is said and the editor
-    // keeps going; a skip is the acquisition refusal's echo, already logged.
+    if (!target->has_value()) {
+        return;
+    }
     if (const auto drawn = rc.RenderUI(
             ZHLN::UIView {
                 .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-                .target     = attachment,
+                .target     = **target,
                 .frameIndex = rc.GetFrameIndex(),
             },
             uiData
@@ -891,7 +886,7 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     ZHLN::SetupSignalHandler(crashState);
-    ZHLN::TaskSystem::Init();
+    ZHLN::TaskSystem::Scope taskScope;
 
     // The editor edits a UINode tree, not a 3D world: no World, no physics, no
     // frame scheduler. A bare registry holds the input/GUI singletons that the
@@ -940,8 +935,7 @@ auto main(int argc, char* argv[]) -> int {
         receiver
     );
     if (!kernelRes) {
-        ZHLN::Log("FATAL: Failed to initialize Kernel: {}", kernelRes.error());
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::LogError("Failed to initialize Kernel: {}", kernelRes.error());
         return EXIT_FAILURE;
     }
 
@@ -958,7 +952,7 @@ auto main(int argc, char* argv[]) -> int {
     // just below.
     auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontAssetID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
     }
 #endif
     ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
@@ -1072,6 +1066,5 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     StopPreview(*kernel, session);
-    ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

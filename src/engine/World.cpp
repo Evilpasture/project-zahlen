@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ArticulationSystem.hpp"
+#include "Hierarchy.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include <Zahlen/Components.hpp>
@@ -12,6 +13,8 @@
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <new>
+#include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -38,7 +41,7 @@ struct World::Impl {
     bool joltAcquired = false;
 };
 
-auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::unique_ptr<World>, ErrorCode> {
+auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> std::expected<std::unique_ptr<World>, ErrorCode> {
     auto instance = std::unique_ptr<World>(new (std::nothrow) World());
     if (!instance) {
         return std::unexpected(WorldInitError::WorldAllocationFailed);
@@ -55,7 +58,7 @@ auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::uni
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
     impl.updateGraph         = std::make_unique<ECS::SystemGraph>();
     impl.renderGraph         = std::make_unique<ECS::SystemGraph>();
-    impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry);
+    impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
     impl.cullingSystem       = std::make_unique<CullingSystem>();
     impl.articulationSystem  = std::make_unique<ArticulationSystem>();
 
@@ -74,7 +77,25 @@ World::~World() {
     _impl->mainECB.reset();
     _impl->renderGraph.reset();
     _impl->updateGraph.reset();
-    _impl->registry.Clear();
+
+    // A standalone World can still contain physics owners. Release the bulk
+    // handles before clearing their components and tearing down Jolt.
+    auto& registry = _impl->registry;
+    if (!registry.GetEntitiesWith<Components::RagdollComponent>().empty()) {
+        std::vector<Physics::RagdollHandle> ragdolls;
+        for (auto& component: registry.GetRawArray<Components::RagdollComponent>()) {
+            ragdolls.push_back(std::exchange(component.ragdollHandle, Physics::RagdollHandle::Invalid));
+        }
+        _impl->physicsContext->DestroyRagdolls(ragdolls);
+    }
+    if (!registry.GetEntitiesWith<Components::PhysicsComponent>().empty()) {
+        std::vector<Physics::BodyHandle> bodies;
+        for (auto& component: registry.GetRawArray<Components::PhysicsComponent>()) {
+            bodies.push_back(std::exchange(component.physicsHandle, Physics::BodyHandle::Null()));
+        }
+        _impl->physicsContext->DestroyBodies(bodies);
+    }
+    registry.Clear();
     _impl->physicsContext.reset();
 
     if (_impl->joltAcquired) {

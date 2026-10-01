@@ -3,7 +3,6 @@
 
 #include "../RenderInternal.hpp"
 #include <Zahlen/Error.hpp>
-#include <array>
 
 namespace ZHLN {
 
@@ -12,8 +11,9 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
 
     impl.targets.NameGraphTargets();
 
-    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
-    Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
+    auto history = impl.accumulationHistory.begin();
+    Vk::Debug::SetImageName(ctx, history[0].image.Handle(), "AccumHistory0");
+    Vk::Debug::SetImageName(ctx, history[1].image.Handle(), "AccumHistory1");
     Vk::Debug::SetImageName(ctx, impl.presenter.depthTarget.image.Handle(), "DepthTarget");
     Vk::Debug::SetImageName(ctx, impl.targets.ShadowMapPrev().image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
@@ -43,17 +43,16 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         if (!e) {
             return std::unexpected(e.error());
         }
+        member.Destroy(allocator);
         member = std::move(*e);
         return {};
     };
 
-    std::expected<void, ErrorCode> result {};
-    result = assign(frames.accumBuffers[0], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
-    if (result) {
-        result = assign(frames.accumBuffers[1], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
-    }
-    if (!result) {
-        return result;
+    for (auto& history: accumulationHistory) {
+        auto result = assign(history, CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
+        if (!result) {
+            return result;
+        }
     }
 
     if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
@@ -63,24 +62,10 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);
 
-        const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-        const VkImageSubresourceRange clearRange = {
-            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel   = 0,
-            .levelCount     = VK_REMAINING_MIP_LEVELS,
-            .baseArrayLayer = 0,
-            .layerCount     = VK_REMAINING_ARRAY_LAYERS
-        };
-        const std::array accumImages = {frames.accumBuffers[0].image.Handle(), frames.accumBuffers[1].image.Handle()};
-        for (const auto img: accumImages) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
+        Vk::ClearColorAndTransition(cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
-            const auto info = Vk::MakeViewCreateInfo2D(presenter.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
-            heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            heapManager.WriteImage(decalDepthSlot, presenter.depthTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(

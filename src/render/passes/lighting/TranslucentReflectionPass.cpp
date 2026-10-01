@@ -18,6 +18,7 @@ void TranslucentReflectionPass::operator()(Vk::RasterPassContextBase& ctx) const
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(impl.graphResources.transDepthBuffer)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(impl.graphResources.transNormalBuffer)),
         Vk::Slot<"texEnvMap">(inputs.prefiltered),
+        Vk::Slot<"texSkyEquirect">(inputs.visualSky),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"brdfLUT">(inputs.brdfLut),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
@@ -26,6 +27,8 @@ void TranslucentReflectionPass::operator()(Vk::RasterPassContextBase& ctx) const
         Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
         Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)),
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
+        Vk::Slot<"texSheen">(Vk::Assume<Vk::ShaderRead<Res_TransSheen>>(impl.graphResources.transSheenBuffer)),
+        Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ShaderRead<Res_TransAnisotropy>>(impl.graphResources.transAnisotropyBuffer)),
         Vk::Slot<"tlas">(inputs.tlas)
     );
 

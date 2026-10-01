@@ -9,11 +9,12 @@
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
 
-auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll> {
+auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> Physics::RagdollHandle {
     auto& joltSystem = GetInternalSystem();
     auto& world      = GetInternalWorld();
 
@@ -21,7 +22,7 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, con
     settings->mSkeleton                     = skeleton;
     settings->mParts.resize(skeleton->GetJointCount());
 
-    return ZHLN::Lock(world.sync.shadowLock, [&]() -> JPH::Ref<JPH::Ragdoll> {
+    auto ragdoll = ZHLN::Lock(world.sync.shadowLock, [&]() -> JPH::Ref<JPH::Ragdoll> {
         for (const auto& part: parts) {
             uint32_t jointIdx = part.jointIndex;
 
@@ -81,6 +82,10 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, con
         JPH::Ragdoll* ragdoll = settings->CreateRagdoll(0, 0, &joltSystem);
         return {ragdoll};
     });
+    if (ragdoll == nullptr) {
+        return Physics::RagdollHandle::Invalid;
+    }
+    return RegisterRagdoll(std::move(ragdoll));
 }
 
 }

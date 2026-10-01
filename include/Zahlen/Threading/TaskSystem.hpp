@@ -3,11 +3,15 @@
 
 #pragma once
 #include <Zahlen/Core/Atomic.hpp>
+#include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <type_traits>
+#include <utility>
 
 namespace ZHLN::TaskSystem {
 auto GetWorkerIndex() -> uint32_t;
@@ -23,15 +27,55 @@ struct Counter {
     ZHLN::Atomic<uint32_t> value {0};
 };
 
+// Lifecycle transitions are serialized and redundant calls are no-ops. Call
+// Shutdown from an application control thread after all dispatched work has
+// completed; do not race task submission/Wait against a lifecycle transition.
 void Init(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize);
-
 void Shutdown();
+
+// Declare before resources that may schedule tasks during their destruction.
+// A Scope owns the process-global scheduler lifetime; do not overlap it with
+// another owner that may shut the scheduler down while those resources live.
+struct Scope final {
+    explicit Scope(uint32_t numThreads = 0, uint32_t numFibers = 128, size_t stackSize = kMinimumFiberStackSize) {
+        Init(numThreads, numFibers, stackSize);
+    }
+    ~Scope() { Shutdown(); }
+
+    Scope(const Scope&)                    = delete;
+    auto operator=(const Scope&) -> Scope& = delete;
+    Scope(Scope&&)                         = delete;
+    auto operator=(Scope&&) -> Scope&      = delete;
+};
 
 void Dispatch(std::span<const Task> tasks, Counter* counter = nullptr);
 
 void Wait(Counter* counter);
 
 void WakeUp(ZHLN::Fiber* fiber);
+
+// Invoke callables in parallel and join all fibers before returning. The
+// callables (including temporary arguments) remain alive for the whole call,
+// so the Task ABI's void* trampoline and non-owning views stay internal.
+template <typename... Funcs>
+    requires(std::is_invocable_r_v<void, const std::remove_reference_t<Funcs>&> && ...)
+void ParallelInvoke(Funcs&&... funcs) {
+    constexpr size_t count = sizeof...(Funcs);
+    if constexpr (count > 0) {
+        std::array<FunctionRef<void() const>, count> borrowed {FunctionRef<void() const> {funcs}...};
+        std::array<Task, count> tasks {};
+        for (size_t i = 0; i < count; ++i) {
+            tasks[i] = Task {
+                .func = [](void* arg) { (*static_cast<FunctionRef<void() const>*>(arg))(); },
+                .arg  = std::addressof(borrowed[i]),
+            };
+        }
+
+        Counter sync;
+        Dispatch(tasks, &sync);
+        Wait(&sync);
+    }
+}
 
 template <typename Func>
 void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {

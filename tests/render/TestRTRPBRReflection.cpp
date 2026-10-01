@@ -294,6 +294,11 @@ struct RTRPBRReflectionTestSuite {
         return LoadPPM(path);
     }
 
+    // Headless captures the tonemapped presentation target (including ambient
+    // diffuse and bloom), not the old raw-HDR screenshot path. Dielectric
+    // floor luma is therefore nonzero even with the sun off; the metal must
+    // still be distinctly brighter without requiring a 4x *display* ratio.
+    static constexpr double   kMinMetalDielectricMeanLumaRatio = 2.0;
     static constexpr NormRect kFloor {.x0 = 0.10, .y0 = 0.55, .x1 = 0.90, .y1 = 0.95};
     static constexpr NormRect kFloorLeft {.x0 = 0.08, .y0 = 0.55, .x1 = 0.42, .y1 = 0.95};
     static constexpr NormRect kFloorRight {.x0 = 0.58, .y0 = 0.55, .x1 = 0.92, .y1 = 0.95};
@@ -385,7 +390,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgC) {
                 return std::unexpected(imgC.error());
             }
-            reg.Destroy(chrome);
+            ZHLN::DespawnEntity(*s.engine, chrome);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity gold = SpawnMirror(*s.engine, *goldRes);
             auto               imgG = CaptureRTR(s, "headless_rtr_pbr_f0_gold.ppm");
@@ -393,7 +399,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgG.error());
             }
             (void) gold;
-            reg.Destroy(gold);
+            ZHLN::DespawnEntity(*s.engine, gold);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *dielRes);
             auto imgD = CaptureRTR(s, "headless_rtr_pbr_f0_diel.ppm");
@@ -410,13 +417,14 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("white dielectric", dielS);
             LogRegion("white emitter", src);
 
-            // ACES×0.015 leaves the floor mean near 2 even when F0 is correct.
-            // Judge ratios and metal-vs-dielectric energy, not absolute luma.
+            // Judge relative metal-vs-dielectric energy and peak highlights,
+            // not the absolute PPM luma (the display path can change it).
             const bool sourceSeen    = ZHLN::Test::ExpectGt(src.maxL, 4.0);
             const bool chromeLit     = ZHLN::Test::ExpectGt(chromeS.maxL, 6.0) && ZHLN::Test::ExpectGt(chromeS.meanL, dielS.meanL);
             const bool goldYellow    = ZHLN::Test::ExpectLt(BlueRatio(goldS) + 0.08, BlueRatio(chromeS)) && ZHLN::Test::ExpectGt(goldS.meanR, goldS.meanB);
             const bool goldBluerLess = ZHLN::Test::ExpectLt(BlueRatio(goldS) + 0.06, BlueRatio(chromeS));
-            const bool metalBrighter = ZHLN::Test::ExpectGt(chromeS.meanL, dielS.meanL * 4.0) && ZHLN::Test::ExpectGt(chromeS.maxL, dielS.maxL * 2.0);
+            const bool metalBrighter = ZHLN::Test::ExpectGt(chromeS.meanL, dielS.meanL * kMinMetalDielectricMeanLumaRatio) &&
+                                       ZHLN::Test::ExpectGt(chromeS.maxL, dielS.maxL * 2.0);
             const bool goldNotBlue   = ZHLN::Test::ExpectLt(goldS.meanB, goldS.meanR * 0.5);
 
             if (!sourceSeen || !chromeLit || !goldYellow || !goldBluerLess || !metalBrighter || !goldNotBlue) {
@@ -456,7 +464,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgS) {
                 return std::unexpected(imgS.error());
             }
-            reg.Destroy(eSmooth);
+            ZHLN::DespawnEntity(*s.engine, eSmooth);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity eMid = SpawnMirror(*s.engine, *mid);
             auto               imgM = CaptureRTR(s, "headless_rtr_pbr_rough_m.ppm");
@@ -464,7 +473,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgM.error());
             }
             (void) eMid;
-            reg.Destroy(eMid);
+            ZHLN::DespawnEntity(*s.engine, eMid);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *rough);
             auto imgR = CaptureRTR(s, "headless_rtr_pbr_rough_r.ppm");
@@ -592,7 +602,7 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("patch dielectric r=0.03", *dielectric);
             LogRegion("patch metal r=0.75", *metalRough);
 
-            const bool metalEnergy   = ZHLN::Test::ExpectGt(metalSmooth->meanL, dielectric->meanL * 4.0) &&
+            const bool metalEnergy   = ZHLN::Test::ExpectGt(metalSmooth->meanL, dielectric->meanL * kMinMetalDielectricMeanLumaRatio) &&
                                        ZHLN::Test::ExpectGt(metalSmooth->maxL, dielectric->maxL * 2.0);
             const bool metalYellower = ZHLN::Test::ExpectGt(metalSmooth->meanR, metalSmooth->meanB) &&
                                        ZHLN::Test::ExpectGt(metalSmooth->meanG, metalSmooth->meanB);
@@ -636,7 +646,8 @@ struct RTRPBRReflectionTestSuite {
             if (!imgSil) {
                 return std::unexpected(imgSil.error());
             }
-            reg.Destroy(eSil);
+            ZHLN::DespawnEntity(*s.engine, eSil);
+            s.engine->ProcessPendingDestroy();
 
             const ZHLN::Entity eAu   = SpawnMirror(*s.engine, *gold);
             auto               imgAu = CaptureRTR(s, "headless_rtr_pbr_gold.ppm");
@@ -644,7 +655,8 @@ struct RTRPBRReflectionTestSuite {
                 return std::unexpected(imgAu.error());
             }
             (void) eAu;
-            reg.Destroy(eAu);
+            ZHLN::DespawnEntity(*s.engine, eAu);
+            s.engine->ProcessPendingDestroy();
 
             SpawnMirror(*s.engine, *copper);
             auto imgCu = CaptureRTR(s, "headless_rtr_pbr_copper.ppm");

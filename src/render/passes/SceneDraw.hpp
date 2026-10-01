@@ -15,7 +15,9 @@ namespace ZHLN::Passes {
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 [[nodiscard]] constexpr auto IsForwardOnly(uint32_t instanceFlags) noexcept -> bool {
-    return (instanceFlags & 0xFF) == 2;
+    // Low bits are the authored coverage mode, not the pipeline family.
+    // Bit 10 routes optically transmissive OPAQUE/MASK materials forward too.
+    return (instanceFlags & 0xFFu) == 2u || (instanceFlags & (1u << 10)) != 0u;
 }
 
 [[nodiscard]] auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool;
@@ -45,7 +47,7 @@ void SubmitDrawInstanced(
 
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
-            {.pipeline    = nativeMat->meshPipeline.Get(),
+            {.pipeline    = nativeMat->meshPipeline,
              .layout      = layout,
              .heap        = true,
              .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
@@ -58,7 +60,7 @@ void SubmitDrawInstanced(
 
     auto* pipeline = pipelineOverride;
     if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr) {
-        pipeline = nativeMat->pipeline.Get();
+        pipeline = nativeMat->pipeline;
     }
     if (pipeline == VK_NULL_HANDLE) {
         return;
@@ -74,13 +76,13 @@ void SubmitDrawInstanced(
 
 // Stencil-buffer constructive solid geometry: the cutters write the stencil,
 // then the eye mesh is drawn against it to cut or intersect.
-void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept;
+void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept;
 
-void Draw3DParticles(const FrameRecorder& recorder) noexcept;
+void Draw3DParticles(PassContext& passCtx) noexcept;
 
-void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept;
+void Draw3DParticleShadows(PassContext& passCtx) noexcept;
 
-// The five GBuffer color targets plus the depth target, as the attachments a
+// The seven GBuffer color targets plus the depth target, as the attachments a
 // raster pass writes them as. Both GBuffer passes (and the viewmodel pass,
 // which writes the same targets from a separate projection) resolve the set the
 // same way, so the spelling lives here rather than in each pass.
@@ -91,7 +93,5 @@ using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
 // Collapses the draw queue into runs of consecutive draws that share a
 // pipeline, which is the granularity a GPU-culled indirect draw is issued at.
 [[nodiscard]] auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange>;
-
-void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept;
 
 }

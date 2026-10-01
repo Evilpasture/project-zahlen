@@ -16,6 +16,7 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
@@ -30,10 +31,14 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
+#include <limits>
 #include <physics/PhysicsWorld.hpp>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -42,7 +47,7 @@ namespace {
 #pragma pack(push, 1)
 
 struct ZHLN_RaycastResult {
-    uint64_t entity;
+    uint64_t bodyHandle;
     double   px, py, pz;
     float    nx, ny, nz;
     float    fraction;
@@ -50,7 +55,7 @@ struct ZHLN_RaycastResult {
 };
 
 struct ZHLN_RaycastPenetrationResult {
-    uint64_t entity;
+    uint64_t bodyHandle;
     double   epx, epy, epz;
     double   xpx, xpy, xpz;
     float    enx, eny, enz;
@@ -117,7 +122,7 @@ struct SetCharVelArgs {
     float    z;
 };
 struct AddImpulseAtArgs {
-    uint64_t entityRaw;
+    uint64_t bodyRaw;
     float    ix;
     float    iy;
     float    iz;
@@ -133,14 +138,14 @@ struct RaycastArgs {
     float               dy;
     float               dz;
     float               maxDist;
-    uint64_t            ignoreEntity;
+    uint64_t            ignoreBody;
     ZHLN_RaycastResult* outResult;
 };
 struct RaycastPenetrationArgs {
     double                         ox, oy, oz;
     float                          dx, dy, dz;
     float                          maxDist;
-    uint64_t                       ignoreEntity;
+    uint64_t                       ignoreBody;
     ZHLN_RaycastPenetrationResult* outResult;
 };
 struct SetMoveInputArgs {
@@ -475,8 +480,12 @@ void InitComponentRegistry() {
 
         s_ComponentRegistry[name] = ComponentRegistryEntry {
             .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
-                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                    return nullptr; // Read-only physics handle
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent> || std::is_same_v<Comp, Components::RagdollComponent>) {
+                    return nullptr; // Physics handles are created by their owning contexts.
+                } else if constexpr (SceneResources::OwnsExternalResource<Comp> && std::is_default_constructible_v<Comp>) {
+                    // A fresh, handle-free component is safe; replacing an
+                    // existing owner requires SceneResources::Attach.
+                    return reg.template Get<Comp>(entity) == nullptr ? &reg.template Add<Comp>(entity, Comp {}) : nullptr;
                 } else if constexpr (std::is_default_constructible_v<Comp>) {
                     return &reg.template Add<Comp>(entity, Comp {});
                 } else {
@@ -580,13 +589,17 @@ void RegisterCreativeWorkCommands() {
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
                         ZHLN::PrefabFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
+                    // This command exposes a buffer handle, not a drawable
+                    // asset. Keep all seven mesh buffers alive in the scene
+                    // without registering an unused AssetID lookup.
+                    engine->GetRegistry().Create(ZHLN::Components::OwnedMeshComponent {.mesh = mesh});
                     return static_cast<uint64_t>(mesh.posBuffer);
                 }));
 
     RegisterCmd("CreateBasicMaterial", MakeCmd<CreateMaterialArgs>([](ZHLN::Engine* engine, const CreateMaterialArgs& a) -> uint64_t {
                     auto mat_res = engine->GetRenderContext().CreateBasicMaterial(false, a.a < 1.0f);
                     if (!mat_res) {
-                        ZHLN::Log("ERROR: CreateBasicMaterial from Lua failed: {}", mat_res.error());
+                        ZHLN::LogError("CreateBasicMaterial from Lua failed: {}", mat_res.error());
                         return 0;
                     }
                     ZHLN::Material mat     = mat_res.value();
@@ -667,13 +680,16 @@ void RegisterCreativeWorkCommands() {
             reg.Add(
                 e, ZHLN::Components::MeshComponent {.meshAsset = entityMeshAsset, .materialAsset = entityMatAsset, .cullRadius = cullRadius, .flags = flags}
             );
+            reg.Add(e, ZHLN::Components::OwnedMeshComponent {.meshAsset = entityMeshAsset, .mesh = mesh,
+                .shape = ZHLN::Components::OwnedMeshComponent::Shape::Box,
+                .dimensions = JPH::Vec3(a.p1, a.p1, a.p1), .color = JPH::Vec4(a.r, a.g, a.b, a.a)});
 
             reg.Add(
                 e, ZHLN::Components::PhysicsComponent {
                        .physicsHandle = pc.CreateRigidBody(
                            shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
                            a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                           a.isStatic ? ZHLN::Layers::ID::NON_MOVING : ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e
+                           a.isStatic ? ZHLN::Layers::ID::NON_MOVING : ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF
                        ),
                        .isStatic = a.isStatic != 0
                    }
@@ -709,12 +725,23 @@ void RegisterCreativeWorkCommands() {
                 }));
 
     RegisterCmd("CreateTexture", MakeCmd<CreateTextureArgs>([](ZHLN::Engine* engine, const CreateTextureArgs& a) -> uint64_t {
-                    if (a.data == nullptr || a.width == 0 || a.height == 0) {
-                        return 1;
+                    const uint64_t texels = static_cast<uint64_t>(a.width) * a.height;
+                    if (a.data == nullptr || texels == 0 || texels > std::numeric_limits<size_t>::max() / 4) {
+                        return static_cast<uint64_t>(ZHLN::TextureHandle::Invalid);
                     }
-                    auto res = engine->GetRenderContext().CreateTexture(a.data, a.width, a.height, a.isSRGB != 0);
-                    return res.value_or(1);
+                    auto res = engine->GetRenderContext().CreateTexture(
+                        std::span {static_cast<const std::byte*>(a.data), static_cast<size_t>(texels) * 4}, {a.width, a.height}, a.isSRGB != 0
+                    );
+                    return static_cast<uint64_t>(res.value_or(ZHLN::TextureHandle::Invalid));
                 }));
+}
+
+// ECS resolves entity references; a body handle is never an entity ID.
+auto BodyForEntity(ECS::Registry& registry, Entity entity) noexcept -> Physics::BodyHandle {
+    if (const auto* component = registry.Get<Components::PhysicsComponent>(entity); component != nullptr) {
+        return component->physicsHandle;
+    }
+    return Physics::BodyHandle::Null();
 }
 
 void RegisterPhysicsCommands() {
@@ -746,7 +773,7 @@ void RegisterPhysicsCommands() {
                         move->currentVelZ = a.z;
                         return 0;
                     }
-                    engine->GetPhysicsContext().SetCharacterVelocity(entity, JPH::Vec3(a.x, a.y, a.z));
+                    engine->GetPhysicsContext().SetCharacterVelocity(BodyForEntity(reg, entity), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
@@ -755,39 +782,36 @@ void RegisterPhysicsCommands() {
                     if (const auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(entity)) {
                         return move->isGrounded ? 1 : 0;
                     }
-                    const auto* phys = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
-                    const ZHLN::Entity handle = phys != nullptr ? phys->physicsHandle : entity;
+                    const auto handle = BodyForEntity(engine->GetRegistry(), entity);
                     return engine->GetPhysicsContext().IsCharacterOnGround(handle) ? 1 : 0;
                 }));
 
     RegisterCmd("SetLinearVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    const auto*        phys   = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
-                    engine->GetPhysicsContext().SetLinearVelocity(phys != nullptr ? phys->physicsHandle : entity, JPH::Vec3(a.x, a.y, a.z));
+                    const Entity entity = Entity::Unpack(a.entityRaw);
+                    engine->GetPhysicsContext().SetLinearVelocity(BodyForEntity(engine->GetRegistry(), entity), JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (engine->GetRegistry().IsAlive(entity)) {
+                    if (engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity) != nullptr) {
                         ZHLN::AccumulateImpulse(engine->GetRegistry(), entity, a.x, a.y, a.z);
                         return 0;
                     }
-                    engine->GetPhysicsContext().AddImpulse(entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulseAt", MakeCmd<AddImpulseAtArgs>([](ZHLN::Engine* engine, const AddImpulseAtArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz));
+                    engine->GetPhysicsContext().AddImpulse(Physics::BodyHandle::Unpack(a.bodyRaw), JPH::Vec3(a.ix, a.iy, a.iz), JPH::RVec3(a.px, a.py, a.pz));
                     return 0;
                 }));
 
     RegisterCmd("Raycast", MakeCmd<RaycastArgs>([](ZHLN::Engine* engine, const RaycastArgs& a) -> uint64_t {
-                    ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
-                    auto         res    = engine->GetPhysicsContext().Raycast(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
+                    const auto ignore = a.ignoreBody != 0 ? Physics::BodyHandle::Unpack(a.ignoreBody) : Physics::BodyHandle::Null();
+                    auto res = engine->GetPhysicsContext().Raycast(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
-                        a.outResult->entity   = res.handle.Pack();
+                        a.outResult->bodyHandle   = res.handle.Pack();
                         a.outResult->px       = static_cast<double>(res.position.GetX());
                         a.outResult->py       = static_cast<double>(res.position.GetY());
                         a.outResult->pz       = static_cast<double>(res.position.GetZ());
@@ -800,11 +824,11 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("RaycastPenetration", MakeCmd<RaycastPenetrationArgs>([](ZHLN::Engine* engine, const RaycastPenetrationArgs& a) -> uint64_t {
-                    ZHLN::Entity ignore = a.ignoreEntity != 0 ? ZHLN::Entity::Unpack(a.ignoreEntity) : ZHLN::Entity {};
+                    const auto ignore = a.ignoreBody != 0 ? Physics::BodyHandle::Unpack(a.ignoreBody) : Physics::BodyHandle::Null();
                     auto res = engine->GetPhysicsContext().RaycastPenetration(JPH::RVec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), a.maxDist, ignore);
                     a.outResult->hasHit = res.hasHit ? 1 : 0;
                     if (res.hasHit) {
-                        a.outResult->entity        = res.handle.Pack();
+                        a.outResult->bodyHandle        = res.handle.Pack();
                         a.outResult->epx           = static_cast<double>(res.entryPosition.GetX());
                         a.outResult->epy           = static_cast<double>(res.entryPosition.GetY());
                         a.outResult->epz           = static_cast<double>(res.entryPosition.GetZ());
@@ -917,10 +941,26 @@ void RegisterAudioCommands() {
     };
 
     RegisterCmd("CreateVoice", MakeCmd<CreateVoiceArgs>([](ZHLN::Engine* engine, const CreateVoiceArgs& a) -> uint64_t {
-                    if (!a.filepath)
-                        return 0;
-                    AudioHandle handle =
-                        engine->GetAudioContext().CreateVoice(ZHLN::Entity::Unpack(a.entityRaw), a.filepath, a.spatialized != 0, a.looping != 0, a.volume);
+                    if (a.filepath == nullptr) {
+                        return static_cast<uint64_t>(AudioHandle::Invalid);
+                    }
+                    auto& registry = engine->GetRegistry();
+                    const Entity owner = Entity::Unpack(a.entityRaw);
+                    if (!registry.IsAlive(owner)) {
+                        return static_cast<uint64_t>(AudioHandle::Invalid);
+                    }
+                    AudioHandle handle = engine->GetAudioContext().CreateVoice(a.filepath, a.spatialized != 0, a.looping != 0, a.volume);
+                    if (handle != AudioHandle::Invalid) {
+                        // The component, not AudioContext, owns this voice's ECS lifetime.
+                        SceneResources::Attach(*engine, owner, Components::AudioSourceComponent {
+                            .filepath      = String128(a.filepath),
+                            .volume        = a.volume,
+                            .isLooping     = a.looping != 0,
+                            .isSpatialized = a.spatialized != 0,
+                            .playOnStart   = false,
+                            .voiceHandle   = handle
+                        });
+                    }
                     return static_cast<uint64_t>(handle);
                 }));
 
@@ -970,11 +1010,15 @@ void RegisterECSCommands() {
                     void*            ptr = nullptr;
 
                     auto it = s_ComponentRegistry.find(name);
-                    if (it != s_ComponentRegistry.end() && it->second.add != nullptr) {
-                        ptr = it->second.add(reg, entity);
+                    if (it != s_ComponentRegistry.end()) {
+                        if (it->second.add != nullptr) {
+                            ptr = it->second.add(reg, entity);
+                        }
                     } else {
                         uint32_t familyID = ZHLN::ECS::Registry::GetFamilyIDFromName(name);
                         if (familyID != 0xFFFFFFFF) {
+                            // The registry rejects C++ families, including
+                            // extras owners that are not in the Lua type map.
                             ptr = reg.AddDynamic(entity, familyID);
                         }
                     }
@@ -1063,8 +1107,8 @@ void RegisterSystemCommands() {
                         .shape            = ZHLN::Physics::CreateDualShape(hull),
                         .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
                     };
-                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), characterParams, playerEntity);
-                    reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
+                    ZHLN::Physics::BodyHandle charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), characterParams);
+                    SceneResources::Attach(*engine, playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
                     if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(
@@ -1227,7 +1271,7 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
         return it->second;
     }
 
-    ZHLN::Log("WARNING: ZHLN_GetCommandID could not resolve '{}' to a known command.", cmdName);
+    ZHLN::LogWarning("ZHLN_GetCommandID could not resolve '{}' to a known command.", cmdName);
     return 0xFFFFFFFF;
 }
 

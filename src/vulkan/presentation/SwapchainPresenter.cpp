@@ -10,6 +10,35 @@
 
 namespace ZHLN::Vk {
 
+SwapchainPresenter::~SwapchainPresenter() noexcept { Cleanup(); }
+
+void SwapchainPresenter::Cleanup() noexcept {
+    if (_alloc != nullptr) {
+        depthTarget.Destroy(*_alloc);
+        headlessColorTarget.Destroy(*_alloc);
+    }
+}
+
+auto SwapchainPresenter::operator=(SwapchainPresenter&& other) noexcept -> SwapchainPresenter& {
+    if (this != &other) {
+        Cleanup();
+        surface = std::move(other.surface);
+        swapchain = std::move(other.swapchain);
+        presentSemaphores = std::move(other.presentSemaphores);
+        depthTarget = std::move(other.depthTarget);
+        headlessColorTarget = std::move(other.headlessColorTarget);
+        sync = std::move(other.sync);
+        pools = std::move(other.pools);
+        frameIndex = std::exchange(other.frameIndex, 0);
+        resourceGeneration = std::exchange(other.resourceGeneration, 1);
+        _ctx = std::exchange(other._ctx, nullptr);
+        _alloc = std::exchange(other._alloc, nullptr);
+        _vsync = other._vsync;
+        _pacer = std::move(other._pacer);
+    }
+    return *this;
+}
+
 
 auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync)
     -> std::expected<void, ErrorCode> {
@@ -19,8 +48,8 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
 
     _pacer.Resolve(ctx, surface.Get(), vsync);
 
-    sync  = FrameSync<2>::Create(ctx.Device());
-    pools = CommandPools<2, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
+    sync  = FrameSync<kFramesInFlight>::Create(ctx.Device());
+    pools = CommandPools<kFramesInFlight, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
     frameIndex = 0;
     if (!sync.Valid() || !pools.Valid()) {
         return std::unexpected(PresentationError::SyncCreationFailed);
@@ -41,25 +70,21 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D renderExtent = {.width = width, .height = height};
-        {
-            auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
-            );
-            if (!dt_res) {
-                return std::unexpected(dt_res.error());
-            }
-            depthTarget = std::move(*dt_res);
+        auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
+        );
+        if (!dt_res) return std::unexpected(dt_res.error());
+        auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
+            *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
+        );
+        if (!hct_res) {
+            dt_res->Destroy(*_alloc);
+            return std::unexpected(hct_res.error());
         }
-
-        {
-            auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
-            );
-            if (!hct_res) {
-                return std::unexpected(hct_res.error());
-            }
-            headlessColorTarget = std::move(*hct_res);
-        }
+        depthTarget.Destroy(*_alloc);
+        headlessColorTarget.Destroy(*_alloc);
+        depthTarget = std::move(*dt_res);
+        headlessColorTarget = std::move(*hct_res);
 
         ++resourceGeneration;
         _pacer.OnSwapchainRebuilt(VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_PRESENT_MODE_MAX_ENUM_KHR);
@@ -99,6 +124,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
         if (!dt_res) {
             return std::unexpected(dt_res.error());
         }
+        depthTarget.Destroy(*_alloc);
         depthTarget = std::move(*dt_res);
     }
 
@@ -127,7 +153,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
         return std::unexpected(ToFrameError(waited));
     }
-    sync.ResetFence(slot);
+    sync.MarkUnsubmitted(slot); // The prior submission finished; a skipped acquire does not need a fence.
     pools[slot].Reset();
 
     if (!swapchain.Valid()) {
@@ -136,7 +162,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
             return std::unexpected(PresentationError::OffscreenTargetUnavailable);
         }
         return SwapchainTarget {
-            .image       = MakeSlice(target.image.Handle(), target.view.Get(), target.extent, kHeadlessColorFormat),
+            .image       = target.AsSlice(),
             .imageIndex  = 0,
             .slot        = slot,
             .generation  = resourceGeneration,
@@ -167,7 +193,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     }
 
     return SwapchainTarget {
-        .image       = MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format),
+        .image       = ImageSlice {sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format},
         .imageIndex  = imageIndex,
         .slot        = slot,
         .generation  = resourceGeneration,
@@ -176,14 +202,8 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 }
 
 
-auto SwapchainPresenter::Present(
-    VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
-    std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> FrameOutcome<PresentSuboptimal> {
-    const bool     presents = swapchain.Valid();
-    const uint32_t slot     = frameIndex;
-
-    if (presents && cmd != VK_NULL_HANDLE) {
+void SwapchainPresenter::PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept {
+    if (swapchain.Valid() && recorder) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
             .image      = swapchain.Get().images[imageIndex],
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -196,13 +216,19 @@ auto SwapchainPresenter::Present(
             .base_mip   = 0,
             .mip_count  = VK_REMAINING_MIP_LEVELS,
         });
-        Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+        Vk::PipelineBarrier(recorder.Handle(), std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
     }
+}
 
-    if (cmd != VK_NULL_HANDLE) {
-        ZHLN_EndCommandBuffer(cmd);
+auto SwapchainPresenter::Present(
+    VkQueue graphicsQueue, VkQueue presentQueue, ExecutableCommands cmds, uint32_t imageIndex,
+    std::span<const VkSemaphoreSubmitInfo> extraWaits
+) noexcept -> FrameOutcome<PresentSuboptimal> {
+    if (!cmds) {
+        return std::unexpected(CommandRecordingError::NotExecutable);
     }
-
+    const bool     presents = swapchain.Valid();
+    const uint32_t slot     = frameIndex;
     const ZHLN_FrameSync& frameSync = sync[slot];
 
     std::array<VkSemaphoreSubmitInfo, 4> waits {};
@@ -217,17 +243,20 @@ auto SwapchainPresenter::Present(
         waits[waitCount++] = extra;
     }
 
-    const VkSemaphore            presentSem = PresentSemaphore(imageIndex);
-    const VkSemaphoreSubmitInfo  signal     = Vk::MakeSemaphoreSubmitInfo(presentSem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-    const VkCommandBufferSubmitInfo cmdInfo = Vk::MakeCommandBufferSubmitInfo(cmd);
+    const VkSemaphore           presentSem = PresentSemaphore(imageIndex);
+    const VkSemaphoreSubmitInfo signal     = Vk::MakeSemaphoreSubmitInfo(presentSem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
+    if (const VkResult reset = sync.ResetFence(slot); reset != VK_SUCCESS) {
+        return std::unexpected(ToFrameError(reset));
+    }
     auto submitRes = Vk::QueueSubmit(
-        graphicsQueue, std::span<const VkCommandBufferSubmitInfo> {&cmdInfo, 1}, std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount},
+        graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount},
         std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1u : 0u}, frameSync.in_flight
     );
     if (!submitRes) [[unlikely]] {
         return std::unexpected(submitRes.error());
     }
+    sync.MarkSubmitted(slot);
 
     if (!presents) {
         return {};

@@ -29,14 +29,11 @@ class DeviceHandle {
     T        _raw    = VK_NULL_HANDLE;
 };
 
-using ShaderModule   = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
 using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
 using Pipeline       = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
 using PipelineCache  = DeviceHandle<VkPipelineCache, ZHLN_DestroyPipelineCache>;
 using Semaphore      = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
 using Sampler        = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
-
-using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, ZHLN_DestroyAS>;
 

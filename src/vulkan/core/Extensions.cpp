@@ -53,11 +53,15 @@ auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
     return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateInstanceExtensions()));
 }
 
+bool ExtensionBuilder::Supports(std::string_view name) const noexcept { return IsSupported(name); }
+
+bool ExtensionBuilder::SupportsAll(std::initializer_list<std::string_view> names) const noexcept {
+    return std::ranges::all_of(names, [this](std::string_view name) { return IsSupported(name); });
+}
+
 auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuilder& {
-    if (IsSupported(name)) {
-        if (const auto* matched = FindAvailable(name)) {
-            _active.push_back(*matched);
-        }
+    if (Supports(name)) {
+        Optional(name);
     } else {
         _missingRequired.emplace_back(name);
     }
@@ -65,32 +69,16 @@ auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuild
 }
 
 auto ExtensionBuilder::Optional(std::string_view name) noexcept -> ExtensionBuilder& {
-    if (IsSupported(name)) {
-        if (const auto* matched = FindAvailable(name)) {
-            _active.push_back(*matched);
-        }
+    if (const auto* matched = FindAvailable(name); matched != nullptr && !std::ranges::contains(_active, *matched)) {
+        _active.push_back(*matched);
     }
     return *this;
 }
 
 auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> names, bool condition) noexcept -> ExtensionBuilder& {
-    if (!condition) {
-        return *this;
-    }
-
-    bool all_supported = true;
-    for (auto name: names) {
-        if (!IsSupported(name)) {
-            all_supported = false;
-            break;
-        }
-    }
-
-    if (all_supported) {
+    if (condition && SupportsAll(names)) {
         for (auto name: names) {
-            if (const auto* matched = FindAvailable(name)) {
-                _active.push_back(*matched);
-            }
+            Optional(name);
         }
     }
     return *this;

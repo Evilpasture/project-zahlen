@@ -11,6 +11,11 @@
 
 module;
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -100,35 +105,32 @@ auto ClientReplicator::GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> En
 // ECS Subsystem Registration
 // ============================================================================
 
-void NetworkInterpolationSystem(SystemContext& ctx, float dt) {
+void NetworkInterpolationSystem(
+    ECS::Query<const NetworkInterpolationComponent, const NetworkIdentityComponent, Components::TransformComponent&> query,
+    FrameDt dt
+) {
     ZHLN::ScopedTimer timer("ECS System: Network Interpolation");
-    auto&             reg = ctx.registry;
 
-    for (Entity e: reg.GetEntitiesWith<NetworkInterpolationComponent>()) {
-        const auto* ident = reg.Get<NetworkIdentityComponent>(e);
+    for (Entity e: query.Entities<NetworkInterpolationComponent>()) {
+        const auto* ident = query.Get<NetworkIdentityComponent>(e);
         if (ident != nullptr && ident->isLocalOwner) {
             continue;
         }
-
-        reg.Patch<Components::TransformComponent, NetworkInterpolationComponent>(
-            e, [&](Components::TransformComponent& trans, const NetworkInterpolationComponent& interp) {
-                const float t  = std::min(1.0f, interp.interpolationSpeed * dt);
-                trans.position = trans.position + (interp.targetPosition - trans.position) * t;
-                trans.rotation = trans.rotation.SLERP(interp.targetRotation, t).Normalized();
-            }
-        );
+        const auto* interp = query.Get<NetworkInterpolationComponent>(e);
+        auto* trans = query.Get<Components::TransformComponent>(e);
+        if (trans == nullptr || interp == nullptr) {
+            continue;
+        }
+        const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);
+        trans->position = trans->position + (interp->targetPosition - trans->position) * t;
+        trans->rotation = trans->rotation.SLERP(interp->targetRotation, t).Normalized();
     }
 }
 
 void RegisterNetworkSubsystem(Engine& engine) {
     auto& graph = engine.GetUpdateGraph();
 
-    graph.AddSystem(
-        {.update_func    = [](SystemContext& ctx) { NetworkInterpolationSystem(ctx, ctx.dt); },
-         .name           = "NetworkInterpolationSystem",
-         .access_pattern = {ECS::Write<Components::TransformComponent>(), ECS::Read<NetworkInterpolationComponent>()},
-         .enabled        = true}
-    );
+    graph.AddSystem<&NetworkInterpolationSystem>();
 }
 
 } // namespace ZHLN::Net

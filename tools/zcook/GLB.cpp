@@ -459,7 +459,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         // 2. Unpack and Pack Normals (FLOAT3)
         auto normOffset = static_cast<uint32_t>(binBuffer.size());
-        for (const auto& attr: compiled.attributes) {
+        for (const auto& attr: compiled.tangentFrames) {
             auto  n       = UnpackNormal(attr.normal.data);
             float nFlt[3] = {n[0], n[1], n[2]};
             binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(nFlt), reinterpret_cast<const uint8_t*>(nFlt) + 12);
@@ -472,7 +472,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         // 3. Unpack and Pack Tangents (FLOAT4)
         auto tangOffset = static_cast<uint32_t>(binBuffer.size());
-        for (const auto& attr: compiled.attributes) {
+        for (const auto& attr: compiled.tangentFrames) {
             auto  t       = UnpackNormal(attr.tangent.data);
             float tFlt[4] = {t[0], t[1], t[2], t[3]};
             binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(tFlt), reinterpret_cast<const uint8_t*>(tFlt) + 16);
@@ -485,7 +485,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         // 4. Unpack and Pack UVs (FLOAT2)
         auto uvOffset = static_cast<uint32_t>(binBuffer.size());
-        for (const auto& attr: compiled.attributes) {
+        for (const auto& attr: compiled.surfaces) {
             float u        = HalfToFloat(attr.uv.data & 0xFFFF);
             float v        = HalfToFloat(attr.uv.data >> 16);
             float uvFlt[2] = {u, v};
@@ -499,7 +499,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         // 5. Pack Colors (directly as UNORM8)
         auto colorOffset = static_cast<uint32_t>(binBuffer.size());
-        for (const auto& attr: compiled.attributes) {
+        for (const auto& attr: compiled.surfaces) {
             uint32_t col = attr.color.data;
             binBuffer.insert(binBuffer.end(), reinterpret_cast<const uint8_t*>(&col), reinterpret_cast<const uint8_t*>(&col) + 4);
         }

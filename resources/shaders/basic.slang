@@ -1,7 +1,7 @@
 import common;
 import material_model;
+import math.transform;
 import pbr_helpers;
-
 
 struct PSOutput {
     float4 color : SV_Target0;
@@ -9,97 +9,19 @@ struct PSOutput {
     float4 normalRoughness : SV_Target2;
     float4 emissive : SV_Target3;
     float4 clearcoat : SV_Target4;
+    float4 anisotropy : SV_Target5;
+    float4 sheen : SV_Target6;
 };
 
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint vertexId, uint instanceId, out float4 worldPos, out float4 activeVPPos
 ) {
-    SceneGeometryVertex output;
-
     uint instId       = (obj.instanceId != 4294967295u) ? obj.instanceId : instanceId;
     InstanceData inst = scene.g_instances[instId];
 
-    uint actualVertexId = inst.fetchIndex(vertexId);
-    actualVertexId = min(actualVertexId, max(inst.vertexCount, 1u) - 1u);
-
+    SceneGeometryVertex output = inst.EvaluateVertex<withMotion>(inst.fetchRasterIndex(vertexId), worldPos);
+    output.instanceId = instId;
     float4x4 activeVP = inst.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-
-    float3 position     = inst.fetchPosition(actualVertexId);
-    float2 localUV      = float2(0, 0);
-    float4 localColor   = float4(1, 1, 1, 1);
-    float3 localNormal  = float3(0, 1, 0);
-    float4 localTangent = float4(1, 0, 0, 1);
-
-    if (inst.attrAddress != 0) {
-        VertexAttributes attributes = inst.fetchAttributes(actualVertexId);
-        localNormal                 = attributes.unpackedNormal.xyz;
-        localTangent                = attributes.unpackedTangent;
-        localUV                     = attributes.unpackedUV;
-        localColor                  = attributes.unpackedColor;
-    }
-
-    float4 localPos = float4(position, 1.0f);
-
-    uint4 localJoints = uint4(0, 0, 0, 0);
-    float4 weights    = float4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    if (inst.isSkinned && inst.skinAddress != 0) {
-        SkinVertex skin = inst.fetchSkin(actualVertexId);
-        localJoints     = skin.unpackedJoints;
-        weights         = skin.unpackedWeights;
-    }
-
-    uint vertexCount      = inst.vertexCount;
-    uint morphOffset      = inst.morphOffset;
-    uint activeMorphCount = inst.activeMorphCount;
-    float4 morphWeights   = inst.morphWeights;
-
-    if (activeMorphCount > 0) {
-        localPos.xyz += GetMorphDisplacement(actualVertexId, vertexCount, morphOffset, activeMorphCount, morphWeights);
-    }
-
-    float3x3 world3x3        = (float3x3) inst.world;
-    float4x4 worldMatrix     = inst.world;
-    float4x4 prevWorldMatrix = inst.prevWorld;
-    uint jointOffset         = inst.jointOffset;
-
-    if (inst.isSkinned) {
-        worldPos           = mul(worldMatrix, SkinPosition(localPos, localJoints, weights, jointOffset));
-        output.normal      = normalize(mul(world3x3, SkinDirection(localNormal, localJoints, weights, jointOffset)));
-        output.tangent.xyz = normalize(mul(world3x3, SkinDirection(localTangent.xyz, localJoints, weights, jointOffset)));
-    } else {
-        worldPos           = mul(worldMatrix, localPos);
-        output.normal      = normalize(mul(world3x3, localNormal));
-        output.tangent.xyz = normalize(mul(world3x3, localTangent.xyz));
-    }
-
-    output.tangent.w = localTangent.w;
-    output.uv        = localUV;
-
-    output.color           = localColor;
-    output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
-    output.baseColorFactor = inst.baseColorFactor;
-    output.emissiveFactor      = inst.emissiveFactor;
-    output.pbrFactors          = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
-    output.alphaMode           = inst.alphaMode;
-    output.transmissionParams    = inst.transmissionParams();
-    output.volumeParams          = inst.volumeParams();
-    output.volumeParams.z        = AverageWorldScale(inst.world);
-    output.transmissionTextures  = inst.transmissionTextures();
-    output.coatParams            = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
-    output.coatTextures          = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
-
-    if (withMotion) {
-        float4 prevWorldPos;
-        if (inst.isSkinned) {
-            prevWorldPos = mul(prevWorldMatrix, SkinPositionPrev(localPos, localJoints, weights, jointOffset));
-        } else {
-            prevWorldPos = mul(prevWorldMatrix, localPos);
-        }
-        output.currClip = mul(activeVP, worldPos);
-        output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
-    }
-
     activeVPPos = mul(activeVP, worldPos);
     return output;
 }
@@ -129,88 +51,67 @@ ForwardGeometryOutput VSMainForward(uint vertexId: SV_VulkanVertexID, uint insta
 }
 
 void PSShadow(ShadowGeometryOutput input) {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, float4(1.0f), input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 }
 
-
-PSOutput PSMain(GBufferGeometryOutput input) {
+PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     PSOutput output;
-
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float metallicFactor   = input.pbrFactors.x;
-    float roughnessFactor  = input.pbrFactors.y;
-    float alphaCutoff      = input.pbrFactors.z;
-    uint alphaMode         = input.alphaMode;
-
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
-    float3 emissive    = emissiveMap * input.emissiveFactor.rgb;
-
-    if (alphaMode == 1 && albedo.a < alphaCutoff) {
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
+    float4 albedo = SampleMaterialAlbedo<ClearCoatMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
         discard;
     }
 
-    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    if (material.isUnlit) {
+        // KHR_materials_unlit uses only baseColorFactor * baseColorTexture *
+        // vertex color. Emission, normals, PBR and AO are not shading inputs.
+        // Keep the depth/velocity in the opaque G-buffer so glass can sample
+        // this surface in the subsequent opaque scene copy.
+        float3 safeNormal = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+        output.color           = albedo;
+        output.emissive        = float4(0.0f);
+        output.normalRoughness = float4(PackNormalOctahedron(safeNormal) * 0.5f + 0.5f, 1.0f, 0.0f);
+        output.clearcoat       = float4(0.0f);
+        output.anisotropy      = float4(0.0f, 0.0f, 1.0f, 1.0f); // Reserved G-buffer unlit marker.
+        output.sheen           = float4(0.0f);
+    } else {
+        // The masked pass used a higher floor than opaque or translucent scene
+        // fragments. Keep the floor in the sampling input, not the material type.
+        float3 N = normalize(input.normal);
+        float3 T = OrthogonalTangent(N, input.tangent.xyz);
+        float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+        // glTF double-sided lighting reverses the *entire* shading frame on a
+        // backface. Flipping N before computing B would leave the normal-map X
+        // axis unflipped; flip all three axes after constructing the front frame.
+        float facing = isFrontFace ? 1.0f : -1.0f;
+        material.roughnessFloor     = input.alphaMode == 1 ? 0.045f : 0.001f;
+        material.hasTangent         = any(input.tangent.xyz);
+        material.geometricNormal    = N * facing;
+        material.tangentDirection   = T * facing;
+        material.bitangentDirection = B * facing;
+        material.coatParams         = input.coatParams;
+        material.coatTextures       = input.coatTextures;
+        material.anisotropyParams   = input.anisotropyParams;
+        material.anisotropyTexIndex = input.anisotropyTexIndex;
 
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
-
-    if (input.alphaMode == 1) {
-        roughness = max(roughness, 0.045f);
+        float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
+        SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
+        output.color           = float4(surface.albedo, surface.alpha);
+        output.emissive        = float4(surface.emissive, 1.0f);
+        float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
+        output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
+        output.clearcoat       = surface.clearcoat;
+        output.anisotropy      = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
+        output.sheen           = surface.sheen;
     }
-
-    float3 geometric = normalize(input.normal);
-    float3 worldNormal = geometric;
-    float3 coatNormal  = geometric;
-    float3 T = float3(1.0f, 0.0f, 0.0f);
-    float3 B = float3(0.0f, 1.0f, 0.0f);
-    bool hasTangent = any(input.tangent.xyz);
-    if (hasTangent) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, geometric) * geometric;
-        if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(geometric, abs(geometric.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
-        }
-        T = normalize(T_unnorm);
-        B = normalize(cross(geometric, T) * input.tangent.w);
-    }
-
-    if (indices.y != 2 && hasTangent) {
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
-    }
-
-    float coatFactor = input.coatParams.x;
-    float coatRough  = input.coatParams.y;
-    if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
-        coatFactor *= scene.globalTextures[input.coatTextures.x].Sample(scene.defaultSampler, input.uv).r;
-    }
-    if (coatFactor > 0.0f && input.coatTextures.y != 0xFFFFu) {
-        coatRough *= scene.globalTextures[input.coatTextures.y].Sample(scene.defaultSampler, input.uv).g;
-    }
-    coatFactor = saturate(coatFactor);
-    coatRough  = saturate(coatRough);
-    if (coatFactor > 1.0f / 255.0f && input.coatTextures.z != 0xFFFFu && hasTangent) {
-        float3 mapN = scene.globalTextures[input.coatTextures.z].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        mapN.xy *= input.coatParams.z;
-        coatNormal = normalize(mapN.x * T + mapN.y * B + mapN.z * geometric);
-    }
-    float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
-    output.clearcoat  = (coatFactor > 1.0f / 255.0f) ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    output.color           = float4(albedo.rgb, albedo.a);
-    output.emissive        = float4(emissive, 1.0f);
-    float2 packedNormal    = PackNormalOctahedron(worldNormal) * 0.5f + 0.5f;
-    output.normalRoughness = float4(packedNormal, roughness, metallic);
 
     float currW    = max(input.currClip.w, 0.0001f);
     float prevW    = max(input.prevClip.w, 0.0001f);
@@ -222,48 +123,10 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     return output;
 }
 
-
-
-float3 RotateVector(float3 V, float3 lightDir) {
-    float lenB = length(lightDir);
-    if (lenB < 0.001f)
-        return V;
-    float3 A     = normalize(float3(0.5f, 1.0f, 0.2f));
-    float3 B     = lightDir / lenB;
-    float3 q_xyz = cross(B, A);
-    float q_w    = 1.0f + dot(A, B);
-    float q_len  = sqrt(dot(q_xyz, q_xyz) + q_w * q_w);
-    if (q_len > 0.0001f) {
-        q_xyz /= q_len;
-        q_w /= q_len;
-        return V + 2.0f * cross(q_xyz, cross(q_xyz, V) + q_w * V);
-    }
-    return V;
-}
-
 float3 RgbMix(float3 base, float3 layer, float3 rgbAlpha) {
     float3 w = max(rgbAlpha, 0.0f);
     float wMax = min(max(w.r, max(w.g, w.b)), 1.0f);
     return (1.0f - wMax) * base + w * layer;
-}
-
-float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, float2 uv) {
-    mapNormal = float3(mapNormal.xy * scale, mapNormal.z);
-    float3 dp1 = ddx(worldPos);
-    float3 dp2 = ddy(worldPos);
-    float2 duv1 = ddx(uv);
-    float2 duv2 = ddy(uv);
-    float3 T = dp1 * duv2.y - dp2 * duv1.y;
-    float t2 = dot(T, T);
-    if (t2 < 1.0e-8f) {
-        return N;
-    }
-    T = T * rsqrt(t2);
-    float3 B = cross(N, T);
-    if (dot(cross(T, B), N) < 0.0f) {
-        B = -B;
-    }
-    return SafeNormalize(T * mapNormal.x + B * mapNormal.y + N * mapNormal.z, N);
 }
 
 float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, bool isFrontFace) {
@@ -276,41 +139,50 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     uint4 indices = input.materialIndices;
     if (indices.y != 2u) {
-        float3 mapN = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos, input.uv);
+        float3 mapN = SampleMaterialTexture(indices.y, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerNormal), input.samplerCodes, kSamplerNormal).rgb * 2.0f - 1.0f;
+        // Account for rotated/mirrored UVs before reconstructing the tangent frame.
+        MaterialSampleInputs normalInput = MakeMaterialInputs(input.uv, input.color, indices, input.samplerCodes,
+                                                               input.baseColorFactor, input.emissiveFactor, input.pbrFactors, 0u);
+        ConfigureSceneMaterial(normalInput, input.uv1, input.instanceId);
+        mapN = TransformNormalSample(mapN, normalInput, kSamplerNormal);
+        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos,
+                          SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerNormal));
     }
 
     float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
-    float3 R = reflect(-V, N);
 
-    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float4 pbr = SampleMaterialTexture(indices.z, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerPbr), input.samplerCodes, kSamplerPbr);
     float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
+    float metallic  = saturate(pbr.b * input.pbrFactors.x);
 
     float4 params = input.transmissionParams;
     uint4 tex = input.transmissionTextures;
     float iridescence = saturate(params.y);
     if (tex.y != 0xFFFFu) {
-        iridescence *= scene.globalTextures[tex.y].Sample(scene.defaultSampler, input.uv).r;
+        iridescence *= SampleMaterialTexture(tex.y, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerIridescence), input.samplerCodes, kSamplerIridescence).r;
     }
     float thicknessNm = params.z;
     if (tex.x != 0xFFFFu) {
-        float g = scene.globalTextures[tex.x].Sample(scene.defaultSampler, input.uv).g;
+        float g = SampleMaterialTexture(tex.x, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerFilmThickness), input.samplerCodes, kSamplerFilmThickness).g;
         thicknessNm = lerp(params.w, params.z, g);
     }
 
-    float3 F0 = float3(0.04f, 0.04f, 0.04f);
-    float3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float ior = max(input.volumeParams.y, 1.0f);
+    float eta = (ior - 1.0f) / (ior + 1.0f);
+    float3 F0 = lerp(float3(eta * eta), albedo, metallic);
+    // A metal reflects rather than transmitting; at IOR 1 the dielectric
+    // component alone has no index boundary and must not reflect air.
+    float3 F = (ior > 1.0f || metallic > 0.0f) ? FresnelSchlickRoughness(NdotV, F0, roughness) : float3(0.0f);
     if (iridescence > 0.0f && thicknessNm > 0.0f) {
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
     }
     F = max(F, 0.0f);
 
-    float ior = max(input.volumeParams.y, 1.0001f);
     float thickness = input.volumeParams.x * input.volumeParams.z;
     if (tex.z != 0xFFFFu) {
-        thickness *= scene.globalTextures[tex.z].Sample(scene.defaultSampler, input.uv).g;
+        thickness *= SampleMaterialTexture(tex.z, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerVolumeThickness), input.samplerCodes, kSamplerVolumeThickness).g;
     }
     float2 refractUV = screenUV;
     if (thickness > 1.0e-5f) {
@@ -324,46 +196,102 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
         }
     }
 
-    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, 0.0f).rgb * albedo;
-    float3 specular = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
+    // A zero-thickness (thin-walled) surface still scatters transmitted light.
+    // No index boundary at IOR 1 means no microfacet refraction, at any roughness.
+    float transRoughness = roughness * saturate(2.0f * (ior - 1.0f));
+    // The frame and transmission target share an extent. The sampler clamps
+    // the fractional max LOD to the last mip for non-power-of-two targets.
+    float maxLod = log2(max(scene.frame.screenResolution.x, scene.frame.screenResolution.y));
+    float lod = transRoughness * maxLod;
+    // A metallic surface absorbs refracted light. The extension's linear R
+    // channel independently modulates optical transmission, not alpha coverage.
+    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, lod).rgb * albedo * (1.0f - metallic);
+    float3 T = OrthogonalTangent(N, input.tangent.xyz);
+    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
+    float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
+    float3 R = AnisotropicReflection(N, V, cross(N, anisotropicT), roughness, aniso.z);
+    float3 specular = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z) *
+                      scene.frame.ambientExposure;
     float transmission = saturate(params.x);
-    float3 color = lerp(albedo * scene.frame.ambientExposure * 0.5f, transmitted, transmission);
+    if (tex.w != 0xFFFFu) {
+        transmission *= SampleMaterialTexture(tex.w, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerTransmission),
+                                              input.samplerCodes, kSamplerTransmission).r;
+    }
+    float3 diffuse = albedo * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    float3 color = lerp(diffuse, transmitted, transmission);
     color = RgbMix(color, specular, F);
     return float4(min(color, 32768.0f), 1.0f);
 }
 
 float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
-    uint4 indices          = input.materialIndices;
-    float4 baseColorFactor = input.baseColorFactor;
-    float roughnessFactor  = input.pbrFactors.y;
-
-    float4 albedo      = scene.globalTextures[indices.x].Sample(scene.defaultSampler, input.uv) * baseColorFactor * input.color;
-    float3 emissiveMap = scene.globalTextures[indices.w].Sample(scene.defaultSampler, input.uv).rgb;
-
-    float3 emissive = emissiveMap * input.emissiveFactor.rgb * albedo.a;
+    MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
+                                                        input.baseColorFactor, input.emissiveFactor, input.pbrFactors, input.alphaMode);
+    ConfigureSceneMaterial(material, input.uv1, input.instanceId);
+    float4 albedo = SampleMaterialAlbedo<StandardPBRMaterial>(material);
+    if (RejectMaskedAlpha(material, albedo.a)) {
+        discard;
+    }
+    // BLEND still composites by coverage; OPAQUE and MASK write full alpha.
+    // None of the lit paths (including emissive or fullBright) apply to unlit.
+    if (material.isUnlit) {
+        return float4(albedo.rgb, material.alphaMode == 2u ? albedo.a : 1.0f);
+    }
+    float3 sampledEmissive = SampleMaterialEmissive<StandardPBRMaterial>(material);
+    float3 emissive = sampledEmissive * albedo.a;
 
     if (scene.frame.fullBright != 0) {
-        return float4(albedo.rgb + emissive, albedo.a);
+        return float4(albedo.rgb + emissive, input.alphaMode == 2u ? albedo.a : 1.0f);
     }
 
     float4 params = input.transmissionParams;
     float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     if (params.x > 0.0f) {
-        return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
+        float4 color = ShadeTransmission(input, N, albedo.rgb, isFrontFace);
+        color.a = input.alphaMode == 2u ? albedo.a : 1.0f;
+        return color;
     }
+
+    // Transmission orients its normal inside ShadeTransmission. Non-transmitting
+    // two-sided surfaces need the same backface rule for both Fresnel and the
+    // anisotropic tangent frame (as in the deferred pass).
+    float3 T = OrthogonalTangent(N, input.tangent.xyz);
+    float3 B = cross(N, T) * (input.tangent.w < 0.0f ? -1.0f : 1.0f);
+    float facing = isFrontFace ? 1.0f : -1.0f;
+    N *= facing;
+    T *= facing;
+    B *= facing;
 
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
     float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV     = saturate(dot(N, V));
-    float3 R        = reflect(-V, N);
-    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
-    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * input.pbrFactors.x;
+    // Forward shading uses the interpolated normal; its transmission branch
+    // applies a separate derivative-based normal map before reaching here.
+    material.geometricNormal = N;
+    SurfaceInteraction surface = EvaluateMaterial<StandardPBRMaterial>(material, albedo, sampledEmissive);
+    float roughness = surface.roughness;
+    float metallic  = surface.metallic;
+    float4 aniso = SampleMaterialAnisotropy(N, T, B, SceneTextureUV(input.uv, input.uv1, input.instanceId, kSamplerAnisotropy), input.anisotropyParams, input.anisotropyTexIndex, input.samplerCodes);
+    float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
+    float3 anisotropicB = cross(N, anisotropicT);
+    float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);
     float3 F0       = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallic);
+    float3 F_rough  = FresnelSchlickRoughness(NdotV, F0, roughness);
     float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
-    float3 FssEss   = FresnelSchlickRoughness(NdotV, F0, roughness) * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
-    float3 specularIBL = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure * FssEss;
-    float3 diffuseIBL  = albedo.rgb * scene.frame.ambientExposure * 0.5f;
-    return float4(diffuseIBL + specularIBL + emissive, albedo.a);
+    // The split-sum LUT already integrates Schlick's angle-dependent Fresnel.
+    // Its A coefficient multiplies F0, not a second grazing-angle evaluation.
+    float3 FssEss   = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+    float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
+    float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
+    float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;
+    float3 litBase = (diffuseIBL + specularIBL) * surface.occlusion;
+    float3 sheenColor = surface.sheen.rgb;
+    if (any(sheenColor > 0.0f)) {
+        float attenuation = SheenAlbedoScaling(sheenColor, surface.sheen.a, NdotV, NdotV);
+        float3 sheenEnv = scene.prefilteredMap.SampleLevel(scene.clampSampler, reflect(-V, N), max(surface.sheen.a, 0.2f) * 5.0f).rgb;
+        litBase = litBase * attenuation + sheenEnv * scene.frame.ambientExposure *
+                  SheenEnvironmentWeight(sheenColor, NdotV) * surface.occlusion;
+    }
+    return float4(litBase + emissive, albedo.a);
 }

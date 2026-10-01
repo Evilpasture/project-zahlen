@@ -95,7 +95,8 @@ class CommandRing {
 
     CommandRing(CommandRing&& other) noexcept:
         _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::move(other._pools)), _cmds(std::move(other._cmds)),
-        _fences(std::exchange(other._fences, {})), _index(other._index.exchange(0, std::memory_order::relaxed)) {
+        _fences(std::exchange(other._fences, {})), _pending(std::exchange(other._pending, {})),
+        _index(other._index.exchange(0, std::memory_order::relaxed)) {
     }
 
     auto operator=(CommandRing&& other) noexcept -> CommandRing& {
@@ -105,6 +106,7 @@ class CommandRing {
             _pools  = std::move(other._pools);
             _cmds   = std::move(other._cmds);
             _fences = std::exchange(other._fences, {});
+            _pending = std::exchange(other._pending, {});
             _index.store(other._index.exchange(0, std::memory_order::relaxed), std::memory_order::relaxed);
         }
         return *this;
@@ -139,9 +141,10 @@ class CommandRing {
         if (_device != VK_NULL_HANDLE) {
             for (size_t i = 0; i < Capacity; ++i) {
                 if (_fences[i] != VK_NULL_HANDLE) {
-                    vkWaitForFences(_device, 1, &_fences[i], VK_TRUE, UINT64_MAX);
+                    if (_pending[i]) { vkWaitForFences(_device, 1, &_fences[i], VK_TRUE, UINT64_MAX); }
                     vkDestroyFence(_device, _fences[i], nullptr);
                     _fences[i] = VK_NULL_HANDLE;
+                    _pending[i] = false;
                 }
                 _pools[i] = {};
                 _cmds[i]  = {};
@@ -153,17 +156,35 @@ class CommandRing {
     struct Slot {
         CommandBuffer<QType> cmd;
         VkFence              fence;
+        uint32_t             index;
     };
 
-    [[nodiscard]] auto Acquire() noexcept -> Slot {
-        uint32_t slot_idx = _index.fetch_add(1, std::memory_order::relaxed) % Capacity;
+    [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
+        const uint32_t slotIndex = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
+        if (_pending[slotIndex]) {
+            if (const VkResult waited = vkWaitForFences(_device, 1, &_fences[slotIndex], VK_TRUE, UINT64_MAX); waited != VK_SUCCESS) {
+                return std::unexpected(ToFrameError(waited));
+            }
+            _pending[slotIndex] = false;
+        }
+        _pools[slotIndex].Reset();
+        return Slot {_cmds[slotIndex], _fences[slotIndex], slotIndex};
+    }
 
-        vkWaitForFences(_device, 1, &_fences[slot_idx], VK_TRUE, UINT64_MAX);
-        vkResetFences(_device, 1, &_fences[slot_idx]);
+    [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
+        if (const VkResult reset = vkResetFences(_device, 1, &slot.fence); reset != VK_SUCCESS) {
+            return std::unexpected(ToFrameError(reset));
+        }
+        auto submitted = QueueSubmit(queue, std::move(cmds), {}, {}, slot.fence);
+        if (submitted) { _pending[slot.index] = true; }
+        return submitted;
+    }
 
-        _pools[slot_idx].Reset();
-
-        return {_cmds[slot_idx], _fences[slot_idx]};
+    [[nodiscard]] auto Submit(StagingRingBuffer& ringBuffer, Slot slot, ExecutableCommands cmds) noexcept -> uint64_t {
+        if (vkResetFences(_device, 1, &slot.fence) != VK_SUCCESS) { return 0; }
+        const uint64_t value = ringBuffer.Submit(std::move(cmds), slot.fence);
+        if (value != 0) { _pending[slot.index] = true; }
+        return value;
     }
 
   private:
@@ -171,40 +192,42 @@ class CommandRing {
     std::array<CommandPool<QType>, Capacity>   _pools {};
     std::array<CommandBuffer<QType>, Capacity> _cmds {};
     std::array<VkFence, Capacity>              _fences {};
+    std::array<bool, Capacity>                 _pending {};
     std::atomic<uint32_t>                      _index {0};
 };
 
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, RecordFn&& record, bool blockCPU = true) {
-    auto [cmd, fence] = ring.Acquire();
-    {
-        CommandBufferGuard guard(cmd);
-        std::forward<RecordFn>(record)(cmd);
-    }
+    auto acquired = ring.Acquire();
+    if (!acquired) { return; }
+    auto slot = *acquired;
+    auto recording = CommandRecorder::Begin(slot.cmd);
+    if (!recording) { return; }
+    std::forward<RecordFn>(record)(recording->Handle());
+    auto executable = std::move(*recording).End();
+    if (!executable) { return; }
 
-    VkQueue queue = ResolveQueue<QType>(ctx);
-
-    if (auto res =
-            QueueSubmit(queue, cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence);
-        !res) [[unlikely]] {
+    if (auto res = ring.Submit(ResolveQueue<QType>(ctx), slot, std::move(*executable)); !res) [[unlikely]] {
         return;
     }
 
     if (blockCPU) {
-        vkWaitForFences(ctx.Device(), 1, &fence, VK_TRUE, UINT64_MAX);
+        vkWaitForFences(ctx.Device(), 1, &slot.fence, VK_TRUE, UINT64_MAX);
     }
 }
 
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
 void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record) {
-    auto [cmd, fence] = ring.Acquire();
-    {
-        CommandBufferGuard guard(cmd);
-        std::forward<RecordFn>(record)(cmd);
-    }
+    auto acquired = ring.Acquire();
+    if (!acquired) { return; }
+    auto slot = *acquired;
+    auto recording = CommandRecorder::Begin(slot.cmd);
+    if (!recording) { return; }
+    std::forward<RecordFn>(record)(recording->Handle());
+    auto executable = std::move(*recording).End();
+    if (!executable) { return; }
 
-    uint64_t submit_val = ringBuffer.Submit(cmd, fence);
-
+    const uint64_t submit_val = ring.Submit(ringBuffer, slot, std::move(*executable));
     if (submit_val == 0) [[unlikely]] {
         return;
     }

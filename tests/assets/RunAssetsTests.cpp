@@ -21,13 +21,13 @@
 auto RunCookerSuite() -> ZHLN::Test::TestStats;
 auto RunPackagingSuite() -> ZHLN::Test::TestStats;
 auto RunMeshletsSuite() -> ZHLN::Test::TestStats;
-auto RunRadianceSuite() -> ZHLN::Test::TestStats;
+auto RunEnvironmentImageSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunCookerSuite,
         RunPackagingSuite,
         RunMeshletsSuite,
-        RunRadianceSuite
+        RunEnvironmentImageSuite
     );
 }

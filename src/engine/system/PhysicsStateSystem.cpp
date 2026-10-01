@@ -6,29 +6,29 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <vector>
 
 namespace ZHLN::Tests {
-static void VerifyRealVisualInterpolation(ECS::Registry& reg, PhysicsContext& physics, float alpha) noexcept {
+static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
+                                          const PhysicsContext& physics, float alpha) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
     }
 
-    auto  entities = reg.GetEntitiesWith<Components::PhysicsComponent>();
+    auto  entities = query.Entities<Components::PhysicsComponent>();
     if (entities.empty()) {
         return;
     }
     testsRun = true;
 
-    auto physComps     = reg.GetRawArray<Components::PhysicsComponent>();
+    auto physComps     = query.Raw<Components::PhysicsComponent>();
     float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
 
-    std::vector<Entity>                     handles;
+    std::vector<Physics::BodyHandle>        handles;
     std::vector<size_t>                     sourceIndex;
     std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.reserve(entities.size());
@@ -48,7 +48,7 @@ static void VerifyRealVisualInterpolation(ECS::Registry& reg, PhysicsContext& ph
             continue;
         }
         Entity      e     = entities[sourceIndex[j]];
-        const auto* trans = reg.Get<Components::TransformComponent>(e);
+        const auto* trans = query.Get<Components::TransformComponent>(e);
         if (trans == nullptr) {
             continue;
         }
@@ -67,18 +67,14 @@ static void VerifyRealVisualInterpolation(ECS::Registry& reg, PhysicsContext& ph
 
 namespace ZHLN {
 
-void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
-    engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry().AliveQuery());
-}
+void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsComponent, Components::TransformComponent&> query,
+                                       ECS::Res<PhysicsContext> physics, FrameAlpha alpha) noexcept {
+    auto entities = query.Entities<Components::PhysicsComponent>();
+    auto phys     = query.Raw<Components::PhysicsComponent>();
 
-void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
-    auto& reg      = ctx.registry;
-    auto  entities = reg.GetEntitiesWith<Components::PhysicsComponent>();
-    auto  phys     = reg.GetRawArray<Components::PhysicsComponent>();
+    float clampedAlpha = std::clamp(alpha.value, 0.0f, 1.0f);
 
-    float clampedAlpha = std::clamp(ctx.alpha, 0.0f, 1.0f);
-
-    thread_local std::vector<Entity>                     handles;
+    thread_local std::vector<Physics::BodyHandle>        handles;
     thread_local std::vector<size_t>                     sourceIndex;
     thread_local std::vector<Physics::BodyStateSnapshot> snapshots;
     handles.clear();
@@ -95,14 +91,14 @@ void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
     }
 
     snapshots.resize(handles.size());
-    ctx.physics->FillBodyStates(handles, snapshots);
+    physics->FillBodyStates(handles, snapshots);
 
     for (size_t j = 0; j < snapshots.size(); ++j) {
         if (!snapshots[j].valid) {
             continue;
         }
         Entity e     = entities[sourceIndex[j]];
-        auto*  trans = reg.Get<Components::TransformComponent>(e);
+        auto*  trans = query.Get<Components::TransformComponent>(e);
         if (trans == nullptr) {
             continue;
         }
@@ -114,7 +110,7 @@ void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyRealVisualInterpolation(ctx.registry, *ctx.physics, ctx.alpha);
+        ZHLN::Tests::VerifyRealVisualInterpolation(query, *physics, alpha.value);
     }
 }
 

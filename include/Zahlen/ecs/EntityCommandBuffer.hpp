@@ -12,7 +12,11 @@ namespace ZHLN::ECS {
 
 class EntityCommandBuffer {
   public:
-    explicit EntityCommandBuffer(Registry& reg): _registry(&reg) {
+    // The optional destroy operation is chosen once by the owning scene.
+    // Plain ECS buffers destroy immediately; Engine buffers mark for cleanup.
+    using DestroyFn = void (*)(Registry&, Entity);
+
+    explicit EntityCommandBuffer(Registry& reg, DestroyFn destroy = nullptr): _registry(&reg), _destroy(destroy) {
     }
     ~EntityCommandBuffer() {
         Reset();
@@ -104,6 +108,7 @@ class EntityCommandBuffer {
     };
 
     Registry*            _registry = nullptr;
+    DestroyFn            _destroy  = nullptr;
     std::vector<Command> _commands;
     uint32_t             _tempIndexCounter = 0xF0000000;
 };

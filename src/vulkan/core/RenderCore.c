@@ -1124,7 +1124,7 @@ VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
 
 [[nodiscard]]
 uint32_t ZHLN_DetectShaderViewMask(const ZHLN_ShaderDesc* const restrict desc) {
-    if (desc->code == nullptr || desc->size == 0) {
+    if (desc == nullptr || desc->code == nullptr || desc->size == 0 || desc->size % sizeof(uint32_t) != 0) {
         return 0;
     }
 
@@ -1146,169 +1146,129 @@ uint32_t ZHLN_DetectShaderViewMask(const ZHLN_ShaderDesc* const restrict desc) {
     return view_mask;
 }
 
-VkShaderModule ZHLN_CreateShaderModule(const VkDevice device, const ZHLN_ShaderDesc* const restrict desc) {
-    if (!desc->code || desc->size == 0 || desc->size % 4 != 0) {
-        return nullptr;
-    }
-
-    const VkShaderModuleCreateInfo info = {
-        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = desc->size,
-        .pCode    = desc->code,
-    };
-
-    VkShaderModule module = nullptr;
-    if (vkCreateShaderModule(device, &info, nullptr, &module) != VK_SUCCESS) {
-        return nullptr;
-    }
-
-    return module;
+// Check the byte span here; the driver validates full SPIR-V during pipeline
+// creation now that there is no separate driver shader-module allocation.
+static bool ZHLN_ValidShaderDesc(const ZHLN_ShaderDesc* const desc) {
+    return desc->code != nullptr && desc->size > 0 && desc->size % sizeof(uint32_t) == 0;
 }
 
-[[nodiscard]]
-bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, ZHLN_ShaderStages* const restrict out) {
-    const bool has_mesh = desc->mesh.code != nullptr && desc->mesh.size > 0;
+static bool ZHLN_AbsentShaderDesc(const ZHLN_ShaderDesc* const desc) {
+    return desc->code == nullptr && desc->size == 0;
+}
 
-    if (desc->vert.code != nullptr && desc->vert.size > 0) {
-        out->vert.handle = ZHLN_CreateShaderModule(desc->device, &desc->vert);
-        if (out->vert.handle == nullptr) {
-            return false;
-        }
-        out->vert.stage     = VK_SHADER_STAGE_VERTEX_BIT;
-        out->vert.view_mask = 0;
-    } else if (!has_mesh) {
+static bool ZHLN_InitShader(const ZHLN_ShaderDesc* const desc, const VkShaderStageFlagBits stage, ZHLN_Shader* const out) {
+    if (!ZHLN_ValidShaderDesc(desc)) {
         return false;
     }
 
-    if (has_mesh) {
-        out->mesh.handle = ZHLN_CreateShaderModule(desc->device, &desc->mesh);
-        if (out->mesh.handle == nullptr) {
-            ZHLN_DestroyShaderStages(desc->device, out);
-            return false;
-        }
-        out->mesh.stage     = VK_SHADER_STAGE_MESH_BIT_EXT;
-        out->mesh.view_mask = 0;
+    *out = (ZHLN_Shader) {
+        .code      = desc->code,
+        .size      = desc->size,
+        .stage     = stage,
+        .view_mask = ZHLN_DetectShaderViewMask(desc),
+    };
 
-        if (desc->task.code != nullptr && desc->task.size > 0) {
-            out->task.handle = ZHLN_CreateShaderModule(desc->device, &desc->task);
-            if (out->task.handle == nullptr) {
-                ZHLN_DestroyShaderStages(desc->device, out);
-                return false;
-            }
-            out->task.stage     = VK_SHADER_STAGE_TASK_BIT_EXT;
-            out->task.view_mask = 0;
-        }
-    }
-
-    if (desc->frag.code && desc->frag.size > 0) {
-        out->frag.handle = ZHLN_CreateShaderModule(desc->device, &desc->frag);
-        if (out->frag.handle == nullptr) {
-            ZHLN_DestroyShaderStages(desc->device, out);
-            return false;
-        }
-        out->frag.stage     = VK_SHADER_STAGE_FRAGMENT_BIT;
-        out->frag.view_mask = 0;
+    if (desc->entry_point != nullptr) {
+        strncpy(out->entry_point, desc->entry_point, sizeof(out->entry_point) - 1);
+    } else if (ZHLN_CopySpirvEntryPoint(desc->code, desc->size, out->entry_point, sizeof(out->entry_point))) {
+        return true;
     } else {
-        out->frag.handle    = nullptr;
-        out->frag.stage     = (VkShaderStageFlagBits) 0;
-        out->frag.view_mask = 0;
-    }
-
-    const ZHLN_ShaderDesc* descs[4]   = {&desc->vert, &desc->frag, &desc->task, &desc->mesh};
-    ZHLN_Shader*           targets[4] = {&out->vert, &out->frag, &out->task, &out->mesh};
-
-    for (int i = 0; i < 4; ++i) {
-        if (targets[i]->handle == nullptr) {
-            continue;
+        const char* fallback = "main";
+        switch (stage) {
+            case VK_SHADER_STAGE_VERTEX_BIT: fallback = "VSMain"; break;
+            case VK_SHADER_STAGE_FRAGMENT_BIT: fallback = "PSMain"; break;
+            case VK_SHADER_STAGE_TASK_BIT_EXT: fallback = "TaskMain"; break;
+            case VK_SHADER_STAGE_MESH_BIT_EXT: fallback = "MeshMain"; break;
+            default: break;
         }
-
-        if (descs[i]->entry_point) {
-            strncpy(targets[i]->entry_point, descs[i]->entry_point, 63);
-        } else {
-            if (ZHLN_CopySpirvEntryPoint(descs[i]->code, descs[i]->size, targets[i]->entry_point, sizeof(targets[i]->entry_point))) {
-                continue;
-            }
-            if (targets[i]->stage == VK_SHADER_STAGE_VERTEX_BIT) {
-                strncpy(targets[i]->entry_point, "VSMain", 63);
-            } else if (targets[i]->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
-                strncpy(targets[i]->entry_point, "PSMain", 63);
-            } else if (targets[i]->stage == VK_SHADER_STAGE_TASK_BIT_EXT) {
-                strncpy(targets[i]->entry_point, "TaskMain", 63);
-            } else if (targets[i]->stage == VK_SHADER_STAGE_MESH_BIT_EXT) {
-                strncpy(targets[i]->entry_point, "MeshMain", 63);
-            } else {
-                strncpy(targets[i]->entry_point, "main", 63);
-            }
-        }
+        strncpy(out->entry_point, fallback, sizeof(out->entry_point) - 1);
     }
+    out->entry_point[sizeof(out->entry_point) - 1] = '\0';
     return true;
 }
 
-void ZHLN_DestroyShaderModule(const VkDevice device, const VkShaderModule module) {
-    if (module != nullptr) {
-        vkDestroyShaderModule(device, module, nullptr);
+[[nodiscard]]
+bool ZHLN_InitShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, ZHLN_ShaderStages* const restrict out) {
+    if (desc == nullptr || out == nullptr) {
+        return false;
     }
+
+    *out = (ZHLN_ShaderStages) {};
+    ZHLN_ShaderStages stages = {};
+    if (!ZHLN_AbsentShaderDesc(&desc->vert) && !ZHLN_InitShader(&desc->vert, VK_SHADER_STAGE_VERTEX_BIT, &stages.vert)) {
+        return false;
+    }
+    if (!ZHLN_AbsentShaderDesc(&desc->mesh) && !ZHLN_InitShader(&desc->mesh, VK_SHADER_STAGE_MESH_BIT_EXT, &stages.mesh)) {
+        return false;
+    }
+    if (stages.vert.code == nullptr && stages.mesh.code == nullptr) {
+        return false;
+    }
+    if (stages.mesh.code != nullptr && !ZHLN_AbsentShaderDesc(&desc->task) &&
+        !ZHLN_InitShader(&desc->task, VK_SHADER_STAGE_TASK_BIT_EXT, &stages.task)) {
+        return false;
+    }
+    if (!ZHLN_AbsentShaderDesc(&desc->frag) && !ZHLN_InitShader(&desc->frag, VK_SHADER_STAGE_FRAGMENT_BIT, &stages.frag)) {
+        return false;
+    }
+    *out = stages;
+    return true;
 }
 
-void ZHLN_DestroyShaderStages(const VkDevice device, ZHLN_ShaderStages* const restrict stages) {
-    ZHLN_DestroyShaderModule(device, stages->vert.handle);
-    ZHLN_DestroyShaderModule(device, stages->frag.handle);
-    ZHLN_DestroyShaderModule(device, stages->task.handle);
-    ZHLN_DestroyShaderModule(device, stages->mesh.handle);
-    *stages = (ZHLN_ShaderStages) {};
+static void ZHLN_WriteShaderStageInfo(
+    const ZHLN_Shader* const                            shader,
+    VkPipelineShaderStageCreateInfo* const               outStage,
+    VkShaderModuleCreateInfo* const                      outModuleInfo,
+    const VkSpecializationInfo* const                    specInfo,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping
+) {
+    // Both structures extend VkPipelineShaderStageCreateInfo. The mapping is
+    // also in this stage's pNext chain, without modifying the caller's mapping.
+    *outModuleInfo = (VkShaderModuleCreateInfo) {
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext    = mapping,
+        .codeSize = shader->size,
+        .pCode    = shader->code,
+    };
+    *outStage = (VkPipelineShaderStageCreateInfo) {
+        .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .pNext               = outModuleInfo,
+        .stage               = shader->stage,
+        .module              = VK_NULL_HANDLE,
+        .pName               = shader->entry_point,
+        .pSpecializationInfo = specInfo,
+    };
 }
 
 [[nodiscard]]
 uint32_t ZHLN_PopulateShaderStageInfos(
-    const ZHLN_ShaderStages* const restrict stages,
-    VkPipelineShaderStageCreateInfo* const restrict outStages,
-    const VkSpecializationInfo*                                specInfo,
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vsMapping,
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* const psMapping
+    const ZHLN_ShaderStages* const restrict               stages,
+    VkPipelineShaderStageCreateInfo* const restrict       outStages,
+    VkShaderModuleCreateInfo* const restrict              outModuleInfos,
+    const VkSpecializationInfo*                           specInfo,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
 ) {
-    uint32_t count = 0;
-
-    const bool mesh_pipeline = stages->mesh.handle != nullptr;
-
-    if (mesh_pipeline) {
-        if (stages->task.handle != nullptr) {
-            outStages[count++] = (VkPipelineShaderStageCreateInfo) {
-                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .pNext               = vsMapping,
-                .stage               = stages->task.stage,
-                .module              = stages->task.handle,
-                .pName               = stages->task.entry_point,
-                .pSpecializationInfo = specInfo,
-            };
-        }
-        outStages[count++] = (VkPipelineShaderStageCreateInfo) {
-            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext               = vsMapping,
-            .stage               = stages->mesh.stage,
-            .module              = stages->mesh.handle,
-            .pName               = stages->mesh.entry_point,
-            .pSpecializationInfo = specInfo,
-        };
-    } else if (stages->vert.handle != nullptr) {
-        outStages[count++] = (VkPipelineShaderStageCreateInfo) {
-            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext               = vsMapping,
-            .stage               = stages->vert.stage,
-            .module              = stages->vert.handle,
-            .pName               = stages->vert.entry_point,
-            .pSpecializationInfo = specInfo,
-        };
+    if (stages == nullptr || outStages == nullptr || outModuleInfos == nullptr) {
+        return 0;
     }
 
-    if (stages->frag.handle != nullptr) {
-        outStages[count++] = (VkPipelineShaderStageCreateInfo) {
-            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext               = psMapping,
-            .stage               = stages->frag.stage,
-            .module              = stages->frag.handle,
-            .pName               = stages->frag.entry_point,
-            .pSpecializationInfo = specInfo,
-        };
+    uint32_t count = 0;
+    if (stages->mesh.code != nullptr) {
+        if (stages->task.code != nullptr) {
+            ZHLN_WriteShaderStageInfo(&stages->task, &outStages[count], &outModuleInfos[count], specInfo, vsMapping);
+            ++count;
+        }
+        ZHLN_WriteShaderStageInfo(&stages->mesh, &outStages[count], &outModuleInfos[count], specInfo, vsMapping);
+        ++count;
+    } else if (stages->vert.code != nullptr) {
+        ZHLN_WriteShaderStageInfo(&stages->vert, &outStages[count], &outModuleInfos[count], specInfo, vsMapping);
+        ++count;
+    }
+
+    if (stages->frag.code != nullptr) {
+        ZHLN_WriteShaderStageInfo(&stages->frag, &outStages[count], &outModuleInfos[count], specInfo, psMapping);
+        ++count;
     }
     return count;
 }
@@ -1336,7 +1296,7 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 }
 
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
-    if (desc->color_format_count > ZHLN_MAX_COLOR_ATTACHMENTS) {
+    if (desc == nullptr || desc->stages == nullptr || desc->color_format_count > ZHLN_MAX_COLOR_ATTACHMENTS) {
         return nullptr;
     }
 
@@ -1344,13 +1304,24 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         return nullptr;
     }
 
+    const ZHLN_Shader* const shaders[] = {&desc->stages->vert, &desc->stages->task, &desc->stages->mesh, &desc->stages->frag};
+    for (size_t i = 0; i < 4; ++i) {
+        if ((shaders[i]->code == nullptr) != (shaders[i]->size == 0) || shaders[i]->size % sizeof(uint32_t) != 0) {
+            return nullptr;
+        }
+    }
+    if (desc->stages->vert.code == nullptr && desc->stages->mesh.code == nullptr) {
+        return nullptr;
+    }
+
     VkPipelineShaderStageCreateInfo shader_stages[ZHLN_MAX_SHADER_STAGES];
-    uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
-        desc->stages, shader_stages, desc->specialization_info, desc->descriptor_heap ? desc->vs_mapping : nullptr,
+    VkShaderModuleCreateInfo        module_infos[ZHLN_MAX_SHADER_STAGES];
+    const uint32_t stage_count = ZHLN_PopulateShaderStageInfos(
+        desc->stages, shader_stages, module_infos, desc->specialization_info, desc->descriptor_heap ? desc->vs_mapping : nullptr,
         desc->descriptor_heap ? desc->ps_mapping : nullptr
     );
 
-    const bool mesh_pipeline = desc->stages != nullptr && desc->stages->mesh.handle != nullptr;
+    const bool mesh_pipeline = desc->stages->mesh.code != nullptr;
 
     VkPipelineCreateFlags2CreateInfoKHR heap_flags2 = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
@@ -1597,6 +1568,7 @@ void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd, const ZHLN_Seco
         .colorAttachmentCount    = (desc->color_format != VK_FORMAT_UNDEFINED) ? VK_TRUE : VK_FALSE,
         .pColorAttachmentFormats = &desc->color_format,
         .depthAttachmentFormat   = desc->depth_format,
+        .stencilAttachmentFormat = desc->stencil_format,
         .rasterizationSamples    = VK_SAMPLE_COUNT_1_BIT,
     };
 
@@ -1901,23 +1873,29 @@ void ZHLN_DestroySampler(const VkDevice device, const VkSampler sampler) {
 
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputePipelineDesc* const restrict desc) {
-    const VkShaderModule comp_module = ZHLN_CreateShaderModule(device, &desc->shader);
-    if (comp_module == nullptr) {
+    if (desc == nullptr || !ZHLN_ValidShaderDesc(&desc->shader)) {
         return nullptr;
     }
 
     char entry_name[64] = "CSMain";
-    if (desc->shader.entry_point) {
-        strncpy(entry_name, desc->shader.entry_point, 63);
+    if (desc->shader.entry_point != nullptr) {
+        strncpy(entry_name, desc->shader.entry_point, sizeof(entry_name) - 1);
+        entry_name[sizeof(entry_name) - 1] = '\0';
     } else {
         (void) ZHLN_CopySpirvEntryPoint(desc->shader.code, desc->shader.size, entry_name, sizeof(entry_name));
     }
 
+    const VkShaderModuleCreateInfo module_info = {
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext    = desc->descriptor_heap ? desc->cs_mapping : nullptr,
+        .codeSize = desc->shader.size,
+        .pCode    = desc->shader.code,
+    };
     const VkPipelineShaderStageCreateInfo stage_info = {
         .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        .pNext               = desc->descriptor_heap ? desc->cs_mapping : nullptr,
+        .pNext               = &module_info,
         .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
-        .module              = comp_module,
+        .module              = VK_NULL_HANDLE,
         .pName               = entry_name,
         .pSpecializationInfo = desc->specialization_info,
     };
@@ -1936,9 +1914,9 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
     };
 
     VkPipeline pipeline = nullptr;
-    vkCreateComputePipelines(device, desc->pipeline_cache, 1, &pipeline_info, nullptr, &pipeline);
-
-    vkDestroyShaderModule(device, comp_module, nullptr);
+    if (vkCreateComputePipelines(device, desc->pipeline_cache, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
+        return nullptr;
+    }
     return pipeline;
 }
 
@@ -1946,7 +1924,8 @@ void ZHLN_CmdDispatch(const VkCommandBuffer cmd, const uint32_t groupCountX, con
     vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
 }
 
-void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width, const int32_t height, const uint32_t mipLevels) {
+void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const int32_t width, const int32_t height, const uint32_t mipLevels,
+                          const VkPipelineStageFlags2 shaderReadStage) {
     int32_t mip_w = width;
     int32_t mip_h = height;
 
@@ -1981,7 +1960,7 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
             .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dst_stage  = shaderReadStage,
             .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
             .base_mip   = i - 1,
             .mip_count  = 1
@@ -2003,7 +1982,7 @@ void ZHLN_GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const 
         .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-        .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dst_stage  = shaderReadStage,
         .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
         .base_mip   = mipLevels - 1,
         .mip_count  = 1

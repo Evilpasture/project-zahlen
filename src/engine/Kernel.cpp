@@ -92,15 +92,16 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     _impl->audioContext = std::make_unique<AudioContext>();
     _impl->assetManager = std::make_unique<AssetManager>();
+    _impl->assetManager->UseRenderContext(*_impl->renderContext);
 
     if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
         if (_impl->assetManager->MountPak(pak->string())) {
             ZHLN::Log("Mounted asset pack: {}", pak->string());
         } else {
-            ZHLN::Log("WARNING: Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+            ZHLN::LogWarning("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
         }
     } else {
-        ZHLN::Log("WARNING: Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
+        ZHLN::LogWarning("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};
@@ -111,8 +112,10 @@ Kernel::~Kernel() {
         return;
     }
 
-    _impl->renderContext.reset();
+    // Prefab buffers belong to the asset cache; it must release them while
+    // the renderer that allocated them is still alive.
     _impl->assetManager.reset();
+    _impl->renderContext.reset();
     _impl->audioContext.reset();
     _impl->fileSystemWatcher.reset();
     _impl->secondaryWindows.clear();
@@ -184,20 +187,20 @@ void Kernel::RemoveWindow(Window& window) {
 }
 
 
-auto Kernel::AcquireTarget() noexcept -> FrameOutcome<RenderAttachment> {
+auto Kernel::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(window));
 }
 
-auto Kernel::GetTargetAttachment() noexcept -> std::optional<RenderAttachment> {
-    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.Target());
+auto Kernel::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
+    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.Target());
 }
 
-auto Kernel::GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.TargetFor(window));
+auto Kernel::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
+    return _impl->renderContext->GetAcquiredTarget(_impl->primaryHost.TargetFor(window));
 }
 
 auto Kernel::GetRenderContext() -> RenderContext& {
@@ -218,6 +221,7 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
 }
 
 auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+    _impl->assetManager->InvalidateGPUMeshes();
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
@@ -226,6 +230,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    _impl->assetManager->UseRenderContext(*_impl->renderContext);
     return {};
 }
 

@@ -35,14 +35,17 @@
 
 
 #include "core/RenderCore.h"
+#include "core/FrameConfig.hpp"
 
 // clang-format off
 #include "core/Extensions.hpp"
 #include "core/Features.hpp"
+#include "core/DeviceConfigurator.hpp"
 #include "diagnostics/DebugNames.hpp"
 #include "pipeline/Vertex.hpp"
 #include "core/Handles.hpp"
 #include "core/Context.hpp"
+#include "execution/CommandRecorder.hpp"
 #include "execution/RenderQueue.hpp"
 #include "presentation/Swapchain.hpp"
 #include "execution/FrameSync.hpp"
@@ -50,6 +53,8 @@
 #include "pipeline/ShaderStages.hpp"
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
+#include "memory/ImageSlice.hpp"
+#include "memory/BufferSlice.hpp"
 #include "core/RenderCore.hpp"
 #include "graph/DynamicRendering.hpp"
 #include "pipeline/DescriptorWrites.hpp"

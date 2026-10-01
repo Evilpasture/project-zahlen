@@ -37,6 +37,8 @@
 #include <expected>
 #include <fstream>
 #include <memory>
+#include <numbers>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -54,6 +56,8 @@ enum class MeshShaderTestError : uint8_t {
     ConfigDidNotSelectPath ZHLN_ANNOTATION(ZHLN::Description<"RenderConfig::enableMeshShading did not select the expected geometry path.">{}),
     MeshletBlackHoleDetected
     ZHLN_ANNOTATION(ZHLN::Description<"Close-up render produced a black square where a meshlet should be: a front-facing meshlet was culled.">{}) = 8,
+    DoubleSidedSetupFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not prepare a double-sided, back-facing meshlet for the GPU regression.">{}) = 9,
+    DoubleSidedPlaneMissing ZHLN_ANNOTATION(ZHLN::Description<"A double-sided back-facing plane rendered via vertices but vanished on the mesh-shader path.">{}) = 10,
 };
 
 namespace {
@@ -394,10 +398,18 @@ struct MeshShaderTestSuite {
                 // Meshlets are an ADDITIONAL view: the raw vertex pool must stay
                 // intact for BLAS builds and the vertex pipeline fallback.
                 allOk &= ZHLN::Test::ExpectTrue(c.mesh.posBuffer != ZHLN::BufferHandle::Invalid);
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.attrBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.tangentFrameBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(c.mesh.surfaceBuffer != ZHLN::BufferHandle::Invalid);
+                allOk &= ZHLN::Test::ExpectTrue(
+                    c.mesh.posBuffer != c.mesh.tangentFrameBuffer && c.mesh.posBuffer != c.mesh.surfaceBuffer &&
+                    c.mesh.tangentFrameBuffer != c.mesh.surfaceBuffer
+                );
                 allOk &= ZHLN::Test::ExpectGt(c.mesh.vertexCount, 0);
 
                 ZHLN::Println("    [INFO] {}: {} verts, {} meshlets.", c.name, c.mesh.vertexCount, c.mesh.meshletCount);
+            }
+            for (const auto& c: cases) {
+                rc.DestroyMesh(c.mesh); // directly inspected meshes were never registered as assets
             }
 
             if (!allOk) {
@@ -649,14 +661,12 @@ struct MeshShaderTestSuite {
         // rendered and compared, so what is asserted is a silhouette
         // difference, not an absolute colour.
         //
-        // Two subjects, and only the second can exercise cone culling:
+        // Two subjects:
         //
-        //   box     Every face is flat, so every normal in a meshlet is the
-        //           same, coneCutoff is 1.0, and ConeBackfaceCulledSphere
-        //           returns false on its first line. A box can never be cone
-        //           culled. It stays because it is what the original report
-        //           was filed against, and it still covers every non-cone way
-        //           a meshlet can go missing up close.
+        //   box     Covers the original report and the near-surface frustum/
+        //           bounds behavior of flat faces. A flat face's coneCutoff is
+        //           zero, not one: its back faces can be culled, but its front
+        //           face must remain visible up close.
         //
         //   sphere  Curved, so a meshlet's normals span a real cone with a
         //           half-angle under 90 degrees and its bounding sphere sits
@@ -830,6 +840,136 @@ struct MeshShaderTestSuite {
                 }
             }
 
+            return {};
+        }
+
+        // ====================================================================
+        // 6. A double-sided back plane must survive the task-stage cone test
+        // ====================================================================
+        //
+        // Khronos TextureCoordinateTest has a gray BackPlaneMesh behind its
+        // four textured squares. Its triangles face -Z, but its material is
+        // double-sided and the camera looks from +Z. The rasterizer uses
+        // CullNone, yet the task shader used to reject the whole meshlet before
+        // rasterization. A flat plane's meshopt cone cutoff is ~0, so the
+        // sphere-cone test really does reject this plane without the fix.
+        std::expected<void, ZHLN::ErrorCode> double_sided_backplane_matches_vertex_path() {
+            auto acquire = [](bool meshShading) {
+                return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+                    .appName = "Headless Double Sided Meshlet",
+                    .width = 320,
+                    .height = 240,
+                    .enableMeshShading = meshShading,
+                });
+            };
+
+            auto vertexEngine = acquire(false);
+            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
+                return std::unexpected(MeshShaderTestError::EngineInitFailed);
+            }
+            if (!vertexEngine->GetRenderContext().GetInfo().meshShadingSupported) {
+                ZHLN::Println("    [SKIP] mesh shading unsupported; double-sided plane test skipped.");
+                return {};
+            }
+
+            auto setupBackplane = [](ZHLN::Engine& engine) -> bool {
+                ZHLN::Test::Headless::DisableTAA(engine);
+                auto& reg = engine.GetRegistry();
+                for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(e, [](auto& pp) {
+                        pp.fullBright = 1;
+                        pp.vignetteIntensity = 0.0f;
+                        pp.enableSSR = 0;
+                        pp.enableRTR = 0;
+                        pp.giMode = 0;
+                        pp.skyZenith = JPH::Vec4(0, 0, 0, 1);
+                        pp.skyHorizon = JPH::Vec4(0, 0, 0, 1);
+                        pp.skyGround = JPH::Vec4(0, 0, 0, 1);
+                    });
+                }
+
+                auto& rc = engine.GetRenderContext();
+                auto material = rc.CreateMaterial(ZHLN::MaterialDesc {
+                    .doubleSided = true, .metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}
+                });
+                if (!ZHLN::Test::ExpectTrue(material.has_value() && material->doubleSided)) {
+                    return false;
+                }
+
+                auto& cam = engine.GetCamera();
+                cam.position = JPH::Vec3(0.0f, 0.0f, 4.0f);
+                cam.yaw = -90.0f;
+                cam.pitch = 0.0f;
+                cam.fov = 45.0f;
+
+                // CreatePlaneMesh winds toward +Y. Rotate -90 degrees about X
+                // to make it face -Z, away from the camera; leave room for the
+                // black background around the quad when checking its silhouette.
+                const ZHLN::Entity plane = ZHLN::PrefabFactory::CreatePlane(
+                    engine, 1.0f, JPH::Vec4(1, 1, 1, 1),
+                    ZHLN::PrefabFactory::SpawnParams {
+                        .rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -std::numbers::pi_v<float> * 0.5f),
+                        .materialOverride = *material
+                    }
+                );
+                const auto* part = reg.Get<ZHLN::Components::MeshComponent>(plane);
+                const auto mesh = part != nullptr ? rc.GetGPUMesh(part->meshAsset) : std::nullopt;
+                return ZHLN::Test::ExpectTrue(mesh.has_value() && mesh->meshletCount > 0);
+            };
+
+            auto capture = [](ZHLN::Engine& engine, const char* path) -> Image {
+                if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
+                    return {};
+                }
+                return LoadPPM(path);
+            };
+
+            if (!setupBackplane(*vertexEngine)) {
+                return std::unexpected(MeshShaderTestError::DoubleSidedSetupFailed);
+            }
+            ZHLN::Test::Headless::TickFrames(*vertexEngine, 6);
+            const Image vertexImg = capture(*vertexEngine, "headless_double_sided_vertex.ppm");
+
+            auto meshEngine = acquire(true);
+            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+                return std::unexpected(MeshShaderTestError::EngineInitFailed);
+            }
+            if (!ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive)) {
+                return std::unexpected(MeshShaderTestError::ConfigDidNotSelectPath);
+            }
+            if (!setupBackplane(*meshEngine)) {
+                return std::unexpected(MeshShaderTestError::DoubleSidedSetupFailed);
+            }
+            ZHLN::Test::Headless::TickFrames(*meshEngine, 6);
+            const Image meshImg = capture(*meshEngine, "headless_double_sided_mesh.ppm");
+
+            if (!(ZHLN::Test::ExpectTrue(vertexImg.Valid()) && ZHLN::Test::ExpectTrue(meshImg.Valid()))) {
+                return std::unexpected(MeshShaderTestError::RenderOutputBlank);
+            }
+            if (!ZHLN::Test::ExpectEq(vertexImg.width, meshImg.width) || !ZHLN::Test::ExpectEq(vertexImg.height, meshImg.height)) {
+                return std::unexpected(MeshShaderTestError::PathDivergence);
+            }
+            if (!ZHLN::Test::ExpectGt(ShadedPixelCount(vertexImg), 500u)) {
+                return std::unexpected(MeshShaderTestError::RenderOutputBlank);
+            }
+
+            auto centerIsShaded = [](const Image& img) -> bool {
+                const size_t pixel = (static_cast<size_t>(img.height / 2) * img.width + img.width / 2) * 3u;
+                return IsShaded(img, pixel, img.rgb[0], img.rgb[1], img.rgb[2]);
+            };
+            if (!ZHLN::Test::ExpectTrue(centerIsShaded(vertexImg))) {
+                return std::unexpected(MeshShaderTestError::RenderOutputBlank);
+            }
+            if (!ZHLN::Test::ExpectTrue(centerIsShaded(meshImg))) {
+                WriteDiffImage("headless_double_sided_diff.ppm", vertexImg, meshImg);
+                return std::unexpected(MeshShaderTestError::DoubleSidedPlaneMissing);
+            }
+
+            const ImageDiff diff = CompareImages(vertexImg, meshImg, 2);
+            if (!ZHLN::Test::ExpectLe(diff.maskMismatchRate, 0.05)) {
+                WriteDiffImage("headless_double_sided_diff.ppm", vertexImg, meshImg);
+                return std::unexpected(MeshShaderTestError::PathDivergence);
+            }
             return {};
         }
     };

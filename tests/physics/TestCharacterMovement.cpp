@@ -60,11 +60,11 @@ inline auto GetBodyPosition(const ZHLN::PhysicsContext& pc, uint32_t denseIndex)
 // ============================================================================
 
 struct CPUPipelineHarness {
-    ZHLN::ECS::Registry  reg;
     ZHLN::PhysicsContext pc;
+    ZHLN::ECS::Registry  reg;
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
-    ZHLN::Entity         charPhys {};
+    ZHLN::Physics::BodyHandle charPhys {};
     JPH::Vec3            prevPos = JPH::Vec3::sZero();
     JPH::Vec3            currPos = JPH::Vec3::sZero();
 
@@ -92,7 +92,6 @@ struct CPUPipelineHarness {
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
         );
-        pc.SetBodyOwner(charPhys, player);
         prevPos = JPH::Vec3(spawnPos);
         currPos = JPH::Vec3(spawnPos);
 
@@ -101,6 +100,15 @@ struct CPUPipelineHarness {
         cam.position = JPH::Vec3(spawnPos) + JPH::Vec3(0.0f, 1.5f, -5.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = 0.0f;
+    }
+
+    ~CPUPipelineHarness() {
+        std::vector<ZHLN::Physics::BodyHandle> handles;
+        for (const auto& component: reg.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
+            handles.push_back(component.physicsHandle);
+        }
+        pc.DestroyBodies(handles);
+        reg.Clear();
     }
 
     void Settle(int frames = 15) {
@@ -445,7 +453,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
-            ZHLN::Entity pushBox =
+            ZHLN::Physics::BodyHandle pushBox =
                 harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 

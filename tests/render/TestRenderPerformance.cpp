@@ -174,8 +174,7 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     engine.SetUICallback(nullptr);
 
     // 2. Clear ECS entities and Command Buffer
-    reg.Clear();
-    engine.GetMainECB().Reset();
+    engine.ClearScene();
 
     // 3. Clear System Graphs before rebuilding default scene
     engine.GetUpdateGraph().Clear();
@@ -236,12 +235,27 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         for (size_t c = 0; c < kGridCols; ++c) {
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
-            ZHLN::PrefabFactory::CreateBox(
+            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat
                 }
             );
+            // A box has three vertex streams and three meshlet buffers. Fail
+            // immediately rather than timing a scene with invalid geometry.
+            const auto* owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue(owner != nullptr)) {
+                return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
+            }
+            const auto& mesh = owner->mesh;
+            if (!ZHLN::Test::ExpectNe(mesh.posBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.tangentFrameBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.surfaceBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletVertexBuffer, ZHLN::BufferHandle::Invalid) ||
+                !ZHLN::Test::ExpectNe(mesh.meshletTriBuffer, ZHLN::BufferHandle::Invalid)) {
+                return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
+            }
         }
     }
 
@@ -366,7 +380,7 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
     auto& rc  = engine.GetRenderContext();
 
     constexpr uint32_t  kMaxParticles = 20000;
-    ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", 64, 64, true, GenerateProceduralDecalTexture(64, 255, 200, 50).data());
+    ZHLN::TextureHandle fireTex       = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 200, 50), true);
 
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
@@ -472,7 +486,7 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     );
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
-    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", 64, 64, true, decalPixels.data());
+    auto decalTex    = rc.CreateProceduralTexture("vfx_perf_decal", {64, 64}, decalPixels, true);
 
     constexpr size_t kDecalCount = 100;
     for (size_t i = 0; i < kDecalCount; ++i) {
@@ -775,7 +789,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     }
 
     // 4. GPU Particle Emitter (10,000 Particles)
-    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", 64, 64, true, GenerateProceduralDecalTexture(64, 255, 180, 40).data());
+    auto sparkTex = rc.CreateProceduralTexture("vfx_perf_spark", {64, 64}, GenerateProceduralDecalTexture(64, 255, 180, 40), true);
     reg.Create(
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 1.0f, 0.0f)}, ZHLN::Components::ParticleEmitterComponent {
                                                                                             .params =
@@ -888,9 +902,10 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     constexpr uint32_t         kTotalFrames = 120;
     const double               avgLimitPct  = (mode == ZHLN::ValidationMode::On) ? 20.0 : 35.0;
     const std::string          testName     = (mode == ZHLN::ValidationMode::On) ? "render.master.val_on" : "render.master.val_off";
-    ZHLN::Test::BenchmarkTimer masterTimer;
-
-    auto stats = ZHLN::Test::BenchmarkFrames(testName)
+    // The per-machine frame baseline below is the throughput gate. An
+    // absolute FPS minimum would grade the host GPU (including Lavapipe CI)
+    // rather than detect a regression in this renderer.
+    const auto stats = ZHLN::Test::BenchmarkFrames(testName)
                      .Warmup(0)
                      .Frames(kTotalFrames)
                      .AvgLimit(avgLimitPct)
@@ -914,8 +929,6 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                          engine.Tick(1.0f / 60.0f, ZHLN::GameplayDriver::Cpp);
                      });
 
-    double totalDurationSec = masterTimer.ElapsedSeconds();
-
     // 10. Frame Screenshot Verification
     const std::string ppmPath    = (mode == ZHLN::ValidationMode::On) ? "headless_master_rt_val_on.ppm" : "headless_master_rt_val_off.ppm";
     const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
@@ -934,13 +947,14 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         }
     }
 
-    ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS", (kTotalFrames * 1.0) / totalDurationSec);
+    ZHLN::Println("    [Throughput] Render Rate: {:.2f} FPS (mean {:.2f} ms/frame)", stats.avgFps, stats.avgFrameMs);
     ZHLN::Println("    [Image Validation] Captured resolution: {}x{}, Shaded Pixels: {}", outputImg.width, outputImg.height, litPixels);
 
-    // Verification Gates
+    // The benchmark already checked average and p99 frame times against the
+    // last run on this machine. Keep absolute gates for rendering correctness,
+    // not a hardware-dependent 25 FPS floor.
     ZHLN::Test::ExpectTrue(outputImg.Valid());
     ZHLN::Test::ExpectGt(litPixels, 50000u);
-    ZHLN::Test::ExpectGt((kTotalFrames / totalDurationSec), 25.0);
 
     if (litPixels <= 50000u || !outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);

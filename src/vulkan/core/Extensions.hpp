@@ -56,6 +56,9 @@ class ExtensionBuilder {
     [[nodiscard]] static auto ForDevice(VkPhysicalDevice physical) noexcept -> ExtensionBuilder;
     [[nodiscard]] static auto ForInstance() noexcept -> ExtensionBuilder;
 
+    [[nodiscard]] bool Supports(std::string_view name) const noexcept;
+    [[nodiscard]] bool SupportsAll(std::initializer_list<std::string_view> names) const noexcept;
+
     auto Require(std::string_view name) noexcept -> ExtensionBuilder&;
 
     auto RequireIf(std::string_view name, bool condition) noexcept -> ExtensionBuilder& {

@@ -3,34 +3,55 @@
 
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
-#include <ShaderBindings.hpp>
 #include "../Resources.hpp"
+#include <ShaderBindings.hpp>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/RadianceMap.hpp>
 #include <array>
 #include <cstring>
 
 namespace ZHLN {
 
+namespace {
+
+[[nodiscard]] auto HashEnvironmentPixels(const EnvironmentRadianceDesc& desc) noexcept -> uint64_t {
+    const uint32_t width = desc.extent.width;
+    const uint32_t height = desc.extent.height;
+    uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
+    hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
+    hash ^= Hash64(reinterpret_cast<const char*>(desc.rgba.data()), desc.rgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    if (!desc.lightingRgba.empty()) {
+        hash ^= Hash64(reinterpret_cast<const char*>(desc.lightingRgba.data()), desc.lightingRgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    }
+    if (!desc.diffuseSH.empty()) {
+        hash ^= Hash64(reinterpret_cast<const char*>(desc.diffuseSH.data()), desc.diffuseSH.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
+    }
+    return hash == 0 ? 1 : hash;
+}
+
+} // namespace
+
 enum class BindlessSetupError : uint8_t {
-    DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices">{}) = 1,
+    DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices"> {}) = 1,
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
+               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
     )
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
-            const Vk::ReflectedStageInput reflectInputs[6] = {
-                {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-                {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+            // The descriptors' entry-point pointers refer to this view's
+            // inline names; keep it alive through layout reflection.
+            const auto basicView     = basicStages.View();
+            const auto reflectInputs = std::to_array<Vk::ReflectedStageInput>({
+                {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = basicView.Fragment(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
-            };
+            });
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
@@ -59,20 +80,17 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitLightingLUTs(); })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitializeSystemTextures(); })
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            return InitializeBlueNoiseTexture();
-        })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return InitializeBlueNoiseTexture(); })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             WriteSceneStaticImageDescriptors();
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
-            size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-            for (int i = 0; i < 2; ++i) {
-                auto gpu_buf_res = Vk::Buffer::Create(
-                    allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
-                );
+            ZHLN::Log("[RenderInit] Pre-allocating persistently mapped per-frame debug VBOs...");
+            size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
+            for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
+                auto gpu_buf_res =
+                    Vk::Buffer::Create(allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
                 if (!gpu_buf_res) {
                     return std::unexpected(ErrorCode(gpu_buf_res.error()));
                 }
@@ -87,10 +105,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
     -> std::expected<void, ErrorCode> {
-
     auto init_res = heapManager.Init(
-        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots,
-        kFrameTransientResourceSlots, kImmediateTransientResourceSlots, 2
+        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kFrameTransientResourceSlots,
+        kImmediateTransientResourceSlots
     );
     if (!init_res) {
         return std::unexpected(init_res.error());
@@ -109,6 +126,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     globalSamplerSlot = *globalSlot;
     clampSamplerSlot  = *clampSlot;
     pointSamplerSlot  = *pointSlot;
+    auto materialBase = heapManager.ReserveOffsetAddressedSamplerRegion(kMaterialSamplerVariantCount);
+    if (!materialBase) {
+        return std::unexpected(materialBase.error());
+    }
+    materialSamplerBaseSlot = {*materialBase};
 
     auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
@@ -129,6 +151,18 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
     heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
 
+    constexpr std::array modes = {VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT};
+    static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
+    for (uint32_t s = 0; s < modes.size(); ++s) {
+        for (uint32_t t = 0; t < modes.size(); ++t) {
+            auto info         = globalSamplerInfo; // Keep filtering/aniso; let glTF materials use generated mips.
+            info.maxLod       = VK_LOD_CLAMP_NONE;
+            info.addressModeU = modes[s];
+            info.addressModeV = modes[t];
+            heapManager.WriteSampler({*materialBase + s * 3u + t}, info);
+        }
+    }
+
     BuildSceneHeapMappings();
 
     return {};
@@ -136,45 +170,41 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-        .Sampler(0, 0, globalSamplerSlot)
-        .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-        .StorageBufferAddress(0, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
-        .StorageBufferAddress(0, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
-        .StorageBufferAddress(0, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
-        .StorageBufferAddress(0, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
-        .StorageBufferAddress(0, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
-        .SampledImage(0, 7, iblPrefilteredSlot)
-        .SampledImage(0, 8, iblBrdfLutSlot)
-        .Sampler(0, 9, clampSamplerSlot)
-        .SampledImage(0, 10, transLightingSlot)
-        .BindlessTextureArray(0, 11, textureManager.BindlessBaseSlot())
-        .Build();
+                            .Sampler(0, 0, globalSamplerSlot)
+                            .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
+                            .StorageBufferAddress(0, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
+                            .StorageBufferAddress(0, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
+                            .StorageBufferAddress(0, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
+                            .StorageBufferAddress(0, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
+                            .StorageBufferAddress(0, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
+                            .SampledImage(0, 7, iblPrefilteredSlot)
+                            .SampledImage(0, 8, iblBrdfLutSlot)
+                            .Sampler(0, 9, clampSamplerSlot)
+                            .SampledImage(0, 10, transLightingSlot)
+                            .SamplerArray(0, 11, materialSamplerBaseSlot)
+                            .BindlessTextureArray(0, 12, textureManager.BindlessBaseSlot())
+                            .Build();
 
     decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-        .Sampler(1, 0, globalSamplerSlot)
-        .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-        .BindlessTextureArray(1, 11, textureManager.BindlessBaseSlot())
-        .Build();
+                                 .Sampler(1, 0, globalSamplerSlot)
+                                 .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
+                                 .SamplerArray(1, 11, materialSamplerBaseSlot)
+                                 .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
+                                 .Build();
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
     BuildSceneHeapMappings();
 
-    decalHeapMappings = Vk::HeapMappingBuilder(heapManager)
-        .SampledImage(0, 0, decalDepthSlot)
-        .Sampler(0, 1, pointSamplerSlot)
-        .Build();
+    decalHeapMappings = Vk::HeapMappingBuilder(heapManager).SampledImage(0, 0, decalDepthSlot).Sampler(0, 1, pointSamplerSlot).Build();
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
-        constexpr uint32_t kIblMipLevels = 6;
-        const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), iblPayload.prefilteredFormat, kIblMipLevels);
-        heapManager.WriteImage(iblPrefilteredSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
     if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Valid()) {
-        const auto info = Vk::MakeViewCreateInfo2D(iblPayload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-        heapManager.WriteImage(iblBrdfLutSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 
@@ -186,17 +216,17 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    const auto info = Vk::MakeViewCreateInfo2D(graphResources.transLightingTarget.image.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-    heapManager.WriteImage(transLightingSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.fullView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     const VkSamplerCreateInfo defaultInfo = defaultSamplerInfo;
     const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
     const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
-    const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo {
-        return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info();
-    }();
+    const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo { return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info(); }();
+    VkSamplerCreateInfo skyInfo = Vk::SamplerBuilder {}.Linear().Repeat().Info();
+    skyInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    skyInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 
     Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointInfo));
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
@@ -207,11 +237,11 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
@@ -227,95 +257,126 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
 }
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {
+    defer                  rollback([&] {
+        for (auto& buffer: frames.jointBuffers) {
+            allocator.DestroyBuffer(buffer);
+        }
+        allocator.DestroyBuffer(morphDeltasBuffer);
+    });
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
-    for (int i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto jb_res = Vk::Buffer::Create(
-            allocator.Get(), sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-            Vk::MemoryUsage::CPUToGPU
+            allocator.Get(), sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
             return std::unexpected(ErrorCode(jb_res.error()));
         }
         frames.jointBuffers[i] = std::move(*jb_res);
 
-        auto mapped = frames.jointBuffers[i].Map();
+        auto mapped = frames.jointBuffers[i].Map(allocator.Get());
+        if (mapped.data == nullptr) {
+            return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        }
         std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
     auto mdb_res = Vk::Buffer::Create(
-        allocator.Get(), sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-        Vk::MemoryUsage::CPUToGPU
+        allocator.Get(), sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
     );
     if (!mdb_res) {
         return std::unexpected(ErrorCode(mdb_res.error()));
     }
     morphDeltasBuffer = std::move(*mdb_res);
+    rollback.Dismiss();
     return {};
 }
 
 auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
-    stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
+    auto started = Vk::StagingContext::Begin(allocator, ctx);
+    if (!started) {
+        return std::unexpected(started.error());
+    }
+    auto staging = std::move(*started);
+
+    auto ibl = Vk::IBLProcessor::Bake(*this);
+    if (!ibl) {
+        return std::unexpected(ibl.error());
+    }
+    iblPayload = std::move(*ibl);
+    ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
     using namespace Resource;
-    const size_t matRawSize = ltc_mat.size() - 128;
-    const size_t ampRawSize = ltc_amp.size() - 128;
+    constexpr size_t kDdsHeaderBytes = 128;
+    const size_t     matRawSize      = ltc_mat.size() - kDdsHeaderBytes;
+    const size_t     ampRawSize      = ltc_amp.size() - kDdsHeaderBytes;
+    auto             stagingRes      = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly);
+    if (!stagingRes) {
+        return std::unexpected(stagingRes.error());
+    }
+    auto  ltcStaging = std::move(*stagingRes);
+    defer _([&] { allocator.DestroyBuffer(ltcStaging); });
+    {
+        auto mapped = ltcStaging.Map(allocator.Get());
+        if (mapped.data == nullptr) {
+            return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        }
+        std::memcpy(mapped.data, ltc_mat.data() + kDdsHeaderBytes, matRawSize);
+        std::memcpy(static_cast<std::byte*>(mapped.data) + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
+    }
 
-    return stagingContext->Begin()
-        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::ErrorCode> {
-            return Vk::IBLProcessor::Bake(*this);
-        })
-        .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
-            iblPayload = std::forward<decltype(ibl)>(ibl);
-            ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
+    constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+    auto           makeLtc   = [&] { return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get()); };
+    bool           submitted = false;
+    auto           matImg    = makeLtc();
+    if (!matImg) {
+        return std::unexpected(matImg.error());
+    }
+    defer _([&] {
+        if (submitted) {
+            submittedStaging->Wait();
+        }
+        allocator.DestroyImage(*matImg);
+    });
+    auto  ampImg = makeLtc();
+    if (!ampImg) {
+        return std::unexpected(ampImg.error());
+    }
+    defer _([&] {
+        if (submitted) {
+            submittedStaging->Wait();
+        }
+        allocator.DestroyImage(*ampImg);
+    });
 
-            return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly)
-                .transform_error([](auto res) -> ErrorCode { return res; });
-        })
-        .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
-            constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-            auto           makeLtc   = [&] {
-                return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get());
-            };
+    // Abort abandoned commands before the images and staging buffer they
+    // reference are destroyed. Earlier failures still abort in staging's dtor.
+    defer _([&] { std::move(staging).Abort(); });
+    staging.UploadImage2DBuffer(matImg->Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
+    staging.UploadImage2DBuffer(ampImg->Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+    staging.AddBuffer(std::move(ltcStaging));
+    auto work = std::move(staging).ExecuteAsync();
+    if (!work) {
+        return std::unexpected(work.error());
+    }
+    submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
+    submitted        = true;
 
-            return makeLtc()
-                .transform_error([](auto res) -> ErrorCode { return res; })
-                .and_then([&, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize, makeLtc](auto&& matImg) mutable -> auto {
-                    return makeLtc()
-                        .transform_error([](auto res) -> ErrorCode { return res; })
-                        .transform(
-                            [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
-                             matRawSize](auto&& ampImg) mutable -> auto {
-                                stagingContext->UploadImage2DBuffer(matImg.Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
-                                stagingContext->UploadImage2DBuffer(ampImg.Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
+    auto matView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), matImg->Handle());
+    if (!matView) {
+        return std::unexpected(matView.error());
+    }
+    auto ampView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ampImg->Handle());
+    if (!ampView) {
+        return std::unexpected(ampView.error());
+    }
 
-                                stagingContext->AddBuffer(std::move(ltcStaging));
-                                return std::make_pair(std::move(matImg), std::forward<decltype(ampImg)>(ampImg));
-                            }
-                        );
-                });
-        })
-        .and_then([&](auto&& images) -> std::expected<void, ErrorCode> {
-            ltcMatImage = std::move(images.first);
-            ltcAmpImage = std::move(images.second);
-
-            stagingContext->ExecuteAsync();
-
-            return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
-                .transform_error([](auto res) -> ErrorCode { return res; })
-                .and_then([&](auto&& matView) -> std::expected<void, ErrorCode> {
-                    ltcMatView = std::forward<decltype(matView)>(matView);
-                    return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
-                        .transform_error([](auto res) -> ErrorCode { return res; })
-                        .transform([&](auto&& ampView) -> auto {
-                            ltcAmpView     = std::forward<decltype(ampView)>(ampView);
-                            ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                            ltcAmpViewInfo = Vk::MakeViewCreateInfo2D(ltcAmpImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                            ApplyImageDebugNames(*this);
-                        });
-                });
-        });
+    ltcMatImage = std::move(*matImg);
+    ltcAmpImage = std::move(*ampImg);
+    ltcMatView  = std::move(*matView);
+    ltcAmpView  = std::move(*ampView);
+    ApplyImageDebugNames(*this);
+    return {};
 }
-
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
     const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>();
@@ -347,46 +408,59 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
 }
 
 auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode> {
-    auto* const impl = _impl.get();
-    const bool hasPixels = desc.rgba != nullptr && desc.width > 0 && desc.height > 0;
-    if (hasPixels && (desc.width > kMaxRadianceExtent || desc.height > kMaxRadianceExtent)) {
+    auto* const impl      = _impl.get();
+    const bool  hasPixels = !desc.rgba.empty();
+    if (hasPixels && (desc.extent.width > Vk::kMaxEnvironmentRadianceExtent || desc.extent.height > Vk::kMaxEnvironmentRadianceExtent)) {
         return std::unexpected(Vk::EnvironmentBakeError::RadianceTooLarge);
+    }
+    if ((hasPixels &&
+         (desc.extent.width == 0 || desc.extent.height == 0 || desc.rgba.size() != static_cast<size_t>(desc.extent.width) * desc.extent.height * 4)) ||
+        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0)) ||
+        (!desc.lightingRgba.empty() && desc.lightingRgba.size() != desc.rgba.size()) ||
+        (!desc.diffuseSH.empty() && (desc.lightingRgba.empty() || desc.diffuseSH.size() != 9))) {
+        return std::unexpected(Vk::EnvironmentBakeError::InvalidRadianceData);
     }
 
     uint64_t hash = 0;
     int      mode = 0;
     if (hasPixels) {
-        hash = desc.contentHash != 0 ? desc.contentHash : HashRadiancePixels(desc.rgba, desc.width, desc.height);
-        mode = desc.renderSkybox != 0 ? 1 : 2;
+        hash = desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc);
+        mode = !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3);
     }
-    if (impl->iblPayload.contentHash == hash && impl->iblPayload.environmentMode == mode) {
-        return {};
-    }
-    if (impl->iblPayload.contentHash == hash) {
+    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyView.Valid())) {
+        // Mode-only changes do not need a new IBL bake, EXCEPT when enabling
+        // the original sky for a cooked map whose hidden mode never uploaded it.
         impl->iblPayload.environmentMode = mode;
         return {};
     }
 
-    Components::PostProcessSettingsComponent sky {};
-    const auto& env = impl->settings.environment;
-    sky.skyZenith   = JPH::Vec4(env.skyZenith[0], env.skyZenith[1], env.skyZenith[2], env.skyZenith[3]);
-    sky.skyHorizon  = JPH::Vec4(env.skyHorizon[0], env.skyHorizon[1], env.skyHorizon[2], env.skyHorizon[3]);
-    sky.skyGround   = JPH::Vec4(env.skyGround[0], env.skyGround[1], env.skyGround[2], env.skyGround[3]);
+    // RenderSystem already translated the ECS settings into GraphicsSettings.
+    // Keep that boundary here instead of reconstructing an ECS component.
+    const auto& sky = impl->settings.environment;
 
     Vk::IBLProcessor::RadianceSource source {};
     if (hasPixels) {
-        source.rgba         = desc.rgba;
-        source.width        = desc.width;
-        source.height       = desc.height;
-        source.renderSkybox = desc.renderSkybox;
+        source.rgba         = desc.lightingRgba.empty() ? desc.rgba.data() : desc.lightingRgba.data();
+        source.visualRgba   = desc.lightingRgba.empty() ? nullptr : desc.rgba.data();
+        source.diffuseSH    = desc.diffuseSH;
+        source.width        = desc.extent.width;
+        source.height       = desc.extent.height;
+        source.renderSkybox = desc.renderSkybox ? 1 : 0;
+    }
+    // Environment changes are rare; wait rather than retiring the old cube
+    // and LUT while previous frames can still read their descriptors/views.
+    if (auto waited = Vk::WaitIdle(impl->ctx.Device()); !waited) {
+        return std::unexpected(waited.error());
     }
     auto baked = Vk::IBLProcessor::Bake(*impl, sky, source);
     if (!baked) {
         return std::unexpected(baked.error());
     }
     baked->contentHash = hash;
-    impl->iblPayload   = std::move(*baked);
+    // Swap keeps each view with its image; old resources are now in `baked`.
+    std::swap(impl->iblPayload, *baked);
     impl->WriteSceneStaticImageDescriptors();
+    baked->Destroy(impl->allocator);
     return {};
 }
 
@@ -397,16 +471,19 @@ auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<v
     std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
     std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
 
-    return textureManager.Upload2D(blackPixel.data(), 1, 1, Rgba8Format(false)).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, ErrorCode> {
-        return textureManager.Upload2D(whitePixel.data(), 1, 1, Rgba8Format(true)).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, ErrorCode> {
-            return textureManager.Upload2D(normalPixel.data(), 1, 1, Rgba8Format(false)).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, ErrorCode> {
-                if (blackIdx != kFallbackBlackTextureIndex || whiteIdx != kFallbackWhiteTextureIndex || normalIdx != kFallbackNormalTextureIndex) {
-                    return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
-                }
-                return {};
-            });
+    return textureManager.Upload2D(blackPixel.data(), 1, 1, Rgba8Format(false))
+        .and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, ErrorCode> {
+            return textureManager.Upload2D(whitePixel.data(), 1, 1, Rgba8Format(true))
+                .and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, ErrorCode> {
+                    return textureManager.Upload2D(normalPixel.data(), 1, 1, Rgba8Format(false))
+                        .and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, ErrorCode> {
+                            if (blackIdx != kFallbackBlackTextureIndex || whiteIdx != kFallbackWhiteTextureIndex || normalIdx != kFallbackNormalTextureIndex) {
+                                return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
+                            }
+                            return {};
+                        });
+                });
         });
-    });
 }
 
-}
+} // namespace ZHLN

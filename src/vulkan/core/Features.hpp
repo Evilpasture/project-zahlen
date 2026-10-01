@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <tuple>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -26,6 +27,25 @@ template <typename T>
 template <typename T>
 [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType;
 
+// Feature payloads contain VkBool32 fields; the header and any trailing
+// alignment padding must never be treated as feature bits.
+template <typename T>
+[[nodiscard]] auto MaskFeatures(const T& requested, const T& supported) noexcept -> T;
+
+template <typename T>
+[[nodiscard]] auto HasAnyEnabledFeature(const T& feature) noexcept -> bool;
+
+template <typename T>
+[[nodiscard]] auto IsSubsetOf(const T& requested, const T& supported) noexcept -> bool;
+
+template <typename T>
+[[nodiscard]] auto QueryFeatureSupport(VkPhysicalDevice physicalDevice) noexcept -> T;
+
+struct AcceptAnyFeature {
+    template <typename T>
+    [[nodiscard]] constexpr bool operator()(VkPhysicalDevice, const T&) const noexcept { return true; }
+};
+
 template <typename T>
 struct FeatureNode {
     T    feature;
@@ -41,11 +61,17 @@ class FeatureChain {
     FeatureChain() = default;
     FeatureChain(VkPhysicalDevice physicalDevice, std::tuple<FeatureNode<Ts>...>&& t);
 
+    template <typename T>
+    auto Add(FeatureNode<T> node) &&;
+
     template <typename T, typename Func>
     auto Require(Func&& configure) &&;
 
-    template <typename T, typename Func>
-    auto Optional(Func&& configure) &&;
+    template <typename T, typename Func, typename Predicate = AcceptAnyFeature>
+    auto Optional(Func&& configure, Predicate&& accept = {}, bool available = true) &&;
+
+    template <typename T>
+    [[nodiscard]] auto Find() const noexcept -> const T*;
 
     FeatureChain<Ts...>& Build();
 

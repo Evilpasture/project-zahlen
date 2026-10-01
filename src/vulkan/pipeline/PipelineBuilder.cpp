@@ -77,6 +77,9 @@ auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Er
     if (_code == nullptr || _size == 0) {
         return std::unexpected(MissingShaders);
     }
+    if (_size % sizeof(uint32_t) != 0) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
+    }
     if (_layout == VK_NULL_HANDLE && !_descriptor_heap) {
         return std::unexpected(MissingLayout);
     }

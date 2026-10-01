@@ -1,27 +1,8 @@
 
+import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;
-
-float3 SafeNormalizeLocal(float3 v, float3 fallback) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return fallback;
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return fallback;
-    return r;
-}
-float3 SafeNormalizeLocal(float3 v) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return float3(0.0f, 0.0f, 1.0f);
-    return r;
-}
-#define SafeNormalize SafeNormalizeLocal
 
 struct RtrHalfPushConstants {
     uint2 halfRes;
@@ -32,6 +13,7 @@ RtrHalfPushConstants pc;
 
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
+Texture2D<float4> texAnisotropy;
 Texture2D<float4> texLighting;
 SamplerState smp;
 SamplerState pointSampler;
@@ -57,6 +39,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
+    float4 anisoRaw = texAnisotropy.Load(int3(fullPos, 0));
+    if (IsGBufferUnlit(anisoRaw.z)) {
+        return;
+    }
     float4 normRough = texNormalRoughness.Load(int3(fullPos, 0));
     float  roughness = normRough.z;
     if (roughness < 0.04f || roughness > 0.4f) {
@@ -72,15 +58,16 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
+    float strength = DecodeGBufferAnisotropy(anisoRaw.z);
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 tangentX  = normalize(cross(up, N));
+    float3 tangentX  = strength > 1.0f / 255.0f ? UnpackAnisotropy(anisoRaw.xy, N) : normalize(cross(up, N));
     float3 tangentY  = cross(N, tangentX);
     float3x3 toLocal = float3x3(tangentX, tangentY, N);
     float3x3 toWorld = transpose(toLocal);
 
     float3 V_local = mul(toLocal, V);
     float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, fullPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-    float  alpha   = max(roughness * roughness, 1e-5f);
+    float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
     float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
     float3 H       = normalize(mul(toWorld, H_local));
 
@@ -139,16 +126,16 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             uint i2      = primIdx * 3 + 2;
 
             if (hitInst.iboAddress != 0) {
-                uint* indices = (uint*) hitInst.iboAddress;
-                i0            = indices[i0];
-                i1            = indices[i1];
-                i2            = indices[i2];
+                GPUBuffer<uint> indices = GPUBuffer<uint>(hitInst.iboAddress);
+                i0 = indices.load(i0);
+                i1 = indices.load(i1);
+                i2 = indices.load(i2);
             }
 
-            float* posValues = (float*) hitInst.posAddress;
-            float3 p0        = float3(posValues[i0 * 3 + 0], posValues[i0 * 3 + 1], posValues[i0 * 3 + 2]);
-            float3 p1        = float3(posValues[i1 * 3 + 0], posValues[i1 * 3 + 1], posValues[i1 * 3 + 2]);
-            float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
+            GPUBuffer<float> posValues = GPUBuffer<float>(hitInst.posAddress);
+            float3 p0 = float3(posValues.load(i0 * 3 + 0), posValues.load(i0 * 3 + 1), posValues.load(i0 * 3 + 2));
+            float3 p1 = float3(posValues.load(i1 * 3 + 0), posValues.load(i1 * 3 + 1), posValues.load(i1 * 3 + 2));
+            float3 p2 = float3(posValues.load(i2 * 3 + 0), posValues.load(i2 * 3 + 1), posValues.load(i2 * 3 + 2));
 
             float3x3 world3x3 = (float3x3) hitInst.world;
             float3   crossN   = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));

@@ -7,7 +7,7 @@
 
 namespace ZHLN::Passes {
 
-// The first GBuffer half: fills the five color targets and the depth target
+// The first GBuffer half: fills the seven color targets and the depth target
 // from scratch, either by culling on the GPU into an indirect command buffer or
 // by replaying the draw queue directly through secondary command buffers.
 //
@@ -17,7 +17,7 @@ namespace ZHLN::Passes {
 // a bare `VkCommandBuffer` instead of an automatic render-pass context.
 struct GBufferBasePass: Vk::RenderPass<
                             "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
-                            Vk::ColorWrite<Res_Emissive>, Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>> {
+                            Vk::ColorWrite<Res_Emissive>, Vk::ColorWrite<Res_Clearcoat>, Vk::ColorWrite<Res_Anisotropy>, Vk::ColorWrite<Res_Sheen>, Vk::DepthStencilWrite<Res_Depth>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

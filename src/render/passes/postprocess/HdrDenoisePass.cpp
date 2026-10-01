@@ -45,7 +45,7 @@ void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
         atrousChain.Step<Shaders::HdrDenoise>(
-            impl.postProcess.HdrDenoise(), impl.postProcess.HdrDenoiseHeapBindings(), dst.extent, Atrous(stepSize),
+            impl.postProcess.HdrDenoise(), impl.postProcess.HdrDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize),
             Vk::Slot<"inColor">(src),
             Vk::Slot<"texDepth">(depth),
             Vk::Slot<"texNormalRoughness">(norm),

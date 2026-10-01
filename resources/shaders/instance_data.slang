@@ -5,12 +5,14 @@ module instance_data;
 
 import vertex_format;
 import cxx_abi;
+import gpu_buffer;
 
 public struct InstanceData {
     public float4x4 world;
     public float4x4 prevWorld;
     public uint64_t posAddress;
-    public uint64_t attrAddress;
+    public uint64_t tangentFrameAddress;
+    public uint64_t surfaceAddress;
     public uint64_t skinAddress;
     public uint64_t iboAddress;
 
@@ -45,6 +47,41 @@ public struct InstanceData {
     public uint64_t meshletTriAddress;
     public uint meshletCount;
     public uint _paddingMeshlet;
+
+    // Separate from the film/clearcoat union above: anisotropy can coexist
+    // with either extension. The texture index is 0xFFFF when absent.
+    public float anisotropyStrength;
+    public float anisotropyRotation;
+    public uint anisotropyTexIndex;
+    public uint samplerCodes0; // Slots 0..7, four bits each; reuses anisotropy padding.
+    public uint samplerCodes1; // Slots 8..14.
+
+    // Linear-space sheen RGB and independent alpha-channel roughness. A zero
+    // color disables the layer; these fields are not part of the film/coat union.
+    [CxxArray]
+    public float4 sheenParams;
+    public uint sheenColorTexIndex;
+    public uint sheenRoughnessTexIndex;
+    public uint occlusionTexIndex;
+    public float occlusionStrength;
+
+    // Transmission is independent of alpha coverage, metallicity and emission.
+    // Do not alias those authored factors to store optical parameters: masked
+    // glass still needs its baseColor alpha and cutoff in the forward shader.
+    public float transmissionValue;
+    public float transmissionIor;
+    public float transmissionThicknessM;
+    public float transmissionNormalScale;
+    public float iridescenceFactor;
+    public float filmThicknessNm;
+    public float filmThicknessMinNm;
+    public uint transmissionTexIndex; // 0xFFFF when absent; linear R channel.
+
+    // One affine transform per textureInfo (not per shared image). Each row is
+    // (u coefficient, v coefficient, offset, unused/UV set). Keep them in
+    // InstanceData so vertex, fragment, meshlet and shadow paths agree.
+    public float4 uvRow0[15];
+    public float4 uvRow1[15];
 };
 
 [CxxSkip]
@@ -62,44 +99,10 @@ public struct GPUMeshlet {
     public float coneCutoff;
 };
 
-public struct VertexAttributes {
-    public uint normal;
-    public uint tangent;
-    public uint uv;
-    public uint color;
-};
-
 public struct SkinVertex {
     public uint2 joints;
     public uint weights;
 };
-
-public extension VertexAttributes {
-    public property float4 unpackedNormal {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.normal);
-        }
-    }
-    public property float4 unpackedTangent {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.tangent);
-        }
-    }
-    public property float2 unpackedUV {
-        [ForceInline]
-        get {
-            return UnpackHalf2(this.uv);
-        }
-    }
-    public property float4 unpackedColor {
-        [ForceInline]
-        get {
-            return UnpackRGBA8(this.color);
-        }
-    }
-}
 
 public float AverageWorldScale(float4x4 world) {
     float3x3 m = (float3x3) world;
@@ -143,7 +146,25 @@ public extension InstanceData {
     public property bool isSkinned {
         [ForceInline]
         get {
-            return ((this.flags >> 8) & 0xFFu) != 0;
+            return (this.flags & (1u << 8)) != 0;
+        }
+    }
+    public property bool isDoubleSided {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 9)) != 0;
+        }
+    }
+    public property bool isUnlit {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 11)) != 0;
+        }
+    }
+    public property bool isMirrored {
+        [ForceInline]
+        get {
+            return (this.flags & (1u << 12)) != 0;
         }
     }
     public property bool isViewmodel {
@@ -154,9 +175,7 @@ public extension InstanceData {
     }
     public property float transmissionFactor {
         [ForceInline]
-        get {
-            return float(this.flags >> 24) * (1.0f / 255.0f);
-        }
+        get { return this.transmissionValue; }
     }
     public property uint filmThicknessTexIndex {
         [ForceInline]
@@ -170,28 +189,23 @@ public extension InstanceData {
         [ForceInline]
         get { return this._paddingMeshlet & 0xFFFFu; }
     }
-    public property float filmThicknessMinNm {
-        [ForceInline]
-        get { return float(this._paddingMeshlet >> 16); }
-    }
     [ForceInline]
     public float4 transmissionParams() {
-        float t = this.transmissionFactor;
-        if (t <= 0.0f) {
-            return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        if (this.transmissionValue <= 0.0f) {
+            return float4(0.0f);
         }
-        return float4(t, this.emissiveFactor.w, this.alphaCutoff, this.filmThicknessMinNm);
+        return float4(this.transmissionValue, this.iridescenceFactor, this.filmThicknessNm, this.filmThicknessMinNm);
     }
     [ForceInline]
     public float4 volumeParams() {
-        if (this.transmissionFactor <= 0.0f) {
+        if (this.transmissionValue <= 0.0f) {
             return float4(0.0f, 1.5f, 1.0f, 1.0f);
         }
-        return float4(this.baseColorFactor.a, this.metallicFactor, 1.0f, this.emissiveFactor.x);
+        return float4(this.transmissionThicknessM, this.transmissionIor, 1.0f, this.transmissionNormalScale);
     }
     [ForceInline]
     public uint4 transmissionTextures() {
-        return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, 0u);
+        return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, this.transmissionTexIndex);
     }
 
     [ForceInline]
@@ -229,23 +243,40 @@ public extension InstanceData {
     public uint fetchIndex(uint indexId) {
         if (this.iboAddress == 0)
             return indexId;
-        uint* indices = (uint*) this.iboAddress;
-        return indices[indexId];
+        return GPUBuffer<uint>(this.iboAddress).load(indexId);
+    }
+
+    // Our vertex draws use sequential SV_VulkanVertexID and fetch the index
+    // ourselves. Swap corners 1 and 2 for mirrored triangle lists so the
+    // existing CCW raster front face, backface culling and SV_IsFrontFace
+    // retain their meaning. Keep fetchIndex unchanged for BLAS/ray queries.
+    [ForceInline]
+    public uint fetchRasterIndex(uint indexId) {
+        if (this.isMirrored) {
+            uint corner = indexId % 3u;
+            if (corner == 1u) indexId += 1u;
+            if (corner == 2u) indexId -= 1u;
+        }
+        return this.fetchIndex(indexId);
     }
 
     [ForceInline]
     public float3 fetchPosition(uint vertexId) {
         if (this.posAddress == 0)
             return float3(0.0f);
-        float* values    = (float*) this.posAddress;
+        GPUBuffer<float> values = GPUBuffer<float>(this.posAddress);
         uint valueOffset = vertexId * 3u;
-        return float3(values[valueOffset], values[valueOffset + 1u], values[valueOffset + 2u]);
+        return float3(values.load(valueOffset), values.load(valueOffset + 1u), values.load(valueOffset + 2u));
     }
 
     [ForceInline]
-    public VertexAttributes fetchAttributes(uint vertexId) {
-        VertexAttributes* attributes = (VertexAttributes*) this.attrAddress;
-        return attributes[vertexId];
+    public VertexTangentFrame fetchTangentFrame(uint vertexId) {
+        return GPUBuffer<VertexTangentFrame>(this.tangentFrameAddress).load(vertexId);
+    }
+
+    [ForceInline]
+    public VertexSurface fetchSurface(uint vertexId) {
+        return GPUBuffer<VertexSurface>(this.surfaceAddress).load(vertexId);
     }
 
     [ForceInline]
@@ -255,46 +286,51 @@ public extension InstanceData {
 
     [ForceInline]
     public GPUMeshlet fetchMeshlet(uint meshletIndex) {
-        uint* words = (uint*) this.meshletAddress;
-        uint base   = meshletIndex * 16u;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletAddress);
+        uint base = meshletIndex * 16u;
 
         GPUMeshlet m;
-        m.vertexOffset   = words[base + 0u];
-        m.triangleOffset = words[base + 1u];
-        m.vertexCount    = words[base + 2u];
-        m.triangleCount  = words[base + 3u];
-        m.sphereCenter   = float3(asfloat(words[base + 4u]), asfloat(words[base + 5u]), asfloat(words[base + 6u]));
-        m.sphereRadius   = asfloat(words[base + 7u]);
-        m.coneApex       = float3(asfloat(words[base + 8u]), asfloat(words[base + 9u]), asfloat(words[base + 10u]));
-        m.coneAxis       = float3(asfloat(words[base + 11u]), asfloat(words[base + 12u]), asfloat(words[base + 13u]));
-        m.coneCutoff     = asfloat(words[base + 14u]);
+        m.vertexOffset   = words.load(base + 0u);
+        m.triangleOffset = words.load(base + 1u);
+        m.vertexCount    = words.load(base + 2u);
+        m.triangleCount  = words.load(base + 3u);
+        m.sphereCenter   = float3(asfloat(words.load(base + 4u)), asfloat(words.load(base + 5u)), asfloat(words.load(base + 6u)));
+        m.sphereRadius   = asfloat(words.load(base + 7u));
+        m.coneApex       = float3(asfloat(words.load(base + 8u)), asfloat(words.load(base + 9u)), asfloat(words.load(base + 10u)));
+        m.coneAxis       = float3(asfloat(words.load(base + 11u)), asfloat(words.load(base + 12u)), asfloat(words.load(base + 13u)));
+        m.coneCutoff     = asfloat(words.load(base + 14u));
         return m;
     }
 
     [ForceInline]
     public uint fetchMeshletVertex(uint vertexOffset, uint local) {
-        uint* indices = (uint*) this.meshletVertexAddress;
-        return indices[vertexOffset + local];
+        return GPUBuffer<uint>(this.meshletVertexAddress).load(vertexOffset + local);
     }
 
     [ForceInline]
     public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
-        uint* words   = (uint*) this.meshletTriAddress;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletTriAddress);
         uint byteBase = triangleOffset + (triangleIndex * 3u);
 
-        uint b0 = (words[(byteBase + 0u) >> 2u] >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
-        uint b1 = (words[(byteBase + 1u) >> 2u] >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
-        uint b2 = (words[(byteBase + 2u) >> 2u] >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
+        uint b0 = (words.load((byteBase + 0u) >> 2u) >> (((byteBase + 0u) & 3u) * 8u)) & 0xFFu;
+        uint b1 = (words.load((byteBase + 1u) >> 2u) >> (((byteBase + 1u) & 3u) * 8u)) & 0xFFu;
+        uint b2 = (words.load((byteBase + 2u) >> 2u) >> (((byteBase + 2u) & 3u) * 8u)) & 0xFFu;
         return uint3(b0, b1, b2);
     }
 
     [ForceInline]
+    public uint3 fetchRasterMeshletTriangle(uint triangleOffset, uint triangleIndex) {
+        uint3 tri = this.fetchMeshletTriangle(triangleOffset, triangleIndex);
+        return this.isMirrored ? tri.xzy : tri;
+    }
+
+    [ForceInline]
     public SkinVertex fetchSkin(uint vertexId) {
-        uint* words     = (uint*) this.skinAddress;
+        GPUBuffer<uint> words = GPUBuffer<uint>(this.skinAddress);
         uint wordOffset = vertexId * 3u;
         SkinVertex result;
-        result.joints  = uint2(words[wordOffset], words[wordOffset + 1u]);
-        result.weights = words[wordOffset + 2u];
+        result.joints  = uint2(words.load(wordOffset), words.load(wordOffset + 1u));
+        result.weights = words.load(wordOffset + 2u);
         return result;
     }
 }

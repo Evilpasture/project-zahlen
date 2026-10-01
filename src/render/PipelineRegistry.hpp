@@ -21,6 +21,7 @@ namespace ZHLN {
 enum class MaterialCreationError : uint8_t {
     ShaderCompilationFailed ZHLN_ANNOTATION(ZHLN::Description<"A material's shader stages could not be compiled">{}) = 1,
     PipelineCreationFailed  ZHLN_ANNOTATION(ZHLN::Description<"A material's graphics pipeline could not be created">{}),
+    MaterialSlotsExhausted  ZHLN_ANNOTATION(ZHLN::Description<"No free material pipeline slots remain">{}),
 };
 
 class PipelineRegistry {
@@ -30,10 +31,12 @@ class PipelineRegistry {
         Vk::PipelineCache&          pipelineCache,
         Vk::HeapMappingBundle&      sceneHeapMappings,
         Vk::GPUDiagnostics&         gpuDiagnostics,
+        Vk::DeletionQueue&          deletionQueue,
         VkPipelineLayout            emptyPipelineLayout
     ) noexcept
-        : _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _layout(emptyPipelineLayout) {}
-    ~PipelineRegistry() = default;
+        : _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics),
+          _deletionQueue(deletionQueue), _layout(emptyPipelineLayout) {}
+    ~PipelineRegistry() { RetireAll(); }
 
     PipelineRegistry(const PipelineRegistry&)                = delete;
     auto operator=(const PipelineRegistry&) -> PipelineRegistry& = delete;
@@ -42,17 +45,23 @@ class PipelineRegistry {
 
     [[nodiscard]] auto CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
-    void Destroy(PipelineHandle handle) { _materials.Destroy(handle); }
+    // Retire native pipelines after in-flight draws complete.
+    void Destroy(PipelineHandle handle);
+    // Retires all remaining pipelines and invalidates their registry handles.
+    // At shutdown the owner drains the queue only after waiting for GPU idle.
+    void RetireAll() noexcept;
 
     [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* { return _materials.Resolve(handle); }
 
   private:
     [[nodiscard]] auto BuildMeshVariant(const PipelineDesc& desc) const noexcept -> Vk::Pipeline;
+    void Retire(NativeMaterial& material) noexcept;
 
     Vk::Context&           _ctx;
     Vk::PipelineCache&     _pipelineCache;
     Vk::HeapMappingBundle& _heapMappings;
     Vk::GPUDiagnostics&    _diagnostics;
+    Vk::DeletionQueue&     _deletionQueue;
     VkPipelineLayout       _layout;
 
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;

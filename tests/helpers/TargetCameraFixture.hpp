@@ -27,7 +27,7 @@ namespace ZHLN::Test::Headless {
 inline void InstallTargetCameraRig(ZHLN::Engine& engine) {
     ZHLN::CameraRig::Install(engine);
 
-    engine.GetRegistry().Clear();
+    engine.ClearScene();
     engine.InitializeDefaultScene();
 
     // The camera is engine state, not an entity, so Clear does not touch it;

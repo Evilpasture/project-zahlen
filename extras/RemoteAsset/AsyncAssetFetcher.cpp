@@ -209,7 +209,7 @@ uint32_t AsyncAssetFetcher::Request(std::string_view url, ValidatorFn validator,
         }
 
         {
-            std::lock_guard lock(this->m_mutex);
+            std::lock_guard publishLock(this->m_mutex);
             Slot& slot = this->m_slots[id];
             if (!slot.warning.empty()) {
                 result.errorMessage =
@@ -225,12 +225,14 @@ uint32_t AsyncAssetFetcher::Request(std::string_view url, ValidatorFn validator,
 }
 
 void AsyncAssetFetcher::Poll() {
-    std::vector<Job*> done;
+    std::vector<std::unique_ptr<Job>> done;
     {
         std::lock_guard lock(m_mutex);
         for (auto it = m_jobs.begin(); it != m_jobs.end();) {
             if (it->get()->finished.load(std::memory_order::acquire)) {
-                done.push_back(it->get());
+                // Keep ownership until after join: erasing a joinable Job
+                // destroys its std::thread and calls std::terminate.
+                done.push_back(std::move(*it));
                 it = m_jobs.erase(it);
             } else {
                 ++it;
@@ -240,7 +242,7 @@ void AsyncAssetFetcher::Poll() {
     // Joins the downloads that are done, and only those. A join that ever
     // takes a moment is a transfer that finished mid-frame, which is the
     // frame's own clock, not the network's.
-    for (Job* job: done) {
+    for (auto& job: done) {
         if (job->thread.joinable()) {
             job->thread.join();
         }

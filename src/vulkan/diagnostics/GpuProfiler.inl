@@ -15,7 +15,7 @@ template <typename EnumT>
     requires std::is_enum_v<EnumT>
 inline void GpuProfiler<EnumT>::Teardown() noexcept {
     if (_device != VK_NULL_HANDLE) {
-        for (uint32_t i = 0; i < 2; ++i) {
+        for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
             if (_pools[i] != VK_NULL_HANDLE) {
                 vkDestroyQueryPool(_device, _pools[i], nullptr);
                 _pools[i] = VK_NULL_HANDLE;
@@ -38,10 +38,10 @@ inline GpuProfiler<EnumT>::~GpuProfiler() noexcept {
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
 inline GpuProfiler<EnumT>::GpuProfiler(GpuProfiler&& other) noexcept:
-    _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE})),
-    _recordedMasks(std::exchange(other._recordedMasks, {0, 0})), _enabled(std::exchange(other._enabled, false)),
-    _statsPools(std::exchange(other._statsPools, {VK_NULL_HANDLE, VK_NULL_HANDLE})), _statsBeginMasks(std::exchange(other._statsBeginMasks, {0, 0})),
-    _statsEndMasks(std::exchange(other._statsEndMasks, {0, 0})), _statsBits(std::exchange(other._statsBits, 0)),
+    _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::exchange(other._pools, {})),
+    _recordedMasks(std::exchange(other._recordedMasks, {})), _enabled(std::exchange(other._enabled, false)),
+    _statsPools(std::exchange(other._statsPools, {})), _statsBeginMasks(std::exchange(other._statsBeginMasks, {})),
+    _statsEndMasks(std::exchange(other._statsEndMasks, {})), _statsBits(std::exchange(other._statsBits, 0)),
     _statsSupported(std::exchange(other._statsSupported, false)), _statsEnabled(std::exchange(other._statsEnabled, false)) {
 }
 
@@ -51,12 +51,12 @@ inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuPr
     if (this != &other) {
         Teardown();
         _device          = std::exchange(other._device, VK_NULL_HANDLE);
-        _pools           = std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE});
-        _recordedMasks   = std::exchange(other._recordedMasks, {0, 0});
+        _pools           = std::exchange(other._pools, {});
+        _recordedMasks   = std::exchange(other._recordedMasks, {});
         _enabled         = std::exchange(other._enabled, false);
-        _statsPools      = std::exchange(other._statsPools, {VK_NULL_HANDLE, VK_NULL_HANDLE});
-        _statsBeginMasks = std::exchange(other._statsBeginMasks, {0, 0});
-        _statsEndMasks   = std::exchange(other._statsEndMasks, {0, 0});
+        _statsPools      = std::exchange(other._statsPools, {});
+        _statsBeginMasks = std::exchange(other._statsBeginMasks, {});
+        _statsEndMasks   = std::exchange(other._statsEndMasks, {});
         _statsBits       = std::exchange(other._statsBits, 0);
         _statsSupported  = std::exchange(other._statsSupported, false);
         _statsEnabled    = std::exchange(other._statsEnabled, false);
@@ -69,7 +69,7 @@ template <typename EnumT>
 inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept
     -> std::expected<void, ErrorCode> {
     _device        = device;
-    _recordedMasks = {0, 0};
+    _recordedMasks = {};
     _enabled       = false;
 
     // 1. Query physical device limits to verify timestamp support
@@ -100,7 +100,7 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
         .pipelineStatistics = 0
     };
 
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         if (vkCreateQueryPool(device, &info, nullptr, &_pools[i]) != VK_SUCCESS) {
             // pQueryPool is undefined on failure; restore the null invariant so
             // Teardown() does not destroy a garbage handle.
@@ -154,7 +154,7 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
         .pipelineStatistics = _statsBits
     };
 
-    for (uint32_t i = 0; i < 2; ++i) {
+    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         if (vkCreateQueryPool(device, &statsInfo, nullptr, &_statsPools[i]) != VK_SUCCESS) {
             // Same invariant as the timestamp pools: never leave a pool the
             // creation refused in a slot Teardown() would destroy.
@@ -175,7 +175,7 @@ inline void GpuProfiler<EnumT>::Reset(uint32_t frameIndex) noexcept {
     if (!_enabled) {
         return;
     }
-    uint32_t slot = frameIndex % 2;
+    uint32_t slot = Vk::FrameSlot(frameIndex);
     vkResetQueryPool(_device, _pools[slot], 0, kQueryCount);
     _recordedMasks[slot] = 0;
 
@@ -197,7 +197,7 @@ void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, En
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = stage_idx * 2;
 
-    const uint32_t slot = frameIndex % static_cast<uint32_t>(_pools.size());
+    const uint32_t slot = Vk::FrameSlot(frameIndex);
     _recordedMasks[slot] |= (uint64_t {1} << stage_idx);
     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
 
@@ -220,7 +220,7 @@ void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, Enum
     auto     stage_idx = static_cast<uint32_t>(stage);
     uint32_t query_idx = (stage_idx * 2) + 1;
 
-    const uint32_t slot = frameIndex % static_cast<uint32_t>(_pools.size());
+    const uint32_t slot = Vk::FrameSlot(frameIndex);
 
     // Close whatever Begin opened, regardless of the CURRENT toggle state: an
     // active query left unterminated is a validation error, so a toggle-off
@@ -240,7 +240,7 @@ inline void GpuProfiler<EnumT>::RetrieveResults(uint32_t frameIndex, float times
     if (!_enabled) {
         return;
     }
-    uint32_t slot = frameIndex % 2;
+    uint32_t slot = Vk::FrameSlot(frameIndex);
     uint64_t mask = _recordedMasks[slot];
     if (mask == 0) {
         return;
@@ -278,7 +278,7 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
     if (!_statsSupported) {
         return;
     }
-    const uint32_t slot = frameIndex % 2;
+    const uint32_t slot = Vk::FrameSlot(frameIndex);
     // Only complete Begin/End pairs carry defined results; an enabling toggle
     // mid-frame leaves begun-but-unterminated scopes out of this mask.
     const uint64_t completed = _statsBeginMasks[slot] & _statsEndMasks[slot];

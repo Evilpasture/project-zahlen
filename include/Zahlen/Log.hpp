@@ -8,12 +8,14 @@
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
+#include <cstdint>
 #include <cstdio>
 #include <format>
 #include <source_location>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 
@@ -29,6 +31,12 @@ auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
 
 enum class LogChannel : uint8_t { StdErr, StdOut, File };
+
+// Severity is orthogonal to LogLevel (verbosity): a Verbose warning is still
+// a warning, it is just hidden unless --verbose is passed. Debug renders gray,
+// Warning yellow and Error red; Info keeps the historical plain layout.
+enum class LogSeverity : uint8_t { Debug, Info, Warning, Error };
+
 void SetLogLevel(LogLevel level) noexcept;
 auto GetLogLevel() noexcept -> LogLevel;
 
@@ -44,16 +52,38 @@ struct LogContext {
     }
 };
 
-void              InternalWriteLog(uint8_t channel, const char* file, uint32_t line, std::string_view message);
+void              InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint32_t line, std::string_view message);
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message);
 
-template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, typename... Args>
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, LogSeverity Severity = LogSeverity::Info, typename... Args>
 void Log(LogContext ctx, Args&&... args) {
     if (static_cast<uint8_t>(GetLogLevel()) < static_cast<uint8_t>(Level)) {
         return;
     }
     std::string formatted = std::vformat(ctx.fmt, std::make_format_args(args...));
-    InternalWriteLog(static_cast<uint8_t>(Channel), ctx.loc.file_name(), ctx.loc.line(), formatted);
+    InternalWriteLog(static_cast<uint8_t>(Channel), static_cast<uint8_t>(Severity), ctx.loc.file_name(), ctx.loc.line(), formatted);
+}
+
+// Severity shorthands. Prefer these over hand-written "ERROR: "/"WARNING: "
+// prefixes so the tag is colorized consistently on every terminal.
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Verbose, typename... Args>
+void LogDebug(LogContext ctx, Args&&... args) {
+    Log<Channel, Level, LogSeverity::Debug>(ctx, std::forward<Args>(args)...);
+}
+
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, typename... Args>
+void LogInfo(LogContext ctx, Args&&... args) {
+    Log<Channel, Level, LogSeverity::Info>(ctx, std::forward<Args>(args)...);
+}
+
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, typename... Args>
+void LogWarning(LogContext ctx, Args&&... args) {
+    Log<Channel, Level, LogSeverity::Warning>(ctx, std::forward<Args>(args)...);
+}
+
+template <LogChannel Channel = LogChannel::StdErr, LogLevel Level = LogLevel::Moderate, typename... Args>
+void LogError(LogContext ctx, Args&&... args) {
+    Log<Channel, Level, LogSeverity::Error>(ctx, std::forward<Args>(args)...);
 }
 
 template <typename... Args>

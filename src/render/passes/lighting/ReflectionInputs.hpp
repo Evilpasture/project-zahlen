@@ -7,14 +7,15 @@
 namespace ZHLN::Passes {
 
 // What both reflection composites bind identically: the prefiltered
-// environment map, the split-sum BRDF lookup, the blue-noise tile, and the
-// top-level acceleration structure. Only the GBuffer they resolve against
-// differs, so the two passes share the gathering of these four.
+// environment map, original visible sky, split-sum BRDF lookup, blue-noise
+// tile, and top-level acceleration structure. Only the GBuffer they resolve
+// against differs, so the passes share these bindings.
 struct ReflectionInputs {
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> prefiltered;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> brdfLut;
-    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> blueNoise;
-    Vk::AsAddressWrite                                       tlas {};
+    Vk::ImageWrite    prefiltered;
+    Vk::ImageWrite    visualSky;
+    Vk::ImageWrite    brdfLut;
+    Vk::ImageWrite    blueNoise;
+    Vk::AsAddressWrite tlas {};
 };
 
 [[nodiscard]] auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs;

@@ -1,13 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_buffer;
 import instance_data;
 import vertex_format;
 
 struct UIObjectConstants {
     float4x4 orthoMatrix;
     uint64_t posAddress;
-    uint64_t attrAddress;
+    uint64_t surfaceAddress;
     uint albedoIdx;
     uint isSDF;
     uint useTextureColor;
@@ -33,15 +34,15 @@ struct UIVSOutput {
 UIVSOutput VSMain(uint vertexId: SV_VertexID) {
     UIVSOutput output;
 
-    float3* posPool            = (float3*) uiObj.posAddress;
-    VertexAttributes* attrPool = (VertexAttributes*) uiObj.attrAddress;
+    GPUBuffer<float3> posPool = GPUBuffer<float3>(uiObj.posAddress);
+    GPUBuffer<VertexSurface> surfaces = GPUBuffer<VertexSurface>(uiObj.surfaceAddress);
 
-    float3 position       = posPool[vertexId];
-    VertexAttributes attr = attrPool[vertexId];
+    float3 position = posPool.load(vertexId);
+    VertexSurface surface = surfaces.load(vertexId);
 
     output.pos   = mul(uiObj.orthoMatrix, float4(position, 1.0f));
-    output.uv    = attr.unpackedUV;
-    output.color = attr.unpackedColor;
+    output.uv    = surface.unpackedUV;
+    output.color = surface.unpackedColor;
     return output;
 }
 

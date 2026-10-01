@@ -11,13 +11,19 @@
 namespace ZHLN::Vk {
 
 struct TextureResource {
-    Image                 image;
-    ImageView             view;
-    VkImageViewCreateInfo viewInfo {};
-    VkExtent3D            extent {};
-    VkFormat              format = VK_FORMAT_UNDEFINED;
-    uint32_t              mipLevels = 1;
-    bool                  isCube = false;
+    Image      image;
+    ImageView  view;
+    VkExtent3D extent {};
+
+    void Destroy(Allocator& allocator) noexcept {
+        view = {};
+        allocator.DestroyImage(image);
+        extent = {};
+    }
+
+    [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
+        return ImageSlice {image.Handle(), view, extent, view.Info().format};
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return image.Valid() && view.Valid();

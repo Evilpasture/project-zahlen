@@ -16,6 +16,7 @@
 #include <Zahlen/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -542,7 +543,7 @@ struct PerformanceTestSuite {
                                        );
 
                                        const ZHLN::UIDrawData draw = gui.EndFrame();
-                                       if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                       if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                            ++framesWithoutDrawData;
                                        }
                                    }
@@ -608,10 +609,20 @@ struct PerformanceTestSuite {
             ZHLN::PhysicsConfig physCfg {
                 .maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 32 * 1024 * 1024
             };
+            ZHLN::PhysicsContext physicsContext(physCfg);
             ZHLN::ECS::Registry  registry;
             ZHLN::AudioContext   audio;
-            ZHLN::PhysicsContext physicsContext(physCfg);
             ZHLN::Camera         mainCamera;
+            ZHLN::defer _([&] {
+                std::vector<ZHLN::Physics::BodyHandle> handles;
+                if (!registry.GetEntitiesWith<ZHLN::Components::PhysicsComponent>().empty()) {
+                    for (const auto& body: registry.GetRawArray<ZHLN::Components::PhysicsComponent>()) {
+                        handles.push_back(body.physicsHandle);
+                    }
+                }
+                physicsContext.DestroyBodies(handles);
+                registry.Clear();
+            });
 
             mainCamera.position = JPH::Vec3(0.0f, 25.0f, -50.0f);
             mainCamera.yaw      = 90.0f;
@@ -639,7 +650,7 @@ struct PerformanceTestSuite {
                 float      spawnZ = posDist(rng);
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
-                ZHLN::Entity bodyHandle =
+                ZHLN::Physics::BodyHandle bodyHandle =
                     physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
@@ -650,7 +661,6 @@ struct PerformanceTestSuite {
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
 
-                physicsContext.SetBodyOwner(bodyHandle, agent);
                 agentEntities.push_back(agent);
             }
             physicsContext.OptimizeBroadphase();
@@ -787,7 +797,7 @@ struct PerformanceTestSuite {
                                      );
 
                                      const ZHLN::UIDrawData draw = gui.EndFrame();
-                                     if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                     if (draw.Empty() || draw.positions.size() != draw.surfaces.size()) {
                                          ++framesWithoutDrawData;
                                      }
                                  }

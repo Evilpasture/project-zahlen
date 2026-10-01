@@ -10,20 +10,23 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/SceneResources.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN::Interaction {
 
-void InteractionSystem::Update(SystemContext& ctx, float dt) {
-    auto& reg = ctx.registry;
+void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, const Components::TransformComponent,
+                                          TriggerComponent&, const Components::InputStateComponent, PickupComponent&,
+                                          const ItemBaseComponent, ContainerComponent&, const Components::PhysicsComponent,
+                                          const Components::MeshComponent, const UsableComponent> query,
+                               ECS::Registry& registry, ECS::OptionRes<PhysicsContext> physics, ECS::OptionRes<AudioContext> audio) {
 
     // The player is whoever carries a MovementComponent (character
     // controller's; installed through the same extension seam).
     Entity playerEnt = Entity::Null();
-    for (Entity e: reg.GetEntitiesWith<Character::MovementComponent>()) {
+    for (Entity e: query.Entities<Character::MovementComponent>()) {
         playerEnt = e;
         break;
     }
@@ -32,17 +35,17 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
         return;
     }
 
-    auto* playerTrans = reg.Get<Components::TransformComponent>(playerEnt);
+    auto* playerTrans = query.Get<Components::TransformComponent>(playerEnt);
     if (playerTrans == nullptr) {
         return;
     }
 
     JPH::Vec3 playerPos = playerTrans->position;
 
-    auto triggerEntities = reg.GetEntitiesWith<TriggerComponent>();
-    auto triggers        = reg.GetRawArray<TriggerComponent>();
+    auto triggerEntities = query.Entities<TriggerComponent>();
+    auto triggers        = query.Raw<TriggerComponent>();
 
-    auto*       inputState          = reg.GetSingleton<Components::InputStateComponent>();
+    auto*       inputState          = query.GetSingleton<Components::InputStateComponent>();
     bool        interactPressed     = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     bool        interactJustPressed = interactPressed && !wasInteractPressed;
@@ -58,7 +61,7 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
             continue;
         }
 
-        auto* trans = reg.Get<Components::TransformComponent>(triggerEnt);
+        auto* trans = query.Get<Components::TransformComponent>(triggerEnt);
         if (trans == nullptr) {
             continue;
         }
@@ -71,25 +74,23 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                 bool processed = false;
 
                 // Handle Pickups
-                if (auto* pickup = reg.Get<PickupComponent>(triggerEnt)) {
-                    auto* itemBase = reg.Get<ItemBaseComponent>(triggerEnt);
+                if (auto* pickup = query.Get<PickupComponent>(triggerEnt)) {
+                    auto* itemBase = query.Get<ItemBaseComponent>(triggerEnt);
                     if (itemBase != nullptr) {
-                        auto* container = reg.Get<ContainerComponent>(playerEnt);
+                        auto* container = query.Get<ContainerComponent>(playerEnt);
                         if (container == nullptr) {
-                            container = &reg.Add(playerEnt, ContainerComponent {});
+                            container = &registry.Add(playerEnt, ContainerComponent {});
                         }
 
                         if (container->count < ContainerComponent::MAX_SLOTS) {
                             container->slots[container->count++] = triggerEnt;
                             pickup->isPickedUp                   = 1;
 
-                            if (auto* phys = reg.Get<Components::PhysicsComponent>(triggerEnt)) {
-                                // FIXED: Use physics context instance method
-                                ctx.physics->DestroyBody(phys->physicsHandle);
-                                reg.Remove<Components::PhysicsComponent>(triggerEnt);
+                            if (physics) {
+                                SceneResources::Detach<Components::PhysicsComponent>(*physics, registry, triggerEnt);
                             }
-                            if (reg.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
-                                reg.Remove<Components::MeshComponent>(triggerEnt);
+                            if (query.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
+                                registry.Remove<Components::MeshComponent>(triggerEnt);
                             }
 
                             trigger.flags &= ~TriggerFlags::Active;
@@ -97,20 +98,20 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                             processed = true;
 
                             Log("Picked up item hash ID: {}", itemBase->id);
-                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
+                            if (audio) audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
 
                         } else {
                             Log("Inventory full!");
-                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
+                            if (audio) audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
                         }
                     }
                 }
 
                 if (!processed) {
-                    if (auto* usable = reg.Get<UsableComponent>(triggerEnt)) {
+                    if (auto* usable = query.Get<UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
-                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
+                            if (audio) audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
                         }
                     }
                 }
@@ -123,27 +124,10 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
 
 namespace {
 
-// The contributed update-graph node. Same body and access pattern the core
-// wiring used to declare; hazard analysis orders it off the external-writes
-// anchor for MovementComponent exactly as before.
+// The graph derives its hazards from Update's query; the explicit Registry&
+// also covers structural changes (container insertion, physics/mesh removal).
 void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
-    updateGraph.AddSystem({
-        .update_func = [](SystemContext& ctx) -> void {
-            static InteractionSystem sys;
-            sys.Update(ctx, ctx.dt);
-        },
-        .name = "InteractionSystem",
-        .access_pattern =
-            {
-                ECS::Write<TriggerComponent>(),
-                ECS::Write<ContainerComponent>(),
-                ECS::Write<PickupComponent>(),
-                ECS::Read<ItemBaseComponent>(),
-                ECS::Read<UsableComponent>(),
-                ECS::Read<Character::MovementComponent>(),
-            },
-        .enabled = true,
-    });
+    updateGraph.AddSystem<&InteractionSystem::Update>();
 }
 
 } // namespace

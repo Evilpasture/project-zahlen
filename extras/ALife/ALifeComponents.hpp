@@ -35,7 +35,8 @@ struct ALifeComponent {
     int32_t wait_time   = 0;
     bool    is_thinking = false;
 
-    uint32_t next_in_grid = ALife::END_OF_LIST;
+    // Full handle: an ECS slot can be reused with a different generation.
+    Entity next_in_grid = Entity::Null();
 
     uint32_t        class_id      = 0;
     int32_t         health        = 100;

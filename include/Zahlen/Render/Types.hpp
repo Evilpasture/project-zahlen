@@ -12,18 +12,61 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec4.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace ZHLN {
 
+// glTF sampler wrapping is attached to a texture *reference*, not its image:
+// multiple texture objects may share the same image with different S/T modes.
+enum class TextureWrap : uint8_t { Repeat = 0, ClampToEdge = 1, MirroredRepeat = 2 };
+struct TextureSamplerAddress {
+    TextureWrap s = TextureWrap::Repeat;
+    TextureWrap t = TextureWrap::Repeat;
+    constexpr bool operator==(const TextureSamplerAddress&) const noexcept = default;
+};
+
+// Each material texture reference can choose its own S/T wrap modes.
+enum class MaterialTextureSlot : uint8_t {
+    Albedo,
+    Normal,
+    Pbr,
+    Emissive,
+    Clearcoat,
+    ClearcoatRoughness,
+    ClearcoatNormal,
+    Anisotropy,
+    Iridescence,
+    FilmThickness,
+    VolumeThickness,
+    SheenColor,
+    SheenRoughness,
+    Occlusion,
+    Transmission,
+    Count
+};
+inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
+using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+
+// glTF textureInfo, not the image, owns the UV transform and set selection.
+// Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
+struct MaterialTextureTransform {
+    std::array<float, 2> offset {0.0f, 0.0f};
+    std::array<float, 2> scale {1.0f, 1.0f};
+    float rotation = 0.0f; // Radians, counter-clockwise in glTF UV space.
+    uint32_t texCoord = 0;
+    constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
+};
+using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_cast<size_t>(MaterialTextureSlot::Count)>;
 
 struct Mesh {
     using enum BufferHandle;
-    BufferHandle posBuffer   = Invalid;
-    BufferHandle attrBuffer  = Invalid;
-    BufferHandle skinBuffer  = Invalid;
-    BufferHandle indexBuffer = Invalid;
+    BufferHandle posBuffer          = Invalid;
+    BufferHandle tangentFrameBuffer = Invalid;
+    BufferHandle surfaceBuffer      = Invalid;
+    BufferHandle skinBuffer         = Invalid;
+    BufferHandle indexBuffer        = Invalid;
     uint32_t     vertexCount = 0;
     uint32_t     indexCount  = 0;
 
@@ -42,13 +85,16 @@ struct Material {
     TextureHandle       normalMap          = TextureHandle::Invalid;
     TextureHandle       pbrMap             = TextureHandle::Invalid;
     TextureHandle       emissiveMap        = TextureHandle::Invalid;
-    float               baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float               emissiveFactor[4]  = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 4> baseColorFactor    = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissiveFactor     = {0.0f, 0.0f, 0.0f, 1.0f};
     float               metallicFactor     = 1.0f;
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
+    bool                doubleSided        = false;
+    bool                unlit              = false; // KHR_materials_unlit: base color without lighting.
     float               transmissionFactor = 0.0f;
+    TextureHandle       transmissionMap    = TextureHandle::Invalid;
     float               iridescenceFactor  = 0.0f;
     float               filmThicknessNm    = 0.0f;
     float               filmThicknessMinNm = 0.0f;
@@ -64,7 +110,23 @@ struct Material {
     TextureHandle       clearcoatMap             = TextureHandle::Invalid;
     TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
     TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
+    float               anisotropyStrength      = 0.0f;
+    float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
+    TextureHandle       anisotropyMap           = TextureHandle::Invalid;
+    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                sheenRoughnessFactor = 0.0f;
+    TextureHandle        sheenColorMap = TextureHandle::Invalid;
+    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
+    TextureHandle        occlusionMap = TextureHandle::Invalid;
+    float                occlusionStrength = 1.0f;
+    MaterialSamplerAddresses textureSamplers {}; // Repeat/Repeat for non-glTF materials.
+    MaterialTextureTransforms textureTransforms {};
 };
+
+static_assert(
+    sizeof(std::array<float, 4>) == sizeof(float[4]) && alignof(std::array<float, 4>) == alignof(float[4]),
+    "material factors must preserve their four-float ABI"
+);
 
 enum class DrawFlags : uint32_t {
     None            = 0,
@@ -94,6 +156,7 @@ struct CSGModifier {
 
 struct MaterialDesc {
     bool doubleSided   = false;
+    bool unlit         = false;
     bool alphaBlend    = false;
     bool additiveBlend = false;
 
@@ -104,6 +167,7 @@ struct MaterialDesc {
     std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
     float                transmissionFactor = 0.0f;
+    TextureHandle        transmissionMap    = TextureHandle::Invalid;
     float                iridescenceFactor  = 0.0f;
     float                filmThicknessNm    = 0.0f;
     float                filmThicknessMinNm = 0.0f;
@@ -124,6 +188,17 @@ struct MaterialDesc {
     TextureHandle clearcoatMap          = TextureHandle::Invalid;
     TextureHandle clearcoatRoughnessMap = TextureHandle::Invalid;
     TextureHandle clearcoatNormalMap    = TextureHandle::Invalid;
+    float         anisotropyStrength    = 0.0f;
+    float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
+    TextureHandle anisotropyMap         = TextureHandle::Invalid;
+    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                sheenRoughnessFactor = 0.0f;
+    TextureHandle        sheenColorMap = TextureHandle::Invalid;
+    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
+    TextureHandle        occlusionMap = TextureHandle::Invalid;
+    float                occlusionStrength = 1.0f;
+    MaterialSamplerAddresses textureSamplers {};
+    MaterialTextureTransforms textureTransforms {};
 };
 
 struct DrawParams {
@@ -134,7 +209,7 @@ struct DrawParams {
     uint32_t             jointOffset      = 0;
     uint32_t             morphOffset      = 0;
     uint32_t             activeMorphCount = 0;
-    const float*         morphWeights     = nullptr;
+    std::array<float, 4> morphWeights     = {};
     DrawFlags            flags            = DrawFlags::None;
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;

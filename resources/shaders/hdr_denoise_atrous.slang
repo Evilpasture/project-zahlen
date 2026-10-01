@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
+import math.math;
 import pbr_helpers;
 import uniforms;
 
@@ -34,17 +34,12 @@ void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol,
     float4 sampleValue  = inColor.Load(int3(coord, 0));
     float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
 
-    float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw)) / depthTol);
+    float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw, frame.invProj)) / depthTol);
     float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
     float weight  = kernelW * wDepth * wNormal;
 
     sum         += sampleValue * weight;
     totalWeight += weight;
-}
-
-float LinearizeDepth(float ndcDepth) {
-    float4 viewPos = mul(frame.invProj, float4(0.0f, 0.0f, ndcDepth, 1.0f));
-    return viewPos.z / max(viewPos.w, 1e-6f);
 }
 
 [numthreads(8, 8, 1)]
@@ -60,7 +55,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
 
     float4 centerValue  = inColor.Load(int3(tid.xy, 0));
-    float  centerDepth  = LinearizeDepth(depth);
+    float  centerDepth  = LinearizeDepth(depth, frame.invProj);
     float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
 
     int step = int(max(pc.stepSize, 1u));

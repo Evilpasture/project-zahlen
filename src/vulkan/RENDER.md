@@ -391,7 +391,7 @@ Here is a typical usage pattern for allocating a mesh, configuring a material, a
 ```cpp
 // 1. Create a vertex buffer
 std::vector<Vertex> vertices = { ... };
-BufferHandle vbo = renderContext.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
+BufferHandle vbo = renderContext.CreateVertexBuffer(std::span {vertices});
 
 // 2. Create a material (raw shader-blob compilation is the internal
 //    ZHLN::PipelineDesc / RenderContext::Impl::CreatePipelineMaterial pair in
@@ -402,8 +402,8 @@ MaterialDesc materialDesc = {
     .metallic = 1.0f,
     .roughness = 0.5f
 };
+materialDesc.albedoMap = renderContext.CreateTexture(std::span {pixels}, {width, height}).value(); // registered TextureHandle
 Material material = renderContext.CreateMaterial(materialDesc).value();
-material.albedoIndex = renderContext.CreateTexture(pixels, width, height);
 
 Mesh mesh = { .vertexBuffer = vbo, .vertexCount = vertices.size() };
 ```

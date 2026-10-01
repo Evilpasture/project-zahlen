@@ -2,87 +2,92 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShaderStages.hpp"
+#include <algorithm>
+#include <utility>
 
 namespace ZHLN::Vk {
 
-ShaderStages::~ShaderStages() {
-    if (_device != VK_NULL_HANDLE) {
-        ZHLN_DestroyShaderStages(_device, &_raw);
+auto ShaderStagesView::Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
+    if (vert.code == nullptr || vert.size == 0) {
+        return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
+    const ZHLN_ShaderStagesDesc desc = {.vert = vert, .frag = frag, .task = {}, .mesh = {}};
+    ZHLN_ShaderStages stages {};
+    if (!ZHLN_InitShaderStages(&desc, &stages)) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
+    }
+    return ShaderStagesView {stages};
 }
 
-ShaderStages::ShaderStages(ShaderStages&& other) noexcept:
-    _device(std::exchange(other._device, VK_NULL_HANDLE)), _raw(std::exchange(other._raw, {})), _vertSpv(std::move(other._vertSpv)),
-    _fragSpv(std::move(other._fragSpv)), _taskSpv(std::move(other._taskSpv)), _meshSpv(std::move(other._meshSpv)) {
-}
-
-auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
-    if (this != &other) {
-        if (_device != VK_NULL_HANDLE) {
-            ZHLN_DestroyShaderStages(_device, &_raw);
-        }
-        _device  = std::exchange(other._device, VK_NULL_HANDLE);
-        _raw     = std::exchange(other._raw, {});
-        _vertSpv = std::move(other._vertSpv);
-        _fragSpv = std::move(other._fragSpv);
-        _taskSpv = std::move(other._taskSpv);
-        _meshSpv = std::move(other._meshSpv);
-    }
-    return *this;
-}
-
-auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
-    ZHLN_ShaderStages           stages {};
-    if (!ZHLN_CreateShaderStages(&desc, &stages)) {
-        if (vert.code && vert.size > 0 && stages.vert.handle == VK_NULL_HANDLE) {
-            return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
-        }
-        if (frag.code && frag.size > 0 && stages.frag.handle == VK_NULL_HANDLE) {
-            return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
-        }
-        return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
-    }
-    stages.vert.view_mask = ZHLN_DetectShaderViewMask(&vert);
-    stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
-    std::vector<uint32_t> vertSpv;
-    std::vector<uint32_t> fragSpv;
-    if (vert.code && vert.size > 0) {
-        vertSpv.assign(vert.code, vert.code + (vert.size / sizeof(uint32_t)));
-    }
-    if (frag.code && frag.size > 0) {
-        fragSpv.assign(frag.code, frag.code + (frag.size / sizeof(uint32_t)));
-    }
-    return ShaderStages {device, stages, std::move(vertSpv), std::move(fragSpv)};
-}
-
-auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+auto ShaderStagesView::CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
-
-    const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = {}, .frag = frag, .task = task, .mesh = mesh};
-
+    const ZHLN_ShaderStagesDesc desc = {.vert = {}, .frag = frag, .task = task, .mesh = mesh};
     ZHLN_ShaderStages stages {};
-    if (!ZHLN_CreateShaderStages(&desc, &stages)) {
-        return std::unexpected(ShaderStageCreationError::ShaderModuleCreationFailed);
+    if (!ZHLN_InitShaderStages(&desc, &stages)) {
+        return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
+    return ShaderStagesView {stages};
+}
 
-    stages.mesh.view_mask = ZHLN_DetectShaderViewMask(&mesh);
-    stages.frag.view_mask = ZHLN_DetectShaderViewMask(&frag);
-    if (stages.task.handle != VK_NULL_HANDLE) {
-        stages.task.view_mask = ZHLN_DetectShaderViewMask(&task);
+OwnedShaderStages::OwnedShaderStages(
+    ShaderBytecode vert, ShaderBytecode frag, ShaderBytecode task, ShaderBytecode mesh, const ShaderStagesView& validated
+) noexcept:
+    _vert(std::move(vert)), _frag(std::move(frag)), _task(std::move(task)), _mesh(std::move(mesh)),
+    _vertMeta(MetadataOf(validated.Get()->vert)), _fragMeta(MetadataOf(validated.Get()->frag)),
+    _taskMeta(MetadataOf(validated.Get()->task)), _meshMeta(MetadataOf(validated.Get()->mesh)) {
+}
+
+auto OwnedShaderStages::MetadataOf(const ZHLN_Shader& shader) noexcept -> StageMetadata {
+    StageMetadata meta {.stage = shader.stage, .viewMask = shader.view_mask};
+    std::copy_n(shader.entry_point, meta.entryPoint.size(), meta.entryPoint.begin());
+    return meta;
+}
+
+auto OwnedShaderStages::MakeStage(const ShaderBytecode& source, const StageMetadata& meta) noexcept -> ZHLN_Shader {
+    if (meta.stage == VkShaderStageFlagBits {}) {
+        return {};
     }
+    const auto desc = CreateShaderDesc(source.Code());
+    ZHLN_Shader shader {.code = desc.code, .size = desc.size, .stage = meta.stage, .entry_point = {}, .view_mask = meta.viewMask};
+    std::copy(meta.entryPoint.begin(), meta.entryPoint.end(), shader.entry_point);
+    return shader;
+}
 
-    const auto copy = [](const ZHLN_ShaderDesc& d) -> std::vector<uint32_t> {
-        if (d.code == nullptr || d.size == 0) {
-            return {};
-        }
-        return std::vector<uint32_t>(d.code, d.code + (d.size / sizeof(uint32_t)));
-    };
+auto OwnedShaderStages::Create(ShaderBytecode vert, ShaderBytecode frag, const char* vertEntry, const char* fragEntry)
+    -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+    // Validate while the source spans still refer to their original buffers.
+    // Retain only the C ABI's entry names, stage flags and view masks; never
+    // retain its SPIR-V pointers across a move of these buffers.
+    auto view = ShaderStagesView::Create(CreateShaderDesc(vert.Code(), vertEntry), CreateShaderDesc(frag.Code(), fragEntry));
+    if (!view) {
+        return std::unexpected(view.error());
+    }
+    return OwnedShaderStages {std::move(vert), std::move(frag), {}, {}, *view};
+}
 
-    return ShaderStages {device, stages, {}, copy(frag), copy(task), copy(mesh)};
+auto OwnedShaderStages::CreateMesh(
+    ShaderBytecode task, ShaderBytecode mesh, ShaderBytecode frag, const char* taskEntry, const char* meshEntry, const char* fragEntry
+) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+    auto view = ShaderStagesView::CreateMesh(
+        CreateShaderDesc(task.Code(), taskEntry), CreateShaderDesc(mesh.Code(), meshEntry), CreateShaderDesc(frag.Code(), fragEntry)
+    );
+    if (!view) {
+        return std::unexpected(view.error());
+    }
+    return OwnedShaderStages {{}, std::move(frag), std::move(task), std::move(mesh), *view};
+}
+
+auto OwnedShaderStages::View() const noexcept -> ShaderStagesView {
+    ZHLN_ShaderStages stages {};
+    stages.vert = MakeStage(_vert, _vertMeta);
+    stages.frag = MakeStage(_frag, _fragMeta);
+    stages.task = MakeStage(_task, _taskMeta);
+    stages.mesh = MakeStage(_mesh, _meshMeta);
+    return ShaderStagesView {stages};
 }
 
 }

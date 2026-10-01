@@ -21,8 +21,10 @@ inline constexpr uint32_t kSpirvMagic             = 0x07230203;
 inline constexpr size_t   kSpirvHeaderWords       = 5;
 inline constexpr uint16_t kSpirvOpEntryPoint    = 15;
 inline constexpr uint16_t kSpirvOpName            = 5;
-inline constexpr uint16_t kSpirvOpTypeSampler     = 26;
-inline constexpr uint16_t kSpirvOpTypePointer     = 32;
+inline constexpr uint16_t kSpirvOpTypeSampler      = 26;
+inline constexpr uint16_t kSpirvOpTypeArray        = 28;
+inline constexpr uint16_t kSpirvOpTypeRuntimeArray = 29;
+inline constexpr uint16_t kSpirvOpTypePointer      = 32;
 inline constexpr uint16_t kSpirvOpFunction        = 54;
 inline constexpr uint16_t kSpirvOpVariable        = 59;
 inline constexpr uint16_t kSpirvOpDecorate        = 71;
@@ -238,11 +240,13 @@ class SpirvBindings {
     std::array<Range, kNameCapacity>       names {};
     std::array<Pair, kVariableCapacity>    variables {};
     std::array<Pair, kTypeCapacity>        pointers {};
+    std::array<Pair, kTypeCapacity>        arrays {};
     std::array<uint32_t, kSamplerCapacity> samplerTypes {};
 
     uint32_t nameCount     = 0;
     uint32_t variableCount = 0;
     uint32_t pointerCount  = 0;
+    uint32_t arrayCount    = 0;
     uint32_t samplerCount  = 0;
 
     const auto isCandidate = [&](uint32_t id) noexcept -> bool {
@@ -299,6 +303,16 @@ class SpirvBindings {
                     pointers[pointerCount++] = Pair {.id = wordAt(word + 1), .related = wordAt(word + 3)};
                 }
                 break;
+            case kSpirvOpTypeArray:
+            case kSpirvOpTypeRuntimeArray:
+                if (count >= (opcode == kSpirvOpTypeArray ? 4u : 3u)) {
+                    if (arrayCount == kTypeCapacity) {
+                        out._truncated = true;
+                        return out;
+                    }
+                    arrays[arrayCount++] = Pair {.id = wordAt(word + 1), .related = wordAt(word + 2)};
+                }
+                break;
             case kSpirvOpFunction:
                 word = words;
                 break;
@@ -352,6 +366,23 @@ class SpirvBindings {
                     pointee = pointers[p].related;
                 }
             }
+        }
+        // An OpVariable for SamplerState[9] points to OpTypeArray, not
+        // OpTypeSampler. Follow fixed/runtime array element types (also nested
+        // arrays) before choosing the sampler or resource half of the catalog.
+        // The bound prevents a malformed type cycle from hanging consteval.
+        for (uint32_t depth = 0; depth < arrayCount; ++depth) {
+            uint32_t element = 0;
+            for (uint32_t a = 0; a < arrayCount; ++a) {
+                if (arrays[a].id == pointee) {
+                    element = arrays[a].related;
+                    break;
+                }
+            }
+            if (element == 0) {
+                break;
+            }
+            pointee = element;
         }
         for (uint32_t s = 0; s < samplerCount; ++s) {
             binding.sampler = binding.sampler || samplerTypes[s] == pointee;

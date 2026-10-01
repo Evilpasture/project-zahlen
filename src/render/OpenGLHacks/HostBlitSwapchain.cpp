@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
@@ -131,55 +132,44 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
 }
 
 bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
-    auto [slot, fence]      = g.ring.Acquire();
-    const VkCommandBuffer cmd = slot;
+    auto acquired = g.ring.Acquire();
+    if (!acquired) { return false; }
+    auto slot = *acquired;
+    auto recording = Vk::CommandRecorder::Begin(slot.cmd);
+    if (!recording) { return false; }
+    const VkCommandBuffer cmd = recording->Handle();
 
-    {
-        Vk::CommandBufferGuard recording(cmd);
-
-        auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
-                           VkAccessFlags2 dstAccess) {
-            Vk::ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
-                                      .image      = image,
-                                      .src_access = srcAccess,
-                                      .dst_access = dstAccess,
-                                      .src_layout = from,
-                                      .dst_layout = to,
-                                      .src_stage  = srcStage,
-                                      .dst_stage  = dstStage,
-                                      .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                                      .base_mip   = 0,
-                                      .mip_count  = 1,
-                                  });
-        };
-
-        barrier(
-            srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
-            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
-        );
-
-        Vk::CopyImageToBuffer(cmd, image, g.staging, VkExtent2D {width, height});
-
-        barrier(
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
-        );
-    }
-
-    const VkSubmitInfo si {
-        .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext                = nullptr,
-        .waitSemaphoreCount   = 0,
-        .pWaitSemaphores      = nullptr,
-        .pWaitDstStageMask    = nullptr,
-        .commandBufferCount   = 1,
-        .pCommandBuffers      = &cmd,
-        .signalSemaphoreCount = 0,
-        .pSignalSemaphores    = nullptr,
+    auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
+                       VkAccessFlags2 dstAccess) {
+        Vk::ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
+                                  .image      = image,
+                                  .src_access = srcAccess,
+                                  .dst_access = dstAccess,
+                                  .src_layout = from,
+                                  .dst_layout = to,
+                                  .src_stage  = srcStage,
+                                  .dst_stage  = dstStage,
+                                  .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                  .base_mip   = 0,
+                                  .mip_count  = 1,
+                              });
     };
-    if (vkQueueSubmit(g.queue, 1, &si, fence) != VK_SUCCESS)
-        return false;
-    return vkWaitForFences(g.device, 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
+
+    barrier(
+        srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
+    );
+
+    Vk::CopyImageToBuffer(cmd, image, g.staging, VkExtent2D {width, height});
+
+    barrier(
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
+    );
+
+    auto executable = std::move(*recording).End();
+    if (!executable || !g.ring.Submit(g.queue, slot, std::move(*executable))) { return false; }
+    return vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
 }
 
 GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height) noexcept {

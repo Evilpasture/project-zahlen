@@ -7,6 +7,7 @@
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "SystemWiring.hpp"
+#include "SceneCleanupSystem.hpp"
 #include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -39,6 +40,7 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -67,6 +69,7 @@ struct EngineImpl {
     Engine::FreeCamSpeedQuery                    freeCamSpeedQuery     = nullptr;
     BonePosePostProcessor                        bonePosePostProcessor = nullptr;
     std::vector<Engine::TeardownHook>            teardownHooks;
+    std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
@@ -157,6 +160,25 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
+    // The old context owns the old buffers. Never pass its handles to the
+    // replacement context (generational slots may reuse the same numbers).
+    auto& reg = _impl->world->GetRegistry();
+    for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
+        emitter.gpuBuffer = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
+        emitter.gpuBuffer = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
+        skeleton.skinnedScratch = BufferHandle::Invalid;
+        skeleton.scratchVertexCount = 0;
+    }
+    for (auto& owned: reg.GetRawArray<Components::OwnedMeshComponent>()) {
+        owned.mesh = {}; // the old context will reclaim its pool; never destroy these on the new device
+    }
+
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
@@ -190,7 +212,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
     _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
-    auto world_res = World::Create(cfg.physics);
+    auto world_res = World::Create(cfg.physics, true);
     if (!world_res) {
         return std::unexpected(world_res.error());
     }
@@ -288,9 +310,9 @@ Engine::~Engine() {
             hook(*this);
         }
 
-        _impl->world->GetArticulationSystem().Shutdown(*this);
-        _impl->world->GetRegistry().Clear();
-        _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
+        // Release external handles while both the World and Kernel still live.
+        // The World destructor can safely clear its already-empty registry.
+        ClearScene();
     }
 
     _impl->world.reset();
@@ -351,20 +373,20 @@ void Engine::RemoveWindow(Window& window) {
     _impl->kernel->RemoveWindow(window);
 }
 
-auto Engine::AcquireTarget() noexcept -> FrameOutcome<RenderAttachment> {
+auto Engine::AcquireTarget() noexcept -> FrameOutcome<FrameTarget> {
     return _impl->kernel->AcquireTarget();
 }
 
-auto Engine::AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+auto Engine::AcquireTarget(Window& window) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->kernel->AcquireTarget(window);
 }
 
-auto Engine::GetTargetAttachment() noexcept -> std::optional<RenderAttachment> {
-    return _impl->kernel->GetTargetAttachment();
+auto Engine::GetAcquiredTarget() noexcept -> std::optional<FrameTarget> {
+    return _impl->kernel->GetAcquiredTarget();
 }
 
-auto Engine::GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->kernel->GetTargetAttachment(window);
+auto Engine::GetAcquiredTarget(Window& window) noexcept -> std::optional<FrameTarget> {
+    return _impl->kernel->GetAcquiredTarget(window);
 }
 
 auto Engine::GetKernel() -> Kernel& {
@@ -378,6 +400,7 @@ auto Engine::MakeSystemContext(float dt) -> SystemContext {
     return SystemContext {
         .registry              = _impl->world->GetRegistry(),
         .render                = &_impl->kernel->GetRenderContext(),
+        .assets                = &_impl->kernel->GetAssetManager(),
         .physics               = &_impl->world->GetPhysics(),
         .audio                 = &_impl->kernel->GetAudioContext(),
         .camera                = &_impl->world->GetCamera(),
@@ -430,6 +453,29 @@ auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
 }
+
+void Engine::ProcessPendingDestroy() {
+    SceneCleanupSystem::ProcessPending(*this);
+}
+
+void Engine::ClearScene() {
+    SceneCleanupSystem::ClearAll(*this);
+}
+
+auto Engine::AddSceneCleanupPass(SceneCleanupPass pass) -> bool {
+    if (pass == nullptr || std::find(_impl->sceneCleanupPasses.begin(), _impl->sceneCleanupPasses.end(), pass) != _impl->sceneCleanupPasses.end()) {
+        return false;
+    }
+    _impl->sceneCleanupPasses.push_back(pass);
+    return true;
+}
+
+void Engine::RunSceneCleanupPasses(bool all) {
+    for (const auto pass: _impl->sceneCleanupPasses) {
+        pass(*this, all);
+    }
+}
+
 auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
 }
@@ -550,8 +596,6 @@ auto Engine::InitializeDefaultScene() -> bool {
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     _impl->activeGameplayDriver = driver;
 
-    _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
-
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
     _impl->scheduler.Execute(*this, dt, ctx);
@@ -565,7 +609,9 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     -> std::expected<void, ErrorCode> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
-    TaskSystem::Init();
+    // Construct before the engine so its destructor (and any cleanup tasks)
+    // finishes before the worker threads and fibers are retired.
+    TaskSystem::Scope tasks;
 
     uint32_t w = options.fullscreen ? 0 : 1280;
     uint32_t h = options.fullscreen ? 0 : 720;
@@ -587,7 +633,6 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
 
     auto engine_res = Engine::Create(config);
     if (!engine_res) {
-        TaskSystem::Shutdown();
         return std::unexpected(engine_res.error());
     }
 
@@ -652,7 +697,6 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
         }
     }
 
-    TaskSystem::Shutdown();
     return {};
 }
 

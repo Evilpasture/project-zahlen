@@ -55,7 +55,7 @@ constexpr size_t kExpectedEntries3 = 3;
 
 constexpr uint32_t kZmetVersion          = 1u;
 constexpr uint32_t kMeshMagic            = 0x3048534Du; // 'MSH0'
-constexpr uint32_t kMeshVersion          = 4u;
+constexpr uint32_t kMeshVersion          = 6u;
 constexpr uint32_t kAnimMagic            = 0x304D4E41u; // 'ANM0'
 constexpr uint32_t kAnimVersion          = 1u;
 constexpr uint32_t kGlbMagic             = 0x46546C67u; // 'glTF'
@@ -164,7 +164,8 @@ inline bool ReadValue(std::istream& stream, T& outValue) {
 // Resolved against the process working directory, which CTest sets to the
 // directory holding the add_test() call. zcook itself is built at the root of
 // the build tree, so the candidate list has to cover one level per nesting
-// step between there and the group: tests/ is one down, tests/extras/ is two.
+// step between there and the group: tests/ is one down, tests/asset_cooking/
+// is two.
 fs::path FindZcookExecutable() {
     std::vector<fs::path> candidates = {"zcook",
                                         "./zcook",

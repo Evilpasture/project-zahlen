@@ -57,8 +57,10 @@ struct AudioTestSuite {
             audio.StopVoice(invalid, 0.0f);
             audio.SetLoopSynthParams(invalidSynth, 1.0f, 440.0f, 1000.0f, 0.5f);
             audio.StopLoopSynth(invalidSynth, 0.0f);
+            ZHLN::Test::ExpectFalse(audio.IsLoopSynthValid(invalidSynth));
+            audio.UpdatePlayback(1.0f / 60.0f); // no entity liveness query or device required
 
-            ZHLN::Test::ExpectEq(audio.CreateVoice(ZHLN::Entity::Null(), "", false, false, 1.0f), invalid);
+            ZHLN::Test::ExpectEq(audio.CreateVoice("", false, false, 1.0f), invalid);
             return {};
         }
 

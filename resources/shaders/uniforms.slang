@@ -14,6 +14,7 @@ public struct FrameUniforms {
     public float4 camPos;
     [CxxCArray]
     public float4 lightDir;
+    public float4 sunRadiance; // RGB directional irradiance, after authored/cooked policy
     public uint lightCount;
     public float ambientExposure;
     public float shadowWidth;

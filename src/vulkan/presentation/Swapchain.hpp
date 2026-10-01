@@ -11,8 +11,6 @@ struct SwapchainSupport {
     [[nodiscard]] auto    PresentModes() const noexcept -> std::span<const VkPresentModeKHR>;
 };
 
-[[nodiscard]] SwapchainSupport QuerySwapchainSupport(VkPhysicalDevice physical, VkSurfaceKHR surface) noexcept;
-
 class Swapchain {
   public:
     Swapchain() noexcept = default;
@@ -44,4 +42,4 @@ class Swapchain {
     VkDevice       _device = VK_NULL_HANDLE;
     ZHLN_Swapchain _raw    = {};
 };
-}
+} // namespace ZHLN::Vk

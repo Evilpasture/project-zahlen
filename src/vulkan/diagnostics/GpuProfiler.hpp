@@ -91,17 +91,17 @@ class GpuProfiler {
   private:
     void Teardown() noexcept;
 
-    VkDevice                        _device        = VK_NULL_HANDLE;
-    std::array<VkQueryPool, 2>      _pools         = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    mutable std::array<uint64_t, 2> _recordedMasks = {0, 0};
-    bool                            _enabled       = false;
+    VkDevice _device = VK_NULL_HANDLE;
+    std::array<VkQueryPool, Vk::kFramesInFlight> _pools {};
+    mutable std::array<uint64_t, Vk::kFramesInFlight> _recordedMasks {};
+    bool _enabled = false;
 
-    std::array<VkQueryPool, 2>      _statsPools      = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    mutable std::array<uint64_t, 2> _statsBeginMasks = {0, 0};
-    mutable std::array<uint64_t, 2> _statsEndMasks   = {0, 0};
-    VkQueryPipelineStatisticFlags   _statsBits       = 0;
-    bool                            _statsSupported  = false;
-    bool                            _statsEnabled    = false;
+    std::array<VkQueryPool, Vk::kFramesInFlight> _statsPools {};
+    mutable std::array<uint64_t, Vk::kFramesInFlight> _statsBeginMasks {};
+    mutable std::array<uint64_t, Vk::kFramesInFlight> _statsEndMasks {};
+    VkQueryPipelineStatisticFlags _statsBits = 0;
+    bool _statsSupported = false;
+    bool _statsEnabled = false;
 };
 
 

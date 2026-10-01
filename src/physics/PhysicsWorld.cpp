@@ -64,7 +64,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     slotToDense.resize(capacity);
     denseToSlot.resize(capacity);
     freeSlots.resize(capacity);
-    bodyOwners.resize(capacity);
 
     categories.resize(capacity);
     masks.resize(capacity);
@@ -81,7 +80,6 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
     for (uint32_t i = 0; i < capacity; ++i) {
         generations[i].store(1, std::memory_order::relaxed);
         StoreSlotState(i, SlotState::Empty);
-        bodyOwners[i] = ZHLN::Entity::Null();
         freeSlots[i] = (capacity - 1) - i;
     }
 
@@ -131,7 +129,6 @@ void PhysicsWorld::Shutdown() {
     slotToDense.clear();
     denseToSlot.clear();
     freeSlots.clear();
-    bodyOwners.clear();
     categories.clear();
     masks.clear();
     slotStates.clear();
@@ -171,7 +168,6 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     slotToDense.resize(newCapacity);
     denseToSlot.resize(newCapacity);
     freeSlots.resize(newCapacity);
-    bodyOwners.resize(newCapacity);
     categories.resize(newCapacity);
     masks.resize(newCapacity);
     generations.resize(newCapacity);
@@ -188,7 +184,6 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     for (size_t i = oldCap; i < newCapacity; i++) {
         generations[i].store(1, std::memory_order::relaxed);
         StoreSlotState(i, SlotState::Empty);
-        bodyOwners[i] = ZHLN::Entity::Null();
         freeSlots[freeIdx++] = static_cast<uint32_t>(i);
     }
     freeCount.store(freeIdx, std::memory_order::release);
@@ -215,7 +210,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
     }
 }
 
-auto PhysicsWorld::AllocateHandle() -> ZHLN::Entity {
+auto PhysicsWorld::AllocateHandle() -> Physics::BodyHandle {
     size_t available = freeCount.load(std::memory_order::acquire);
     if (available == 0) {
         ResizeBuffers(capacity * 2);
@@ -226,7 +221,7 @@ auto PhysicsWorld::AllocateHandle() -> ZHLN::Entity {
     freeCount.store(available, std::memory_order::release);
 
     uint32_t gen = generations[slot].load(std::memory_order::relaxed);
-    return ZHLN::Entity {.index = slot, .generation = gen};
+    return Physics::BodyHandle {.index = slot, .generation = gen};
 }
 
 void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
@@ -254,7 +249,6 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
         denseToSlot[denseIdx]    = moverSlot;
     }
 
-    bodyOwners[slot] = ZHLN::Entity::Null();
     generations[slot].fetch_add(1, std::memory_order::relaxed);
     StoreSlotState(slot, SlotState::Empty);
 
@@ -288,7 +282,7 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
     size_t rotSize = currentCount * sizeof(float) * 4;
     size_t velSize = currentCount * sizeof(float) * 4;
 
-    size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t) + sizeof(ZHLN::Entity));
+    size_t mappingSize = slotCap * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
 
     size_t totalSize = sizeof(WorldStateHeader) + posSize + rotSize + (velSize * 2) + mappingSize;
 
@@ -328,7 +322,6 @@ auto PhysicsWorld::SaveState() const -> JPH::Array<std::byte> {
             *ptr   = s;
             ptr += 1;
         }
-        std::memcpy(ptr, bodyOwners.data(), slotCap * sizeof(ZHLN::Entity));
     });
     return buffer;
 }
@@ -345,8 +338,13 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         return false;
     }
 
-    const uint8_t* ptr        = data + sizeof(WorldStateHeader);
-    size_t         savedCount = header->bodyCount;
+    size_t savedCount = header->bodyCount;
+    const size_t expectedSize = sizeof(WorldStateHeader) + savedCount * (sizeof(JPH::Real) + sizeof(float) * 3) * 4 +
+                                slotCapacity * (sizeof(uint32_t) * 3 + sizeof(uint8_t));
+    if (savedCount > capacity || size < expectedSize) {
+        return false;
+    }
+    const uint8_t* ptr = data + sizeof(WorldStateHeader);
 
     ZHLN::Lock(sync.shadowLock, [&] -> void {
         size_t posSize = savedCount * sizeof(JPH::Real) * 4;
@@ -377,8 +375,6 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
             slotStates[i].store(*ptr, std::memory_order::relaxed);
             ptr += 1;
         }
-        std::memcpy(bodyOwners.data(), ptr, slotCapacity * sizeof(ZHLN::Entity));
-        ptr += (slotCapacity * sizeof(ZHLN::Entity));
 
         size_t newFreeCount = 0;
         for (uint32_t i = 0; i < slotCapacity; ++i) {

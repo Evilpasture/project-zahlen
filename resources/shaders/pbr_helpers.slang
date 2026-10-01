@@ -3,8 +3,24 @@ module pbr_helpers;
 __exported import hash;
 __exported import blue_noise;
 __exported import instance_data;
+__exported import math.math;
+__exported import math.transform;
 __exported import uniforms;
 __exported import vertex_format;
+
+// Res_Anisotropy is R8G8B8A8_UNORM. Reserve the top code (255) in its
+// strength channel for KHR_materials_unlit, and quantize lit strengths into
+// 0..254. That lets opaque unlit materials stay in the G-buffer (and in the
+// opaque scene sampled by transmission) without mistaking strength=1 for unlit.
+public float EncodeGBufferAnisotropy(float strength) {
+    return saturate(strength) * (254.0f / 255.0f);
+}
+public float DecodeGBufferAnisotropy(float encodedStrength) {
+    return saturate(encodedStrength * (255.0f / 254.0f));
+}
+public bool IsGBufferUnlit(float encodedStrength) {
+    return encodedStrength > (254.5f / 255.0f);
+}
 
 public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                                     float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
@@ -61,30 +77,6 @@ public bool IsFiniteFloat(float x) {
 }
 public bool IsFiniteFloat3(float3 v) {
     return IsFiniteFloat(v.x) && IsFiniteFloat(v.y) && IsFiniteFloat(v.z);
-}
-
-public float3 SafeNormalize(float3 v, float3 fallback) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return fallback;
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return fallback;
-    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
-        return fallback;
-    return r;
-}
-
-public float3 SafeNormalize(float3 v) {
-    float len = length(v);
-    if (len < 1e-5f || len != len || len > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    float3 r = v / len;
-    if (r.x != r.x || r.y != r.y || r.z != r.z)
-        return float3(0.0f, 0.0f, 1.0f);
-    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
-        return float3(0.0f, 0.0f, 1.0f);
-    return r;
 }
 
 public float SoftClamp(float x, float limit) {
@@ -195,6 +187,34 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 #endif
 
+// KHR_materials_sheen: Charlie's cylindrical-fiber distribution with the
+// cheaper Ashikhmin/Premoze visibility. The prefiltered environment is GGX,
+// so its sheen term below is an approximation, not a Charlie convolution.
+public float SheenCharlieBRDF(float3 N, float3 V, float3 L, float3 H, float roughness) {
+    float alpha = max(roughness * roughness, 0.005f);
+    float invAlpha = 1.0f / alpha;
+    float NdotH = saturate(dot(N, H));
+    float sin2h = saturate(1.0f - NdotH * NdotH);
+    float distribution = (2.0f + invAlpha) * pow(max(sin2h, 1e-6f), 0.5f * invAlpha) / (2.0f * 3.14159265f);
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float visibility = 1.0f / (4.0f * max(NdotL + NdotV - NdotL * NdotV, 1e-4f));
+    return distribution * visibility;
+}
+
+// Approximate hemispherical sheen albedo in place of a dedicated Charlie DFG
+// LUT. Scale the base lobe before adding sheen; clearcoat remains on top.
+public float SheenAlbedoScaling(float3 color, float roughness, float NdotV, float NdotL) {
+    float grazing = max(1.0f - saturate(NdotV), 1.0f - saturate(NdotL));
+    float energy = (0.25f + 0.35f * grazing * grazing) * (0.75f + 0.25f * saturate(roughness));
+    return saturate(1.0f - max(color.r, max(color.g, color.b)) * energy);
+}
+
+public float3 SheenEnvironmentWeight(float3 color, float NdotV) {
+    float grazing = 1.0f - saturate(NdotV);
+    return color * (0.25f + 0.35f * grazing * grazing);
+}
+
 public float DistributionGGX(float3 N, float3 H, float roughness) {
     float r     = max(roughness, 0.001f);
     float a     = r * r;
@@ -212,6 +232,90 @@ public float GeometrySchlickGGX(float NdotV, float roughness) {
 
 public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
+}
+
+// KHR_materials_anisotropy: the authored direction is the axis of *increased*
+// alpha roughness. The perpendicular axis keeps the material's base roughness.
+// This is not the symmetric (1 +/- strength) approximation: at full strength
+// alphaT becomes 1 even when the material roughness is zero.
+public float2 AnisotropicAlphas(float roughness, float strength) {
+    float alpha = max(roughness * roughness, 0.001f);
+    return float2(lerp(alpha, 1.0f, saturate(strength) * saturate(strength)), alpha);
+}
+
+// RG: octahedral world-space direction; B: strength. Zero strength is all
+// zeroes, so cleared pixels and non-anisotropic materials never need a tangent.
+public float4 PackAnisotropy(float3 N, float3 direction, float strength) {
+    if (strength <= 0.0f) {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    float3 T = OrthogonalTangent(N, direction);
+    return float4(PackNormalOctahedron(T) * 0.5f + 0.5f, saturate(strength), 0.0f);
+}
+
+public float3 UnpackAnisotropy(float2 packedDirection, float3 N) {
+    return OrthogonalTangent(N, UnpackNormalOctahedron(packedDirection * 2.0f - 1.0f));
+}
+
+// Burley/Heitz anisotropic GGX and height-correlated Smith visibility.
+public float DistributionGGXAnisotropic(float3 N, float3 H, float3 T, float3 B, float2 alpha) {
+    float3 h = float3(dot(T, H) / alpha.x, dot(B, H) / alpha.y, saturate(dot(N, H)));
+    float d = max(dot(h, h), 1e-8f);
+    return 1.0f / (3.14159265f * alpha.x * alpha.y * d * d);
+}
+
+public float VisibilityGGXAnisotropic(float3 N, float3 V, float3 L, float3 T, float3 B, float2 alpha) {
+    float NdotV = saturate(dot(N, V));
+    float NdotL = saturate(dot(N, L));
+    if (NdotV <= 0.0f || NdotL <= 0.0f) {
+        return 0.0f;
+    }
+    float lambdaV = NdotL * length(float3(alpha.x * dot(T, V), alpha.y * dot(B, V), NdotV));
+    float lambdaL = NdotV * length(float3(alpha.x * dot(T, L), alpha.y * dot(B, L), NdotL));
+    return 0.5f / max(lambdaV + lambdaL, 1e-6f);
+}
+
+public float3 SpecularGGX(float3 N, float3 V, float3 L, float3 H, float roughness, float3 F, float3 T, float3 B, float strength) {
+    if (strength > 1.0f / 255.0f) {
+        float2 alpha = AnisotropicAlphas(roughness, strength);
+        return F * DistributionGGXAnisotropic(N, H, T, B, alpha) * VisibilityGGXAnisotropic(N, V, L, T, B, alpha);
+    }
+    float D = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    return (D * G * F) / max(4.0f * saturate(dot(N, V)) * saturate(dot(N, L)), 0.001f);
+}
+
+// Khronos' bent-normal IBL direction. Keep this separate from the cubemap
+// lookup so reflection probes can parallax-correct the direction before sampling.
+public float3 AnisotropicReflection(float3 N, float3 V, float3 B, float roughness, float strength) {
+    float3 R = reflect(-V, N);
+    if (strength <= 1.0f / 255.0f) {
+        return R;
+    }
+    float3 bent = SafeNormalize(cross(cross(B, V), B), N);
+    float a = 1.0f - saturate(strength) * (1.0f - roughness);
+    a *= a;
+    a *= a;
+    bent = SafeNormalize(lerp(bent, N, a), N);
+    R = reflect(-V, bent);
+    return SafeNormalize(lerp(R, bent, roughness * roughness), reflect(-V, N));
+}
+
+// The PMREM is isotropic. Five widely spaced lookups at its sharpest mip
+// duplicate bright studio lights instead of stretching them continuously.
+// Sample the already bent (and optionally parallax-corrected) direction once.
+// A modest LOD bias towards the wide-axis roughness suppresses aliasing when
+// the base roughness is near zero, without blurring the narrow axis all the
+// way to sqrt(alphaT). The isotropic path retains its original LOD exactly.
+public float3 SampleAnisotropicEnvironment(TextureCube<float4> environment, SamplerState sampler, float3 bentDirection,
+                                            float roughness, float strength) {
+    float baseRoughness = saturate(roughness);
+    float effectiveRoughness = baseRoughness;
+    if (strength > 1.0f / 255.0f) {
+        float2 alpha = AnisotropicAlphas(baseRoughness, strength);
+        effectiveRoughness = lerp(baseRoughness, sqrt(alpha.x), 0.4f);
+    }
+    return environment.SampleLevel(sampler, bentDirection, effectiveRoughness * 5.0f).rgb;
 }
 
 public float ClearcoatFresnel(float NdotV) {
@@ -310,6 +414,9 @@ public float3 EvaluateSH(float3 N, float4 sh[9]) {
     float3 result = sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z + sh[3].xyz * -0.488603f * N.x +
                     sh[4].xyz * 1.092548f * N.x * N.y + sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
                     sh[7].xyz * -1.092548f * N.x * N.z + sh[8].xyz * 0.546274f * (N.x * N.x - N.y * N.y);
+    // The SH contains only the smooth lighting panorama. Compact HDR suns
+    // have been promoted to scene-owned shadowed directional lights, not
+    // packed into the unused w lanes or applied as unshadowed ambient.
     return max(result, float3(0.0f, 0.0f, 0.0f));
 }
 
@@ -541,8 +648,8 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
 }
 
 
-public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
-    float3 Vh = normalize(float3(alpha * V_local.x, alpha * V_local.y, max(V_local.z, 0.001f)));
+public float3 SampleGGX_VNDF(float3 V_local, float2 alpha, float2 u) {
+    float3 Vh = normalize(float3(alpha.x * V_local.x, alpha.y * V_local.y, max(V_local.z, 0.001f)));
 
     float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
     float3 T1   = (lensq > 1e-7f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
@@ -557,7 +664,11 @@ public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
 
     float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
 
-    return normalize(float3(alpha * Nh.x, alpha * Nh.y, max(Nh.z, 0.0f)));
+    return normalize(float3(alpha.x * Nh.x, alpha.y * Nh.y, max(Nh.z, 0.0f)));
+}
+
+public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
+    return SampleGGX_VNDF(V_local, float2(alpha), u);
 }
 
 public float3 EvaluateVNDFWeight(float NdotV, float NdotL, float VdotH, float roughness, float3 F0) {

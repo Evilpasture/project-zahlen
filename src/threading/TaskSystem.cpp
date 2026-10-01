@@ -4,6 +4,7 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -100,14 +101,14 @@ WorkQueue                s_freeQueue;
 std::vector<Fiber*>      s_fiberPool;
 std::vector<FiberData>   s_fiberData;
 std::vector<std::thread> s_threads;
+
+// Lifecycle transitions (including worker joins) are serialized. WorkerMain's
+// queue loop does not take this lock; all submitted tasks must finish before
+// Shutdown joins the workers.
+std::mutex               s_lifecycleMutex;
+bool                     s_running = false; // guarded by s_lifecycleMutex
+std::atomic<uint32_t>    s_workerCount {0};
 thread_local uint32_t    t_workerIndex = 0;
-uint32_t                 s_workerCount = 0;
-struct TaskSystemDeinitGuard {
-    ~TaskSystemDeinitGuard() {
-        Shutdown();
-    }
-};
-TaskSystemDeinitGuard s_deinitGuard;
 
 void SetCurrentThreadHighPriority() noexcept {
 #if defined(__APPLE__)
@@ -162,7 +163,8 @@ void WorkerMain(uint32_t index) {
 }
 
 void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
-    if (!s_threads.empty() || !s_fiberPool.empty()) {
+    std::lock_guard lock(s_lifecycleMutex);
+    if (s_running) {
         return;
     }
     SetCurrentThreadHighPriority();
@@ -180,7 +182,7 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
         }
     }
 
-    s_workerCount = numThreads + 1;
+    s_workerCount.store(numThreads + 1, std::memory_order::release);
     t_workerIndex = numThreads;
 
     s_fiberPool.resize(numFibers);
@@ -195,16 +197,22 @@ void Init(uint32_t numThreads, uint32_t numFibers, size_t stackSize) {
     for (uint32_t i = 0; i < numThreads; i++) {
         s_threads.emplace_back(WorkerMain, i);
     }
+    s_running = true;
 }
 
 auto GetWorkerIndex() -> uint32_t {
     return t_workerIndex;
 }
 auto GetWorkerCount() -> uint32_t {
-    return s_workerCount;
+    return s_workerCount.load(std::memory_order::acquire);
 }
 
 void Shutdown() {
+    std::lock_guard lock(s_lifecycleMutex);
+    if (!s_running) {
+        return;
+    }
+
     s_readyQueue.WakeAll();
     s_freeQueue.WakeAll();
 
@@ -222,8 +230,9 @@ void Shutdown() {
     s_fiberData.clear();
     s_readyQueue.Reset();
     s_freeQueue.Reset();
-    t_localFiber  = nullptr;
-    s_workerCount = 0;
+    t_localFiber = nullptr;
+    s_workerCount.store(0, std::memory_order::release);
+    s_running = false;
 }
 
 void Dispatch(std::span<const Task> tasks, Counter* counter) {

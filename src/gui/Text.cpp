@@ -59,7 +59,7 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
 
 uint32_t AppendTextVertices(
     VertexPosition*    outPos,
-    VertexAttributes*  outAttr,
+    VertexSurface*     outSurface,
     const FontAtlas&   font,
     const std::string& text,
     float              x,
@@ -75,8 +75,6 @@ uint32_t AppendTextVertices(
     float         currentY     = y;
     float         lineHeight   = TextLineHeight(font, scale);
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
-    Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
-    Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
 
     uint32_t writtenCount = 0;
 
@@ -102,18 +100,18 @@ uint32_t AppendTextVertices(
         float y1 = y0 + (g.y1 - g.y0) * scale;
 
         outPos[writtenCount]    = {{x0, y0, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u0, v0), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v0), .color = packedColor};
         outPos[writtenCount]    = {{x0, y1, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u0, v1), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor};
         outPos[writtenCount]    = {{x1, y0, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u1, v0), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor};
 
         outPos[writtenCount]    = {{x1, y0, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u1, v0), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v0), .color = packedColor};
         outPos[writtenCount]    = {{x0, y1, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u0, v1), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u0, v1), .color = packedColor};
         outPos[writtenCount]    = {{x1, y1, 0.0f}};
-        outAttr[writtenCount++] = {.normal = dummyNormal, .tangent = dummyTangent, .uv = Math::PackUV(u1, v1), .color = packedColor};
+        outSurface[writtenCount++] = {.uv = Math::PackUV(u1, v1), .color = packedColor};
 
         currentX += g.xadvance * scale;
     }

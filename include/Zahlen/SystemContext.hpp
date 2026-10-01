@@ -16,6 +16,7 @@
 namespace ZHLN {
 
 class RenderContext;
+class AssetManager;
 class PhysicsContext;
 class AudioContext;
 class CullingSystem;
@@ -31,10 +32,16 @@ using BonePosePostProcessor = void (*)(
     ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
 );
 
+// Distinct parameter types for the two otherwise identically typed output
+// lists. They are resolved from SystemContext without positional guessing.
+struct VisibleEntities { JPH::Array<Entity>& values; };
+struct VisibleShadowEntities { JPH::Array<Entity>& values; };
+
 struct SystemContext {
     ECS::Registry& registry;
 
     RenderContext*     render       = nullptr;
+    AssetManager*      assets       = nullptr;
     PhysicsContext*    physics      = nullptr;
     AudioContext*      audio        = nullptr;
     Camera*            camera       = nullptr;

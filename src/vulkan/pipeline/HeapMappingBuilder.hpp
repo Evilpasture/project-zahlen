@@ -33,6 +33,14 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
+    auto SamplerArray(uint32_t set, uint32_t binding, SamplerHandle base) && noexcept -> HeapMappingBuilder&& {
+        AddConstantOffset(
+            set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(_heap.SamplerOffset(base.index)),
+            static_cast<uint32_t>(_heap.SamplerStride())
+        );
+        return std::move(*this);
+    }
+
     auto SampledImage(uint32_t set, uint32_t binding, TextureHandle handle) && noexcept -> HeapMappingBuilder&& {
         AddConstantOffset(
             set, binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(_heap.ResourceOffset(handle.index)), 0

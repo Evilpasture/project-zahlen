@@ -119,9 +119,9 @@ struct UITreeTestSuite {
 
             // The walk's other half is the payload: a tree of four visible
             // widgets has to hand back the geometry a renderer would draw, and
-            // it has to be self-consistent -- one attribute per vertex.
+            // it has to be self-consistent -- one surface per vertex.
             const ZHLN::UIDrawData draw = gui.EndFrame();
-            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.attributes.size())) {
+            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.surfaces.size())) {
                 return std::unexpected(UITreeTestError::RenderWalkFailed);
             }
 
@@ -210,7 +210,7 @@ struct UITreeTestSuite {
             // Design mode draws the tree too; it just does not activate it. Same
             // payload contract as the non-design walk above.
             const ZHLN::UIDrawData draw = gui.EndFrame();
-            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.attributes.size())) {
+            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.surfaces.size())) {
                 return std::unexpected(UITreeTestError::RenderWalkFailed);
             }
             bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });

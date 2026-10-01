@@ -10,6 +10,7 @@
 #include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <type_traits>
@@ -37,24 +38,36 @@ struct NativeMesh {
     }
 };
 
+// Stable registry entry: GPU pipelines are retired by PipelineRegistry, never
+// by destruction of the pool slot. The layout is borrowed from the renderer.
 struct NativeMaterial {
-    Vk::Pipeline     pipeline;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipeline       pipeline     = VK_NULL_HANDLE;
+    VkPipelineLayout layout       = VK_NULL_HANDLE;
+    VkPipeline       meshPipeline = VK_NULL_HANDLE;
 
-    Vk::Pipeline meshPipeline;
+    NativeMaterial() = default;
+    NativeMaterial(const NativeMaterial&) = delete;
+    auto operator=(const NativeMaterial&) -> NativeMaterial& = delete;
+    NativeMaterial(NativeMaterial&&) = delete;
+    auto operator=(NativeMaterial&&) -> NativeMaterial& = delete;
 
     [[nodiscard]] bool HasMeshPipeline() const noexcept {
-        return meshPipeline.Valid();
+        return meshPipeline != VK_NULL_HANDLE;
     }
 };
+static_assert(std::is_trivially_destructible_v<NativeMaterial> && !std::is_copy_constructible_v<NativeMaterial>);
 
+
+// Draw-submission translation: material S/T modes -> common.slang sampler words.
+// Kept private so shader packing changes do not become public Material API changes.
+[[nodiscard]] auto PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept -> uint32_t;
 
 struct DrawCommand {
     InstanceData         instanceData;
     NativeMaterial*      material;
     NativeMaterial*      prePassMaterial;
     NativeMesh*          posMesh;
-    NativeMesh*          attrMesh;
+    NativeMesh*          frameMesh;
     NativeMesh*          skinMesh;
     BufferHandle         skinnedVertexBuffer;
     uint32_t             jointOffset;

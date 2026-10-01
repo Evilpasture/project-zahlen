@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../RenderInternal.hpp"
-#include "pipeline/ComputePass.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
+#include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
@@ -15,22 +15,22 @@ namespace ZHLN {
 
 auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, taaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, taaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, fxaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, fxaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, mlaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, mlaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
@@ -41,15 +41,13 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> 
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaWeightPass,
-                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
+                this, smaaWeightPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
                 MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaBlendPass,
-                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
+                this, smaaBlendPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
                 MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
@@ -68,13 +66,13 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
-            this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingPS>(),
-            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingVS>(),
+            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
     }
     return BuildPassVariants(
-        this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingNortPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingNortVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
@@ -95,34 +93,34 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
 
     if (ctx.RayTracingSupported()) {
         auto res = BuildPassVariants(
-            this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(),
-            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(),
+            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
         if (!res) {
             return res;
         }
         return BuildPassVariants(
-            this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(),
-            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(),
+            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
     }
     auto res = BuildPassVariants(
-        this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
     if (!res) {
         return res;
     }
     return BuildPassVariants(
-        this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(),
-        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {presenter.GetPresentFormat()}
+        this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
+        {presenter.GetPresentFormat()}
     );
 }
 
@@ -136,7 +134,6 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 #endif
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
-
     auto defaultSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
     return std::expected<void, ErrorCode> {}
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -215,14 +212,16 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Lighting", [this]() -> std::expected<void, ErrorCode> { return BuildSpecializedLightingPipelines(); },
-                {Shaders::Modules::LightingVS::Path, Shaders::Modules::LightingPS::Path, Shaders::Modules::LightingNortVS::Path, Shaders::Modules::LightingNortPS::Path,
-                 Shaders::Modules::ReflectionVS::Path, Shaders::Modules::ReflectionPS::Path, Shaders::Modules::ReflectionNortVS::Path, Shaders::Modules::ReflectionNortPS::Path}
+                {Shaders::Modules::LightingVS::Path, Shaders::Modules::LightingPS::Path, Shaders::Modules::LightingNortVS::Path,
+                 Shaders::Modules::LightingNortPS::Path, Shaders::Modules::ReflectionVS::Path, Shaders::Modules::ReflectionPS::Path,
+                 Shaders::Modules::ReflectionNortVS::Path, Shaders::Modules::ReflectionNortPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, ErrorCode> { return postProcess.Build(*this); },
-                {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path, Shaders::Modules::HdrDenoiseAtrousCS::Path}
+                {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path,
+                 Shaders::Modules::HdrDenoiseAtrousCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -247,7 +246,8 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Decals", [this]() -> std::expected<void, ErrorCode> { return BuildDecalPipeline(); }, {Shaders::Modules::DecalVS::Path, Shaders::Modules::DecalPS::Path}
+                this, "Decals", [this]() -> std::expected<void, ErrorCode> { return BuildDecalPipeline(); },
+                {Shaders::Modules::DecalVS::Path, Shaders::Modules::DecalPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return postProcess.BakeSMAALUTs(*this); })
@@ -258,4 +258,4 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         });
 }
 
-}
+} // namespace ZHLN

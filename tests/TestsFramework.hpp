@@ -10,6 +10,7 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <concepts>
 #include <cstdlib>
 #include <expected>
@@ -38,7 +39,6 @@
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #define ZHLN_TEST_TIMEOUT_SUPPORTED 1
-#include <setjmp.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -76,11 +76,38 @@ inline bool IsDebuggerAttached() noexcept {
 }
 #endif
 
-inline sigjmp_buf g_testTimeoutJmpBuf;
+// SIGALRM is process-wide. A longjmp out of Engine::Create/Destroy skips
+// destructors and can leave a live Vulkan device or locked mutex behind;
+// continuing the group then fabricates unrelated engine-acquisition failures.
+// Write only with async-signal-safe POSIX calls and stop this test process.
+// The handler may interrupt another thread; only lock-free atomics may carry
+// a case name from the runner into an asynchronous C++ signal handler.
+inline std::atomic<const char*> g_testTimeoutName {nullptr};
+inline std::atomic<size_t>      g_testTimeoutNameLength {0};
+static_assert(std::atomic<const char*>::is_always_lock_free && std::atomic<size_t>::is_always_lock_free);
+
+inline void WriteTimeoutText(const char* text, size_t length) noexcept {
+    while (length != 0) {
+        const ssize_t written = ::write(STDERR_FILENO, text, length);
+        if (written <= 0) {
+            return; // Best effort: never attempt a non-signal-safe fallback.
+        }
+        text += written;
+        length -= static_cast<size_t>(written);
+    }
+}
 
 inline void TestTimeoutSignalHandler(int sig) {
     if (sig == SIGALRM) {
-        siglongjmp(g_testTimeoutJmpBuf, 1);
+        static constexpr char prefix[] = "  [ TIMEOUT ] ";
+        static constexpr char suffix[] = " (deadline exceeded; terminating this test process)\n";
+        WriteTimeoutText(prefix, sizeof(prefix) - 1);
+        const char* const name = g_testTimeoutName.load(std::memory_order_acquire);
+        if (name != nullptr) {
+            WriteTimeoutText(name, g_testTimeoutNameLength.load(std::memory_order_relaxed));
+        }
+        WriteTimeoutText(suffix, sizeof(suffix) - 1);
+        ::_exit(124);
     }
 }
 #endif
@@ -96,10 +123,11 @@ namespace ZHLN::Test {
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
 
-// Internal to the framework: this is what the runner seeds a result with and
-// what a timeout produces. It is deliberately NOT what a test returns — a test
-// that reports this is a test that declined to say what went wrong. Callers
-// define their own error enum and return that; see the Expectations comment.
+// Internal to the framework: this is what the runner seeds a result with
+// before invoking a case. Timeouts instead exit the process with status 124.
+// It is deliberately NOT what a test returns — a test that reports this
+// declined to say what went wrong. Callers define their own error enum and
+// return that; see the Expectations comment.
 enum class TestFrameworkError : uint8_t {
     AssertionFailed ZHLN_ANNOTATION(ZHLN::Description<"One or more assertions failed in this test. ">{}) = 1,
 };
@@ -458,26 +486,40 @@ concept HasNestedTests = requires { typename T::Tests; };
 
 template <typename Suite>
 TestStats RunSuite() {
+    // Run one cold-engine case in a fresh process without the preceding tests
+    // (or their leaked state after a SIGALRM). For example:
+    // ZHLN_TEST_FILTER=RenderPipelinesTestSuite::engines_are_serial_and_the_slot_is_released
+    const char* const filterEnv = std::getenv("ZHLN_TEST_FILTER");
+    const std::string_view filter = filterEnv != nullptr ? std::string_view {filterEnv} : std::string_view {};
+    const std::string_view suiteName = ZHLN::Reflect::TypeName<Suite>();
+    if (const auto separator = filter.find("::"); separator != std::string_view::npos && filter.substr(0, separator) != suiteName) {
+        return {}; // Do not construct an unrelated suite (it may own an Engine).
+    }
+
     // Take ownership of the process diagnostics: framework storage outlasts
     // every engine, so engines increment it directly (teardown included) and
     // per-test deltas below bracket whole engine lifecycles exactly.
     // Idempotent: nested suites re-register the same storage.
-    RenderContext::UseDiagnostics(&g_validationErrors, &g_deviceLost);
+    RenderContext::UseDiagnostics(g_validationErrors, g_deviceLost);
 
     Suite     suite;
     TestStats stats;
 
     ZHLN::Println("{}=================================================={}", Color::Cyan, Color::Reset);
-    ZHLN::Println("{}Running Test Suite: {}{}", Color::Cyan, ZHLN::Reflect::TypeName<Suite>(), Color::Reset);
+    ZHLN::Println("{}Running Test Suite: {}{}", Color::Cyan, suiteName, Color::Reset);
     ZHLN::Println("{}=================================================={}", Color::Cyan, Color::Reset);
 
     auto run_test_method = [&](auto target, auto pmf, std::string_view name) {
+        if (!filter.empty() && filter != suiteName && filter != name && filter != std::format("{}::{}", suiteName, name)) {
+            return;
+        }
         using MethodType = decltype(pmf);
         using ReturnType = std::invoke_result_t<MethodType, decltype(target)>;
 
         if constexpr (TestResult<ReturnType>) {
             auto& ctx = GetThreadLocalContext();
             ctx.Reset(name);
+            ZHLN::Println("  [ RUN  ] {}", name);
 
             // 1. Snapshot telemetry before test begins (framework-owned
             // totals: they persist across engine lifetimes)
@@ -492,6 +534,8 @@ TestStats RunSuite() {
             sigemptyset(&sa.sa_mask);
             sa.sa_flags = 0;
             struct sigaction old_sa;
+            g_testTimeoutNameLength.store(name.size(), std::memory_order_relaxed);
+            g_testTimeoutName.store(name.data(), std::memory_order_release);
             sigaction(SIGALRM, &sa, &old_sa);
 
             if (IsDebuggerAttached() || ctx.timeoutSeconds == 0) {
@@ -500,23 +544,11 @@ TestStats RunSuite() {
                 alarm(ctx.timeoutSeconds);
             }
 
-            if (sigsetjmp(g_testTimeoutJmpBuf, 1) == 0) {
-                result = (target.*pmf)();
-                alarm(0);
-                sigaction(SIGALRM, &old_sa, nullptr);
-            } else {
-                alarm(0);
-                sigaction(SIGALRM, &old_sa, nullptr);
-
-                ctx.failures.push_back(
-                    {.file          = "Unknown",
-                     .line          = 0,
-                     .actualValue   = "Test execution timed out (deadlock or infinite loop)",
-                     .expectedValue = "Test execution completes under " + std::to_string(ctx.timeoutSeconds) + " seconds",
-                     .op            = "Timeout"}
-                );
-                result = std::unexpected(ZHLN::ErrorCode(TestFrameworkError::AssertionFailed));
-            }
+            result = (target.*pmf)();
+            alarm(0);
+            sigaction(SIGALRM, &old_sa, nullptr);
+            g_testTimeoutName.store(nullptr, std::memory_order_release);
+            g_testTimeoutNameLength.store(0, std::memory_order_relaxed);
 #else
             result = (target.*pmf)();
 #endif
@@ -562,9 +594,7 @@ TestStats RunSuite() {
                     );
                 }
                 for (const auto& f: ctx.failures) {
-                    if (f.op == "Timeout") {
-                        ZHLN::Println("    {}Timeout Error: {}{}", Color::Red, f.actualValue, Color::Reset);
-                    } else if (f.op == "ValidationError" || f.op == "DeviceLost") {
+                    if (f.op == "ValidationError" || f.op == "DeviceLost") {
                         ZHLN::Println("    {}GPU Failure: {}{}", Color::Red, f.actualValue, Color::Reset);
                     } else {
                         ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
@@ -589,23 +619,9 @@ TestStats RunSuite() {
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
                     detail = std::format("{}::{}", ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name());
                 }
-                size_t recorded = 0;
-                bool   timedOut = false;
-                for (const auto& f: ctx.failures) {
-                    if (f.op == "Timeout") {
-                        timedOut = true;
-                    } else {
-                        ++recorded;
-                    }
-                }
-                if (!detail.empty() && (recorded > 0 || timedOut)) {
+                const size_t recorded = ctx.failures.size();
+                if (!detail.empty() && recorded > 0) {
                     detail += " + ";
-                }
-                if (timedOut) {
-                    detail += std::format("timed out after {} s", ctx.timeoutSeconds);
-                    if (recorded > 0) {
-                        detail += " + ";
-                    }
                 }
                 if (recorded > 0) {
                     detail += std::to_string(recorded) + (recorded == 1 ? " recorded failure" : " recorded failures");
@@ -613,7 +629,7 @@ TestStats RunSuite() {
                 if (detail.empty()) {
                     detail = "failed without recorded details";
                 }
-                GetFailedTestSummaries().push_back(FailedTestSummary {std::string {ZHLN::Reflect::TypeName<Suite>()}, std::string {name}, std::move(detail)});
+                GetFailedTestSummaries().push_back(FailedTestSummary {std::string {suiteName}, std::string {name}, std::move(detail)});
             }
         }
     };
@@ -696,6 +712,11 @@ class Runner {
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);
         ZHLN::Println("Total Failed: {}", totalStats.failed);
+        const char* const selected = std::getenv("ZHLN_TEST_FILTER");
+        const bool unmatchedFilter = selected != nullptr && *selected != '\0' && totalStats.passed == 0 && totalStats.failed == 0;
+        if (unmatchedFilter) {
+            ZHLN::Println("No test matched ZHLN_TEST_FILTER='{}'.", selected);
+        }
 
         auto& summaries = GetFailedTestSummaries();
         if (!summaries.empty()) {
@@ -710,7 +731,7 @@ class Runner {
         // Runner, its results section must not re-list the first run's failures.
         summaries.clear();
 
-        return totalStats.failed > 0 ? 1 : 0;
+        return totalStats.failed > 0 || unmatchedFilter ? 1 : 0;
     }
 };
 

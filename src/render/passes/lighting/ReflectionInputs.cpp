@@ -7,37 +7,15 @@ namespace ZHLN::Passes {
 
 auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs {
     return ReflectionInputs {
-        .prefiltered =
-            Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = impl.iblPayload.prefilteredImage.Handle(),
-                .view     = impl.iblPayload.prefilteredView.Get(),
-                .extent   = {.width = 128, .height = 128, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = impl.iblPayload.prefilteredFormat,
-                .viewInfo = &impl.iblPayload.prefilteredViewInfo
-            },
-        .brdfLut =
-            Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = impl.iblPayload.brdfLutImage.Handle(),
-                .view     = impl.iblPayload.brdfLutView.Get(),
-                .extent   = {.width = 512, .height = 512, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                .viewInfo = &impl.iblPayload.brdfLutViewInfo
-            },
-        .blueNoise =
-            Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = impl.textureManager.Image(impl.blueNoiseTexIdx).Handle(),
-                .view     = impl.textureManager.View(impl.blueNoiseTexIdx).Get(),
-                .extent   = {.width = impl.blueNoiseWidth, .height = impl.blueNoiseHeight, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                .viewInfo = &impl.blueNoiseViewInfo
-            },
+        .prefiltered = Vk::ImageWrite {impl.iblPayload.prefilteredView},
+        .visualSky   = Vk::ImageWrite {impl.iblPayload.visualSkyView.Valid() ? impl.iblPayload.visualSkyView :
+                                      impl.textureManager.View(kFallbackBlackTextureIndex)},
+        .brdfLut     = Vk::ImageWrite {impl.iblPayload.brdfLutView},
+        .blueNoise   = Vk::ImageWrite {impl.textureManager.View(impl.blueNoiseTexIdx)},
         .tlas =
             Vk::AsAddressWrite {
-                .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas.Current()) ?
-                               Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas.Current().Get()) :
+                .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas[impl.presenter.frameIndex]) ?
+                               Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[impl.presenter.frameIndex].Get()) :
                                0
             }
     };

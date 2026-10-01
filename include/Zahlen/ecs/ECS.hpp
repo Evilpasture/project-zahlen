@@ -36,6 +36,7 @@ struct ComponentTypeInfo {
     size_t           size                        = 0;
     size_t           alignment                   = 0;
     void (*debugDump)(const void*, std::string&) = nullptr;
+    bool            isDynamic                   = false;
 };
 
 constexpr auto HashTypeName(std::string_view str) -> uint32_t {
@@ -167,6 +168,8 @@ class ZHLN_API Registry {
         });
     }
 
+    // Immediate, data-only ECS destruction. Engine scene entities that own
+    // external handles must use DespawnEntity/Engine cleanup instead.
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
 
@@ -179,9 +182,13 @@ class ZHLN_API Registry {
         };
     }
 
+    // Data-only reset: component destructors run, but external resources are
+    // not released. Use Engine::ClearScene for Engine-owned scenes.
     void               Clear();
 
     auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;
+    // Only families registered with RegisterComponentDynamic; typed families
+    // require constructed components and (when resource-owning) explicit release.
     auto AddDynamic(Entity entity, uint32_t familyID) -> void*;
 
     static void MapNameToFamilyID(std::string_view name, uint32_t id) noexcept;
@@ -218,6 +225,9 @@ class ZHLN_API Registry {
 
     template <typename T>
     auto Add(Entity entity, T&& component) -> T& {
+        if (!IsAlive(entity)) {
+            ZHLN::Panic("ECS: cannot add a component to a dead entity");
+        }
         using DecayedT = std::decay_t<T>;
         uint32_t id    = ComponentFamily::GetTypeID<DecayedT>();
         EnsureComponentCapacity(id);

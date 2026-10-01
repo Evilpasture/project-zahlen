@@ -1,5 +1,7 @@
 
 import common;
+import gpu_buffer;
+import math.transform;
 import particles;
 import uniforms;
 
@@ -12,31 +14,6 @@ struct ComputePushConstants {
 
 [vk::push_constant]
 ComputePushConstants pc;
-public struct Quaternion {
-    public float4 value;
-    public __init(float4 value) {
-        this.value = value;
-    }
-
-    [ForceInline]
-    public static Quaternion fromAxisAngle(float3 axis, float angle) {
-        float halfAngle = angle * 0.5f;
-        return Quaternion(float4(axis * sin(halfAngle), cos(halfAngle)));
-    }
-
-    [ForceInline]
-    public static Quaternion multiply(Quaternion lhs, Quaternion rhs) {
-        float4 q1 = lhs.value;
-        float4 q2 = rhs.value;
-        return Quaternion(float4(q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y, q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x,
-                                 q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w, q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z));
-    }
-
-    [ForceInline]
-    public Quaternion normalized() {
-        return Quaternion(normalize(this.value));
-    }
-}
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
@@ -44,9 +21,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (idx >= pc.particleCount)
         return;
 
-    Particle3D* particleList = (Particle3D*) pc.particleBufferAddr;
-    Particle3D p             = particleList[idx];
-    float dt              = pc.deltaTime;
+    GPUBuffer<Particle3D> particleList = GPUBuffer<Particle3D>(pc.particleBufferAddr);
+    Particle3D p = particleList.load(idx);
+    float dt = pc.deltaTime;
 
     if (p.params.y <= 0.0f) {
         float3 seed = float3(idx, scene.frame.camPos.w, pc.p.scaleMin);
@@ -94,5 +71,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         p.color      = pc.p.startColor;
     }
 
-    particleList[idx] = p;
+    particleList.store(idx, p);
 }

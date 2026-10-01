@@ -19,6 +19,9 @@
 module;
 
 #if defined(_WIN32)
+// winsock2.h reaches <cstdlib> through winnt.h's intrinsic headers. Load
+// libstdc++'s configuration with C++ linkage first, as the module interfaces do.
+#include <cstddef>
 // clang-format off
 #include <winsock2.h>
 #include <ws2tcpip.h>
