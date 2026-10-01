@@ -38,8 +38,8 @@ class GenerationalPool {
     template <typename... Args>
     HandleType Create(Args&&... args) {
         if (_freeIndices.empty()) [[unlikely]] {
-            ZHLN::Log(
-                "ERROR: GenerationalPool has exceeded its maximum capacity of {}! Returning "
+            ZHLN::LogError(
+                "GenerationalPool has exceeded its maximum capacity of {}! Returning "
                 "invalid handle.",
                 MaxObjects
             );

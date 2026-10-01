@@ -48,7 +48,7 @@ TerrainHandle TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
                 return static_cast<TerrainHandle>(handleRaw);
             }
         }
-        ZHLN::Log("[TerrainSystem] ERROR: Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
+        ZHLN::LogError("[TerrainSystem] Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
         return TerrainHandle::Invalid;
     });
 }

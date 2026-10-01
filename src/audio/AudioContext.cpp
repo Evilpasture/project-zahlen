@@ -678,7 +678,7 @@ AudioContext::AudioContext(const AudioConfig& ): _impl(std::make_unique<Impl>())
         _impl->initialized = true;
         ZHLN::Log("miniaudio Engine initialized successfully.");
     } else {
-        ZHLN::Log("ERROR: Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
+        ZHLN::LogError("Failed to initialize miniaudio engine! Result code: {}", static_cast<int>(result));
     }
 }
 

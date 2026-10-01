@@ -1490,7 +1490,7 @@ auto main(int argc, char* argv[]) -> int {
          .enableFallbackScene = false}
     );
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -1504,7 +1504,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF, installed before the scene boots so the HUD's atlas is
     // that font and not core's embedded 8x8.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 

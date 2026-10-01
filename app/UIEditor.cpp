@@ -935,7 +935,7 @@ auto main(int argc, char* argv[]) -> int {
         receiver
     );
     if (!kernelRes) {
-        ZHLN::Log("FATAL: Failed to initialize Kernel: {}", kernelRes.error());
+        ZHLN::LogError("Failed to initialize Kernel: {}", kernelRes.error());
         return EXIT_FAILURE;
     }
 
@@ -952,7 +952,7 @@ auto main(int argc, char* argv[]) -> int {
     // just below.
     auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontAssetID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), falling back to embedded default.", fontAssetID.error());
     }
 #endif
     ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());

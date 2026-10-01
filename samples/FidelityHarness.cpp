@@ -706,7 +706,7 @@ auto main(int argc, char* argv[]) -> int {
          .enableFallbackScene = false}
     );
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 

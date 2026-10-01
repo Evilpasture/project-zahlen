@@ -1048,7 +1048,7 @@ void ConfigureHumanoidChildOfConstraints(RigBoneMap& map) noexcept {
         const RigNodeIndex forearm = map.nodeIndices[BoneSlot(forearmBone)];
         const RigNodeIndex hand    = map.nodeIndices[BoneSlot(handBone)];
         if (!IsValidRigNode(forearm, map.nodeCount) || !IsValidRigNode(hand, map.nodeCount)) {
-            ZHLN::Log("[ProceduralAnimation] WARNING: hand constraint not created — forearm={} hand={}", 
+            ZHLN::LogWarning("[ProceduralAnimation] hand constraint not created — forearm={} hand={}",
                       IsValidRigNode(forearm, map.nodeCount) ? "valid" : "missing",
                       IsValidRigNode(hand, map.nodeCount) ? "valid" : "missing");
             return;
@@ -1975,10 +1975,10 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                     clip.name, animator->currentTrackTime, clip.duration, clip.channels.size(), usableTransformChannels
                 );
                 if (usableTransformChannels == 0) {
-                    ZHLN::Log("[ProceduralAnimation] WARNING: selected track has no usable transform channels; bind pose will be shown.");
+                    ZHLN::LogWarning("[ProceduralAnimation] selected track has no usable transform channels; bind pose will be shown.");
                 }
             } else {
-                ZHLN::Log("[ProceduralAnimation] WARNING: no valid authored track selected; bind pose will be shown.");
+                ZHLN::LogWarning("[ProceduralAnimation] no valid authored track selected; bind pose will be shown.");
             }
             if (!complete) {
                 for (size_t semantic = 0; semantic < kCoreBoneCount; ++semantic) {

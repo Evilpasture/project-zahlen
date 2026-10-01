@@ -46,8 +46,8 @@ void ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags req
     properties.pNext = &subgroup;
     vkGetPhysicalDeviceProperties2(physical, &properties);
     if ((subgroup.supportedOperations & requiredOps) != requiredOps) {
-        ZHLN::Log(
-            "[Vulkan] WARNING: subgroup width {} supports operations {:#x}, missing requested operations {:#x}; using fallback paths where available.",
+        ZHLN::LogWarning(
+            "[Vulkan] subgroup width {} supports operations {:#x}, missing requested operations {:#x}; using fallback paths where available.",
             subgroup.subgroupSize, subgroup.supportedOperations, requiredOps & ~subgroup.supportedOperations
         );
     } else {

@@ -671,8 +671,8 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
         if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
-            ZHLN::Log(
-                "WARN: failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
+            ZHLN::LogWarning(
+                "failed to resize shadow targets to {}x{}; keeping {}x{}", incoming.shadows.resolution, incoming.shadows.resolution,
                 settings.shadows.resolution, settings.shadows.resolution
             );
             incoming.shadows.resolution = settings.shadows.resolution;

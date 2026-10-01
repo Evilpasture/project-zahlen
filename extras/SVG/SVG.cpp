@@ -574,7 +574,7 @@ Rasterizer::Rasterizer(const Options& options): _impl(std::make_unique<Impl>()) 
     // The Rasterizer stays constructible so the failure reaches the caller as an
     // error from the load call rather than as an exception nobody can catch.
     _impl->buildError = native.error();
-    ZHLN::Log("[SVG] WARNING: resvg options could not be built ({}); loads through this Rasterizer will fail.", native.error());
+    ZHLN::LogWarning("[SVG] resvg options could not be built ({}); loads through this Rasterizer will fail.", native.error());
 }
 
 Rasterizer::~Rasterizer() = default;

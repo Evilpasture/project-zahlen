@@ -414,7 +414,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     if (!resolved) [[unlikely]] {
         static uint32_t s_WarnCount = 0;
         if (s_WarnCount++ < 5) {
-            ZHLN::Log("WARNING: RenderContext::Draw skipped draw call with invalid mesh, material, or skinned scratch handle.");
+            ZHLN::LogWarning("RenderContext::Draw skipped draw call with invalid mesh, material, or skinned scratch handle.");
         }
         return;
     }

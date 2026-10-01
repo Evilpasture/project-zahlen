@@ -57,7 +57,7 @@ template <typename T, typename F>
         vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, c, d);
     });
     if (displays.empty()) {
-        ZHLN::Log("[Vk::Surface] FATAL: No displays found via VK_KHR_display");
+        ZHLN::LogError("[Vk::Surface] No displays found via VK_KHR_display");
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::TTYSurfaceCreationFailed);
     }
     ZHLN::Log("[Vk::Surface] Using Display: {}", displays[0].displayName != nullptr ? displays[0].displayName : "Unknown");
@@ -69,7 +69,7 @@ template <typename T, typename F>
         vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
     if (modes.empty()) {
-        ZHLN::Log("[Vk::Surface] FATAL: No compatible display modes found!");
+        ZHLN::LogError("[Vk::Surface] No compatible display modes found!");
         return std::unexpected(ZHLN::Vk::SurfaceCreationError::TTYSurfaceCreationFailed);
     }
     return modes[0];
@@ -139,7 +139,7 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
 
     const uint32_t planeIndex = SelectPlane(physicalDevice, display->display);
     if (planeIndex == UINT32_MAX) {
-        ZHLN::Log("[Vk::Surface] FATAL: Could not find a compatible display plane!");
+        ZHLN::LogError("[Vk::Surface] Could not find a compatible display plane!");
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
 
@@ -161,7 +161,7 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
 
     VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
     if (vkCreateDisplayPlaneSurfaceKHR(instance, &createInfo, nullptr, &rawSurface) != VK_SUCCESS) {
-        ZHLN::Log("[Vk::Surface] FATAL: vkCreateDisplayPlaneSurfaceKHR failed!");
+        ZHLN::LogError("[Vk::Surface] vkCreateDisplayPlaneSurfaceKHR failed!");
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
 

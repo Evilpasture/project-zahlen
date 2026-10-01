@@ -53,7 +53,7 @@ constexpr uint32_t kMaxMorphTargets = 4;
 // Advisory diagnostics only. In particular, extensionsRequired is a warning
 // here, not a reason to discard geometry that can still use the core fallback.
 void WarnImport(std::string_view path, std::string_view detail) {
-    Log("{}[glTF WARNING] '{}' {}{}", Color::Yellow, path, detail, Color::Reset);
+    LogWarning("[glTF] '{}' {}", path, detail);
 }
 
 [[nodiscard]] auto FindExtensionCapability(std::string_view name) -> const Capability* {
@@ -1052,7 +1052,7 @@ auto GetOrCreateCompiledPrimitive(
 
     if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: GLTF Importer: Failed to build mesh BLAS: {}", res.error());
+            ZHLN::LogWarning("GLTF Importer: Failed to build mesh BLAS: {}", res.error());
         }
     }
 
@@ -1493,13 +1493,13 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
     cgltf_data*   data = nullptr;
 
     if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
-        Log("ERROR: Failed to parse GLB from file: {}", rawPath);
+        LogError("Failed to parse GLB from file: {}", rawPath);
         return nullptr;
     }
 
     ValidateDeclaredExtensions(*data, path);
     if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
-        Log("ERROR: Failed to load GLB buffers from file: {}", rawPath);
+        LogError("Failed to load GLB buffers from file: {}", rawPath);
         cgltf_free(data);
         return nullptr;
     }
@@ -1549,13 +1549,13 @@ auto LoadGLBPrefabFromMemory(
     cgltf_data*   data = nullptr;
 
     if (cgltf_parse(&opts, bytes.data(), bytes.size(), &data) != cgltf_result_success) {
-        Log("ERROR: Failed to parse in-memory GLB: {}", virtualPath);
+        LogError("Failed to parse in-memory GLB: {}", virtualPath);
         return nullptr;
     }
 
     ValidateDeclaredExtensions(*data, virtualPath);
     if (cgltf_load_buffers(&opts, data, basePath.empty() ? nullptr : basePath.c_str()) != cgltf_result_success) {
-        Log("ERROR: Failed to load in-memory GLB buffers: {}", virtualPath);
+        LogError("Failed to load in-memory GLB buffers: {}", virtualPath);
         cgltf_free(data);
         return nullptr;
     }

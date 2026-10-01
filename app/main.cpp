@@ -115,7 +115,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // InitializeDefaultScene, is what decides which bake the boot atlas uses.
     auto fontID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)

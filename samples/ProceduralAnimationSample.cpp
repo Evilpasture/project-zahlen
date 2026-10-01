@@ -581,7 +581,7 @@ auto AttachCharacterRig(
             ZHLN::Log("[Sample] Selected idle track {}: '{}' (duration={}, channels={}).", idleTrack, clip.name, clip.duration, clip.channels.size());
             ZHLN::Log("[Sample] Locomotion tracks: idle={}, walk={}, run={}.", idleTrack, walkTrack, runTrack);
         } else {
-            ZHLN::Log("[Sample] WARNING: '{}' contains no authored animation track; bind pose will be shown.", glbPath);
+            ZHLN::LogWarning("[Sample] '{}' contains no authored animation track; bind pose will be shown.", glbPath);
         }
 
         // Instantiate the visual hierarchy without physics colliders. A prefab
@@ -669,7 +669,7 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
+        ZHLN::LogError("Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -681,7 +681,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF. Installed before the scene boots, so the HUD and any
     // other UI text come from that atlas.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+        ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 

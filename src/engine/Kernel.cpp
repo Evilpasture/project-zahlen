@@ -98,10 +98,10 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
         if (_impl->assetManager->MountPak(pak->string())) {
             ZHLN::Log("Mounted asset pack: {}", pak->string());
         } else {
-            ZHLN::Log("WARNING: Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+            ZHLN::LogWarning("Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
         }
     } else {
-        ZHLN::Log("WARNING: Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
+        ZHLN::LogWarning("Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};

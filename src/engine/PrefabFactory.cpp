@@ -105,7 +105,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetMa
     }
 
     if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
-        Log("WARNING: No baked font available; text cannot be drawn.");
+        LogWarning("No baked font available; text cannot be drawn.");
         return TextureHandle::Invalid;
     }
 
@@ -169,7 +169,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     assetMgr.FreeMemory(req);
 
     if (!decoded) {
-        Log("WARNING: Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
+        LogWarning("Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
         return std::unexpected(decoded.error());
     }
 
@@ -195,7 +195,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     req.assetID = hash;
 
     if (!assetMgr.LoadSync(req)) {
-        ZHLN::Log("WARNING: Failed to load texture asset from VFS: {}", path);
+        ZHLN::LogWarning("Failed to load texture asset from VFS: {}", path);
         return TextureHandle::Invalid;
     }
 
@@ -207,7 +207,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     assetMgr.FreeMemory(req);
 
     if (pixels == nullptr) {
-        ZHLN::Log("ERROR: stbi_load_from_memory failed for texture: {}", path);
+        ZHLN::LogError("stbi_load_from_memory failed for texture: {}", path);
         return TextureHandle::Invalid;
     }
 
@@ -217,7 +217,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     stbi_image_free(pixels);
 
     if (!texRes) {
-        ZHLN::Log("ERROR: Failed to upload texture asset {}: {}", path, texRes.error());
+        ZHLN::LogError("Failed to upload texture asset {}: {}", path, texRes.error());
     }
     return texRes.value_or(TextureHandle::Invalid);
 }

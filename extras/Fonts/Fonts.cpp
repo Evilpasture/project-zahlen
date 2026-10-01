@@ -157,7 +157,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
             } else {
                 // The code formats as its annotated message, so the line says
                 // what went wrong, not which number it was.
-                Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, bm.error());
+                LogWarning("BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, bm.error());
                 if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
                     self.cache = std::move(*cooked);
                     Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
@@ -165,7 +165,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                     // Only warn for cooked font if it exists
                     std::vector<uint8_t> zProbe;
                     if (ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe)) {
-                        Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
+                        LogWarning("Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
                     }
                 }
             }
@@ -178,7 +178,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                     self.cache = std::move(*cooked);
                     Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
                 } else {
-                    Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
+                    LogWarning("Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
                 }
             }
         }
@@ -395,7 +395,7 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
             // case for a stock virtual path); anything else means it was read and
             // rejected, which the caller cannot see from the failed return alone.
             if (!baked.error().Is(FontBMError::MissingMetrics)) {
-                Log("WARNING: BMFont descriptor '{}' failed to parse ({}).", source.fntPath, baked.error());
+                LogWarning("BMFont descriptor '{}' failed to parse ({}).", source.fntPath, baked.error());
             }
             return std::unexpected(baked.error());
         }

@@ -225,7 +225,7 @@ auto RenderContext::Create(
                         impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphics_family
                     );
                     if (!ok) {
-                        ZHLN::Log("WARNING: HostBlit presenter failed to initialize; continuing offscreen-only.");
+                        ZHLN::LogWarning("HostBlit presenter failed to initialize; continuing offscreen-only.");
                         impl->presentationMode = PresentationMode::OffscreenOnly;
                     }
                 }
@@ -240,22 +240,10 @@ auto RenderContext::Create(
 }
 
 RenderContext::~RenderContext() {
-    // Opt-in breadcrumbs around potentially blocking GPU cleanup. A pipeline
-    // cache "Saved" line alone does not mean renderer destruction finished.
-    const bool traceEnabled = std::getenv("ZHLN_TRACE_TEARDOWN") != nullptr;
-    const auto start = std::chrono::steady_clock::now();
-    const auto trace = [&](const char* phase) {
-        if (traceEnabled) {
-            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-            ZHLN::Log("[Render teardown] RenderContext {} (+{} ms)", phase, ms);
-        }
-    };
     if (_impl && (_impl->ctx.Device() != nullptr)) {
-        trace("wait idle before destinations");
         if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
-            ZHLN::Log("ERROR: Failed to wait for idle while destroying destinations ({})", idle.error());
+            ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
         }
-        trace("destroy destinations");
         _impl->DestroyDestinations();
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {
@@ -263,16 +251,12 @@ RenderContext::~RenderContext() {
             }
         }
         _impl->gpuDiagnostics.Shutdown();
-        trace("wait idle before pipeline cache save");
         auto res = Vk::WaitIdle(_impl->ctx.Device());
         if (!res) {
-            ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
+            ZHLN::LogError("Failed to wait for idle on device destruction.");
         }
-        trace("save pipeline cache");
         Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
-        trace("reset submitted staging (fence wait)");
         _impl->submittedStaging.reset();
-        trace("RenderContext body complete; Impl teardown follows");
     }
 }
 

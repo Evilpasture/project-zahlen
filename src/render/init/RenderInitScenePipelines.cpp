@@ -315,7 +315,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
             shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
-                    ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error());
+                    ZHLN::LogError("Failed to hot-reload CSG stencil pipelines: {}", res.error());
                 } else {
                     ZHLN::Log("[Shader Reload] CSG Stencil pipelines hot-reloaded successfully.");
                 }
@@ -541,7 +541,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 shaderReloads.Register("Skinning", {Shaders::Modules::SkinningCS::Path}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
-                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error());
+                        ZHLN::LogError("Failed to hot-reload Skinning pipeline: {}", res.error());
                     } else {
                         ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
                     }

@@ -59,7 +59,7 @@ void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skel
 uint32_t ArticulationSystem::AllocateJoints(uint32_t count) noexcept {
     const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
     if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
-        ZHLN::Log("[ArticulationSystem] WARNING: Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
+        ZHLN::LogWarning("[ArticulationSystem] Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
     }
     return offset % _jointStates.jointBlendWeights.size();
 }

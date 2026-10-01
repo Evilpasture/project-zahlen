@@ -41,7 +41,7 @@ std::expected<Vk::Pipeline, ErrorCode>
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!ctx.RayTracingSupported()) {
-        ZHLN::Log("WARNING: Ray tracing not enabled on this device. RTR will be disabled.");
+        ZHLN::LogWarning("Ray tracing not enabled on this device. RTR will be disabled.");
     } else {
         ZHLN::Log("Ray tracing enabled (acceleration structure + ray query).");
     }
@@ -53,7 +53,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
         return std::unexpected(res.error());
     }
     if (!gpuProfiler.Enabled()) {
-        ZHLN::Log("WARNING: GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
+        ZHLN::LogWarning("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
     }
 
     return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
