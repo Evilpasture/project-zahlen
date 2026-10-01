@@ -83,12 +83,6 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return bytes;
 }
 
-// The unlit fixture is authored C++ (MakeUnlitTriangleFixture), so this test
-// must not silently skip: empty bytes mean the builder regressed.
-[[nodiscard]] auto MakeUnlitFixtureBytes() -> std::vector<uint8_t> {
-    return MakeUnlitTriangleFixture();
-}
-
 [[nodiscard]] JPH::Mat44 ColumnMajor(const float (&values)[16]) noexcept {
     return JPH::Mat44(
         JPH::Vec4(values[0], values[1], values[2], values[3]), JPH::Vec4(values[4], values[5], values[6], values[7]),
@@ -1529,7 +1523,7 @@ struct GLTFImportTestSuite {
          * fallback PBR fields to get a flat image is not implementing unlit.
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_required_unlit_materials() {
-            const auto bytes = MakeUnlitFixtureBytes();
+            const auto bytes = MakeUnlitTriangleFixture();
             SourceDocument source;
             if (bytes.empty() || !source.Parse(bytes) || source.data->materials_count != 2 || source.data->meshes_count != 2 ||
                 !source.data->materials[0].unlit || !source.data->materials[1].unlit) {
