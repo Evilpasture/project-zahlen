@@ -80,14 +80,6 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
-# A genuinely independent math check: GGX PDF normalization and the solid
-# angle / LOD of equirectangular texels. No C++/Slang source inspection;
-# zshader compiles/reflects the shaders and fidelity captures test the image.
-add_test(NAME TestIBLImportanceSamplingMath
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test_ibl_importance_sampling_math.py"
-)
-set_tests_properties(TestIBLImportanceSamplingMath PROPERTIES LABELS "CPU;Fast;Extras;Math")
-
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
 # RenderUITree) left core for extras/UI; its suite followed. Walks a

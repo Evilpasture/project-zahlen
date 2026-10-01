@@ -212,10 +212,9 @@ double-sided just because a node is mirrored. A negative determinant reverses
 the winding of each *draw*, including when inherited from a parent; the vertex
 and meshlet raster paths restore CCW winding before culling and front-face
 shading. The mirrored tangent-frame handedness also follows the world transform
-without modifying authored or generated local tangents. The pinned glTF import
-regression checks the real asset's material flags and mesh sharing; the
-headless GPU regression checks culling and double-sided normals on both raster
-paths. Neither is a pixel-perfect match to the Sample Viewer golden, so compare
+without modifying authored or generated local tangents. The authored glTF
+import regression checks sidedness flags and shared geometry; the headless
+GPU regression checks culling and double-sided normals on both raster paths. Neither is a pixel-perfect match to the Sample Viewer golden, so compare
 a new capture as well.
 
 **MultiUVTest's `<model-viewer>` golden is not a neutral brightness target.**
@@ -276,10 +275,9 @@ For HDR IBL speckles, compare `khronos-MetalRoughSpheres-HDR` and
 `khronos-IridescentDishWithOlives` to their Filament goldens with the same
 exposure, panorama, and camera. A fourfold-overlap change to the HDR prefilter
 was tried and **reverted**: the reported teal-like patches on the olives did
-not improve. Do not treat source-footprint filtering as a proven cause. The
-independent `tests/extras/test_ibl_importance_sampling_math.py` checks the
-GGX PDF and panorama solid angle numerically; it cannot validate a Vulkan
-render or identify which layer contributes a visible patch.
+not improve. Do not treat source-footprint filtering as a proven cause. Only
+the Vulkan capture can validate a render or identify which layer contributes
+a visible patch.
 
 ### Isolating olive and glass color (diagnostic captures only)
 

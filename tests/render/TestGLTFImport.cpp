@@ -89,13 +89,6 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return MakeUnlitTriangleFixture();
 }
 
-[[nodiscard]] auto ReadNegativeScaleAssetBytes() -> std::vector<uint8_t> {
-    const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/NegativeScaleTest.glb";
-    std::ifstream     stream(path, std::ios::binary);
-    if (!stream) return {};
-    return std::vector<uint8_t>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-}
-
 [[nodiscard]] JPH::Mat44 ColumnMajor(const float (&values)[16]) noexcept {
     return JPH::Mat44(
         JPH::Vec4(values[0], values[1], values[2], values[3]), JPH::Vec4(values[4], values[5], values[6], values[7]),
@@ -231,6 +224,14 @@ struct GltfUnlitMaterial {
     GltfUnlitExtensions   extensions;
 };
 
+// Sidedness is a plain bool, so one shape covers the single-sided check/X
+// panel material and the shared double-sided sphere material.
+struct GltfSidedMaterial {
+    std::string_view         name;
+    GltfPbrMetallicRoughness pbrMetallicRoughness;
+    bool                     doubleSided = false;
+};
+
 struct GltfAnisotropyTextureInfo {
     int32_t index = 0;
 };
@@ -331,6 +332,18 @@ struct GltfLightNode {
     std::string_view     name;
     std::array<float, 3> translation {0.0f, 0.0f, 0.0f};
     GltfNodeExtensions   extensions;
+};
+
+// One shape for mirrored leaves and the mirrored parent: leaves carry an
+// empty children array, which is valid glTF and reads as childless, while
+// identity rotation/scale serialize explicitly rather than being omitted.
+struct GltfScaledMeshNode {
+    std::string_view     name;
+    int32_t              mesh = 0;
+    std::array<float, 3> translation {0.0f, 0.0f, 0.0f};
+    std::array<float, 4> rotation {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 3> scale {1.0f, 1.0f, 1.0f};
+    std::vector<int32_t> children;
 };
 
 struct KhrPunctualLight {
@@ -723,6 +736,31 @@ constexpr float                kEmissiveStrength = 4.0f;
                       GltfMesh {.name = "Blue Mesh", .primitives = {GltfPrimitive {.material = 1}}}},
         .materials = {GltfUnlitMaterial {.name = "Orange", .pbrMetallicRoughness = {.baseColorFactor = {1.0f, 0.21763764f, 0.0f, 1.0f}}},
                       GltfUnlitMaterial {.name = "Blue", .pbrMetallicRoughness = {.baseColorFactor = {0.0f, 0.21763764f, 1.0f, 1.0f}}}},
+        .accessors   = TriangleAccessors(),
+        .bufferViews = TriangleBufferViews(),
+        .buffers     = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
+}
+
+// Five triangles over one shared vertex buffer: a mirrored single-sided
+// front, a properly rotated single-sided back, a mirrored parent carrying a
+// double-sided child, and a plain double-sided instance of the same mesh.
+// Covers what the retired NegativeScaleTest.glb covered: the importer must
+// keep authored sidedness and share geometry without letting node parity
+// leak into materials, and spawned worlds must match source parity.
+[[nodiscard]] auto MakeNegativeScaleFixture() -> std::vector<uint8_t> {
+    const GltfDocument<GltfScaledMeshNode, GltfSidedMaterial> document {
+        .scenes    = {GltfScene {.nodes = {0, 1, 2, 4}}},
+        .nodes     = {GltfScaledMeshNode {.name = "Front", .translation = {-1.2f, 0.0f, 0.0f}, .scale = {-1.0f, 1.0f, 1.0f}},
+                      GltfScaledMeshNode {.name = "Back", .translation = {1.2f, 0.0f, 0.0f}, .rotation = {0.0f, 1.0f, 0.0f, 0.0f}},
+                      GltfScaledMeshNode {.name = "MirrorParent", .mesh = 1, .scale = {-1.0f, 1.0f, 1.0f}, .children = {3}},
+                      GltfScaledMeshNode {.name = "Child", .mesh = 1, .translation = {0.0f, 0.85f, 0.0f}},
+                      GltfScaledMeshNode {.name = "Plain", .mesh = 1, .translation = {0.0f, -0.85f, 0.0f}}},
+        .meshes    = {GltfMesh {.name = "Panel", .primitives = {GltfPrimitive {.material = 0}}},
+                      GltfMesh {.name = "Sphere", .primitives = {GltfPrimitive {.material = 1}}}},
+        .materials = {GltfSidedMaterial {.name = "Check"},
+                      GltfSidedMaterial {.name = "NotShiny", .doubleSided = true}},
         .accessors   = TriangleAccessors(),
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
@@ -1554,25 +1592,25 @@ struct GLTFImportTestSuite {
         }
 
         /**
-         * Khronos NegativeScaleTest contains a single-sided check/X material
-         * on a mirrored node and double-sided spheres instantiated under both
-         * signs of their full parent-to-child transform. The primitive cache
-         * must share geometry without letting the first node's parity change
-         * its material (or the authored doubleSided flag).
+         * The authored document puts a single-sided check/X material on a
+         * mirrored node and double-sided spheres under both signs of their
+         * full parent-to-child transform. The primitive cache must share
+         * geometry without letting the first node's parity change its
+         * material (or the authored doubleSided flag).
          */
         std::expected<void, ZHLN::ErrorCode> negative_scale_keeps_authored_sidedness_on_shared_meshes() {
-            const auto bytes = ReadNegativeScaleAssetBytes();
+            const auto bytes = MakeNegativeScaleFixture();
             SourceDocument source;
-            if (bytes.empty() || !source.Parse(bytes) || source.data->nodes_count != 14 || source.data->materials_count != 6) {
+            if (bytes.empty() || !source.Parse(bytes) || source.data->nodes_count != 5 || source.data->materials_count != 2) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
-            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos NegativeScaleTest");
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless NegativeScale Sidedness");
             if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
 
             const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "khronos_negative_scale_test.glb"
+                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "negative_scale_sidedness.glb"
             );
-            if (prefab == nullptr || prefab->parts.size() != 11) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            if (prefab == nullptr || prefab->parts.size() != 5) return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
             const auto findPart = [prefab](std::string_view name) -> const ZHLN::ModelPart* {
                 const auto found = std::ranges::find_if(prefab->parts, [name](const auto& part) { return std::string_view(part.name) == name; });
@@ -1590,8 +1628,8 @@ struct GLTFImportTestSuite {
                 }
             }
 
-            const auto* front = findPart("NegativeScaleFront");
-            const auto* back  = findPart("NegativeScaleBack");
+            const auto* front = findPart("Front");
+            const auto* back  = findPart("Back");
             if (front == nullptr || back == nullptr || front->defaultMaterial.doubleSided || back->defaultMaterial.doubleSided ||
                 SourceWorld(source.data->nodes[static_cast<size_t>(front->nodeIndex)]).GetDeterminant3x3() >= 0.0f) {
                 return std::unexpected(GLTFImportError::NegativeScaleMismatch);
@@ -1601,14 +1639,13 @@ struct GLTFImportTestSuite {
             // parities, including a negative determinant inherited from its
             // parent. Both instances must retain the authored material.
             constexpr std::array pairs {
-                std::pair {"NotShiny1", "NotShinyMinus1"},
-                std::pair {"Shiny1", "ShinyMinus1"},
-                std::pair {"Dark1", "DarkMinus1"},
+                std::pair {"Front", "Back"},
+                std::pair {"Child", "Plain"},
             };
-            for (const auto& [positiveName, negativeName]: pairs) {
-                const auto* a = findPart(positiveName);
-                const auto* b = findPart(negativeName);
-                if (a == nullptr || b == nullptr || !a->defaultMaterial.doubleSided || !b->defaultMaterial.doubleSided ||
+            for (const auto& [first, second]: pairs) {
+                const auto* a = findPart(first);
+                const auto* b = findPart(second);
+                if (a == nullptr || b == nullptr || a->defaultMaterial.doubleSided != b->defaultMaterial.doubleSided ||
                     a->mesh.posBuffer == ZHLN::BufferHandle::Invalid || a->mesh.posBuffer != b->mesh.posBuffer ||
                     a->defaultMaterial.pipeline != b->defaultMaterial.pipeline) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
@@ -1618,7 +1655,7 @@ struct GLTFImportTestSuite {
                 if (aMirrored == bMirrored) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
             }
 
-            std::array<ZHLN::Entity, 16> spawned {};
+            std::array<ZHLN::Entity, 8> spawned {};
             const auto count = ZHLN::PrefabFactory::InstantiatePrefab(
                 *engine, *prefab, {.createPhysics = false, .emissiveVirtualLights = false},
                 spawned.data(), static_cast<uint32_t>(spawned.size())
