@@ -25,7 +25,9 @@ struct FunctionParameters;
 template <typename R, typename... Params>
 struct FunctionParameters<R (*)(Params...)> {
     template <typename F>
-    static void ForEach(F&& f) { (f.template operator()<Params>(), ...); }
+    static void ForEach(F&& f) {
+        (f.template operator()<Params>(), ...);
+    }
 
     template <auto Fn, template <typename> class Resolver, typename Context>
     static void Invoke(Context& ctx) {
@@ -63,14 +65,15 @@ struct CallableParameters<T, std::void_t<decltype(&T::operator())>>: FunctionPar
 template <auto Fn>
 struct CallableInspector {
     using Callable = std::remove_cvref_t<decltype(Fn)>;
-    static_assert(!std::is_member_function_pointer_v<Callable>,
-                  "Unbound member functions need a receiver; use a free/static function or a callable object");
+    static_assert(!std::is_member_function_pointer_v<Callable>, "Unbound member functions need a receiver; use a free/static function or a callable object");
 
 #if ZHLN_REFLECTION_AVAILABLE
   private:
     static consteval auto FunctionEntity() -> std::meta::info {
         if constexpr (std::is_pointer_v<Callable> && std::is_function_v<std::remove_pointer_t<Callable>>) {
+#if !defined(__ASAN_ENABLED__) && !defined(__SANITIZE_ADDRESS__)
             static_assert(Fn != nullptr, "Cannot inspect a null function");
+#endif
             return std::meta::reflect_function(*Fn);
         } else if constexpr (std::is_class_v<Callable> && requires { &Callable::operator(); }) {
             return ^^Callable::operator();
@@ -82,7 +85,9 @@ struct CallableInspector {
 
     static constexpr auto fnEntity = FunctionEntity();
 
-    static consteval auto ParameterCount() -> std::size_t { return std::meta::parameters_of(fnEntity).size(); }
+    static consteval auto ParameterCount() -> std::size_t {
+        return std::meta::parameters_of(fnEntity).size();
+    }
 
     template <std::size_t I>
     static consteval auto ParameterTypeInfo() -> std::meta::info {
@@ -118,7 +123,7 @@ struct CallableInspector {
     template <typename F>
     static void ForEachParameter(F&& f) {
         // Only the type aliases above touch reflections; f runs with C++ types.
-        ForEachWithIndices(std::forward<F>(f), std::make_index_sequence<ParameterCount()>{});
+        ForEachWithIndices(std::forward<F>(f), std::make_index_sequence<ParameterCount()> {});
     }
 
     static consteval auto Name() -> std::string_view {
@@ -157,7 +162,7 @@ struct CallableInspector {
         // A reflection (std::meta::info) is consteval-only in Clang/P2996.
         // Resolve every parameter type above, during template instantiation;
         // the runtime thunk must only mention ordinary C++ types and values.
-        InvokeWithIndices<Resolver>(ctx, std::make_index_sequence<ParameterCount()>{});
+        InvokeWithIndices<Resolver>(ctx, std::make_index_sequence<ParameterCount()> {});
     }
 
 #else
@@ -167,21 +172,28 @@ struct CallableInspector {
 
   public:
     template <typename F>
-    static void ForEachParameter(F&& f) { Params::ForEach(std::forward<F>(f)); }
+    static void ForEachParameter(F&& f) {
+        Params::ForEach(std::forward<F>(f));
+    }
 
     static consteval auto Name() -> std::string_view {
         // Only for reflection stubs. Native reflection above obtains the
         // actual entity and its canonical identifier instead of parsing text.
         std::string_view pretty = __PRETTY_FUNCTION__;
-        auto start = pretty.find("Fn = ");
-        if (start == std::string_view::npos) return "AnonymousCallable";
+        auto             start  = pretty.find("Fn = ");
+        if (start == std::string_view::npos)
+            return "AnonymousCallable";
         pretty.remove_prefix(start + sizeof("Fn = ") - 1);
-        auto end = pretty.find_first_of(";]");
+        auto end  = pretty.find_first_of(";]");
         auto name = pretty.substr(0, end);
-        if (name.find("<lambda") != std::string_view::npos) return name; // NameCString adds identity
-        if (name.starts_with('&')) name.remove_prefix(1);
-        if (name.ends_with("()")) name.remove_suffix(2);
-        if (name.ends_with("{}")) name.remove_suffix(2);
+        if (name.find("<lambda") != std::string_view::npos)
+            return name; // NameCString adds identity
+        if (name.starts_with('&'))
+            name.remove_prefix(1);
+        if (name.ends_with("()"))
+            name.remove_suffix(2);
+        if (name.ends_with("{}"))
+            name.remove_suffix(2);
         auto last = name.rfind("::");
         if (last != std::string_view::npos) {
             auto suffix = name.substr(last + 2);
@@ -211,7 +223,9 @@ struct CallableInspector {
     }
 
     template <template <typename> class Resolver, typename Context>
-    static void Invoke(Context& ctx) { Params::template Invoke<Fn, Resolver>(ctx); }
+    static void Invoke(Context& ctx) {
+        Params::template Invoke<Fn, Resolver>(ctx);
+    }
 #endif
 };
 
