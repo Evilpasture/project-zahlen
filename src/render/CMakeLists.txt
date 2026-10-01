@@ -3,6 +3,7 @@
 
 
 set(RAW_RENDER_SOURCES
+    GpuAbi.cpp
     RenderFrame.cpp
     RenderDestinations.cpp
     PresentationSurface.cpp
