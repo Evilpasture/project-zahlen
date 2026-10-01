@@ -33,3 +33,6 @@ list(APPEND ASSET_COOKING_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
 if(ASSET_COOKING_TEST_ENVIRONMENT)
     set_tests_properties(${TARGET_NAME} PROPERTIES ENVIRONMENT "${ASSET_COOKING_TEST_ENVIRONMENT}")
 endif()
+# The binary, and the zcook it launches, both need the loader path on Windows.
+zahlen_add_runtime_dll_path(${TARGET_NAME})
+zahlen_add_runtime_dlls(${TARGET_NAME})

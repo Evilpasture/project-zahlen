@@ -30,9 +30,6 @@ elseif(NOT APPLE)
     endif()
 endif()
 
-target_compile_definitions(zahlen_window PRIVATE ZHLN_ENGINE_BUILD)
-
-
 target_compile_options(zahlen_window PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
 target_link_libraries(zahlen_window

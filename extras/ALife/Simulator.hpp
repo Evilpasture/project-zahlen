@@ -34,7 +34,7 @@ struct SimConfig {
     SimTuning default_tuning;
 };
 
-class ZHLN_API Simulator {
+class ZHLN_STATIC_API Simulator {
   public:
     explicit Simulator(const SimConfig& config = SimConfig {});
 

@@ -101,6 +101,9 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
             ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
         )
     endif()
+
+    zahlen_add_runtime_dll_path(${TARGET_NAME})
+    zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 
 # Lighting, shading and ray-traced image quality.

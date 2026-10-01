@@ -172,6 +172,48 @@ static void
     }
 }
 
+static VkLayerProperties* ZHLN_EnumerateInstanceLayers(uint32_t* outCount) {
+    *outCount                 = 0;
+    VkLayerProperties* props  = nullptr;
+    VkResult           result = VK_INCOMPLETE;
+    while (result == VK_INCOMPLETE) {
+        uint32_t count = 0;
+        if (vkEnumerateInstanceLayerProperties(&count, nullptr) != VK_SUCCESS || count == 0) {
+            free(props);
+            return nullptr;
+        }
+        void* grown = realloc(props, (size_t) count * sizeof(VkLayerProperties));
+        if (grown == nullptr) {
+            free(props);
+            return nullptr;
+        }
+        props  = grown;
+        result = vkEnumerateInstanceLayerProperties(&count, props);
+        if (result == VK_SUCCESS) {
+            *outCount = count;
+            return props;
+        }
+        if (result != VK_INCOMPLETE) {
+            free(props);
+            return nullptr;
+        }
+    }
+    free(props);
+    return nullptr;
+}
+
+static bool ZHLN_HasLayer(const VkLayerProperties* props, uint32_t count, const char* name) {
+    if (props == nullptr || name == nullptr) {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (strcmp(props[i].layerName, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
     VkDebugUtilsMessageTypeFlagsEXT             type,
@@ -280,6 +322,33 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 
     static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
+    // A layer is requested by name, so a loader with no manifest for it -- a
+    // Windows box without the Vulkan SDK, a Linux install without the
+    // validation-layers package, either one with no VK_LAYER_PATH -- fails the
+    // whole vkCreateInstance call with VK_ERROR_LAYER_NOT_PRESENT, and the engine
+    // does not start at all. Validation is a debugging aid, not a requirement:
+    // drop the layer (and with it the validation-only extensions and layer
+    // settings further down) with a line saying so, the same way an unsupported
+    // extension is dropped.
+    uint32_t           available_layer_count = 0;
+    VkLayerProperties* available_layers      = ZHLN_EnumerateInstanceLayers(&available_layer_count);
+
+    if (enable_validation && !ZHLN_HasLayer(available_layers, available_layer_count, validation_layers[0])) {
+        fprintf(
+            stderr,
+            "Zahlen: [VULKAN] Validation layer \"%s\" is not available; continuing without validation. "
+            "Install the Vulkan SDK (or point VK_LAYER_PATH at the layer manifests) to enable it.\n",
+            validation_layers[0]
+        );
+        enable_validation = false;
+        gpu_validation    = false;
+    }
+
+    if (available_layers != nullptr) {
+        free(available_layers);
+        available_layers = nullptr;
+    }
+
     uint32_t available_count = 0;
     auto     available_exts  = ZHLN_EnumerateExtensions(ZHLN_EnumInstanceExts, nullptr, &available_count);
 
@@ -290,9 +359,10 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     );
 
     if (enable_validation) {
-        if (!ZHLN_NameListed(final_extensions, final_count, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) && final_count < 32) {
-            final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-        }
+        // Optional for the same reason the layer is: a driver without
+        // VK_EXT_debug_utils must not fail instance creation over it.
+        // ZHLN_CreateDebugMessenger already tolerates the null entry point.
+        ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
         if (gpu_validation) {
             ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);

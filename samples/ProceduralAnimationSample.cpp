@@ -1,6 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+// The modules this file imports reach them the same way, from their global
+// fragments, and a translation unit and the modules it imports have to agree on
+// the intrinsics' language linkage -- otherwise the import reports "conflicting
+// language linkage for imported declaration" for every intrinsic the module
+// declares. Same block as extras/Animation/ProceduralAnimation.cpp's.
+#include <Zahlen/Core/Platform.hpp>
+#endif
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>

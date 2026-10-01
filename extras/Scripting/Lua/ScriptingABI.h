@@ -19,11 +19,18 @@
 extern "C" {
 #endif
 
+// ZHLN_STATIC_API, not ZHLN_API: the definitions in Scripting.cpp and
+// ScriptingABI.cpp are compiled into this archive, which a host links directly
+// rather than loading as a DLL. A declaration that reached a consumer as
+// __declspec(dllimport) would turn every call through it into an __imp_* import,
+// and an archive's own plain symbol cannot satisfy that -- the same reason the
+// rest of extras is annotated this way. Linux expands both macros identically.
+
 // 1. Interns the string once and assigns it a fast array index
-ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName);
+ZHLN_STATIC_API uint32_t ZHLN_GetCommandID(const char* cmdName);
 
 // 2. Dispatches via O(1) jump table
-ZHLN_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID, const void* args);
+ZHLN_STATIC_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID, const void* args);
 
 // ---------------------------------------------------------------------------
 // Reflection-driven access through ScriptBinder.
@@ -97,27 +104,27 @@ typedef struct ZHLN_ScriptVal {
 // `instance` must point at a live object of `className`; the binder casts it
 // without being able to check. outResult may be NULL when the return value is
 // not wanted.
-ZHLN_API ZHLN_ScriptStatus ZHLN_InvokeMethod(const char* className, const char* methodName,
+ZHLN_STATIC_API ZHLN_ScriptStatus ZHLN_InvokeMethod(const char* className, const char* methodName,
                                              void* instance, const ZHLN_ScriptVal* args,
                                              uint64_t argCount, ZHLN_ScriptVal* outResult);
 
 // Read and write a property by name. set_element_at / get_element_at are used
 // when elementIndex is not SIZE_MAX.
-ZHLN_API ZHLN_ScriptStatus ZHLN_GetProperty(const char* className, void* instance,
+ZHLN_STATIC_API ZHLN_ScriptStatus ZHLN_GetProperty(const char* className, void* instance,
                                             const char* propertyName, uint64_t elementIndex,
                                             ZHLN_ScriptVal* outResult);
 
-ZHLN_API ZHLN_ScriptStatus ZHLN_SetProperty(const char* className, void* instance,
+ZHLN_STATIC_API ZHLN_ScriptStatus ZHLN_SetProperty(const char* className, void* instance,
                                             const char* propertyName, uint64_t elementIndex,
                                             const ZHLN_ScriptVal* value);
 
 // Register every component type core declares with the binder. Must run before
 // any of the above; until it does, the registry is empty and every lookup fails.
 // Returns the number of types registered.
-ZHLN_API uint64_t ZHLN_RegisterCoreScriptTypes(void);
+ZHLN_STATIC_API uint64_t ZHLN_RegisterCoreScriptTypes(void);
 
 // Human-readable name for a ScriptError code, for script-side diagnostics.
-ZHLN_API const char* ZHLN_ScriptErrorName(uint32_t error);
+ZHLN_STATIC_API const char* ZHLN_ScriptErrorName(uint32_t error);
 
 #ifdef __cplusplus
 }

@@ -176,6 +176,29 @@ if(UNIX AND NOT APPLE)
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/zahlen_engine.map")
 endif()
 
+if(MINGW)
+  # PE side of the question the version script above answers for ELF: what does
+  # the engine's shared library export?
+  #
+  # On ELF the map says `global: *` and localizes the renderer's internals only,
+  # an exception that exists for symbol preemption -- something PE does not have,
+  # since a DLL binds intra-image by default. What PE does have is a much
+  # narrower export set: GNU ld stops auto-exporting as soon as one object carries
+  # __declspec(dllexport), which every ZHLN_API declaration does. Only the
+  # annotated public API would be exported, and the engine's own consumers call
+  # more than that on purpose -- the header-inline Panic<> reaches InternalPanic,
+  # the ECS Registry holds a Mutex whose slow paths are out of line,
+  # EntityCommandBuffer::Playback, Fiber and TaskSystem are non-public by design
+  # and all reachable from a test. They link on Linux because the .so exports
+  # everything; without this flag the Windows test executables fail with
+  # `undefined reference to ZHLN::Mutex::LockSlow()`.
+  #
+  # Exporting the whole image restores the ELF behaviour. The DLL is a private
+  # build artifact and its import library is what consumers link, so the wider
+  # export table costs nothing.
+  target_link_options(zahlen_engine PRIVATE -Wl,--export-all-symbols)
+endif()
+
 set_target_properties(zahlen_engine PROPERTIES CXX_STANDARD 26
                                                CXX_STANDARD_REQUIRED ON)
 
@@ -238,6 +261,48 @@ target_link_libraries(
           ${ZSTD_LIBRARY}
           zahlen_warnings)
 
+# Every target whose objects are linked into libzahlen_engine compiles the
+# engine's own public headers, so all of them must see ZHLN_API as dllexport.
+# On Windows Common.h maps ZHLN_API to dllimport without ZHLN_ENGINE_BUILD, and
+# then a call between two of these objects -- say EntityCommandBuffer.cpp in
+# zahlen_ecs calling ZHLN::ECS::Registry::Create defined in ECS.cpp in the same
+# target -- is emitted as an import of __imp__ZN4ZHLN3ECS8Registry6CreateEv:
+# a reference the DLL was always meant to satisfy from its own text, which
+# MinGW ld reports as an undefined reference while linking it. The visibility
+# macro is ignored outside Windows (Common.h uses gnu::visibility), so this
+# changes nothing on the other platforms.
+foreach(ZHLN_ENGINE_LIB_TARGET
+        zahlen_render  zahlen_vulkan  zahlen_window   zahlen_physics
+        zahlen_threading  zahlen_filesystem  zahlen_ecs  zahlen_audio
+        zahlen_gui)
+  target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
+endforeach()
+
+# Windows: the MinGW link surface the engine's own sources need.
+#
+#   stdc++exp  <bits/print.h>'s vprint_unicode calls std::__open_terminal and
+#              std::__write_to_terminal when _WIN32 is defined (the POSIX branch
+#              delegates to vprint_nonunicode instead), and those two definitions
+#              live in libstdc++exp, not in libstdc++. PUBLIC because the same
+#              header instantiation lands in the consumers' own objects: the
+#              engine's Log.cpp, CommandLine.cpp, RenderCore.cpp, Mutex.cpp and
+#              RenderDocInit.cpp all print to a FILE*, and so do the tools,
+#              tests and samples that link this library. tools/zshader carries
+#              the same expression for libslang's in-process passes.
+#   dbghelp    the symbol resolver in src/engine/diagnostics/StackTrace.cpp; its
+#              #pragma comment(lib, "dbghelp.lib") is MSVC-only, so MinGW needs
+#              the import library named.
+#   atomic     std::atomic<ZHLN::Vk::DiagnosticsSink> is a 16-byte object, and
+#              GCC calls libatomic's __atomic_load_16/__atomic_store_16 for it
+#              unless -mcx16 is on -- it is not, this tree asks for -mavx2 and
+#              friends rather than an ISA level.
+target_link_libraries(
+  zahlen_engine
+  PUBLIC $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>)
+if(MINGW)
+  target_link_libraries(zahlen_engine PRIVATE dbghelp atomic)
+endif()
+
 if(APPLE)
   target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
@@ -272,6 +337,10 @@ add_executable(zahlen app/main.cpp)
 target_link_libraries(zahlen PRIVATE zahlen_engine Jolt)
 target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 
+# The engine's DLL is written next to it; Jolt's is not, and PE has no rpath to
+# find it with. This is the binary a person runs, so the DLLs go beside it.
+zahlen_add_runtime_dlls(zahlen)
+
 target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED
@@ -281,6 +350,8 @@ if(ZHLN_BUILD_EXTRAS)
   add_executable(zahlen_ui_editor app/UIEditor.cpp)
   target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
   target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+
+  zahlen_add_runtime_dlls(zahlen_ui_editor)
   set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
                                                     CXX_STANDARD_REQUIRED ON)
 else()

@@ -1259,7 +1259,7 @@ extern "C" {
 
 using namespace ZHLN;
 
-ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
+ZHLN_STATIC_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
     if (cmdName == nullptr) {
         return 0xFFFFFFFF;
     }
@@ -1275,7 +1275,7 @@ ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
     return 0xFFFFFFFF;
 }
 
-ZHLN_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32_t cmdID, const void* args) {
+ZHLN_STATIC_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32_t cmdID, const void* args) {
     if (cmdID >= s_JumpTable.size()) [[unlikely]] {
         return 0;
     }

@@ -44,6 +44,7 @@
         "ZHLN_REFLECTION_AVAILABLE",
         "ZHLN_RENDERING_HPP_INCLUDED",
         "ZHLN_RESTRICT",
+        "ZHLN_STATIC_API",
         "ZHLN_STR",
         "ZHLN_STR_HELPER",
         "ZHLN_TARGET_TRIPLE",

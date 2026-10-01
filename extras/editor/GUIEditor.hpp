@@ -140,7 +140,7 @@ struct EditorState {
 // something the editor cannot conjure -- a GPU mesh and material, a body in
 // the physics world -- so "new entity" cannot mean "new box" from in here.
 // Spawning geometry is PrefabFactory's job and needs an Engine.
-ZHLN_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {}) -> ZHLN::Entity;
+ZHLN_STATIC_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {}) -> ZHLN::Entity;
 
 // Destroys `state.selectedEntity` and clears the selection.
 //
@@ -148,7 +148,7 @@ ZHLN_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {})
 // in the editor state even if the entity turns out to be gone already. The
 // explicit Engine lifecycle pipeline cascades children before their parent and
 // notifies external resource systems before each registry destroy.
-ZHLN_API void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept;
+ZHLN_STATIC_API void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept;
 
 // One component the editor knows how to add to an entity, remove from it, and
 // display. Function pointers rather than a std::function, so the table is a
@@ -174,12 +174,12 @@ struct ComponentKind {
 // immediately display. DrawInspectorPanel draws one section per entry here --
 // the two lists are the same set, and a component added to one belongs in the
 // other.
-[[nodiscard]] ZHLN_API auto ComponentKinds() noexcept -> std::span<const ComponentKind>;
+[[nodiscard]] ZHLN_STATIC_API auto ComponentKinds() noexcept -> std::span<const ComponentKind>;
 
 // The basic shapes the hierarchy's Add Shape dropdown offers, in the order
 // the dropdown lists them. The host maps a `requestedSpawn` index to the
 // matching PrefabFactory spawner.
-[[nodiscard]] ZHLN_API auto SpawnShapeNames() noexcept -> std::span<const std::string_view>;
+[[nodiscard]] ZHLN_STATIC_API auto SpawnShapeNames() noexcept -> std::span<const std::string_view>;
 
 // Runs the Blender-style modal transform for this frame: enters a mode on
 // G/R/S press edges (plain S only -- a Ctrl+S save chord never starts Scale),
@@ -206,7 +206,7 @@ struct SceneViewport {
     uint32_t height = 0;
 };
 
-ZHLN_API void UpdateTransformMode(
+ZHLN_STATIC_API void UpdateTransformMode(
     ZHLN::ECS::Registry& reg,
     EditorState&         state,
     const Camera&        camera,
@@ -224,7 +224,7 @@ ZHLN_API void UpdateTransformMode(
 // `engine` is explicit because Delete must use its ordered resource-lifecycle
 // pipeline; the panel edits that engine's registry. GUI::Context itself remains
 // stateless with respect to the ECS.
-ZHLN_API void DrawHierarchyPanel(
+ZHLN_STATIC_API void DrawHierarchyPanel(
     ZHLN::GUI::Context& gui,
     ZHLN::Engine&       engine,
     EditorState&        state,
@@ -240,7 +240,7 @@ ZHLN_API void DrawHierarchyPanel(
 // entity that is showing it rather than from a list kept elsewhere.
 //
 // NOTE: `reg` is separate from `gui` for the same reason as above.
-ZHLN_API void DrawInspectorPanel(
+ZHLN_STATIC_API void DrawInspectorPanel(
     ZHLN::GUI::Context&    gui,
     ZHLN::ECS::Registry&   reg,
     EditorState&           state,

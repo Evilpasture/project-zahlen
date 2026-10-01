@@ -124,4 +124,9 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
             COMMENT "Copying ASan Runtime for ${SAMPLE_NAME}..."
         )
     endif()
+
+    # A sample links the engine's DLL and Jolt's, and is built into a directory
+    # beside neither of them. Same staging as the ASan runtime above, and for the
+    # same reason: a person runs this one.
+    zahlen_add_runtime_dlls(${SAMPLE_NAME})
 endforeach()

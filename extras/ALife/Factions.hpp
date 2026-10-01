@@ -16,7 +16,7 @@ struct FactionDef {
     uint32_t id {};
 };
 
-class ZHLN_API FactionRegistry {
+class ZHLN_STATIC_API FactionRegistry {
   public:
     explicit FactionRegistry(uint32_t capacity);
 

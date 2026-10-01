@@ -32,7 +32,7 @@ struct WorldState {
     }
 };
 
-class ZHLN_API WorldStateRegistry {
+class ZHLN_STATIC_API WorldStateRegistry {
   public:
     auto               RegisterKey(std::string_view name) -> uint32_t;
     [[nodiscard]] auto GetID(std::string_view name) const -> uint32_t;
@@ -59,6 +59,6 @@ struct PlanRequest {
     WorldState goal;
 };
 
-[[nodiscard]] ZHLN_API auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan;
+[[nodiscard]] ZHLN_STATIC_API auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan;
 
 } // namespace ZHLN::ALife

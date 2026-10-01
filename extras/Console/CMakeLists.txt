@@ -38,3 +38,17 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+
+# SymbolResolver.cpp walks the symbol table through dbghelp on Windows, and its
+# #pragma comment(lib, "dbghelp.lib") is MSVC-only -- MinGW needs the import
+# library named instead. PRIVATE, the way ws2_32 is in extras/Network and
+# extras/HTTP: the calls are compiled into this archive, so a consumer that
+# includes SymbolResolver.hpp needs no dbghelp header of its own, and CMake still
+# carries it through to that consumer's link line as a link-only dependency,
+# which is where this archive's undefined __imp_SymSetOptions and friends get
+# resolved.
+if(MINGW)
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        dbghelp
+    )
+endif()

@@ -99,7 +99,7 @@ struct UiActionEvent {
 // typed event that Invoke pushes onto an ECS::EventBus. Missing ids are a
 // no-op, not an error: a document can name an action this host has not
 // installed. No std::function -- gameplay reacts by draining the bus.
-class ZHLN_API ActionRegistry {
+class ZHLN_STATIC_API ActionRegistry {
   public:
     ActionRegistry() = default;
     explicit ActionRegistry(ECS::EventBus& bus) noexcept: _bus(&bus) {}
@@ -150,7 +150,7 @@ class ZHLN_API ActionRegistry {
 };
 
 // Host value table for widgets that take a mutable reference.
-class ZHLN_API PropertyStore {
+class ZHLN_STATIC_API PropertyStore {
   public:
     void SetBool(std::string_view path, bool value);
     void SetFloat(std::string_view path, float value);
@@ -184,21 +184,21 @@ struct RenderUITreeResult {
 
 // Resolves a Design-mode clickedId (a node.id, or a generated path like
 // "panel/0/1" when the node has no id) to the live node. Null when missing.
-[[nodiscard]] ZHLN_API auto FindNodeById(UINode& root, std::string_view targetId) -> UINode*;
-[[nodiscard]] ZHLN_API auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode*;
+[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(UINode& root, std::string_view targetId) -> UINode*;
+[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode*;
 
 // Appends @p child under the node named by @p parentId. False if the parent
 // is not in the tree.
-[[nodiscard]] ZHLN_API auto InsertChild(UINode& root, std::string_view parentId, UINode child) -> bool;
+[[nodiscard]] ZHLN_STATIC_API auto InsertChild(UINode& root, std::string_view parentId, UINode child) -> bool;
 
 // Removes the named node and its subtree. The root itself cannot be removed.
-[[nodiscard]] ZHLN_API auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool;
+[[nodiscard]] ZHLN_STATIC_API auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool;
 
 // Walks @p root once, issuing Context calls. Must run between BeginFrame and
 // EndFrame. @p properties is non-const because bound
 // widgets write back; pass a dummy store when the tree has no bindings.
 // @p selectedId is tinted in Design mode so a builder can see the selection.
-[[nodiscard]] ZHLN_API auto RenderUITree(
+[[nodiscard]] ZHLN_STATIC_API auto RenderUITree(
     Context&              gui,
     const UINode&         root,
     const ActionRegistry& actions,

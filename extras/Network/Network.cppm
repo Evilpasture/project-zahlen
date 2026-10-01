@@ -617,7 +617,7 @@ class ClientReplicator {
 
 export namespace ZHLN::Net {
 
-class ZHLN_API NetworkClient {
+class ZHLN_STATIC_API NetworkClient {
   public:
     NetworkClient();
     ~NetworkClient();

@@ -4,6 +4,7 @@
 
 #include "diagnostics/DiagnosticsInternal.hpp"
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <atomic>
@@ -22,6 +23,18 @@
 #endif
 
 namespace ZHLN {
+
+#if defined(_WIN32)
+// The one definition of the error-category registry's head, imported by every
+// module that formats an Error. See the declaration in <Zahlen/ErrorCode.hpp>:
+// PE does not merge the header-inline static across modules the way ELF's
+// STB_GNU_UNIQUE does, so without this an Error built in libzahlen_engine.dll
+// reads an empty list in zahlen.exe and prints "None".
+auto TemplatedDetail::GetRegistryHead() noexcept -> std::atomic<TemplatedDetail::RegistryNode*>& {
+    static std::atomic<TemplatedDetail::RegistryNode*> head {nullptr};
+    return head;
+}
+#endif
 
 namespace {
 

@@ -45,7 +45,7 @@ struct PathWorkspace {
     }
 };
 
-class ZHLN_API LevelGraph {
+class ZHLN_STATIC_API LevelGraph {
   public:
     explicit LevelGraph(uint32_t node_count);
 

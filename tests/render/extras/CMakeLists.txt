@@ -101,6 +101,9 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
             ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
         )
     endif()
+
+    zahlen_add_runtime_dll_path(GPU_EXTRAS_${TARGET_NAME})
+    zahlen_add_runtime_dlls(GPU_EXTRAS_${TARGET_NAME})
 endforeach()
 
 

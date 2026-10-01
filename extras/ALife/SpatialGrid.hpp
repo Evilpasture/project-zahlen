@@ -19,7 +19,7 @@ class Registry;
 
 namespace ZHLN::ALife {
 
-class ZHLN_API SpatialGrid {
+class ZHLN_STATIC_API SpatialGrid {
   public:
     SpatialGrid(uint32_t w, uint32_t h, float cell_size);
 

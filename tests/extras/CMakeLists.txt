@@ -23,6 +23,10 @@ function(zahlen_register_extras_test TARGET_NAME)
             ENVIRONMENT "${EXTRAS_TEST_ENVIRONMENT}"
         )
     endif()
+
+    # The suites here shell out to zcook, whose own DLLs are in the build tree.
+    zahlen_add_runtime_dll_path(${TARGET_NAME})
+    zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 
 # Suites below link the extras domain they exercise, not the zahlen_extras

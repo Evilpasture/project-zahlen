@@ -121,6 +121,12 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
             ENVIRONMENT "${CPU_TEST_ENVIRONMENT}"
         )
     endif()
+
+    # The group's binary is built into build/tests/, not beside the DLLs it links.
+    # ctest gets the directories on PATH; the copy is what makes the binary itself
+    # runnable when something other than ctest starts it.
+    zahlen_add_runtime_dll_path(${TARGET_NAME})
+    zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 
 # 2. The CPU test groups.

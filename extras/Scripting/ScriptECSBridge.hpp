@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-class ZHLN_API ScriptECSBridge {
+class ZHLN_STATIC_API ScriptECSBridge {
   public:
     explicit ScriptECSBridge(ECS::Registry& reg): m_registry(reg) {
     }
