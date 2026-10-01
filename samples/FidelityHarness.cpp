@@ -862,6 +862,6 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    ZHLN::Log("[Fidelity] Wrote {}.", outputPath);
+    ZHLN::Log("[Fidelity] Wrote {}.", config.outputPath);
     return EXIT_SUCCESS;
 }
