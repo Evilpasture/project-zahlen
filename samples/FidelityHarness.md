@@ -311,30 +311,6 @@ done
 | `transmission-coverage` | Renders transmitting meshes unlit white, using their original forward pipeline and depth test over the unmodified opaque scene. White over an olive means a glass surface is actually in front at that pixel; white elsewhere can also be the glass dish. To avoid a false coverage mask, the harness refuses this mode for textured or alpha-covered glass. |
 | `transmission-no-iridescence` | Preserves glass geometry, refraction, and ordinary Fresnel but removes its iridescent film. Use only after the coverage comparison implicates glass. |
 
-Compare **matching pixels** in `opaque-only` and `dielectric-specular`. To see
-what remains without the olive's specular IBL using the **existing captures**:
-
-```bash
-python3 scripts/inspect_olive_layers.py \
-    "$OUT/olives-opaque-only.pam" "$OUT/olives-dielectric-specular.pam" \
-    --output "$OUT/olives-diffuse-residual.pam" --point X,Y
-```
-
-Replace `X,Y` with the original-image coordinates of an *interior* teal olive
-pixel from GIMP; repeat `--point X,Y` for a yellow control. Inspect the output
-PAM alongside the baseline. The script decodes sRGB and **inverts the PBR Neutral
-tonemapper** (including its common minimum-channel offset and bright-range
-desaturation), subtracts specular in linear HDR, then tone-maps the residual
-again. Subtracting the two PAM byte values directly is incorrect. The script
-prints the HDR RGB terms and specular fraction per channel at each requested
-point. Fully clipped pixels cannot be inverted and are marked magenta; alpha
-mismatches are transparent. Use `--no-aa` for both input captures: interior
-pixels are the reliable comparison, not SMAA-blended edges. Apart from 8-bit
-quantization, the separation applies to the **nonmetallic olives** at
-unsaturated pixels, not to the metallic gold leaf (blackening its base color
-also zeroes its colored specular F0). Background pixels shared by both captures
-subtract to black.
-
 The original teal residual was caused by an extremely compact, intense HDR
 sun. At the olive's shadow-side normal `(-0.940, 0, 0.342)`, nine-term SH of
 the entire panorama produced `(-0.117, -0.000, 0.176)` in linear RGB and clamped
@@ -400,9 +376,8 @@ For **`UnlitTest`**, run
 `SCENARIO=khronos-UnlitTest ./scripts/run_fidelity.sh -j1` and compare with
 `gltf-sample-viewer-golden.png`. The bevelled orange and blue solids must have
 uniform color across their faces despite different normals or scene lighting;
-only their antialiased silhouettes should blend into the background. The
-attributed official GLB in `tests/render/assets/` drives both an importer test
-and a GPU regression that measures front/top/side colors with the sun off/on.
+only their antialiased silhouettes should blend into the background. An authored in-memory document drives the importer test, and a GPU regression
+uploads the authored solid to measure front/top/side colors with the sun off/on.
 The latter also tests masked and blended unlit base-color texture coverage.
 Those property checks do not replace comparison of a full harness capture
 with the sample viewer golden.
