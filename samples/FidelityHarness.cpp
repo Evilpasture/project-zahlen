@@ -62,12 +62,15 @@
 #include <Jolt/Math/Vec3.h>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
@@ -591,68 +594,87 @@ enum class DiagnosticCapture {
 // COMMAND LINE
 // ============================================================================
 
-// Core's HandleCommandLine owns --help/--version/--headless/--validation and
-// friends; these are this harness's own. Both spellings are accepted:
-// `--flag value` and `--flag=value`.
-std::string FlagValue(std::span<char* const> args, std::string_view name) {
-    const std::string prefix = std::string(name) + "=";
-    for (size_t i = 1; i < args.size(); ++i) {
-        const std::string_view arg = args[i];
-        if (arg == name && (i + 1) < args.size()) {
-            return std::string(args[i + 1]);
-        }
-        if (arg.starts_with(prefix)) {
-            return std::string(arg.substr(prefix.size()));
-        }
-    }
-    return {};
-}
-
-// Optional numeric flag, defaulting when absent or unparsable.
-float FlagFloat(std::span<char* const> args, std::string_view name, float fallback) {
-    const std::string text = FlagValue(args, name);
-    if (text.empty()) {
-        return fallback;
-    }
-    char*       end    = nullptr;
-    const float parsed = std::strtof(text.c_str(), &end);
-    return (end != text.c_str()) ? parsed : fallback;
-}
+// This harness's own flags, parsed by core's HandleCommandLine alongside the
+// engine's --help/--version/--headless/--validation and friends. Both
+// spellings are accepted: `--flag value` and `--flag=value`.
+struct HarnessConfig {
+    std::string scenarioPath;
+    std::string outputPath;
+    std::string diagnosticName;
+    float       ambientScale = 1.0f;
+    bool        noAA         = false;
+    // Set when --diagnostic appears at all: an explicitly empty mode is an
+    // error, while an absent flag means DiagnosticCapture::None.
+    bool diagnosticFlagPresent = false;
+};
 
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    const std::span<char* const> args(argv, static_cast<size_t>(argc));
+    HarnessConfig config;
+    const std::array appHandlers = {
+        ZHLN::CommandHandler {
+            .key         = "--scenario",
+            .placeholder = "<file.json>",
+            .description = "Path to the Khronos fidelity scenario (required)",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    config.scenarioPath = v;
+                    return {};
+                },
+        },
+        ZHLN::CommandHandler {
+            .key         = "--output",
+            .placeholder = "<file.pam>",
+            .description = "Where to write the capture (required)",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    config.outputPath = v;
+                    return {};
+                },
+        },
+        ZHLN::CommandHandler {
+            .key         = "--diagnostic",
+            .placeholder = "<mode>",
+            .description = "Diagnostic capture: opaque-only, dielectric-specular, transmission-coverage, transmission-no-iridescence",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    config.diagnosticFlagPresent = true;
+                    config.diagnosticName        = v;
+                    return {};
+                },
+        },
+        ZHLN::CommandHandler {
+            .key         = "--ambient-scale",
+            .placeholder = "<f>",
+            .description = "IBL ambient scale (default 1.0)",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
+                    if (v.empty()) {
+                        return {};
+                    }
+                    float parsed = 1.0f;
+                    const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
+                    if (ec != std::errc {} || ptr != v.data() + v.size()) {
+                        std::println(stderr, "Error: Invalid value '{}' for --ambient-scale.", v);
+                        return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+                    }
+                    config.ambientScale = parsed;
+                    return {};
+                },
+        },
+        ZHLN::CommandHandler {
+            .key         = "--no-aa",
+            .description = "Disable anti-aliasing for the capture",
+            .action =
+                [&](ZHLN::CommandLineOptions&, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
+                    config.noAA = true;
+                    return {};
+                },
+        },
+    };
 
-    // This harness's own flags are consumed first: core's HandleCommandLine
-    // rejects unknown arguments, so the harness removes them before handing
-    // core the rest. Value flags accept both `--flag value` and `--flag=value`;
-    // `args` aliases the process-owned strings, so the filtered list holds
-    // pointers into the same storage.
-    const std::string scenarioPath   = FlagValue(args, "--scenario");
-    const std::string outputPath     = FlagValue(args, "--output");
-    const std::string diagnosticName = FlagValue(args, "--diagnostic");
-    const auto        diagnostic     = ParseDiagnosticCapture(diagnosticName);
-    const float       ambientScale   = FlagFloat(args, "--ambient-scale", 1.0f);
-    bool              noAA           = false;
-
-    std::vector<char*> coreArgs;
-    coreArgs.reserve(args.size());
-    for (size_t i = 0; i < args.size(); ++i) {
-        const std::string_view arg = args[i];
-        if (arg == "--scenario" || arg == "--output" || arg == "--ambient-scale" || arg == "--diagnostic") {
-            ++i; // skip this flag's value
-        } else if (arg.starts_with("--scenario=") || arg.starts_with("--output=") || arg.starts_with("--ambient-scale=") ||
-                   arg.starts_with("--diagnostic=")) {
-            // consumed inline
-        } else if (arg == "--no-aa") {
-            noAA = true;
-        } else {
-            coreArgs.push_back(args[i]);
-        }
-    }
-
-    auto optionsRes = ZHLN::HandleCommandLine(std::span<char* const>(coreArgs.data(), coreArgs.size()));
+    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)), appHandlers);
     if (!optionsRes) {
         return EXIT_FAILURE;
     }
@@ -661,15 +683,12 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_SUCCESS;
     }
 
-    if (scenarioPath.empty() || outputPath.empty()) {
+    if (config.scenarioPath.empty() || config.outputPath.empty()) {
         ZHLN::Log("Fidelity harness: --scenario <file.json> and --output <file.pam> are required.");
         return EXIT_FAILURE;
     }
-    const bool diagnosticFlagPresent = std::ranges::any_of(args, [](const char* arg) {
-        const std::string_view flag(arg);
-        return flag == "--diagnostic" || flag.starts_with("--diagnostic=");
-    });
-    if (!diagnostic || (diagnosticFlagPresent && diagnosticName.empty())) {
+    const auto diagnostic = ParseDiagnosticCapture(config.diagnosticName);
+    if (!diagnostic || (config.diagnosticFlagPresent && config.diagnosticName.empty())) {
         ZHLN::Log("[Fidelity] Unknown/empty --diagnostic mode. Use opaque-only, dielectric-specular, transmission-coverage, or transmission-no-iridescence.");
         return EXIT_FAILURE;
     }
@@ -683,7 +702,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Scope taskScope;
 
-    const auto scenarioBytes = ReadFileBytes(scenarioPath);
+    const auto scenarioBytes = ReadFileBytes(config.scenarioPath);
     if (!scenarioBytes) {
         return EXIT_FAILURE;
     }
@@ -743,9 +762,9 @@ auto main(int argc, char* argv[]) -> int {
     // Conformance settings and the authored camera, before the import: the
     // backdrop and the grade are already right while the model uploads. The
     // ambient scale defaults to 1:1; --no-aa is only for unfiltered A/B captures.
-    const ZHLN::GraphicsSettings settings = MakeConformanceSettings(ambientScale, noAA);
+    const ZHLN::GraphicsSettings settings = MakeConformanceSettings(config.ambientScale, config.noAA);
     ApplyGraphicsSettings(*engine, settings);
-    ZHLN::Log("[Fidelity] Antialiasing: {}.", noAA ? "none (--no-aa)" : "SMAA (spatial)");
+    ZHLN::Log("[Fidelity] Antialiasing: {}.", config.noAA ? "none (--no-aa)" : "SMAA (spatial)");
 
     // The environment is an ECS key, not a renderer-side file load. Decode
     // the scenario's raw HDR/JPEG (or cooked ZRD1/ZRD2) through the optional
@@ -837,7 +856,7 @@ auto main(int argc, char* argv[]) -> int {
         return EXIT_FAILURE;
     }
 
-    const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(outputPath);
+    const auto capture = engine->GetRenderContext().CaptureScreenshotPPM(config.outputPath);
     if (!capture) {
         ZHLN::Log("[Fidelity] Capture failed: {}", capture.error());
         return EXIT_FAILURE;

@@ -88,7 +88,11 @@ void PrintVersion() {
     std::println("There is {}NO WARRANTY{}, to the extent permitted by law.\n", BYellow, Reset);
 }
 
-void PrintHelp(std::string_view exeName);
+void PrintHelp(std::string_view exeName, std::span<const ZHLN::CommandHandler> appHandlers);
+
+constexpr bool MatchesHandler(const ZHLN::CommandHandler& handler, std::string_view key) noexcept {
+    return handler.key == key || (!handler.shortKey.empty() && handler.shortKey == key);
+}
 
 constexpr bool IsTrue(std::string_view val) noexcept {
     return val == "on" || val == "true" || val == "1" || val == "yes";
@@ -98,15 +102,9 @@ constexpr bool IsFalse(std::string_view val) noexcept {
     return val == "off" || val == "false" || val == "0" || val == "no";
 }
 
-struct CommandHandler {
-    std::string_view key;
-    std::string_view shortKey;
-    std::string_view placeholder;
-    std::string_view description;
-    std::expected<void, ZHLN::ErrorCode> (*action)(ZHLN::CommandLineOptions&, std::string_view);
-};
+using ZHLN::CommandHandler;
 
-constexpr std::array Handlers = {
+const std::array Handlers = {
     CommandHandler {
         .key         = "--editor",
         .shortKey    = "",
@@ -138,7 +136,7 @@ constexpr std::array Handlers = {
             if (!opt.args.empty() && opt.args[0] != nullptr) {
                 exeName = std::filesystem::path(opt.args[0]).filename().string();
             }
-            PrintHelp(exeName);
+            PrintHelp(exeName, opt.appHandlers);
             opt.helpRequested = true;
             return {};
         }
@@ -344,14 +342,14 @@ constexpr std::array Handlers = {
     },
 };
 
-void PrintHelp(std::string_view exeName) {
+void PrintHelp(std::string_view exeName, std::span<const ZHLN::CommandHandler> appHandlers) {
     using namespace Ansi;
 
     std::println("\n{}Usage:{} {}{}{} {}[options]{}\n", BCyan, Reset, BYellow, exeName, Reset, Gray, Reset);
 
     std::println("{}Options:{}", BCyan, Reset);
 
-    for (const auto& handler: Handlers) {
+    auto printHandler = [](const ZHLN::CommandHandler& handler) {
         std::string rawOpt;
         if (!handler.shortKey.empty()) {
             rawOpt += handler.shortKey;
@@ -379,6 +377,16 @@ void PrintHelp(std::string_view exeName) {
         optCol += padding;
 
         std::println("{}{}", optCol, handler.description);
+    };
+
+    for (const auto& handler: Handlers) {
+        printHandler(handler);
+    }
+    if (!appHandlers.empty()) {
+        std::println("\n{}Application Options:{}", BCyan, Reset);
+        for (const auto& handler: appHandlers) {
+            printHandler(handler);
+        }
     }
 
     std::println("\n{}Environment Variables:{}", BCyan, Reset);
@@ -402,8 +410,8 @@ void PrintHelp(std::string_view exeName) {
 
 namespace ZHLN {
 
-std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* const> args) {
-    CommandLineOptions options {.args = args, .validationMode = ValidationMode::On, .launchEditor = false};
+std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* const> args, std::span<const CommandHandler> appHandlers) {
+    CommandLineOptions options {.args = args, .validationMode = ValidationMode::On, .launchEditor = false, .appHandlers = appHandlers};
 
     if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {
         std::string_view val(envVal);
@@ -428,12 +436,15 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
     std::vector<Token> tokens = Tokenize(args);
 
     for (const auto& tok: tokens) {
-        const auto* it = std::ranges::find_if(Handlers, [&](const auto& handler) {
-            return handler.key == tok.key || (!handler.shortKey.empty() && handler.shortKey == tok.key);
-        });
+        const auto* it = std::ranges::find_if(Handlers, [&](const auto& handler) { return MatchesHandler(handler, tok.key); });
+        const CommandHandler* handler = it != Handlers.end() ? &*it : nullptr;
+        if (handler == nullptr) {
+            const auto* appIt = std::ranges::find_if(appHandlers, [&](const auto& appHandler) { return MatchesHandler(appHandler, tok.key); });
+            handler = appIt != appHandlers.end() ? &*appIt : nullptr;
+        }
 
-        if (it != Handlers.end()) {
-            auto result = it->action(options, tok.value);
+        if (handler != nullptr) {
+            auto result = handler->action(options, tok.value);
             if (!result) {
                 return std::unexpected(result.error());
             }
@@ -444,7 +455,7 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
             if (!args.empty() && args[0] != nullptr) {
                 exeName = std::filesystem::path(args[0]).filename().string();
             }
-            PrintHelp(exeName);
+            PrintHelp(exeName, options.appHandlers);
 
             return std::unexpected(CommandLineError::UnknownArgument);
         }

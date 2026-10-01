@@ -467,6 +467,7 @@ using ZHLN::AudioWaveformType;
 using ZHLN::ScriptRunner;
 
 using ZHLN::Clock;
+using ZHLN::CommandHandler;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
