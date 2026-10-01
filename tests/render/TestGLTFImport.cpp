@@ -17,6 +17,7 @@
 // and geometry through RenderContext, so it needs a real (headless) device.
 
 #include "TestsFramework.hpp"
+#include "helpers/AuthoredUnlitFixture.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -82,13 +83,10 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return bytes;
 }
 
-// The pinned Khronos fixture is tiny (3,992 bytes) and checked in with its
-// attribution under tests/render/assets/, so this test must not silently skip.
+// The unlit fixture is authored C++ (helpers/AuthoredUnlitFixture.hpp), so this
+// test must not silently skip: empty bytes mean the builder regressed.
 [[nodiscard]] auto ReadUnlitAssetBytes() -> std::vector<uint8_t> {
-    const std::string path = std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/UnlitTest.glb";
-    std::ifstream     stream(path, std::ios::binary);
-    if (!stream) return {};
-    return std::vector<uint8_t>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    return ZHLN::Test::GltfFixtures::MakeUnlitGlb();
 }
 
 [[nodiscard]] auto ReadNegativeScaleAssetBytes() -> std::vector<uint8_t> {
@@ -556,47 +554,9 @@ struct GltfLightDocument {
     std::vector<GltfBuffer>       buffers;
 };
 
-// Assembles a GLB container around a serialized JSON chunk and a binary chunk.
-//
-// Synthesizing the input is not the same as reimplementing the importer: this
-// only produces bytes a conformant loader must accept, so the extension
-// behaviour under test stays the importer's own.
-[[nodiscard]] auto MakeGlb(const std::string& json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
-    std::string paddedJson = json;
-    while (paddedJson.size() % 4 != 0) {
-        paddedJson.push_back(' ');
-    }
-    std::vector<uint8_t> paddedBin(bin.begin(), bin.end());
-    while (paddedBin.size() % 4 != 0) {
-        paddedBin.push_back(0);
-    }
-
-    std::vector<uint8_t> glb;
-    auto                 append32 = [&glb](uint32_t value) {
-        for (uint32_t byte = 0; byte < 4; ++byte) {
-            glb.push_back(static_cast<uint8_t>((value >> (8u * byte)) & 0xFFu));
-        }
-    };
-    auto appendBytes = [&glb](const auto& source) {
-        for (const auto element: source) {
-            glb.push_back(static_cast<uint8_t>(element));
-        }
-    };
-
-    const size_t binChunkSize = paddedBin.empty() ? 0u : 8u + paddedBin.size();
-    append32(0x46546C67u); // "glTF"
-    append32(2u);
-    append32(static_cast<uint32_t>(12u + 8u + paddedJson.size() + binChunkSize));
-    append32(static_cast<uint32_t>(paddedJson.size()));
-    append32(0x4E4F534Au); // "JSON"
-    appendBytes(paddedJson);
-    if (!paddedBin.empty()) {
-        append32(static_cast<uint32_t>(paddedBin.size()));
-        append32(0x004E4942u); // "BIN\0"
-        appendBytes(paddedBin);
-    }
-    return glb;
-}
+// GLB assembly lives in helpers/AuthoredUnlitFixture.hpp so the unlit render
+// suite builds the same bytes; every fixture below keeps calling MakeGlb.
+using ZHLN::Test::GltfFixtures::MakeGlb;
 
 // One triangle: 3 VEC3 positions then 3 uint32 indices.
 constexpr float    kTrianglePositions[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
@@ -1440,7 +1400,7 @@ struct GLTFImportTestSuite {
         }
 
         /**
-         * The official UnlitTest GLB requires KHR_materials_unlit. Its two
+         * The authored unlit document requires KHR_materials_unlit. Its two
          * materials leave metallicFactor at the glTF default 1: altering the
          * fallback PBR fields to get a flat image is not implementing unlit.
          */

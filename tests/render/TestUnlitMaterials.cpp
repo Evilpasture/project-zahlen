@@ -1,13 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Render the actual Khronos UnlitTest GLB, not an engine-authored flat-color
-// stand-in. It contains two bevelled meshes with many different face normals:
-// both the front and the sloping faces must show the same authored base color.
-// A fully anisotropic lit box verifies both that lighting actually changed and
-// that full-strength lit anisotropy never aliases the reserved unlit code.
+// Render the authored unlit fixture (helpers/AuthoredUnlitFixture.hpp), not an
+// engine-authored flat-color stand-in and not a binary blob: two chamfered
+// boxes with many different face normals sharing one vertex buffer. Both the
+// front and the sloping faces must show the same authored base color. A fully
+// anisotropic lit box verifies both that lighting actually changed and that
+// full-strength lit anisotropy never aliases the reserved unlit code.
 
 #include "TestsFramework.hpp"
+#include "helpers/AuthoredUnlitFixture.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
@@ -26,18 +28,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <fstream>
-#include <iterator>
 #include <span>
-#include <string>
 #include <vector>
 
 enum class UnlitMaterialError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the headless unlit test engine.">{}) = 1,
-    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"Pinned Khronos UnlitTest.glb fixture is missing.">{}),
-    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not import and spawn both Khronos UnlitTest meshes.">{}),
+    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"Authored unlit fixture failed to build.">{}),
+    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not import and spawn both authored unlit meshes.">{}),
     MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the lit control material.">{}),
-    CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"The UnlitTest frame could not be read back.">{}),
+    CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"The unlit frame could not be read back.">{}),
     WrongBaseColor ZHLN_ANNOTATION(ZHLN::Description<"The imported orange or blue object lost its authored base color.">{}),
     FaceShaded ZHLN_ANNOTATION(ZHLN::Description<"Different normals on the same unlit object rendered different colors.">{}),
     LightAffectedUnlit ZHLN_ANNOTATION(ZHLN::Description<"Changing the sun affected an unlit face.">{}),
@@ -85,16 +84,14 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         });
     }
     auto& camera    = engine.GetCamera();
-    camera.position = JPH::Vec3(0.0f, 0.0f, 7.0f); // Fidelity Generator's khronos-UnlitTest orbit radius.
+    camera.position = JPH::Vec3(0.0f, 0.0f, 7.0f); // Same orbit the retired Khronos sample used, so the face windows below hold.
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
     camera.fov      = 45.0f;
 }
 
 [[nodiscard]] auto ReadUnlitFixture() -> std::vector<uint8_t> {
-    std::ifstream file(std::string(ZHLN_TEST_SOURCE_DIR) + "/tests/render/assets/UnlitTest.glb", std::ios::binary);
-    if (!file) return {};
-    return std::vector<uint8_t>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return ZHLN::Test::GltfFixtures::MakeUnlitGlb();
 }
 
 // The fixture meshes are centred at world X=-1.2 and X=+1.2, with unit radius;
@@ -120,15 +117,15 @@ struct UnlitMaterialsTestSuite {
     ~UnlitMaterialsTestSuite() { ZHLN::Test::Headless::EndSession(); }
 
     struct Tests {
-        std::expected<void, ZHLN::ErrorCode> official_meshes_are_uniform_and_ignore_the_sun() {
+        std::expected<void, ZHLN::ErrorCode> authored_meshes_are_uniform_and_ignore_the_sun() {
             const auto bytes = ReadUnlitFixture();
             if (bytes.empty()) return std::unexpected(UnlitMaterialError::AssetUnavailable);
-            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Khronos UnlitTest", 512, 512);
+            const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Authored Unlit", 512, 512);
             if (engine == nullptr) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
 
             const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), std::span {bytes}, "gpu_unlit_test.glb"
+                engine->GetRenderContext(), engine->GetAssetManager(), std::span {bytes}, "authored_unlit_test.glb"
             );
             if (prefab == nullptr || prefab->parts.size() != 2) return std::unexpected(UnlitMaterialError::PrefabLoadFailed);
             std::array<ZHLN::Entity, 3> entities {};
@@ -151,16 +148,16 @@ struct UnlitMaterialsTestSuite {
                 {.position = JPH::RVec3(0.0, -1.6, 0.0), .createPhysics = false, .materialOverride = *controlMaterial});
 
             ZHLN::Test::Headless::TickFrames(*engine, 6);
-            const auto dark = ZHLN::Test::Headless::Capture(*engine, "khronos_unlit_dark.ppm");
+            const auto dark = ZHLN::Test::Headless::Capture(*engine, "authored_unlit_dark.ppm");
             if (!dark.Valid()) return std::unexpected(UnlitMaterialError::CaptureFailed);
             reg.Patch<ZHLN::Components::LightComponent>(sun, [](auto& light) { light.intensity = 220.0f; });
             ZHLN::Test::Headless::TickFrames(*engine, 4);
-            const auto bright = ZHLN::Test::Headless::Capture(*engine, "khronos_unlit_bright.ppm");
+            const auto bright = ZHLN::Test::Headless::Capture(*engine, "authored_unlit_bright.ppm");
             if (!bright.Valid()) return std::unexpected(UnlitMaterialError::CaptureFailed);
 
             const MeanRgb orange = Mean(bright, kOrangeFaces[0]);
             const MeanRgb blue   = Mean(bright, kBlueFaces[0]);
-            ZHLN::Println("    [INFO] UnlitTest front orange=({:.1f},{:.1f},{:.1f}) blue=({:.1f},{:.1f},{:.1f}) lit box R dark={:.1f} bright={:.1f}",
+            ZHLN::Println("    [INFO] unlit front orange=({:.1f},{:.1f},{:.1f}) blue=({:.1f},{:.1f},{:.1f}) lit box R dark={:.1f} bright={:.1f}",
                           orange.r, orange.g, orange.b, blue.r, blue.g, blue.b,
                           Mean(dark, kLitControl).r, Mean(bright, kLitControl).r);
             if (orange.r < 90.0 || orange.r < 1.6 * orange.g || orange.b > 0.25 * orange.r ||
