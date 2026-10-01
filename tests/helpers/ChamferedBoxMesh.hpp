@@ -3,14 +3,15 @@
 
 // tests/helpers/ChamferedBoxMesh.hpp
 //
-// Authored chamfered-box mesh shared by the unlit test fixtures.
+// Authored chamfered-box mesh for the unlit render suite.
 //
 // Replaces the Khronos UnlitTest.glb sample asset (CC-BY 4.0, (c) 2019
-// Analytical Graphics, Inc. -- Ed Mackey) with generated C++ so the suites do
-// not depend on a binary blob: same solid (faces at +/-1, chamfer inset
-// 0.66667, orange/blue objects at X = -/+1.2), same 96 vertices and 132
-// indices, flat face normals. Vertex ORDER differs from the sample --
-// rasterization of opaque single-sided geometry does not depend on it.
+// Analytical Graphics, Inc. -- Ed Mackey) with generated C++ so the suite
+// uploads straight from engine API calls instead of a binary blob: same
+// solid (faces at +/-1, chamfer inset 0.66667, orange/blue objects at
+// X = -/+1.2), same 96 vertices and 132 indices, flat face normals. Vertex
+// ORDER differs from the sample -- rasterization of opaque single-sided
+// geometry does not depend on it.
 //
 // Deliberately dependency-free: no engine headers, no reflection, no device.
 // The standalone harness below verifies winding, closure and geometric

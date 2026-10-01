@@ -163,8 +163,8 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ and tests/render/assets/ at
-# runtime. (The unlit fixture used to live in the latter as a binary GLB; it
-# is authored C++ now -- see helpers/AuthoredUnlitFixture.hpp.)
+# runtime. (The unlit binary used to live in the latter; the render suite now
+# uploads the authored solid from helpers/ChamferedBoxMesh.hpp instead.)
 target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)

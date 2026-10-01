@@ -1,27 +1,30 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Render the authored unlit fixture (helpers/AuthoredUnlitFixture.hpp), not an
-// engine-authored flat-color stand-in and not a binary blob: two chamfered
-// boxes with many different face normals sharing one vertex buffer. Both the
-// front and the sloping faces must show the same authored base color. A fully
-// anisotropic lit box verifies both that lighting actually changed and that
-// full-strength lit anisotropy never aliases the reserved unlit code.
+// Render two chamfered boxes built straight from engine API calls, not an
+// engine-authored flat-color stand-in and not a binary blob: the authored
+// mesh carries many different face normals, and both the front and the
+// sloping faces must show the same authored base color. A fully anisotropic
+// lit box verifies both that lighting actually changed and that full-strength
+// lit anisotropy never aliases the reserved unlit code.
 
 #include "TestsFramework.hpp"
-#include "helpers/AuthoredUnlitFixture.hpp"
+#include "helpers/ChamferedBoxMesh.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Math3D.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <glTF/GLTFImporter.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -29,12 +32,13 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
 #include <vector>
 
 enum class UnlitMaterialError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the headless unlit test engine.">{}) = 1,
-    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"Authored unlit fixture failed to build.">{}),
-    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not import and spawn both authored unlit meshes.">{}),
+    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"Authored chamfered mesh failed to upload.">{}),
+    UnlitMaterialFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the orange and blue unlit materials.">{}),
     MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the lit control material.">{}),
     CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"The unlit frame could not be read back.">{}),
     WrongBaseColor ZHLN_ANNOTATION(ZHLN::Description<"The imported orange or blue object lost its authored base color.">{}),
@@ -90,8 +94,126 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
     camera.fov      = 45.0f;
 }
 
-[[nodiscard]] auto ReadUnlitFixture() -> std::vector<uint8_t> {
-    return ZHLN::Test::GltfFixtures::MakeUnlitGlb();
+// Uploads the authored chamfered solid with white vertex colors, so the
+// rendered pixels equal the materials' base colors exactly: the shader
+// multiplies albedo x baseColor x vertex color, and unlit has no albedo map.
+// Meshlets and the BLAS mirror MeshBuilder so every draw path stays valid.
+[[nodiscard]] auto UploadChamferedMesh(ZHLN::RenderContext& rc) -> ZHLN::Mesh {
+    const auto box = ZHLN::Test::GltfFixtures::BuildChamferedBox();
+    std::vector<ZHLN::VertexPosition>     positions;
+    std::vector<ZHLN::VertexTangentFrame> frames;
+    std::vector<ZHLN::VertexSurface>      surfaces;
+    std::vector<uint32_t>                 indices;
+    positions.reserve(ZHLN::Test::GltfFixtures::ChamferedBoxMesh::kVertexCount);
+    frames.reserve(ZHLN::Test::GltfFixtures::ChamferedBoxMesh::kVertexCount);
+    surfaces.reserve(ZHLN::Test::GltfFixtures::ChamferedBoxMesh::kVertexCount);
+    indices.reserve(ZHLN::Test::GltfFixtures::ChamferedBoxMesh::kIndexCount);
+
+    const auto white = ZHLN::Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f);
+    const auto uv0   = ZHLN::Math::PackUV(0.0f, 0.0f);
+    for (uint32_t i = 0; i < ZHLN::Test::GltfFixtures::ChamferedBoxMesh::kVertexCount; ++i) {
+        const float px = box.positions[i * 3 + 0];
+        const float py = box.positions[i * 3 + 1];
+        const float pz = box.positions[i * 3 + 2];
+        const float nx = box.normals[i * 3 + 0];
+        const float ny = box.normals[i * 3 + 1];
+        const float nz = box.normals[i * 3 + 2];
+        positions.push_back({{px, py, pz}});
+        // Any stable perpendicular: unlit materials never sample the tangent.
+        const float ax = std::abs(nx);
+        const float ay = std::abs(ny);
+        float       tx;
+        float       ty;
+        float       tz;
+        if (ay <= ax && ay <= std::abs(nz)) {
+            tx = -nz;
+            ty = 0.0f;
+            tz = nx;
+        } else if (ax <= std::abs(nz)) {
+            tx = 0.0f;
+            ty = nz;
+            tz = -ny;
+        } else {
+            tx = ny;
+            ty = -nx;
+            tz = 0.0f;
+        }
+        const float length = std::sqrt(tx * tx + ty * ty + tz * tz);
+        frames.push_back(
+            {.normal = ZHLN::Math::PackNormal(nx, ny, nz), .tangent = ZHLN::Math::PackNormal(tx / length, ty / length, tz / length, 1.0f)}
+        );
+        surfaces.push_back({.uv = uv0, .color = white, .uv1 = uv0});
+    }
+    for (uint16_t index: box.indices) {
+        indices.push_back(index);
+    }
+
+    ZHLN::Mesh mesh {
+        .posBuffer          = rc.CreateVertexBuffer(std::span {positions}),
+        .tangentFrameBuffer = rc.CreateVertexBuffer(std::span {frames}),
+        .surfaceBuffer      = rc.CreateVertexBuffer(std::span {surfaces}),
+        .skinBuffer         = ZHLN::BufferHandle::Invalid,
+        .indexBuffer        = rc.CreateIndexBuffer(std::span {indices}),
+        .vertexCount        = static_cast<uint32_t>(positions.size()),
+        .indexCount         = static_cast<uint32_t>(indices.size()),
+    };
+    if (const ZHLN::MeshletBuildResult built = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}); !built.Empty()) {
+        mesh.meshletBuffer       = rc.CreateStorageBuffer(std::span {built.meshlets});
+        mesh.meshletVertexBuffer = rc.CreateStorageBuffer(std::span {built.vertices});
+        mesh.meshletTriBuffer    = rc.CreateStorageBuffer(std::span {built.triangles});
+        if (mesh.meshletBuffer == ZHLN::BufferHandle::Invalid || mesh.meshletVertexBuffer == ZHLN::BufferHandle::Invalid ||
+            mesh.meshletTriBuffer == ZHLN::BufferHandle::Invalid) {
+            rc.DestroyBuffer(mesh.meshletBuffer);
+            rc.DestroyBuffer(mesh.meshletVertexBuffer);
+            rc.DestroyBuffer(mesh.meshletTriBuffer);
+            mesh.meshletBuffer       = ZHLN::BufferHandle::Invalid;
+            mesh.meshletVertexBuffer = ZHLN::BufferHandle::Invalid;
+            mesh.meshletTriBuffer    = ZHLN::BufferHandle::Invalid;
+            mesh.meshletCount        = 0;
+        } else {
+            mesh.meshletCount = static_cast<uint32_t>(built.meshlets.size());
+        }
+    }
+    if (auto built = rc.BuildMeshBLAS(mesh); !built) {
+        if (!built.error().Is(ZHLN::RenderFeatureError::FeatureNotSupported)) {
+            ZHLN::LogWarning("UploadChamferedMesh: Failed to build mesh BLAS: {}", built.error());
+        }
+    }
+    return mesh;
+}
+
+// Mirrors PrefabFactory::CreateBox for a caller-built mesh: same registered
+// assets and components, but Shape::None because no rebuild recipe exists.
+auto SpawnUnlitChamfer(ZHLN::Engine& engine, float x, const ZHLN::Material& material) -> ZHLN::Entity {
+    auto&            rc   = engine.GetRenderContext();
+    auto&            reg  = engine.GetRegistry();
+    const ZHLN::Mesh mesh = UploadChamferedMesh(rc);
+    if (mesh.posBuffer == ZHLN::BufferHandle::Invalid || mesh.indexBuffer == ZHLN::BufferHandle::Invalid) {
+        return ZHLN::Entity::Null();
+    }
+
+    const ZHLN::Entity e   = reg.Create();
+    const std::string  tag = std::to_string(e.index);
+    const ZHLN::AssetID    meshAsset = ZHLN::HashAssetID("unlit_chamfer_mesh_" + tag);
+    const ZHLN::MaterialID matAsset  = ZHLN::HashAssetID("unlit_chamfer_mat_" + tag);
+    rc.RegisterGPUMesh(meshAsset, mesh);
+    rc.RegisterGPUMaterial(matAsset, material);
+
+    const JPH::Vec3  position = JPH::Vec3(x, 0.0f, 0.0f);
+    const JPH::Mat44 worldMat = ZHLN::Math::CreateTransform(position, JPH::Quat::sIdentity(), JPH::Vec3::sReplicate(1.0f));
+    reg.Add(e, ZHLN::Components::NameComponent {.name = ZHLN::String64("UnlitChamfer_" + tag)});
+    reg.Add(e, ZHLN::Components::TransformComponent {.position = position, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
+    reg.Add(e, ZHLN::Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+    reg.Add(e, ZHLN::Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = 2.0f});
+    reg.Add(
+        e, ZHLN::Components::OwnedMeshComponent {.meshAsset = meshAsset,
+                                                 .mesh      = mesh,
+                                                 .shape     = ZHLN::Components::OwnedMeshComponent::Shape::None,
+                                                 .dimensions = JPH::Vec3::sZero(),
+                                                 .color      = JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f)}
+    );
+    reg.Add(e, ZHLN::Components::PBRComponent {.roughness = material.roughnessFactor, .metallic = material.metallicFactor});
+    return e;
 }
 
 // The fixture meshes are centred at world X=-1.2 and X=+1.2, with unit radius;
@@ -118,21 +240,17 @@ struct UnlitMaterialsTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> authored_meshes_are_uniform_and_ignore_the_sun() {
-            const auto bytes = ReadUnlitFixture();
-            if (bytes.empty()) return std::unexpected(UnlitMaterialError::AssetUnavailable);
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Authored Unlit", 512, 512);
             if (engine == nullptr) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
 
-            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), std::span {bytes}, "authored_unlit_test.glb"
-            );
-            if (prefab == nullptr || prefab->parts.size() != 2) return std::unexpected(UnlitMaterialError::PrefabLoadFailed);
-            std::array<ZHLN::Entity, 3> entities {};
-            if (ZHLN::PrefabFactory::InstantiatePrefab(
-                    *engine, *prefab, {.createPhysics = false, .emissiveVirtualLights = false}, entities.data(), static_cast<uint32_t>(entities.size())
-                ) < 3) {
-                return std::unexpected(UnlitMaterialError::PrefabLoadFailed);
+            auto&      rc       = engine->GetRenderContext();
+            const auto orangeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {1.0f, 0.21763764f, 0.0f, 1.0f}});
+            const auto blueMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.unlit = true, .baseColor = {0.0f, 0.21763764f, 1.0f, 1.0f}});
+            if (!orangeMat || !blueMat) return std::unexpected(UnlitMaterialError::UnlitMaterialFailed);
+            if (SpawnUnlitChamfer(*engine, -1.2f, *orangeMat) == ZHLN::Entity::Null() ||
+                SpawnUnlitChamfer(*engine, 1.2f, *blueMat) == ZHLN::Entity::Null()) {
+                return std::unexpected(UnlitMaterialError::AssetUnavailable);
             }
 
             auto& reg = engine->GetRegistry();

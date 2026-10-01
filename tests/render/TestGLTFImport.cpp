@@ -17,7 +17,6 @@
 // and geometry through RenderContext, so it needs a real (headless) device.
 
 #include "TestsFramework.hpp"
-#include "helpers/AuthoredUnlitFixture.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -41,6 +40,7 @@
 #include <ios>
 #include <iterator>
 #include <json/JSONSchema.hpp>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -83,10 +83,10 @@ constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
     return bytes;
 }
 
-// The unlit fixture is authored C++ (helpers/AuthoredUnlitFixture.hpp), so this
-// test must not silently skip: empty bytes mean the builder regressed.
-[[nodiscard]] auto ReadUnlitAssetBytes() -> std::vector<uint8_t> {
-    return ZHLN::Test::GltfFixtures::MakeUnlitGlb();
+// The unlit fixture is authored C++ (MakeUnlitTriangleFixture), so this test
+// must not silently skip: empty bytes mean the builder regressed.
+[[nodiscard]] auto MakeUnlitFixtureBytes() -> std::vector<uint8_t> {
+    return MakeUnlitTriangleFixture();
 }
 
 [[nodiscard]] auto ReadNegativeScaleAssetBytes() -> std::vector<uint8_t> {
@@ -213,6 +213,22 @@ struct GltfSpecGlossExtensions {
 struct GltfSpecGlossMaterial {
     std::string_view name = "SpecGlossOnly";
     GltfSpecGlossExtensions extensions;
+};
+
+// Only baseColorFactor: metallic/roughness stay omitted so the glTF defaults
+// (metallic 1, roughness 1) apply. KHR_materials_unlit carries no payload, so
+// the extension object is empty; SerializeJSON cannot emit an empty reflected
+// struct, hence the empty map, which serializes to {}.
+struct GltfUnlitPbr {
+    std::array<float, 4> baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+};
+struct GltfUnlitExtensions {
+    std::map<std::string_view, int> KHR_materials_unlit;
+};
+struct GltfUnlitMaterial {
+    std::string_view      name;
+    GltfUnlitPbr          pbrMetallicRoughness;
+    GltfUnlitExtensions   extensions;
 };
 
 struct GltfAnisotropyTextureInfo {
@@ -358,6 +374,20 @@ struct GltfSpecGlossDocument {
     std::vector<GltfAccessor>          accessors;
     std::vector<GltfBufferView>        bufferViews;
     std::vector<GltfBuffer>            buffers;
+};
+
+struct GltfUnlitDocument {
+    GltfAsset                     asset;
+    std::vector<std::string_view> extensionsUsed {"KHR_materials_unlit"};
+    std::vector<std::string_view> extensionsRequired {"KHR_materials_unlit"};
+    int32_t                       scene = 0;
+    std::vector<GltfScene>        scenes;
+    std::vector<GltfMeshNode>     nodes;
+    std::vector<GltfMesh>         meshes;
+    std::vector<GltfUnlitMaterial> materials;
+    std::vector<GltfAccessor>     accessors;
+    std::vector<GltfBufferView>   bufferViews;
+    std::vector<GltfBuffer>       buffers;
 };
 
 [[nodiscard]] constexpr auto FindExtensionCapability(std::string_view name) -> const ZHLN::GLTF::Capability* {
@@ -554,9 +584,47 @@ struct GltfLightDocument {
     std::vector<GltfBuffer>       buffers;
 };
 
-// GLB assembly lives in helpers/AuthoredUnlitFixture.hpp so the unlit render
-// suite builds the same bytes; every fixture below keeps calling MakeGlb.
-using ZHLN::Test::GltfFixtures::MakeGlb;
+// Assembles a GLB container around a serialized JSON chunk and a binary chunk.
+//
+// Synthesizing the input is not the same as reimplementing the importer: this
+// only produces bytes a conformant loader must accept, so the extension
+// behaviour under test stays the importer's own.
+[[nodiscard]] auto MakeGlb(const std::string& json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
+    std::string paddedJson = json;
+    while (paddedJson.size() % 4 != 0) {
+        paddedJson.push_back(' ');
+    }
+    std::vector<uint8_t> paddedBin(bin.begin(), bin.end());
+    while (paddedBin.size() % 4 != 0) {
+        paddedBin.push_back(0);
+    }
+
+    std::vector<uint8_t> glb;
+    auto                 append32 = [&glb](uint32_t value) {
+        for (uint32_t byte = 0; byte < 4; ++byte) {
+            glb.push_back(static_cast<uint8_t>((value >> (8u * byte)) & 0xFFu));
+        }
+    };
+    auto appendBytes = [&glb](const auto& source) {
+        for (const auto element: source) {
+            glb.push_back(static_cast<uint8_t>(element));
+        }
+    };
+
+    const size_t binChunkSize = paddedBin.empty() ? 0u : 8u + paddedBin.size();
+    append32(0x46546C67u); // "glTF"
+    append32(2u);
+    append32(static_cast<uint32_t>(12u + 8u + paddedJson.size() + binChunkSize));
+    append32(static_cast<uint32_t>(paddedJson.size()));
+    append32(0x4E4F534Au); // "JSON"
+    appendBytes(paddedJson);
+    if (!paddedBin.empty()) {
+        append32(static_cast<uint32_t>(paddedBin.size()));
+        append32(0x004E4942u); // "BIN\0"
+        appendBytes(paddedBin);
+    }
+    return glb;
+}
 
 // One triangle: 3 VEC3 positions then 3 uint32 indices.
 constexpr float    kTrianglePositions[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
@@ -637,6 +705,24 @@ constexpr float                kEmissiveStrength = 4.0f;
         .nodes       = {GltfMeshNode {.name = "SpecGlossBottle"}},
         .meshes      = TriangleMeshes(),
         .materials   = {GltfSpecGlossMaterial {}},
+        .accessors   = TriangleAccessors(),
+        .bufferViews = TriangleBufferViews(),
+        .buffers     = TriangleBuffers(),
+    };
+    return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
+}
+
+// Two unlit triangles sharing one vertex buffer: the importer must preserve
+// the required extension and the authored base colors on each part.
+[[nodiscard]] auto MakeUnlitTriangleFixture() -> std::vector<uint8_t> {
+    const GltfUnlitDocument document {
+        .scenes    = {GltfScene {.nodes = {0, 1}}},
+        .nodes     = {GltfMeshNode {.name = "Orange Object", .translation = {-1.2f, 0.0f, 0.0f}},
+                      GltfMeshNode {.name = "Blue Object", .mesh = 1, .translation = {1.2f, 0.0f, 0.0f}}},
+        .meshes    = {GltfMesh {.name = "Orange Mesh", .primitives = {GltfPrimitive {.material = 0}}},
+                      GltfMesh {.name = "Blue Mesh", .primitives = {GltfPrimitive {.material = 1}}}},
+        .materials = {GltfUnlitMaterial {.name = "Orange", .pbrMetallicRoughness = {.baseColorFactor = {1.0f, 0.21763764f, 0.0f, 1.0f}}},
+                      GltfUnlitMaterial {.name = "Blue", .pbrMetallicRoughness = {.baseColorFactor = {0.0f, 0.21763764f, 1.0f, 1.0f}}}},
         .accessors   = TriangleAccessors(),
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
@@ -1405,7 +1491,7 @@ struct GLTFImportTestSuite {
          * fallback PBR fields to get a flat image is not implementing unlit.
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_required_unlit_materials() {
-            const auto bytes = ReadUnlitAssetBytes();
+            const auto bytes = MakeUnlitFixtureBytes();
             SourceDocument source;
             if (bytes.empty() || !source.Parse(bytes) || source.data->materials_count != 2 || source.data->meshes_count != 2 ||
                 !source.data->materials[0].unlit || !source.data->materials[1].unlit) {
