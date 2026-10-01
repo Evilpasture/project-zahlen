@@ -327,10 +327,11 @@ target_compile_options(
   PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
   PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 if(WIN32)
-  target_compile_options(
-    zahlen_engine
-    PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter
-            -Wno-microsoft-enum-forward-reference -D_CRT_SECURE_NO_WARNINGS)
+  # -Wno-microsoft-anon-tag and -Wno-microsoft-enum-forward-reference are clang
+  # diagnostics and now come from the probe in cmake/CompilerWarnings.cmake, so a
+  # GNU driver is not handed flags it does not know. -Wno-unused-parameter is
+  # already probed there too, for every target that links zahlen_warnings.
+  target_compile_options(zahlen_engine PRIVATE -Wno-unknown-pragmas -D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 add_executable(zahlen app/main.cpp)

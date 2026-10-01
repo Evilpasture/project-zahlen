@@ -267,7 +267,9 @@ struct DescriptorHeapsParallelSuite {
             // deterministic; focal = 32 px/m at z = 0 for this camera).
             const auto sampleRgb = [&](int sx, int sy) {
                 const size_t idx = (static_cast<size_t>(sy) * static_cast<size_t>(width) + static_cast<size_t>(sx)) * 3;
-                ZHLN::Println("    [INFO] sample({}, {}) rgb = ({}, {}, {})", sx, sy, (int) pixels[idx + 0], (int) pixels[idx + 1], (int) pixels[idx + 2]);
+                ZHLN::Println(
+                    "    [INFO] sample({}, {}) rgb = ({}, {}, {})", sx, sy, static_cast<int>(pixels[idx + 0]), static_cast<int>(pixels[idx + 1]), static_cast<int>(pixels[idx + 2])
+                );
             };
             sampleRgb(153, 237); // red    (col 0, row 10)
             sampleRgb(171, 237); // green  (col 1, row 10)

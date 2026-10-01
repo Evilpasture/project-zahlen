@@ -445,12 +445,17 @@ export class ExplosionSystem {
         s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
         Mesh boxMesh;
-        if (resourceEntity != Entity::Null()) {
-            auto& owned = *reg.Get<Components::OwnedMeshComponent>(resourceEntity);
-            boxMesh = owned.mesh;
+        // Registry::Get answers null when the entity has no such component, and
+        // this used to be dereferenced on the strength of the entity merely being
+        // non-null -- which is the null dereference GCC reports. A missing
+        // component now takes the same path as a missing entity: the debris mesh
+        // the asset is registered from gets created either way.
+        auto* owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : nullptr;
+        if (owned != nullptr) {
+            boxMesh = owned->mesh;
             if (boxMesh.posBuffer == BufferHandle::Invalid) {
                 boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
-                rc.DestroyMesh(std::exchange(owned.mesh, boxMesh));
+                rc.DestroyMesh(std::exchange(owned->mesh, boxMesh));
             }
         } else {
             boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});

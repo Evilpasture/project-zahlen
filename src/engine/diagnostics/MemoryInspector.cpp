@@ -65,7 +65,7 @@ auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcep
     const size_t size = dest.size();
 #if defined(_WIN32)
     SIZE_T bytesRead = 0;
-    BOOL   ok        = ReadProcessMemory(GetCurrentProcess(), src.data(), dest.data(), (SIZE_T) size, &bytesRead);
+    BOOL   ok        = ReadProcessMemory(GetCurrentProcess(), src.data(), dest.data(), static_cast<SIZE_T>(size), &bytesRead);
     return ok && (bytesRead == size);
 #elif defined(__linux__)
     struct iovec local {

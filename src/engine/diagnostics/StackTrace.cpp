@@ -20,7 +20,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h> // i'm tired of missing macros
 #include <dbghelp.h>
+#if defined(_MSC_VER) // MSVC autolink; MinGW links dbghelp from CMakeLists.txt
 #pragma comment(lib, "dbghelp.lib")
+#endif
 #endif
 
 namespace ZHLN::Diagnostics {

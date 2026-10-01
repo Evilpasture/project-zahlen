@@ -20,7 +20,12 @@
 // standalone immintrin.h (including Jolt's use in module global fragments).
 #include <windows.h>
 
+// MSVC auto-links libraries named here. Every other toolchain links them from
+// CMake instead -- see the dbghelp note in CMakeLists.txt -- and warns about the
+// pragma under -Wunknown-pragmas, so it is MSVC-only on purpose.
+#if defined(_MSC_VER)
 #pragma comment(lib, "User32.lib")
+#endif
 
 #undef near
 #undef far

@@ -32,9 +32,12 @@ static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
 void InitRenderDocAPI() {
 #if defined(_WIN32)
     if (HMODULE mod = GetModuleHandleA("renderdoc.dll")) {
-        pRENDERDOC_GetAPI R_GetAPI = (pRENDERDOC_GetAPI) GetProcAddress(mod, "RENDERDOC_GetAPI");
-        if (R_GetAPI) {
-            R_GetAPI(eRENDERDOC_API_Version_1_5_0, (void**) &s_RDocAPI);
+        // GetProcAddress returns a FARPROC, whose signature is not this one; the
+        // hop through void* is the one the dlsym path below also makes, and the
+        // one GCC accepts without -Wcast-function-type.
+        auto R_GetAPI = reinterpret_cast<pRENDERDOC_GetAPI>(reinterpret_cast<void*>(GetProcAddress(mod, "RENDERDOC_GetAPI")));
+        if (R_GetAPI != nullptr) {
+            R_GetAPI(eRENDERDOC_API_Version_1_5_0, reinterpret_cast<void**>(&s_RDocAPI));
         }
     }
 #elif defined(__linux__)

@@ -7,7 +7,9 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <dbghelp.h>
-#pragma comment(lib, "dbghelp.lib")
+#if defined(_MSC_VER) // MSVC autolink; MinGW links dbghelp from this directory's
+#pragma comment(lib, "dbghelp.lib") // CMakeLists.txt (see the note there)
+#endif
 #elif defined(__linux__) || defined(__APPLE__)
 #include <cstdlib>
 #include <cxxabi.h>

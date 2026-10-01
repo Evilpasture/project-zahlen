@@ -236,7 +236,7 @@ struct DecalTestSuite {
                 }
 
                 // Detect unprojected neutral dark wall pixels (Gray: R ~ G ~ B)
-                if (r > 20 && std::abs((int) r - (int) g) < 15 && std::abs((int) g - (int) b) < 15) {
+                if (r > 20 && std::abs(static_cast<int>(r) - static_cast<int>(g)) < 15 && std::abs(static_cast<int>(g) - static_cast<int>(b)) < 15) {
                     darkWallPixels++;
                 }
             }

@@ -15,7 +15,9 @@
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#if defined(_MSC_VER) // MSVC autolink; see the same guard in Platform.hpp
 #pragma comment(lib, "Shcore.lib")
+#endif
 #else
 #include <dlfcn.h>
 #endif

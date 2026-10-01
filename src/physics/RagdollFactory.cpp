@@ -79,8 +79,9 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, con
         settings->CalculateConstraintIndexToBodyIdxPair();
         settings->Stabilize();
 
-        JPH::Ragdoll* ragdoll = settings->CreateRagdoll(0, 0, &joltSystem);
-        return {ragdoll};
+        // Not 'ragdoll': that is the handle this lambda's result is assigned to.
+        JPH::Ragdoll* createdRagdoll = settings->CreateRagdoll(0, 0, &joltSystem);
+        return {createdRagdoll};
     });
     if (ragdoll == nullptr) {
         return Physics::RagdollHandle::Invalid;

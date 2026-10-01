@@ -410,7 +410,7 @@ class IBLProcessor {
                     const float rowWeight = rowOverlap * std::sin(pi * (float(sy) + 0.5f) / float(srcH));
                     for (uint32_t sx = static_cast<uint32_t>(left); sx < srcW && float(sx) < right; ++sx) {
                         const float colOverlap = std::min(float(sx + 1), right) - std::max(float(sx), left);
-                        const double weight = static_cast<double>(rowWeight) * colOverlap;
+                        const double weight = static_cast<double>(rowWeight) * static_cast<double>(colOverlap);
                         const size_t index = (static_cast<size_t>(sy) * srcW + sx) * 4u;
                         for (uint32_t c = 0; c < 4; ++c)
                             sum[c] += static_cast<double>(src[index + c]) * weight;

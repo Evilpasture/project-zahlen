@@ -127,6 +127,14 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
                     }
 
                     NativeMaterial* material = _materials.Resolve(handle);
+                    if (material == nullptr) [[unlikely]] {
+                        // Unreachable for a handle Create() has just handed back,
+                        // but Resolve's documented answer is null for every way a
+                        // handle can fail to name a live object, and writing
+                        // through it unchecked is the null dereference GCC says.
+                        _materials.Destroy(handle);
+                        return std::unexpected(MaterialCreationError::MaterialSlotsExhausted);
+                    }
                     material->pipeline = compiledPipeline.Release();
                     material->layout = _layout;
                     material->meshPipeline = meshPipeline.Release();

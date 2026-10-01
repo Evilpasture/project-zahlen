@@ -52,6 +52,11 @@ set(ZHLN_WARNING_SUPPRESSIONS
     -Wnested-anon-types
     -Wgnu-anonymous-struct
     -Winterference-size
+    # Microsoft-extension diagnostics: clang has them for windows.h, GCC does not.
+    # Naming one on a driver that lacks it is what puts "cc1plus: note:
+    # unrecognized command-line option" in the middle of a build log.
+    -Wmicrosoft-anon-tag
+    -Wmicrosoft-enum-forward-reference
 )
 
 set(ZHLN_COMPILE_WARNINGS "")
