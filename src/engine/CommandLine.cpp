@@ -439,7 +439,7 @@ std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* c
         const auto* it = std::ranges::find_if(Handlers, [&](const auto& handler) { return MatchesHandler(handler, tok.key); });
         const CommandHandler* handler = it != Handlers.end() ? &*it : nullptr;
         if (handler == nullptr) {
-            const auto* appIt = std::ranges::find_if(appHandlers, [&](const auto& appHandler) { return MatchesHandler(appHandler, tok.key); });
+            const auto appIt = std::ranges::find_if(appHandlers, [&](const auto& appHandler) { return MatchesHandler(appHandler, tok.key); });
             handler = appIt != appHandlers.end() ? &*appIt : nullptr;
         }
 
