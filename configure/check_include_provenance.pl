@@ -133,6 +133,8 @@ my %FIRST_PARTY = (
     EnvironmentSettings => ['include/Zahlen/GraphicsSettings.hpp'],
     GraphicsSettings => ['include/Zahlen/GraphicsSettings.hpp'],
     FunctionRef      => ['include/Zahlen/Core/FunctionRef.hpp'],
+    # Qualified: renderer builders already have unrelated Optional() members.
+    'ZHLN::Optional' => ['include/Zahlen/Core/Optional.hpp'],
     Hash64           => ['include/Zahlen/Core/Hash.hpp'],
     Hash32           => ['include/Zahlen/Core/Hash.hpp'],
     HashCombine      => ['include/Zahlen/Core/Hash.hpp'],

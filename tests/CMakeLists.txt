@@ -151,6 +151,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestFontAsset.cpp
     core/TestGraphicsSettings.cpp
     core/TestMath.cpp
+    core/TestOptional.cpp
     core/TestPlatform.cpp
     core/TestRayTracedNoiseMetrics.cpp
     core/TestReflection.cpp
