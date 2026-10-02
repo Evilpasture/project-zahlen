@@ -36,10 +36,10 @@ namespace ZHLN::PrefabFactory {
 
 namespace {
 
-auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset* {
-    if (mgr != nullptr && fontID != InvalidAssetID) {
-        if (auto* cached = mgr->GetCachedFont(fontID); cached != nullptr) {
-            return cached;
+auto ResolveFontAsset(ZHLN::Optional<AssetManager&> mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset& {
+    if (mgr && fontID != InvalidAssetID) {
+        if (auto cached = mgr->GetCachedFont(fontID)) {
+            return *cached;
         }
         AssetLoadRequest req;
         req.assetID = fontID;
@@ -52,14 +52,14 @@ auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& ow
                 auto* raw = ownedPtr.get();
                 owned = *raw;
                 mgr->CacheFont(fontID, std::move(ownedPtr));
-                return raw;
+                return *raw;
             }
         }
     }
     if (GUI::LoadBakedFont(owned)) {
-        return &owned;
+        return owned;
     }
-    return &GUI::GetDefaultBakedFont();
+    return GUI::GetDefaultBakedFont();
 }
 
 }
@@ -82,25 +82,21 @@ void ReleaseOwnedMeshes(RenderContext& ctx, ECS::Registry& reg) {
 }
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    return CreateFontAtlasTexture(ctx, registry, nullptr, GUI::kDefaultFontAssetID);
+    return CreateFontAtlasTexture(ctx, registry, std::nullopt, GUI::kDefaultFontAssetID);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, AssetID fontID) -> TextureHandle {
-    return CreateFontAtlasTexture(ctx, registry, &assetMgr, fontID);
-}
-
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager* assetMgr, AssetID fontID) -> TextureHandle {
-    auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
-    if (uiSettings == nullptr) {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle {
+    auto uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
+    if (!uiSettings) {
         return TextureHandle::Invalid;
     }
 
     GUI::BakedFontAsset        ownedAsset;
-    const GUI::BakedFontAsset* asset = ResolveFontAsset(assetMgr, fontID, ownedAsset);
+    const GUI::BakedFontAsset* asset = &ResolveFontAsset(assetMgr, fontID, ownedAsset);
 
-    if (asset == &GUI::GetDefaultBakedFont() && assetMgr != nullptr && fontID == InvalidAssetID) {
-        if (auto* def = assetMgr->GetCachedFont(GUI::kDefaultFontAssetID); def != nullptr) {
-            asset = def;
+    if (asset == &GUI::GetDefaultBakedFont() && assetMgr && fontID == InvalidAssetID) {
+        if (auto def = assetMgr->GetCachedFont(GUI::kDefaultFontAssetID)) {
+            asset = &*def;
         }
     }
 
@@ -138,12 +134,12 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetMa
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle {
     const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
-    return CreateFontAtlasTexture(ctx, registry, &assetMgr, id);
+    return CreateFontAtlasTexture(ctx, registry, assetMgr, id);
 }
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
     if (auto res = LoadFontAsset(assetMgr, GUI::kDefaultFontAssetPath); res.has_value()) {
-        if (auto* cached = assetMgr.GetCachedFont(*res); cached != nullptr) {
+        if (auto cached = assetMgr.GetCachedFont(*res)) {
             GUI::SetDefaultBakedFont(*cached);
         }
         return true;
@@ -153,7 +149,7 @@ auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
 
 auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
     const AssetID id = HashAssetPath(path);
-    if (auto* cached = assetMgr.GetCachedFont(id); cached != nullptr) {
+    if (auto cached = assetMgr.GetCachedFont(id)) {
         return id;
     }
 
@@ -180,11 +176,11 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     return id;
 }
 
-auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset* {
+auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::BakedFontAsset&> {
     return assetMgr.GetCachedFont(id);
 }
 
-auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset* {
+auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&> {
     return assetMgr.GetCachedFont(HashAssetPath(path));
 }
 
@@ -222,7 +218,7 @@ auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view pa
     return texRes.value_or(TextureHandle::Invalid);
 }
 
-auto LoadModelPrefab(RenderContext& , AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {
+auto LoadModelPrefab(RenderContext& , AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     return assetMgr.GetCachedPrefab(HashAssetPath(path));
 }
 
@@ -443,7 +439,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
 
 }
 
-auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     JPH::Vec4 boxColor = (params.materialOverride.baseColorFactor[3] >= 0.0f) ?
                              JPH::Vec4(
                                  params.materialOverride.baseColorFactor[0], params.materialOverride.baseColorFactor[1],
@@ -486,7 +482,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
                                                .dimensions = halfExtents, .color = boxColor});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
-    if (params.createPhysics && pc != nullptr) {
+    if (params.createPhysics && pc) {
         auto shape = pc->GetOrCreateShape(
             Physics::ShapeType::Box, halfExtents.GetX() * params.scale.GetX(), halfExtents.GetY() * params.scale.GetY(),
             halfExtents.GetZ() * params.scale.GetZ()
@@ -502,17 +498,17 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
 }
 
 auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
-    return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
+    return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), halfExtents, params);
 }
 
 namespace {
 
 auto SpawnPrimitive(
-    RenderContext&  ctx,
-    ECS::Registry&  reg,
-    PhysicsContext* pc,
-    std::string_view shapeName,
-    Mesh             mesh,
+    RenderContext&                  ctx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    std::string_view                shapeName,
+    Mesh                            mesh,
     Components::OwnedMeshComponent::Shape shape,
     JPH::Vec3        dimensions,
     float            cullRadius,
@@ -554,7 +550,7 @@ auto SpawnPrimitive(
                                                .dimensions = dimensions, .color = shapeColor});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
-    if (params.createPhysics && pc != nullptr) {
+    if (params.createPhysics && pc) {
         auto bodyShape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
         auto body      = pc->CreateRigidBody(
             bodyShape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
@@ -567,7 +563,7 @@ auto SpawnPrimitive(
 
 }
 
-auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params) -> Entity {
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.GetW() < 0.0f) {
         resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
@@ -581,10 +577,10 @@ auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, fl
 }
 
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
-    return CreateSphere(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, params);
+    return CreateSphere(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), radius, params);
 }
 
-auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.GetW() < 0.0f) {
         resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
@@ -598,10 +594,10 @@ auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, 
 }
 
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCylinder(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+    return CreateCylinder(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), radius, height, params);
 }
 
-auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params) -> Entity {
     SpawnParams resolved = params;
     if (resolved.color.GetW() < 0.0f) {
         resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
@@ -615,10 +611,10 @@ auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, floa
 }
 
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
-    return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+    return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), radius, height, params);
 }
 
-auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
+auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
     Mesh mesh = CreatePlaneMesh(ctx, extent, color);
 
     Material mat;
@@ -653,7 +649,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
                                                .dimensions = JPH::Vec3(extent, 0.0f, 0.0f), .color = color});
     reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
 
-    if (params.createPhysics && pc != nullptr) {
+    if (params.createPhysics && pc) {
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
         auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask);
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
@@ -663,7 +659,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
 }
 
 auto CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
-    return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), extent, color, params);
+    return CreatePlane(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), extent, color, params);
 }
 
 auto InstantiatePrefab(
@@ -785,12 +781,12 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
         // Default procedural materials also lived in the lost renderer.
         // Recreate a drawable baseline from the scene's color/PBR settings;
         // data-driven materials are restored by their own asset systems.
-        const auto* meshComp = reg.Get<Components::MeshComponent>(entities[i]);
-        if (meshComp != nullptr && !ctx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
+        const auto meshComp = reg.Get<Components::MeshComponent>(entities[i]);
+        if (meshComp && !ctx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
             if (auto created = ctx.CreateBasicMaterial(false, owned.color.GetW() < 1.0f)) {
                 Material mat = *created;
                 mat.baseColorFactor = {owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()};
-                if (const auto* pbr = reg.Get<Components::PBRComponent>(entities[i])) {
+                if (const auto pbr = reg.Get<Components::PBRComponent>(entities[i])) {
                     mat.roughnessFactor = pbr->roughness;
                     mat.metallicFactor  = pbr->metallic;
                 }
@@ -800,7 +796,7 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     }
 }
 
-auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {
+auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&> {
     return LoadModelPrefab(engine.GetRenderContext(), engine.GetAssetManager(), path);
 }
 
@@ -809,8 +805,8 @@ auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnPar
 }
 
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
-    ModelPrefab* prefab = LoadModelPrefab(engine, path);
-    if (prefab == nullptr) {
+    auto prefab = LoadModelPrefab(engine, path);
+    if (!prefab) {
         return 0;
     }
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);

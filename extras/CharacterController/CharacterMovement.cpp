@@ -76,7 +76,7 @@ void MovementSystem(Engine& engine, float dt) {
             Entity             e    = entities[i];
             move.prevOrientation    = move.orientation;
 
-            auto* phys = reg.Get<Components::PhysicsComponent>(e);
+            auto phys = reg.Get<Components::PhysicsComponent>(e);
             if (!phys) {
                 continue;
             }
@@ -186,8 +186,8 @@ void CommitCharacterSteering(Engine& engine) {
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
-        if (phys == nullptr) {
+        const auto phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        if (!phys) {
             continue;
         }
         const auto& move = moves[i];
@@ -209,8 +209,8 @@ void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
     }
 
     for (Entity e: entities) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(e);
-        if (phys == nullptr || phys->isStatic) {
+        const auto phys = reg.Get<Components::PhysicsComponent>(e);
+        if (!phys || phys->isStatic) {
             continue;
         }
 
@@ -265,8 +265,8 @@ void WriteCharacterGrounded(Engine& engine) {
     auto  entities = reg.GetEntitiesWith<MovementComponent>();
     auto  moves    = reg.GetRawArray<MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
-        if (phys == nullptr) {
+        const auto phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        if (!phys) {
             continue;
         }
         moves[i].wasGrounded = moves[i].isGrounded;

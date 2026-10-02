@@ -28,8 +28,7 @@ auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignme
 
 auto ComponentFamily::ResolveDenseID(uint32_t typeHash) noexcept -> uint32_t {
     return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
-        const uint32_t* existing = s_HashToDense.Find(typeHash);
-        if (existing != nullptr) {
+        if (const auto existing = s_HashToDense.Find(typeHash)) {
             return *existing;
         }
         uint32_t id = s_TypeCounter++;
@@ -44,11 +43,7 @@ void Registry::MapNameToFamilyID(std::string_view name, uint32_t id) noexcept {
 
 auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
     return ZHLN::Lock(s_FamilyMutex, [&] -> uint32_t {
-        const uint32_t* id = s_NameToFamilyID.Find(name);
-        if (id != nullptr) {
-            return *id;
-        }
-        return 0xFFFFFFFF;
+        return s_NameToFamilyID.Find(name).value_or(0xFFFFFFFFu);
     });
 }
 

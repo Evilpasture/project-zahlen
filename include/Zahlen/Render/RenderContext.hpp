@@ -4,6 +4,7 @@
 #pragma once
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
@@ -69,7 +70,7 @@ class ZHLN_API RenderContext {
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
-        Create(PresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
+        Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FileSystemWatcher&> fileSystemWatcher = std::nullopt) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 

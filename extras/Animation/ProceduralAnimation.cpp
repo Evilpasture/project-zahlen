@@ -1304,22 +1304,22 @@ struct SkinBinding {
     SkinBinding best;
     size_t      bestScore = 0;
     auto        consider  = [&](Entity entity) {
-        auto* mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
-        if (mesh == nullptr || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
+        auto mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
+        if (!mesh || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
             return;
         }
         const Skeleton& skeleton = prefab->skeletons[static_cast<size_t>(mesh->skeletonIndex)];
         const size_t    score    = ScoreSkeletonForProceduralPose(skeleton);
         if (best.skeletalMesh == nullptr || score > bestScore) {
-            best      = {.skeletalMesh = mesh, .skeleton = &skeleton};
+            best      = {.skeletalMesh = &*mesh, .skeleton = &skeleton};
             bestScore = score;
         }
     };
 
     consider(root);
     for (Entity entity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-        const auto* hierarchy = registry.Get<Components::HierarchyComponent>(entity);
-        if (hierarchy != nullptr && hierarchy->parent == root) {
+        const auto hierarchy = registry.Get<Components::HierarchyComponent>(entity);
+        if (hierarchy && hierarchy->parent == root) {
             consider(entity);
         }
     }
@@ -1821,23 +1821,23 @@ size_t ProceduralAnimation::MaskFirstPersonPalette(
 size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept {
     size_t synchronizedCount = 0;
     for (Entity childEntity: registry.GetEntitiesWith<Components::MeshComponent>()) {
-        const auto* hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
-        if (hierarchy == nullptr || hierarchy->parent != rootEntity) {
+        const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+        if (!hierarchy || hierarchy->parent != rootEntity) {
             continue;
         }
-        const auto* mesh = registry.Get<Components::MeshComponent>(childEntity);
-        if (mesh == nullptr || mesh->nodeIndex < 0) {
+        const auto mesh = registry.Get<Components::MeshComponent>(childEntity);
+        if (!mesh || mesh->nodeIndex < 0) {
             continue;
         }
         const RigNodeIndex node = static_cast<RigNodeIndex>(mesh->nodeIndex);
         if (!IsValidRigNode(node, boneMap.nodeCount)) {
             continue;
         }
-        const auto* skeletalMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity);
-        if (skeletalMesh != nullptr && skeletalMesh->skeletonIndex >= 0) {
+        const auto skeletalMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity);
+        if (skeletalMesh && skeletalMesh->skeletonIndex >= 0) {
             continue;
         }
-        if (auto* childTransform = registry.Get<Components::TransformComponent>(childEntity)) {
+        if (auto childTransform = registry.Get<Components::TransformComponent>(childEntity)) {
             const JPH::Mat44& modelTransform = boneMap.modelTransforms[node];
             childTransform->position         = modelTransform.GetTranslation();
             childTransform->rotation         = ExtractRotation(modelTransform);
@@ -1862,41 +1862,41 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
     auto& renderer = *renderRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
-        auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
-        auto* hair             = registry.Get<HairStrandsComponent>(entity);
-        auto* config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
-        auto* firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
-        auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
-        auto* itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
-        auto* movement         = registry.Get<Character::MovementComponent>(entity);
-        auto* transform        = registry.Get<Components::TransformComponent>(entity);
-        auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
-        auto* poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
-        auto* boneMap          = registry.Get<RigBoneMap>(entity);
+        auto gait             = registry.Get<ProceduralLocomotionComponent>(entity);
+        auto hair             = registry.Get<HairStrandsComponent>(entity);
+        auto config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
+        auto firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
+        auto tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
+        auto itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
+        auto movement         = registry.Get<Character::MovementComponent>(entity);
+        auto transform        = registry.Get<Components::TransformComponent>(entity);
+        auto physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
+        auto poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
+        auto boneMap          = registry.Get<RigBoneMap>(entity);
 
         // Articulation consumes only the generic core pose hook. Guarantee that
         // a procedural ragdoll publishes through that hook even when spawn code
         // forgot to attach it explicitly.
-        if (poseOverride == nullptr && registry.Get<Components::RagdollComponent>(entity) != nullptr) {
-            poseOverride = &registry.Add(entity, Components::KinematicPoseOverrideComponent {});
+        if (!poseOverride && registry.Get<Components::RagdollComponent>(entity)) {
+            poseOverride = registry.Add(entity, Components::KinematicPoseOverrideComponent {});
             ZHLN::Log("[ProceduralAnimation] Added missing KinematicPoseOverrideComponent to ragdoll entity {}.", entity.index);
         }
-        if (poseOverride != nullptr) {
+        if (poseOverride) {
             poseOverride->valid = false;
         }
-        if (gait == nullptr || transform == nullptr || boneMap == nullptr) {
+        if (!gait || !transform || !boneMap) {
             continue;
         }
 
-        auto*              animator = registry.Get<Components::AnimatorComponent>(entity);
-        const ModelPrefab* prefab   = animator != nullptr ? animator->prefab : boneMap->sourcePrefab;
+        auto               animator = registry.Get<Components::AnimatorComponent>(entity);
+        const ModelPrefab* prefab   = animator ? animator->prefab : boneMap->sourcePrefab;
         SkinBinding        skin     = FindSkinBinding(registry, entity, prefab);
 
         if ((!boneMap->initialized || boneMap->sourcePrefab != prefab) && prefab != nullptr && skin.skeleton != nullptr) {
             const bool complete    = BuildBoneMap(*prefab, *skin.skeleton, *boneMap);
             boneMap->jointOffset   = skin.skeletalMesh->jointOffset;
             boneMap->skeletonIndex = skin.skeletalMesh->skeletonIndex;
-            if (hair != nullptr) {
+            if (hair) {
                 hair->bindPoseInitialized = false;
                 hair->initialized         = false;
             }
@@ -1961,7 +1961,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                     repairedFingerRelations
                 );
             }
-            if (animator != nullptr && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
+            if (animator && animator->currentTrackIdx >= 0 && animator->currentTrackIdx < static_cast<int32_t>(prefab->animations.size())) {
                 const AnimationClip& clip                    = prefab->animations[static_cast<size_t>(animator->currentTrackIdx)];
                 size_t               usableTransformChannels = 0;
                 for (const AnimationChannel& channel: clip.channels) {
@@ -2002,33 +2002,33 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             continue;
         }
 
-        if (hair != nullptr && !hair->bindPoseInitialized) {
+        if (hair && !hair->bindPoseInitialized) {
             std::copy_n(boneMap->bindLocalTransforms.begin(), boneMap->nodeCount, boneMap->localTransforms.begin());
             ResolveForwardKinematics(*boneMap);
             Animation::ConfigureHairBindPose(*hair, boneMap->modelTransforms.data(), *boneMap);
         }
-        const bool authoredPoseOnly       = config != nullptr && config->authoredPoseOnly;
-        const bool gaitEnabled            = !authoredPoseOnly && (config == nullptr || config->enableGait);
-        const bool gravityBounceEnabled   = gaitEnabled && (config == nullptr || config->enableGravityBounce);
-        const bool ikEnabled              = !authoredPoseOnly && (config == nullptr || config->enableLegIK);
-        const bool accelerationEnabled    = !authoredPoseOnly && (config == nullptr || config->enableAccelerationTilt);
-        const bool upperBodyEnabled       = !authoredPoseOnly && (config == nullptr || config->enableUpperBody);
-        const bool secondaryMotionEnabled = !authoredPoseOnly && (config == nullptr || config->enableSecondaryMotion);
-        const bool itemHandlingEnabled    = !authoredPoseOnly && itemHandling != nullptr && itemHandling->enabled && itemHandling->gripCount > 0;
+        const bool authoredPoseOnly       = config && config->authoredPoseOnly;
+        const bool gaitEnabled            = !authoredPoseOnly && (!config || config->enableGait);
+        const bool gravityBounceEnabled   = gaitEnabled && (!config || config->enableGravityBounce);
+        const bool ikEnabled              = !authoredPoseOnly && (!config || config->enableLegIK);
+        const bool accelerationEnabled    = !authoredPoseOnly && (!config || config->enableAccelerationTilt);
+        const bool upperBodyEnabled       = !authoredPoseOnly && (!config || config->enableUpperBody);
+        const bool secondaryMotionEnabled = !authoredPoseOnly && (!config || config->enableSecondaryMotion);
+        const bool itemHandlingEnabled    = !authoredPoseOnly && itemHandling && itemHandling->enabled && itemHandling->gripCount > 0;
         const bool handChildOfEnabled     = true; // Hands must always follow forearms
-        const bool chestChildOfEnabled    = config == nullptr || config->enforceChestChildOf;
-        const bool neckChildOfEnabled     = config == nullptr || config->enforceNeckChildOf;
-        const bool headChildOfEnabled     = config == nullptr || config->enforceHeadChildOf;
-        const bool footAttachmentsEnabled = config == nullptr || config->enforceFootAttachments;
+        const bool chestChildOfEnabled    = !config || config->enforceChestChildOf;
+        const bool neckChildOfEnabled     = !config || config->enforceNeckChildOf;
+        const bool headChildOfEnabled     = !config || config->enforceHeadChildOf;
+        const bool footAttachmentsEnabled = !config || config->enforceFootAttachments;
         bool       hasKneeConstraints     = false;
         for (size_t index = 0; index < boneMap->childOfConstraintCount; ++index) {
             hasKneeConstraints = hasKneeConstraints || boneMap->childOfConstraints[index].kind == RigChildOfKind::Knee;
         }
         const bool childOfEnabled        = hasKneeConstraints || handChildOfEnabled || chestChildOfEnabled || neckChildOfEnabled || headChildOfEnabled ||
                                            footAttachmentsEnabled;
-        const bool locomotionSyncEnabled = animator != nullptr && tracks != nullptr && tracks->synchronizeToStrideWheel;
+        const bool locomotionSyncEnabled = animator && tracks && tracks->synchronizeToStrideWheel;
 
-        const JPH::Vec3 velocityWorld   = physicsComponent != nullptr ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
+        const JPH::Vec3 velocityWorld   = physicsComponent ? physics.GetCharacterVelocity(physicsComponent->physicsHandle) : JPH::Vec3::sZero();
         const JPH::Quat rootRotation    = transform->rotation.Normalized();
         const JPH::Vec3 velocityLocal   = rootRotation.Inversed() * velocityWorld;
         const float     horizontalSpeed = std::sqrt(velocityLocal.GetX() * velocityLocal.GetX() + velocityLocal.GetZ() * velocityLocal.GetZ());
@@ -2054,11 +2054,11 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         if (gaitEnabled || locomotionSyncEnabled) {
             Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
         }
-        if (animator != nullptr && tracks != nullptr) {
-            SynchronizeLocomotionTrack(*animator, *tracks, movement, *gait, horizontalSpeed, dt);
+        if (animator && tracks) {
+            SynchronizeLocomotionTrack(*animator, *tracks, movement ? &*movement : nullptr, *gait, horizontalSpeed, dt);
         }
 
-        ApplyAuthoredPose(animator, config, *boneMap, dt);
+        ApplyAuthoredPose(animator ? &*animator : nullptr, config ? &*config : nullptr, *boneMap, dt);
         if (childOfEnabled) {
             ProceduralAnimation::CaptureChildOfPoseDeltas(*boneMap);
         }
@@ -2082,16 +2082,16 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
-            const Physics::BodyHandle ignoredHandle        = physicsComponent != nullptr ? physicsComponent->physicsHandle : Physics::BodyHandle {};
-            const float               legIKWeight          = config != nullptr ? config->legIKWeight : 1.0f;
-            const float               pelvisDropWeight     = config != nullptr ? config->pelvisDropWeight : 1.0f;
-            const float               maxHeightCorrection  = config != nullptr ? config->maxFootHeightCorrection : 0.18f;
-            const float               maxLegExtension      = config != nullptr ? config->maxLegExtension : 0.98f;
-            const float               maxBodyTilt          = JPH::DegreesToRadians(config != nullptr ? config->maxIKBodyTiltDegrees : 10.0f);
-            const float               maxAnkleSideways     = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleSidewaysDegrees : 15.0f);
-            const float               maxAnkleForward      = JPH::DegreesToRadians(config != nullptr ? config->maxAnkleForwardDegrees : 35.0f);
-            const bool                preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
-            const bool                worldLockFeet          = config != nullptr && config->worldLockFeet;
+            const Physics::BodyHandle ignoredHandle          = physicsComponent ? physicsComponent->physicsHandle : Physics::BodyHandle {};
+            const float               legIKWeight            = config ? config->legIKWeight : 1.0f;
+            const float               pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
+            const float               maxHeightCorrection    = config ? config->maxFootHeightCorrection : 0.18f;
+            const float               maxLegExtension        = config ? config->maxLegExtension : 0.98f;
+            const float               maxBodyTilt            = JPH::DegreesToRadians(config ? config->maxIKBodyTiltDegrees : 10.0f);
+            const float               maxAnkleSideways       = JPH::DegreesToRadians(config ? config->maxAnkleSidewaysDegrees : 15.0f);
+            const float               maxAnkleForward        = JPH::DegreesToRadians(config ? config->maxAnkleForwardDegrees : 35.0f);
+            const bool                preserveAuthoredFootXZ = !config || config->preserveAuthoredFootXZ;
+            const bool                worldLockFeet          = config && config->worldLockFeet;
             Animation::SolveLegGrounding(
                 physics, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
@@ -2111,14 +2111,14 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // Stage 4: authored upper-body channels win by default. Procedural arm
         // swing/look-at only fill groups not keyed by the active GLB track.
         if (upperBodyEnabled) {
-            const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator, *boneMap);
-            const bool                      forceLayering = config != nullptr && config->layerUpperBodyOverAuthoredChannels;
+            const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator ? &*animator : nullptr, *boneMap);
+            const bool                      forceLayering = config && config->layerUpperBodyOverAuthoredChannels;
             const bool                      applyArmSwing = forceLayering || !coverage.arms;
             const bool                      applyLookAt   = forceLayering || !coverage.torsoHead;
-            const auto*                     lookAt        = registry.Get<ProceduralLookAtComponent>(entity);
+            const auto                      lookAt        = registry.Get<ProceduralLookAtComponent>(entity);
             if (applyArmSwing || applyLookAt) {
                 Animation::SolveUpperBody(
-                    *gait, lookAt, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap, applyArmSwing, applyLookAt
+                    *gait, lookAt ? &*lookAt : nullptr, transform->position, rootRotation, boneMap->modelTransforms.data(), *boneMap, applyArmSwing, applyLookAt
                 );
             }
         }
@@ -2137,7 +2137,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             const JPH::Vec3     headPosition    = IsValidRigNode(headNode, boneMap->nodeCount) ? boneMap->modelTransforms[headNode].GetTranslation() :
                                                                                                  JPH::Vec3(0.0f, 1.6f, 0.0f);
             JPH::Vec3           aimDirection    = JPH::Vec3::sAxisZ();
-            if (const auto* lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
+            if (const auto lookAt = registry.Get<ProceduralLookAtComponent>(entity)) {
                 const JPH::Vec3 targetModel = rootRotation.Inversed() * (lookAt->targetWorldPos - transform->position);
                 const JPH::Vec3 fromHead    = targetModel - headPosition;
                 if (fromHead.LengthSq() > 1.0e-8f) {
@@ -2215,20 +2215,20 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             if (registry.IsAlive(itemHandling->itemEntity)) {
                 const JPH::Mat44 worldItem = rootWorld * itemHandling->itemModelTransform;
                 JPH::Mat44       localItem = worldItem;
-                if (const auto* hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
-                    hierarchy != nullptr && hierarchy->parent != Entity::Null() && registry.IsAlive(hierarchy->parent)) {
+                if (const auto hierarchy = registry.Get<Components::HierarchyComponent>(itemHandling->itemEntity);
+                    hierarchy && hierarchy->parent != Entity::Null() && registry.IsAlive(hierarchy->parent)) {
                     if (hierarchy->parent == entity) {
                         localItem = itemHandling->itemModelTransform;
-                    } else if (const auto* parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
+                    } else if (const auto parentWorld = registry.Get<Components::WorldTransformComponent>(hierarchy->parent)) {
                         localItem = parentWorld->world.Inversed() * worldItem;
                     }
                 }
-                if (auto* itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
+                if (auto itemTransform = registry.Get<Components::TransformComponent>(itemHandling->itemEntity)) {
                     itemTransform->position = localItem.GetTranslation();
                     itemTransform->rotation = ExtractRotation(localItem);
-                    auto* itemWorld         = registry.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
-                    if (itemWorld == nullptr) {
-                        itemWorld = &registry.Add(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
+                    auto itemWorld          = registry.Get<Components::WorldTransformComponent>(itemHandling->itemEntity);
+                    if (!itemWorld) {
+                        itemWorld = registry.Add(itemHandling->itemEntity, Components::WorldTransformComponent {.world = worldItem, .previous = worldItem});
                     } else {
                         itemWorld->previous = itemWorld->world;
                         itemWorld->world    = worldItem;
@@ -2238,7 +2238,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         }
 
         // Stage 5: worker-fiber XPBD secondary motion.
-        if (hair != nullptr && secondaryMotionEnabled) {
+        if (hair && secondaryMotionEnabled) {
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
             const JPH::Vec3    headModelPosition = hasHead ? boneMap->modelTransforms[headNode].GetTranslation() : JPH::Vec3(0.0f, 1.60f, 0.0f);
@@ -2267,7 +2267,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                 const JPH::Vec3  worldScale(world.GetColumn3(0).Length(), world.GetColumn3(1).Length(), world.GetColumn3(2).Length());
                 boneMap->modelTransforms[node] = JPH::Mat44::sRotationTranslation(modelRotation, modelPosition).PreScaled(worldScale);
             }
-        } else if (hair != nullptr) {
+        } else if (hair) {
             // Re-seed from the authored shape when secondary motion is enabled
             // again instead of resuming stale Verlet velocity.
             hair->initialized = false;
@@ -2325,7 +2325,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         ResolveForwardKinematics(*boneMap);
         boneMap->poseValid = true;
         ++boneMap->poseVersion;
-        if (poseOverride != nullptr) {
+        if (poseOverride) {
             poseOverride->valid = false;
         }
 
@@ -2333,7 +2333,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // head pose. Smooth only the head-local eye offset/orientation; root
         // translation remains immediate so forward movement cannot pull the
         // camera behind the body.
-        if (firstPerson != nullptr && firstPerson->enabled) {
+        if (firstPerson && firstPerson->enabled) {
             const RigNodeIndex headNode = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             if (IsValidRigNode(headNode, boneMap->nodeCount)) {
                 const JPH::Mat44& headModel      = boneMap->modelTransforms[headNode];
@@ -2370,7 +2370,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                 camera.fov                = firstPerson->fov;
                 camera.nearZ              = firstPerson->nearPlane;
             }
-        } else if (firstPerson != nullptr) {
+        } else if (firstPerson) {
             firstPerson->cameraInitialized = false;
         }
 
@@ -2397,7 +2397,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             const Skeleton&                      skeleton = prefab->skeletons[static_cast<size_t>(skeletalMesh->skeletonIndex)];
             std::array<JPH::Mat44, kMaxRigNodes> palette {};
             const size_t                         paletteCount = ProceduralAnimation::BuildSkinningPalette(skeleton, *boneMap, palette);
-            if (firstPerson != nullptr && firstPerson->enabled) {
+            if (firstPerson && firstPerson->enabled) {
                 ProceduralAnimation::MaskFirstPersonPalette(
                     skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
                 );
@@ -2406,7 +2406,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 
             if (skeletalMesh == skin.skeletalMesh) {
-                if (poseOverride != nullptr) {
+                if (poseOverride) {
                     const size_t overrideCount = std::min(paletteCount, Components::KinematicPoseOverrideComponent::MaxJoints);
                     for (size_t jointIndex = 0; jointIndex < overrideCount; ++jointIndex) {
                         const int32_t      importedNode           = skeleton.joints[jointIndex].nodeIndex;
@@ -2427,11 +2427,15 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // Upload the best semantic skeleton first so its generic motor target is
         // always published even when another part shares the same joint offset.
         uploadSkin(skin.skeletalMesh);
-        uploadSkin(registry.Get<Components::SkeletalMeshComponent>(entity));
+        if (auto selfMesh = registry.Get<Components::SkeletalMeshComponent>(entity)) {
+            uploadSkin(&*selfMesh);
+        }
         for (Entity childEntity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-            const auto* hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
-            if (hierarchy != nullptr && hierarchy->parent == entity) {
-                uploadSkin(registry.Get<Components::SkeletalMeshComponent>(childEntity));
+            const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+            if (hierarchy && hierarchy->parent == entity) {
+                if (auto childMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity)) {
+                    uploadSkin(&*childMesh);
+                }
             }
         }
 

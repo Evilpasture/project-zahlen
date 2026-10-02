@@ -837,11 +837,14 @@ void PhysicsContext::DestroyRagdolls(std::span<const Physics::RagdollHandle> han
     });
 }
 
-auto PhysicsContext::GetRagdoll(Physics::RagdollHandle handle) const noexcept -> JPH::Ragdoll* {
+auto PhysicsContext::GetRagdoll(Physics::RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&> {
     auto& world = _impl->world;
-    return ZHLN::Lock(world.sync.shadowLock, [&] -> JPH::Ragdoll* {
+    return ZHLN::Lock(world.sync.shadowLock, [&] -> ZHLN::Optional<JPH::Ragdoll&> {
         auto* slot = _impl->FindRagdollSlot(handle);
-        return slot != nullptr ? slot->instance.GetPtr() : nullptr;
+        if (slot != nullptr && slot->instance != nullptr) {
+            return *slot->instance.GetPtr();
+        }
+        return std::nullopt;
     });
 }
 

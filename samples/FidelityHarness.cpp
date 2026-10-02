@@ -238,11 +238,11 @@ uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::
     // The default importer downsizes images to 1024 for runtime memory. Keep
     // authored 2048px shoe/cloth normal and color textures in fidelity stills;
     // the renderer's trilinear/aniso samplers select the right mip at a distance.
-    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
         engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath,
         ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048}
     );
-    if (prefab == nullptr) {
+    if (!prefab) {
         ZHLN::Log("[Fidelity] '{}' is not a glTF this importer can read.", virtualPath);
         return 0;
     }
@@ -524,8 +524,8 @@ enum class DiagnosticCapture {
     uint32_t iridescent   = 0;
 
     for (const ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-        const auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(e);
-        if (mesh == nullptr) {
+        const auto mesh = registry.Get<ZHLN::Components::MeshComponent>(e);
+        if (!mesh) {
             return false;
         }
         auto material = renderer.GetGPUMaterial(mesh->materialAsset);

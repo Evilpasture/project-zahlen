@@ -148,32 +148,34 @@ struct UITreeTestSuite {
 
             // Named nodes resolve by id; anonymous children by the path
             // RenderUITree would report ("panel/0").
-            ZHLN::GUI::UINode* hello = ZHLN::GUI::FindNodeById(root, "panel/0");
-            ZHLN::GUI::UINode* save  = ZHLN::GUI::FindNodeById(root, "save");
-            if (!(ZHLN::Test::ExpectNe(hello, nullptr) && ZHLN::Test::ExpectNe(save, nullptr) &&
-                  ZHLN::Test::ExpectEq(ZHLN::GUI::FindNodeById(root, "panel"), &root))) {
+            auto hello     = ZHLN::GUI::FindNodeById(root, "panel/0");
+            auto save      = ZHLN::GUI::FindNodeById(root, "save");
+            auto rootFound = ZHLN::GUI::FindNodeById(root, "panel");
+            if (!(ZHLN::Test::ExpectTrue(hello.has_value()) && ZHLN::Test::ExpectTrue(save.has_value()) &&
+                  ZHLN::Test::ExpectTrue(rootFound.has_value()) && ZHLN::Test::ExpectEq(&*rootFound, &root))) {
                 return std::unexpected(UITreeTestError::TreeMutationFailed);
             }
             ZHLN::Test::ExpectEq(std::string_view(hello->label), std::string_view("Hello"));
             ZHLN::Test::ExpectEq(std::string_view(save->label), std::string_view("Save"));
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "missing") == nullptr);
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "") == nullptr);
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::FindNodeById(root, "missing").has_value());
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::FindNodeById(root, "").has_value());
 
             const ZHLN::GUI::UINode& constRoot = root;
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(constRoot, "save") == save);
+            const auto constSave = ZHLN::GUI::FindNodeById(constRoot, "save");
+            ZHLN::Test::ExpectTrue(constSave.has_value() && &*constSave == &*save);
 
             ZHLN::Test::ExpectTrue(ZHLN::GUI::InsertChild(
                 root, "panel", ZHLN::GUI::UINode {.id = "ssr", .kind = ZHLN::GUI::NodeKind::Checkbox, .label = "SSR"}
             ));
             ZHLN::Test::ExpectEq(root.children.size(), size_t {3});
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "ssr") != nullptr);
+            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "ssr").has_value());
             ZHLN::Test::ExpectFalse(ZHLN::GUI::InsertChild(root, "nope", ZHLN::GUI::UINode {}));
 
             // The root cannot be deleted; a named child can, and so can an
             // anonymous one addressed by path.
             ZHLN::Test::ExpectFalse(ZHLN::GUI::RemoveNodeById(root, "panel"));
             ZHLN::Test::ExpectTrue(ZHLN::GUI::RemoveNodeById(root, "save"));
-            ZHLN::Test::ExpectTrue(ZHLN::GUI::FindNodeById(root, "save") == nullptr);
+            ZHLN::Test::ExpectFalse(ZHLN::GUI::FindNodeById(root, "save").has_value());
             ZHLN::Test::ExpectTrue(ZHLN::GUI::RemoveNodeById(root, "panel/0"));
             ZHLN::Test::ExpectEq(root.children.size(), size_t {1});
             ZHLN::Test::ExpectEq(std::string_view(root.children[0].id), std::string_view("ssr"));

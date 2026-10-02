@@ -5,6 +5,7 @@
 
 #include "Rendering.hpp"
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <cstddef>
@@ -83,24 +84,24 @@ class FrameDestinations {
     FrameDestinations(const FrameDestinations&) = delete;
     auto operator=(const FrameDestinations&) -> FrameDestinations& = delete;
 
-    [[nodiscard]] auto Find(const PresentationTarget& target) noexcept -> Window*;
-    [[nodiscard]] auto Find(const PresentationTarget& target) const noexcept -> const Window*;
-    [[nodiscard]] auto Find(uint64_t id) noexcept -> Window*;
-    [[nodiscard]] auto Find(uint64_t id) const noexcept -> const Window*;
+    [[nodiscard]] auto Find(const PresentationTarget& target) noexcept -> ZHLN::Optional<Window&>;
+    [[nodiscard]] auto Find(const PresentationTarget& target) const noexcept -> ZHLN::Optional<const Window&>;
+    [[nodiscard]] auto Find(uint64_t id) noexcept -> ZHLN::Optional<Window&>;
+    [[nodiscard]] auto Find(uint64_t id) const noexcept -> ZHLN::Optional<const Window&>;
     [[nodiscard]] auto Windows() noexcept -> std::span<Window>;
-    [[nodiscard]] auto FindRecording(uint64_t windowId) noexcept -> Recording*;
-    [[nodiscard]] auto FindRecording(uint64_t windowId) const noexcept -> const Recording*;
+    [[nodiscard]] auto FindRecording(uint64_t windowId) noexcept -> ZHLN::Optional<Recording&>;
+    [[nodiscard]] auto FindRecording(uint64_t windowId) const noexcept -> ZHLN::Optional<const Recording&>;
     void AddRecording(uint64_t windowId, Vk::CommandRecorder&& recorder) noexcept;
     void AbortRecording(uint64_t windowId) noexcept;
     [[nodiscard]] auto Full() const noexcept -> bool;
-    auto Attach(Window entry) noexcept -> Window*;
+    auto Attach(Window entry) noexcept -> ZHLN::Optional<Window&>;
     void Detach(const PresentationTarget& target) noexcept;
     void Clear() noexcept;
     void BeginFrame() noexcept;
     void AbortRecordings() noexcept;
 
     void SetActive(uint64_t id) noexcept { activeWindow = id; }
-    [[nodiscard]] auto Active() const noexcept -> const Window* { return Find(activeWindow); }
+    [[nodiscard]] auto Active() const noexcept -> ZHLN::Optional<const Window&> { return Find(activeWindow); }
 
   private:
     uint64_t activeWindow = 0;

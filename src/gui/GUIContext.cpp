@@ -106,12 +106,12 @@ struct Context::Impl {
     }
 
     auto GetState(uint64_t id, uint64_t frame) noexcept -> WidgetState& {
-        auto* state = widgetStates.Find(id);
-        if (state == nullptr) {
+        auto state = widgetStates.Find(id);
+        if (!state) {
             widgetStates.Insert(id, WidgetState {});
             state = widgetStates.Find(id);
         }
-        ZHLN::Assert(state != nullptr);
+        ZHLN::Assert(state.has_value());
         state->lastActiveFrame = frame;
         return *state;
     }
@@ -241,10 +241,10 @@ void Context::BeginFrame(float dt) noexcept {
     if (_impl->engine != nullptr) {
         winSize = _impl->engine->GetPlatformHost().GetSize();
     }
-    auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    auto* settings = _impl->registry.GetSingleton<UISettingsComponent>();
+    auto input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    auto settings = _impl->registry.GetSingleton<UISettingsComponent>();
 
-    if (input != nullptr && input->queuedInputCount > 0) {
+    if (input && input->queuedInputCount > 0) {
         for (size_t i = 0; i < input->queuedInputCount; ++i) {
             const auto& queued = input->queuedInput[i];
             if (queued.isChar) {
@@ -256,7 +256,7 @@ void Context::BeginFrame(float dt) noexcept {
         input->ClearQueuedInput();
     }
 
-    if ((settings != nullptr) && (settings->fontAtlas.glyphCount > 0)) {
+    if (settings && (settings->fontAtlas.glyphCount > 0)) {
         _impl->activeFont = &settings->fontAtlas;
     } else {
         _impl->activeFont = &_impl->fallbackFont;
@@ -282,10 +282,10 @@ void Context::BeginFrame(float dt) noexcept {
 
     Clay_SetLayoutDimensions({static_cast<float>(winSize.width), static_cast<float>(winSize.height)});
 
-    float mx          = (input != nullptr) ? input->mouseX : -1.0f;
-    float my          = (input != nullptr) ? input->mouseY : -1.0f;
-    bool  isMouseDown = (input != nullptr) && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
-    float wheel = (input != nullptr) ? input->mouseWheel : 0.0f;
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    float wheel       = input ? input->mouseWheel : 0.0f;
 
     Clay_SetPointerState(Clay_Vector2 {mx, my}, isMouseDown);
     Clay_UpdateScrollContainers(false, Clay_Vector2 {0.0f, wheel * 30.0f}, dt);
@@ -487,10 +487,10 @@ auto Context::Button(std::string_view label, const JPH::Vec4& color, const Sizin
     Clay_ElementId         elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
     auto&                  state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->currentFrame);
 
-    auto* input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx          = (input != nullptr) ? input->mouseX : -1.0f;
-    float my          = (input != nullptr) ? input->mouseY : -1.0f;
-    bool  isMouseDown = (input != nullptr) && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    auto  input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     Clay__OpenElementWithId(elemId);
 
@@ -559,9 +559,9 @@ auto Context::IsPointerOver(std::string_view id) const noexcept -> bool {
     if (!rect || (_impl == nullptr)) {
         return false;
     }
-    auto*       input = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    const float mx    = (input != nullptr) ? input->mouseX : -1.0f;
-    const float my    = (input != nullptr) ? input->mouseY : -1.0f;
+    auto        input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    const float mx    = input ? input->mouseX : -1.0f;
+    const float my    = input ? input->mouseY : -1.0f;
     return mx >= rect->x && mx <= (rect->x + rect->width) && my >= rect->y && my <= (rect->y + rect->height);
 }
 
@@ -581,10 +581,10 @@ auto Context::Checkbox(std::string_view label, bool& checked, std::string_view i
     Clay_ElementId         elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
     auto&                  state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->currentFrame);
 
-    auto* input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx          = (input != nullptr) ? input->mouseX : -1.0f;
-    float my          = (input != nullptr) ? input->mouseY : -1.0f;
-    bool  isMouseDown = (input != nullptr) && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    auto  input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     BeginRow(8.0f);
 
@@ -646,10 +646,10 @@ auto Context::Slider(std::string_view label, float& value, float minVal, float m
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
 
-    auto* input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx          = (input != nullptr) ? input->mouseX : -1.0f;
-    float my          = (input != nullptr) ? input->mouseY : -1.0f;
-    bool  isMouseDown = (input != nullptr) && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    auto  input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     BeginRow(4.0f);
     BeginBox("", {.width = {.fixed = 96.0f}, .height = {.fixed = 22.0f}, .alignMain = Alignment::Center, .alignCross = Alignment::Start});
@@ -764,9 +764,9 @@ auto Context::TextInputImpl(std::string_view label, std::string& value, size_t m
     const uint64_t         stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x7E17;
     auto&                  state    = _impl->GetState(stateKey, _impl->currentFrame);
 
-    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx    = (input != nullptr) ? input->mouseX : -1.0f;
-    float my    = (input != nullptr) ? input->mouseY : -1.0f;
+    auto  input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
 
     state.caret.cursorIndex     = static_cast<uint32_t>(std::min<size_t>(state.caret.cursorIndex, value.size()));
     state.caret.selectionAnchor = static_cast<uint32_t>(std::min<size_t>(state.caret.selectionAnchor, value.size()));
@@ -810,7 +810,7 @@ auto Context::TextInputImpl(std::string_view label, std::string& value, size_t m
 
     if (isFocused && _impl->pendingEventCount > 0) {
         TextEdit::Modifiers mods {};
-        if (input != nullptr) {
+        if (input) {
             mods.shift = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LShift)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RShift));
             mods.ctrl  = input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::LControl)) || input->IsKeyDownRaw(static_cast<uint8_t>(KeyCode::RControl));
         }
@@ -963,9 +963,9 @@ auto Context::Dropdown(std::string_view label, std::span<const std::string_view>
     const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0xD209;
     auto&          state    = _impl->GetState(stateKey, _impl->currentFrame);
 
-    auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx    = (input != nullptr) ? input->mouseX : -1.0f;
-    float my    = (input != nullptr) ? input->mouseY : -1.0f;
+    auto  input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx    = input ? input->mouseX : -1.0f;
+    float my    = input ? input->mouseY : -1.0f;
 
     selected             = std::clamp(selected, 0, optionCount - 1);
     state.highlightIndex = std::clamp(state.highlightIndex, 0, optionCount - 1);
@@ -1141,10 +1141,10 @@ auto Context::BeginCollapsingHeader(std::string_view label, bool defaultOpen) no
         state.isInitialized = true;
     }
 
-    auto* input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    float mx          = (input != nullptr) ? input->mouseX : -1.0f;
-    float my          = (input != nullptr) ? input->mouseY : -1.0f;
-    bool  isMouseDown = (input != nullptr) && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+    auto  input       = _impl->registry.GetSingleton<Components::InputStateComponent>();
+    float mx          = input ? input->mouseX : -1.0f;
+    float my          = input ? input->mouseY : -1.0f;
+    bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
     BeginColumn(4.0f);
 

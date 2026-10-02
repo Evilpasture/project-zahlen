@@ -64,8 +64,8 @@ struct ScriptECSBridgeTestSuite {
             // 2. Direct Component Property Mutation via Bridge
             auto setRes = bridge.SetProperty(e, "PlayerDataComponent", "level", ZHLN::ToScriptVal(10));
             ZHLN::Test::ExpectTrue(setRes.has_value());
-            auto* comp = reg.Get<PlayerDataComponent>(e);
-            ZHLN::Test::ExpectTrue(comp != nullptr);
+            auto comp = reg.Get<PlayerDataComponent>(e);
+            ZHLN::Test::ExpectTrue(comp.has_value());
             ZHLN::Test::ExpectEq(comp->level, 10);
 
             // 3. Multi-level Sub-structure Property Drilling (coords.x)

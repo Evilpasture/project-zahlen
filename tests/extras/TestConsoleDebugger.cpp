@@ -168,9 +168,9 @@ struct ConsoleDebuggerTestSuite {
             ZHLN::GameConsole setConsole;
             ZHLN::ConsoleDebugger::Execute(reg, setConsole, std::format("set {} PBRComponent.roughness 0.25", id));
             ZHLN::Test::ExpectTrue(Contains(JoinedLogs(setConsole), "Updated PBRComponent.roughness to 0.25"));
-            const auto* pbr = reg.Get<ZHLN::Components::PBRComponent>(e);
-            ZHLN::Test::ExpectTrue(pbr != nullptr);
-            if (pbr != nullptr) {
+            const auto pbr = reg.Get<ZHLN::Components::PBRComponent>(e);
+            ZHLN::Test::ExpectTrue(pbr.has_value());
+            if (pbr) {
                 ZHLN::Test::ExpectEq(pbr->roughness, 0.25f);
             }
 

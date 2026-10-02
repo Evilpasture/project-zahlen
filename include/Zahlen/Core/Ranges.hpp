@@ -640,7 +640,7 @@ struct FindOrAdapter {
         using ValueType = std::conditional_t<std::is_void_v<TargetType>, std::decay_t<Fallback>, TargetType>;
 
         if constexpr (requires { c.Find(key); }) {
-            if (const auto* val = c.Find(key)) {
+            if (const auto val = c.Find(key)) {
                 return static_cast<ValueType>(*val);
             }
             return static_cast<ValueType>(fallback);
@@ -697,7 +697,7 @@ struct FindValueAdapter {
         using OptType = std::optional<std::decay_t<MappedType>>;
 
         if constexpr (requires { c.Find(key); }) {
-            if (const auto* val = c.Find(key)) {
+            if (const auto val = c.Find(key)) {
                 return OptType(*val);
             }
             return OptType(std::nullopt);

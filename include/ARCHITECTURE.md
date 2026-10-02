@@ -233,7 +233,7 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
 
   ```cpp
   // the extra: parse, upload, cache
-  auto* prefab = ZHLN::GLTF::LoadGLBPrefab(ctx, cwMgr, "Crate.glb");
+  auto prefab = ZHLN::GLTF::LoadGLBPrefab(ctx, cwMgr, "Crate.glb");
 
   // core only: read the struct back out of the cache and spawn it
   ZHLN::CreativeWorksFactory::InstantiatePrefab(engine, "Crate.glb", params);
@@ -447,7 +447,7 @@ only for declared families. Queries can be projected to a read-only subset.
 Declare `Registry&` explicitly when making structural ECS changes or calling
 an existing callback that may do so; it conservatively conflicts with all
 component accesses. `Res<T>` and `ResMut<T>` inject required services,
-`OptionRes<T>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
+`Optional<T&>` / `Optional<const T&>` injects a nullable service, and `FrameDt`, `FrameAlpha`, and
 `FrameIndex` avoid guessing between otherwise identical scalar types. The
 legacy `AddSystem(SystemInfo)` API remains available to external callers.
 `Reflect::CallableInspector` in `Core/Reflection/Callable.hpp` provides

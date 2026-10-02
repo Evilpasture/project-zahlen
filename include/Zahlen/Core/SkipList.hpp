@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Atomic.hpp"
+#include "Optional.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
 #include <algorithm>
 #include <array>
@@ -92,7 +93,7 @@ class SkipList {
         return *this;
     }
 
-    [[nodiscard]] const Value* Find(const Key& key) const noexcept {
+    [[nodiscard]] ZHLN::Optional<const Value&> Find(const Key& key) const noexcept {
         const_cast<SkipList*>(this)->EnterReader();
 
         const SkipNode* curr = _head;
@@ -109,18 +110,21 @@ class SkipList {
 
         const ZHLN::Atomic<SkipNode*>* forward = curr->GetForward();
         SkipNode*                      next    = forward[0].load(std::memory_order::acquire);
-        const Value*                   result  = nullptr;
+        ZHLN::Optional<const Value&>   result;
 
         if (next && !next->deleted.load(std::memory_order::acquire) && !_compare(next->key, key) && !_compare(key, next->key)) {
-            result = &next->value;
+            result = next->value;
         }
 
         const_cast<SkipList*>(this)->ExitReader();
         return result;
     }
 
-    [[nodiscard]] Value* Find(const Key& key) noexcept {
-        return const_cast<Value*>(std::as_const(*this).Find(key));
+    [[nodiscard]] ZHLN::Optional<Value&> Find(const Key& key) noexcept {
+        if (auto found = std::as_const(*this).Find(key)) {
+            return const_cast<Value&>(*found);
+        }
+        return std::nullopt;
     }
 
     template <typename Func>

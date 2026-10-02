@@ -301,7 +301,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
 
         bool found = false;
         for (Entity e: reg.GetEntitiesWith<Components::NameComponent>()) {
-            if (const auto* nameComp = reg.Get<Components::NameComponent>(e)) {
+            if (const auto nameComp = reg.Get<Components::NameComponent>(e)) {
                 if (std::string_view(nameComp->name) == tokens[1]) {
                     console.Log(std::format("Found Entity: {} (ID: {})", nameComp->name.c_str(), e.Pack()), {.r = 0.3f, .g = 1.0f, .b = 0.3f, .a = 1.0f});
                     found = true;

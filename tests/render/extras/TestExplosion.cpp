@@ -79,8 +79,8 @@ struct ExplosionTestSuite {
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
-            const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            if (!ZHLN::Test::ExpectTrue(comp != nullptr)) {
+            const auto comp = reg.Get<ZHLN::ExplosionComponent>(expRoot);
+            if (!ZHLN::Test::ExpectTrue(comp.has_value())) {
                 return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
 
@@ -88,12 +88,12 @@ struct ExplosionTestSuite {
             ZHLN::Test::ExpectEq(comp->debrisEntity, ZHLN::Entity::Null());
             ZHLN::Test::ExpectTrue(!comp->fireball.empty());
             ZHLN::Test::ExpectTrue(!comp->soilSmoke.empty());
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::LightComponent>(expRoot) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::LightComponent>(expRoot).has_value());
 
             constexpr float dt = 1.0f / 60.0f;
             ZHLN::ExplosionSystem::Update(*engine, dt);
-            const auto* active = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            if (!ZHLN::Test::ExpectTrue(active != nullptr && active->fireBuffer != ZHLN::BufferHandle::Invalid &&
+            const auto active = reg.Get<ZHLN::ExplosionComponent>(expRoot);
+            if (!ZHLN::Test::ExpectTrue(active.has_value() && active->fireBuffer != ZHLN::BufferHandle::Invalid &&
                                         active->smokeBuffer != ZHLN::BufferHandle::Invalid)) {
                 return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
@@ -135,15 +135,15 @@ struct ExplosionTestSuite {
             const ZHLN::Entity expRoot = ZHLN::ExplosionSystem::Spawn(*engine, JPH::Vec3(0.0f, 0.0f, 0.0f), 1.0f, ZHLN::OrdnanceType::ArtilleryMortar);
             ZHLN::Test::ExpectTrue(reg.IsAlive(expRoot));
 
-            const auto* comp      = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            if (!ZHLN::Test::ExpectTrue(comp != nullptr)) {
+            const auto comp = reg.Get<ZHLN::ExplosionComponent>(expRoot);
+            if (!ZHLN::Test::ExpectTrue(comp.has_value())) {
                 return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
 
             const ZHLN::Entity debrisEnt = comp->debrisEntity;
             ZHLN::Test::ExpectTrue(debrisEnt != ZHLN::Entity::Null());
             ZHLN::Test::ExpectTrue(reg.IsAlive(debrisEnt));
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(debrisEnt) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(debrisEnt).has_value());
 
             constexpr float dt             = 1.0f / 60.0f;
             bool            craterObserved = false;
@@ -165,7 +165,7 @@ struct ExplosionTestSuite {
             // Crater Decal spawned with DecalComponent
             ZHLN::Test::ExpectTrue(craterObserved);
             ZHLN::Test::ExpectTrue(reg.IsAlive(foundCrater));
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::DecalComponent>(foundCrater) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::DecalComponent>(foundCrater).has_value());
 
             for (int i = 0; i < 180; ++i) {
                 engine->ProcessEvents();
@@ -220,8 +220,8 @@ struct ExplosionTestSuite {
             }
 
             // Invariant 1: Scale shrunk dynamically during fade
-            const auto* trans      = reg.Get<ZHLN::Components::TransformComponent>(craterEnt);
-            if (!ZHLN::Test::ExpectTrue(trans != nullptr)) {
+            const auto trans = reg.Get<ZHLN::Components::TransformComponent>(craterEnt);
+            if (!ZHLN::Test::ExpectTrue(trans.has_value())) {
                 return std::unexpected(ExplosionTestError::CraterDecalSpawnFailed);
             }
             ZHLN::Test::ExpectLt(trans->scale.GetX(), 6.8f);

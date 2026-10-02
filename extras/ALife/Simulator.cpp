@@ -185,9 +185,9 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
 // --- Interaction Math ---
 
 void Simulator::ResolveOfflineInteraction(ECS::Registry& reg, Entity e1, Entity e2) {
-    auto* c1 = reg.Get<ALifeComponent>(e1);
-    auto* c2 = reg.Get<ALifeComponent>(e2);
-    if ((c1 == nullptr) || (c2 == nullptr)) {
+    auto c1 = reg.Get<ALifeComponent>(e1);
+    auto c2 = reg.Get<ALifeComponent>(e2);
+    if (!c1 || !c2) {
         return;
     }
 
@@ -294,7 +294,7 @@ auto Simulator::Load(ECS::Registry& reg, const char* filename) -> bool {
 
         // Either update existing or add new
         if (reg.IsAlive(rec.entity)) {
-            if (auto* existing = reg.Get<ALifeComponent>(rec.entity)) {
+            if (auto existing = reg.Get<ALifeComponent>(rec.entity)) {
                 *existing = rec.comp;
             } else {
                 reg.Add(rec.entity, rec.comp);

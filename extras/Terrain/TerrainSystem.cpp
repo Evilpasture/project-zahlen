@@ -107,7 +107,7 @@ void TerrainSystem::RegisterCleanup(Engine& engine) {
 
 void TerrainSystem::Detach(Engine& engine, Entity entity) {
     auto& registry = engine.GetRegistry();
-    if (auto* terrain = registry.Get<TerrainComponent>(entity)) {
+    if (auto terrain = registry.Get<TerrainComponent>(entity)) {
         UnregisterTerrainData(std::exchange(terrain->terrainHandle, TerrainHandle::Invalid));
         registry.Remove<TerrainComponent>(entity);
     }
@@ -134,7 +134,7 @@ void TerrainSystem::Cleanup(Engine& engine, bool all) {
     if (!entities.empty()) {
         auto terrains = registry.GetRawArray<TerrainComponent>();
         for (size_t i = 0; i < entities.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+            if (all || registry.Get<Components::PendingDestroy>(entities[i])) {
                 UnregisterTerrainData(std::exchange(terrains[i].terrainHandle, TerrainHandle::Invalid));
             }
         }
@@ -157,12 +157,12 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
         auto&  terrain  = terrains[i];
-        if (registry.Get<Components::PendingDestroy>(e) != nullptr) {
+        if (registry.Get<Components::PendingDestroy>(e)) {
             continue;
         }
-        auto*  meshComp = query.Get<Components::MeshComponent>(e);
+        auto meshComp = query.Get<Components::MeshComponent>(e);
 
-        if (meshComp == nullptr) {
+        if (!meshComp) {
             continue;
         }
 
@@ -182,18 +182,18 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
         // without baking a second set of buffers; after device loss the owner
         // has been invalidated, so rebuild from the CPU heightmap instead.
         if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
-            auto* owned = query.Get<Components::OwnedMeshComponent>(e);
-            if (owned != nullptr && owned->meshAsset != meshComp->meshAsset) {
+            auto owned = query.Get<Components::OwnedMeshComponent>(e);
+            if (owned && owned->meshAsset != meshComp->meshAsset) {
                 rc.UnregisterGPUMesh(owned->meshAsset);
                 owned->meshAsset = meshComp->meshAsset;
             }
-            if (owned != nullptr && owned->mesh.posBuffer != BufferHandle::Invalid) {
+            if (owned && owned->mesh.posBuffer != BufferHandle::Invalid) {
                 rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
             } else if (tData != nullptr && !tData->heights.empty()) {
                 Mesh tMesh = CreateTerrainMeshFromData(
                     rc, tData->sampleCount, tData->worldSize, tData->heights.data(), tData->colors.empty() ? nullptr : tData->colors.data()
                 );
-                if (owned != nullptr) {
+                if (owned) {
                     rc.DestroyMesh(owned->mesh);
                     owned->mesh = tMesh;
                 } else {
@@ -228,8 +228,8 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
             continue;
         }
 
-        const auto* trans    = reg.Get<Components::TransformComponent>(e);
-        JPH::Vec3   pos      = (trans != nullptr) ? trans->position : JPH::Vec3::sZero();
+        const auto trans    = reg.Get<Components::TransformComponent>(e);
+        JPH::Vec3  pos      = trans ? trans->position : JPH::Vec3::sZero();
         float       halfSize = tData->worldSize * 0.5f;
 
         float localX = worldX - pos.GetX();

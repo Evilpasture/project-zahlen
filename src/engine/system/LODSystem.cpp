@@ -29,15 +29,15 @@ void LODSystem::Update(Engine& engine) {
                 continue;
             }
 
-            auto* meshComp = reg.Get<Components::MeshComponent>(e);
+            auto meshComp = reg.Get<Components::MeshComponent>(e);
             if (!meshComp) {
                 continue;
             }
 
             JPH::Vec3 worldPos = JPH::Vec3::sZero();
-            if (auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e)) {
+            if (auto worldTrans = reg.Get<Components::WorldTransformComponent>(e)) {
                 worldPos = worldTrans->world.GetTranslation();
-            } else if (auto* trans = reg.Get<Components::TransformComponent>(e)) {
+            } else if (auto trans = reg.Get<Components::TransformComponent>(e)) {
                 worldPos = trans->position;
             }
 

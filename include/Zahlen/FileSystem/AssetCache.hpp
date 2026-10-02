@@ -5,6 +5,7 @@
 #pragma once
 
 #include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstdint>
 #include <memory>
@@ -45,10 +46,10 @@ class AssetCache {
         return *this;
     }
 
-    [[nodiscard]] auto Find(uint64_t id) const noexcept -> T* {
-        return Lock(_mutex, [&]() -> T* {
-            const auto* entry = _map.Find(id);
-            return entry != nullptr ? *entry : nullptr;
+    [[nodiscard]] auto Find(uint64_t id) const noexcept -> ZHLN::Optional<T&> {
+        return Lock(_mutex, [&]() -> ZHLN::Optional<T&> {
+            const auto entry = _map.Find(id);
+            return (entry && *entry != nullptr) ? ZHLN::Optional<T&> {**entry} : ZHLN::Optional<T&> {std::nullopt};
         });
     }
 

@@ -30,6 +30,7 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <string>
@@ -183,9 +184,9 @@ struct RenderUITreeResult {
 };
 
 // Resolves a Design-mode clickedId (a node.id, or a generated path like
-// "panel/0/1" when the node has no id) to the live node. Null when missing.
-[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(UINode& root, std::string_view targetId) -> UINode*;
-[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode*;
+// "panel/0/1" when the node has no id) to the live node. Empty when missing.
+[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(UINode& root, std::string_view targetId) -> ZHLN::Optional<UINode&>;
+[[nodiscard]] ZHLN_STATIC_API auto FindNodeById(const UINode& root, std::string_view targetId) -> ZHLN::Optional<const UINode&>;
 
 // Appends @p child under the node named by @p parentId. False if the parent
 // is not in the tree.

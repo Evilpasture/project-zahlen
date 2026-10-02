@@ -108,11 +108,11 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
     auto     allSkinnedEntities = query.Entities<Components::SkeletalMeshComponent>();
 
     for (Entity e: allSkinnedEntities) {
-        auto* skelMesh = query.Get<Components::SkeletalMeshComponent>(e);
-        if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0) {
-            auto*  hier       = query.Get<Components::HierarchyComponent>(e);
-            Entity parentRoot = (hier != nullptr) ? hier->parent : Entity::Null();
-            if (auto* anim = query.Get<Components::AnimatorComponent>(parentRoot)) {
+        auto skelMesh = query.Get<Components::SkeletalMeshComponent>(e);
+        if (skelMesh && skelMesh->skeletonIndex >= 0) {
+            auto   hier       = query.Get<Components::HierarchyComponent>(e);
+            Entity parentRoot = hier ? hier->parent : Entity::Null();
+            if (auto anim = query.Get<Components::AnimatorComponent>(parentRoot)) {
                 if (anim->prefab != nullptr) {
                     totalJoints =
                         std::max(totalJoints, skelMesh->jointOffset + static_cast<uint32_t>(anim->prefab->skeletons[skelMesh->skeletonIndex].joints.size()));
@@ -260,25 +260,25 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
 
             auto allMeshEntities = query.Entities<Components::MeshComponent>();
             for (Entity childEnt: allMeshEntities) {
-                auto* hier = query.Get<Components::HierarchyComponent>(childEnt);
+                auto hier = query.Get<Components::HierarchyComponent>(childEnt);
                 if (!hier || hier->parent != rootEntity) {
                     continue;
                 }
 
-                auto* mesh = query.Get<Components::MeshComponent>(childEnt);
+                auto mesh = query.Get<Components::MeshComponent>(childEnt);
                 if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
                     continue;
                 }
 
                 if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
-                    if (auto* morphComp = query.Get<Components::MorphTargetComponent>(childEnt)) {
+                    if (auto morphComp = query.Get<Components::MorphTargetComponent>(childEnt)) {
                         morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
                         morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
                     }
                 }
 
-                auto* skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
-                if (skelMesh != nullptr && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
+                auto skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
+                if (skelMesh && skelMesh->skeletonIndex >= 0 && skelMesh->skeletonIndex < static_cast<int32_t>(prefab.skeletons.size())) {
                     const Skeleton& skeleton = prefab.skeletons[skelMesh->skeletonIndex];
 
                     for (size_t j = 0; j < skeleton.joints.size(); ++j) {
@@ -288,7 +288,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 } else {
                     const Math::TransformTRS trs = Math::Decompose(worldTransforms[mesh->nodeIndex]);
 
-                    if (auto* childTrans = query.Get<Components::TransformComponent>(childEnt)) {
+                    if (auto childTrans = query.Get<Components::TransformComponent>(childEnt)) {
                         childTrans->position = trs.translation;
                         childTrans->rotation = trs.rotation;
                         childTrans->scale    = trs.scale;

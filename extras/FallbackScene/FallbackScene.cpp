@@ -171,7 +171,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
+    if (auto settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle = PrefabFactory::CreateFontAtlasTexture(
@@ -224,8 +224,8 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     auto& rc  = engine.GetRenderContext();
 
     // --- TOGGLE POPUP VISIBILITY WITH ESCAPE KEY ---
-    auto*       inputState = reg.GetSingleton<Components::InputStateComponent>();
-    bool        escDown    = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
+    auto        inputState = reg.GetSingleton<Components::InputStateComponent>();
+    bool        escDown    = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::Escape));
     static bool wasEscDown = false;
 
     if (escDown && !wasEscDown) {

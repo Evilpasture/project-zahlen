@@ -107,8 +107,8 @@ struct RenderAnimatedMeshTestSuite {
             }
 
             const ZHLN::Entity rootEntity = spawnedParts[0];
-            const auto*        animComp   = reg.Get<ZHLN::Components::AnimatorComponent>(rootEntity);
-            if (animComp == nullptr) {
+            const auto         animComp   = reg.Get<ZHLN::Components::AnimatorComponent>(rootEntity);
+            if (!animComp) {
                 return std::unexpected(AnimatedMeshTestError::NoAnimatorFound);
             }
 
@@ -132,12 +132,12 @@ struct RenderAnimatedMeshTestSuite {
             // per-component scratch reuse across another rendered frame.
             std::vector<std::pair<ZHLN::Entity, ZHLN::BufferHandle>> skinnedScratch;
             for (const ZHLN::Entity e: spawnedParts) {
-                if (const auto* mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
+                if (const auto mesh = reg.Get<ZHLN::Components::MeshComponent>(e)) {
                     if (std::isnan(mesh->cullRadius) || std::isinf(mesh->cullRadius) || mesh->cullRadius > 20.0f) {
                         return std::unexpected(AnimatedMeshTestError::MeshDeformationExplosion);
                     }
-                    if (const auto* skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(e);
-                        skin != nullptr && skin->skinnedScratch != ZHLN::BufferHandle::Invalid) {
+                    if (const auto skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(e);
+                        skin && skin->skinnedScratch != ZHLN::BufferHandle::Invalid) {
                         skinnedScratch.emplace_back(e, skin->skinnedScratch);
                     }
                 }
@@ -150,8 +150,8 @@ struct RenderAnimatedMeshTestSuite {
                 return std::unexpected(AnimatedMeshTestError::SimulationTickFailed);
             }
             for (const auto& [entity, buffer]: skinnedScratch) {
-                const auto* skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
-                ZHLN::Test::ExpectTrue(skin != nullptr && skin->skinnedScratch == buffer);
+                const auto skin = reg.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
+                ZHLN::Test::ExpectTrue(skin.has_value() && skin->skinnedScratch == buffer);
             }
 
             // 6. Automated Pixel Readback & Color Histogram Analysis

@@ -73,8 +73,8 @@ auto AuthorHumanoidParts(const Skeleton& skeleton, PhysicsContext& pc) -> std::v
 auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, ArticulationSystem& articulation) -> bool {
     // The root owns the rig description: its AnimatorComponent holds the
     // prefab the skeletons live in.
-    const auto* animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
-    if (animComp == nullptr || animComp->prefab == nullptr) {
+    const auto animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
+    if (!animComp || animComp->prefab == nullptr) {
         ZHLN::LogWarning("[RagdollAuthoring] BuildHumanoidBipedRagdoll found no AnimatorComponent with a prefab on entity {}.", rootEntity.index);
         return false;
     }
@@ -84,9 +84,9 @@ auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsCon
     const Skeleton* targetSkeleton = nullptr;
     uint32_t        jointOffset    = 0;
     for (const Entity child: reg.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-        const auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(child);
-        const auto* hier     = reg.Get<Components::HierarchyComponent>(child);
-        if (skelMesh == nullptr || hier == nullptr || hier->parent != rootEntity) {
+        const auto skelMesh = reg.Get<Components::SkeletalMeshComponent>(child);
+        const auto hier     = reg.Get<Components::HierarchyComponent>(child);
+        if (!skelMesh || !hier || hier->parent != rootEntity) {
             continue;
         }
         if (skelMesh->skeletonIndex < 0 || static_cast<size_t>(skelMesh->skeletonIndex) >= animComp->prefab->skeletons.size()) {

@@ -84,7 +84,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, *_impl->fileSystemWatcher);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -138,7 +138,7 @@ auto Kernel::GetPlatformHost() const noexcept -> const PlatformHost& {
     return _impl->primaryHost;
 }
 
-auto Kernel::GetWindow() noexcept -> Window* {
+auto Kernel::GetWindow() noexcept -> ZHLN::Optional<Window&> {
     return _impl->primaryHost.AsWindow();
 }
 
@@ -160,24 +160,25 @@ void Kernel::ProcessEvents() {
     }
 }
 
-auto Kernel::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window* {
-    if (!_impl->primaryHost.Valid() || _impl->primaryHost.AsWindow() == nullptr || !_impl->glfwAcquired) {
+auto Kernel::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
+    -> ZHLN::Optional<Window&> {
+    if (!_impl->primaryHost.Valid() || !_impl->primaryHost.AsWindow() || !_impl->glfwAcquired) {
         ZHLN::Log("[Kernel] AddWindow requires a windowed session");
-        return nullptr;
+        return std::nullopt;
     }
 
     auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver);
     if (window->GetNativeHandle() == nullptr) {
         ZHLN::Log("[Kernel] AddWindow: OS window creation failed");
-        return nullptr;
+        return std::nullopt;
     }
-    Window* raw = window.get();
+    Window& raw = *window;
     _impl->secondaryWindows.push_back(std::move(window));
     return raw;
 }
 
 void Kernel::RemoveWindow(Window& window) {
-    if (_impl->primaryHost.AsWindow() == &window) {
+    if (const auto primary = _impl->primaryHost.AsWindow(); primary && &*primary == &window) {
         return;
     }
     if (_impl->renderContext != nullptr) {
@@ -225,7 +226,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, *_impl->fileSystemWatcher);
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }

@@ -377,7 +377,7 @@ export class ExplosionSystem {
     }
 
     static void Detach(Engine& engine, Entity entity) {
-        if (auto* exp = engine.GetRegistry().Get<ExplosionComponent>(entity)) {
+        if (auto exp = engine.GetRegistry().Get<ExplosionComponent>(entity)) {
             Release(engine, *exp);
             engine.GetRegistry().Remove<ExplosionComponent>(entity);
         }
@@ -391,7 +391,7 @@ export class ExplosionSystem {
         }
         auto explosions = reg.GetRawArray<ExplosionComponent>();
         for (size_t i = 0; i < entities.size(); ++i) {
-            if (all || reg.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+            if (all || reg.Get<Components::PendingDestroy>(entities[i])) {
                 Release(engine, explosions[i]);
             }
         }
@@ -424,8 +424,8 @@ export class ExplosionSystem {
         // one emitter. Keep its buffers on a dedicated ECS resource entity.
         Entity resourceEntity = Entity::Null();
         for (const Entity e: reg.GetEntitiesWith<Components::OwnedMeshComponent>()) {
-            if (const auto* owned = reg.Get<Components::OwnedMeshComponent>(e);
-                owned != nullptr && owned->meshAsset == s_DebrisMeshAsset) {
+            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
+                owned && owned->meshAsset == s_DebrisMeshAsset) {
                 resourceEntity = e;
                 break;
             }
@@ -445,13 +445,13 @@ export class ExplosionSystem {
         s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", {256, 256}, GenerateCraterNormalTexture(256), false);
 
         Mesh boxMesh;
-        // Registry::Get answers null when the entity has no such component, and
+        // Registry::Get answers nullopt when the entity has no such component, and
         // this used to be dereferenced on the strength of the entity merely being
         // non-null -- which is the null dereference GCC reports. A missing
         // component now takes the same path as a missing entity: the debris mesh
         // the asset is registered from gets created either way.
-        auto* owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : nullptr;
-        if (owned != nullptr) {
+        auto owned = resourceEntity != Entity::Null() ? reg.Get<Components::OwnedMeshComponent>(resourceEntity) : ZHLN::Optional<Components::OwnedMeshComponent&> {};
+        if (owned) {
             boxMesh = owned->mesh;
             if (boxMesh.posBuffer == BufferHandle::Invalid) {
                 boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
@@ -597,7 +597,7 @@ export class ExplosionSystem {
             for (size_t i = 0; i < expEntities.size(); ++i) {
                 Entity              e   = expEntities[i];
                 ExplosionComponent& exp = explosions[i];
-                if (reg.Get<Components::PendingDestroy>(e) != nullptr) {
+                if (reg.Get<Components::PendingDestroy>(e)) {
                     continue;
                 }
                 exp.age += dt;
@@ -673,7 +673,7 @@ export class ExplosionSystem {
             for (size_t i = 0; i < craterEntities.size(); ++i) {
                 Entity                craterEnt = craterEntities[i];
                 CraterDecalComponent& crater    = craters[i];
-                if (reg.Get<Components::PendingDestroy>(craterEnt) != nullptr) {
+                if (reg.Get<Components::PendingDestroy>(craterEnt)) {
                     continue;
                 }
                 crater.age += dt;

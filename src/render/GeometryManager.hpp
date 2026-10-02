@@ -60,8 +60,8 @@ class GeometryManager {
     void RegisterMaterial(MaterialID id, Material material) { _materials.Insert(id, material); }
     void UnregisterMaterial(MaterialID id) { _materials.Erase(id); }
 
-    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* { return _meshes.Find(id); }
-    [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> const Material* { return _materials.Find(id); }
+    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> ZHLN::Optional<const Mesh&> { return _meshes.Find(id); }
+    [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> ZHLN::Optional<const Material&> { return _materials.Find(id); }
 
     void ClearMeshes() noexcept { _meshes.Clear(); }
 

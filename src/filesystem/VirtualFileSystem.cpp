@@ -210,8 +210,8 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
 
     {
         Lock(_catalogMutex, [&] {
-            const CatalogEntry* catEntry = _catalog.Find(req->assetID);
-            if (catEntry == nullptr) {
+            const auto catEntry = _catalog.Find(req->assetID);
+            if (!catEntry) {
                 return;
             }
             entry   = catEntry->entry;
@@ -273,7 +273,7 @@ void VirtualFileSystem::FreeMemory(LoadRequest& req) {
 
 auto VirtualFileSystem::Exists(uint64_t assetID) const noexcept -> bool {
     bool inPak = Lock(_catalogMutex, [&]() -> bool {
-        return _catalog.Find(assetID) != nullptr;
+        return _catalog.Find(assetID).has_value();
     });
     return inPak;
 }
@@ -310,12 +310,10 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
     }
 
     uint64_t id = Hash64(virtualPath);
-    const CatalogEntry* catEntry = nullptr;
     PakArchive* archive = nullptr;
     PakEntry entry {};
     Lock(_catalogMutex, [&] {
-        catEntry = _catalog.Find(id);
-        if (catEntry != nullptr) {
+        if (const auto catEntry = _catalog.Find(id)) {
             entry = catEntry->entry;
             archive = catEntry->archive;
         }

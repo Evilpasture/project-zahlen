@@ -6,6 +6,7 @@
 
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -44,16 +45,15 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, AssetID fontID) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::Optional<AssetManager&> assetMgr, AssetID fontID) -> TextureHandle;
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager* assetMgr, AssetID fontID) -> TextureHandle;
 
 auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
 
 auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
-auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
-auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
+auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> ZHLN::Optional<GUI::BakedFontAsset&>;
+auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<GUI::BakedFontAsset&>;
 
 auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> TextureHandle;
 
@@ -78,28 +78,28 @@ struct SpawnParams {
     Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
-auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
+auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
 auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
 
 auto CreatePlane(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    float              extent = 10.0f,
-    const JPH::Vec4&   color  = {0.6f, 0.6f, 0.6f, 1.0f},
-    const SpawnParams& params = {}
+    RenderContext&                  ctx,
+    ECS::Registry&                  reg,
+    ZHLN::Optional<PhysicsContext&> pc,
+    float                           extent = 10.0f,
+    const JPH::Vec4&                color  = {0.6f, 0.6f, 0.6f, 1.0f},
+    const SpawnParams&              params = {}
 ) -> Entity;
 auto CreatePlane(Engine& engine, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
 
-auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params = {}) -> Entity;
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;
-auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
 auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
-auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsContext&> pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
-auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ModelPrefab*;
-auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
+auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
+auto LoadModelPrefab(Engine& engine, std::string_view path) -> ZHLN::Optional<ModelPrefab&>;
 
 auto InstantiatePrefab(
     RenderContext&      ctx,

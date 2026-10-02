@@ -273,20 +273,20 @@ void NoteDesignClick(Context& gui, std::string_view id, TreeMode mode, RenderUIT
 }
 
 template <typename Node>
-auto FindImpl(Node& node, std::string_view targetId, std::string_view path) -> Node* {
+auto FindImpl(Node& node, std::string_view targetId, std::string_view path) -> ZHLN::Optional<Node&> {
     if (targetId.empty()) {
-        return nullptr;
+        return std::nullopt;
     }
     const std::string id = NodeId(node, path);
     if (id == targetId) {
-        return &node;
+        return node;
     }
     for (size_t i = 0; i < node.children.size(); ++i) {
-        if (auto* found = FindImpl(node.children[i], targetId, ChildPath(id, i))) {
+        if (auto found = FindImpl(node.children[i], targetId, ChildPath(id, i))) {
             return found;
         }
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 auto RemoveImpl(UINode& node, std::string_view targetId, std::string_view path) -> bool {
@@ -406,17 +406,17 @@ void RenderNode(
 
 } // namespace
 
-auto FindNodeById(UINode& root, std::string_view targetId) -> UINode* {
+auto FindNodeById(UINode& root, std::string_view targetId) -> ZHLN::Optional<UINode&> {
     return FindImpl(root, targetId, RootPath(root));
 }
 
-auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode* {
+auto FindNodeById(const UINode& root, std::string_view targetId) -> ZHLN::Optional<const UINode&> {
     return FindImpl(root, targetId, RootPath(root));
 }
 
 auto InsertChild(UINode& root, std::string_view parentId, UINode child) -> bool {
-    UINode* parent = FindNodeById(root, parentId);
-    if (parent == nullptr) {
+    auto parent = FindNodeById(root, parentId);
+    if (!parent) {
         return false;
     }
     parent->children.push_back(std::move(child));

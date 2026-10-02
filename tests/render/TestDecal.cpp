@@ -109,8 +109,8 @@ struct DecalTestSuite {
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(decalEnt));
 
-            const auto* decalComp = reg.Get<ZHLN::Components::DecalComponent>(decalEnt);
-            if (!ZHLN::Test::ExpectTrue(decalComp != nullptr)) {
+            const auto decalComp = reg.Get<ZHLN::Components::DecalComponent>(decalEnt);
+            if (!ZHLN::Test::ExpectTrue(decalComp.has_value())) {
                 return std::unexpected(DecalTestError::DecalEntitySpawnFailed);
             }
 

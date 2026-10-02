@@ -79,7 +79,7 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
     auto& reg = engine.GetRegistry();
 
     for (const PhysicsBodyState& body: message->bodies) {
-        if (const auto* e = uidToEntityMap.Find(body.uid); e != nullptr) {
+        if (const auto e = uidToEntityMap.Find(body.uid)) {
             reg.Patch<NetworkInterpolationComponent>(*e, [&](NetworkInterpolationComponent& interp) {
                 interp.targetPosition = body.position;
                 interp.targetRotation = body.rotation;
@@ -91,7 +91,7 @@ auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t
 }
 
 auto ClientReplicator::GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity {
-    if (const auto* found = uidToEntityMap.Find(uid); found != nullptr) {
+    if (const auto found = uidToEntityMap.Find(uid)) {
         if (reg.IsAlive(*found)) {
             return *found;
         }
@@ -112,13 +112,13 @@ void NetworkInterpolationSystem(
     ZHLN::ScopedTimer timer("ECS System: Network Interpolation");
 
     for (Entity e: query.Entities<NetworkInterpolationComponent>()) {
-        const auto* ident = query.Get<NetworkIdentityComponent>(e);
-        if (ident != nullptr && ident->isLocalOwner) {
+        const auto ident = query.Get<NetworkIdentityComponent>(e);
+        if (ident && ident->isLocalOwner) {
             continue;
         }
-        const auto* interp = query.Get<NetworkInterpolationComponent>(e);
-        auto* trans = query.Get<Components::TransformComponent>(e);
-        if (trans == nullptr || interp == nullptr) {
+        const auto interp = query.Get<NetworkInterpolationComponent>(e);
+        auto       trans  = query.Get<Components::TransformComponent>(e);
+        if (!trans || !interp) {
             continue;
         }
         const float t  = std::min(1.0f, interp->interpolationSpeed * dt.value);

@@ -45,16 +45,14 @@ namespace ZHLN {
 
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
-    const Mesh* found = _impl->geometry.FindMesh(id);
-    if (found != nullptr) {
+    if (const auto found = _impl->geometry.FindMesh(id)) {
         return *found;
     }
     return std::nullopt;
 }
 
 auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optional<Material> {
-    const Material* found = _impl->geometry.FindMaterial(id);
-    if (found != nullptr) {
+    if (const auto found = _impl->geometry.FindMaterial(id)) {
         return *found;
     }
     return std::nullopt;
@@ -77,7 +75,7 @@ void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
 void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
 void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
-    if (const Material* mat = _impl->geometry.FindMaterial(id)) {
+    if (const auto mat = _impl->geometry.FindMaterial(id)) {
         if (mat->pipeline != PipelineHandle::Invalid) {
             _impl->pipelines.Destroy(mat->pipeline);
         }
@@ -400,7 +398,7 @@ void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg 
 
 void RenderContext::Impl::BeginShaderObservation() {
     if constexpr (isDev) {
-        if (fileSystemWatcher != nullptr && shaderDirectoryWatch == 0) {
+        if (fileSystemWatcher && shaderDirectoryWatch == 0) {
             shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
                 "resources/shaders", [this](const FS::FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
                 FS::FileSystemWatcher::kDefaultDebounceMs
@@ -802,8 +800,8 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto* const impl = _impl.get();
 
     if (!impl->presenter.swapchain.Valid()) {
-        const auto* dest = impl->destinations.Find(impl->presentationTarget);
-        if (impl->frameOpen || dest == nullptr || !dest->acquired || !dest->acquired->drawn) {
+        const auto dest = impl->destinations.Find(impl->presentationTarget);
+        if (impl->frameOpen || !dest || !dest->acquired || !dest->acquired->drawn) {
             // A headless target starts UNDEFINED. If rendering failed before
             // acquisition, treating it as COLOR_ATTACHMENT here makes the
             // readback barrier invalid and writes a black success image.

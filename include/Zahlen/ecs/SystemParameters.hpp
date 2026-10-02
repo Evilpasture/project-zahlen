@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
@@ -52,16 +53,9 @@ struct ResMut {
 };
 
 // Nullable services (for example, audio in an ECS-only/headless graph).
-// Like ResMut, this is a mutable handle; use Res<T> for required read-only data.
+// Prefer ZHLN::Optional<T&> or ZHLN::Optional<const T&> in system signatures.
 template <typename T>
-struct OptionRes {
-    static_assert(!std::is_const_v<T>, "OptionRes<T> requires an unqualified resource type");
-    T* ptr = nullptr;
-    [[nodiscard]] T* operator->() const noexcept { return ptr; }
-    [[nodiscard]] T& operator*() const noexcept { return *ptr; }
-    [[nodiscard]] bool HasValue() const noexcept { return ptr != nullptr; }
-    explicit operator bool() const noexcept { return HasValue(); }
-};
+using OptionRes = ZHLN::Optional<T&>;
 
 namespace TemplatedDetail {
 
@@ -117,21 +111,21 @@ class Query {
 
     template <typename T>
         requires Declared<T>
-    [[nodiscard]] auto Get(Entity entity) const noexcept -> Element<T>* {
+    [[nodiscard]] auto Get(Entity entity) const noexcept -> ZHLN::Optional<Element<T>&> {
         return _registry->Get<T>(entity);
     }
 
     template <typename T>
         requires Declared<T>
-    [[nodiscard]] auto GetSingleton() const noexcept -> Element<T>* {
+    [[nodiscard]] auto GetSingleton() const noexcept -> ZHLN::Optional<Element<T>&> {
         const auto entities = Entities<T>();
-        return entities.empty() ? nullptr : Get<T>(entities.front());
+        return entities.empty() ? ZHLN::Optional<Element<T>&> {std::nullopt} : Get<T>(entities.front());
     }
 
     template <typename T, typename Fn>
         requires Declared<T>
     auto Patch(Entity entity, Fn&& fn) const -> bool {
-        if (auto* component = Get<T>(entity)) {
+        if (auto component = Get<T>(entity)) {
             std::invoke(std::forward<Fn>(fn), *component);
             return true;
         }
@@ -161,11 +155,11 @@ class Query {
         const std::array sets {Entities<TemplatedDetail::RawComponent<Comps>>()...};
         const auto& primary = *std::ranges::min_element(sets, {}, &std::span<const Entity>::size);
         for (Entity entity: primary) {
-            const std::tuple<Element<TemplatedDetail::RawComponent<Comps>>*...> components {
+            const std::tuple<ZHLN::Optional<Element<TemplatedDetail::RawComponent<Comps>>&>...> components {
                 Get<TemplatedDetail::RawComponent<Comps>>(entity)...
             };
-            if (std::apply([](auto*... ptrs) { return (static_cast<bool>(ptrs) && ...); }, components)) {
-                std::apply([&](auto*... ptrs) { std::invoke(fn, entity, *ptrs...); }, components);
+            if (std::apply([](const auto&... opts) { return (static_cast<bool>(opts) && ...); }, components)) {
+                std::apply([&](const auto&... opts) { std::invoke(fn, entity, *opts...); }, components);
             }
         }
     }

@@ -62,7 +62,7 @@ consteval auto MakeComponentKind() -> ComponentKind {
         // The same spelling the registry registers the component under, so the
         // dropdown and Registry::DebugDumpEntity cannot disagree about a name.
         .name   = ZHLN::ECS::BoxedName<C>(),
-        .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity) != nullptr; },
+        .has    = [](const ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> bool { return reg.Get<C>(entity).has_value(); },
         .add    = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Add<C>(entity, C {}); },
         .remove = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void { reg.Remove<C>(entity); }
     };
@@ -99,8 +99,8 @@ constexpr auto kComponentKinds = MakeComponentKinds<
         if (cur == editorRoot) {
             return true;
         }
-        const auto* hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
-        if (hierarchy == nullptr || hierarchy->parent == ZHLN::Entity::Null()) {
+        const auto hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
+        if (!hierarchy || hierarchy->parent == ZHLN::Entity::Null()) {
             return false;
         }
         cur = hierarchy->parent;
@@ -260,8 +260,8 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 
 namespace {
 
-auto ReadTransformInput(const Comp::InputStateComponent* input) noexcept -> TransformInput {
-    if (input == nullptr) {
+auto ReadTransformInput(ZHLN::Optional<const Comp::InputStateComponent&> input) noexcept -> TransformInput {
+    if (!input) {
         return TransformInput::None;
     }
     TransformInput bits = TransformInput::None;
@@ -364,7 +364,7 @@ auto SpawnShapeNames() noexcept -> std::span<const std::string_view> {
 void UpdateTransformMode(
     ZHLN::ECS::Registry& reg, EditorState& state, const Camera& camera, const SceneViewport& viewport, bool uiOwnsInput
 ) noexcept {
-    const auto*    input   = reg.GetSingleton<Comp::InputStateComponent>();
+    const auto input = reg.GetSingleton<Comp::InputStateComponent>();
     if (uiOwnsInput) {
         // Keep the edge detector honest across the capture window, so a key
         // held when the field lost focus is not seen as a fresh press.
@@ -373,14 +373,14 @@ void UpdateTransformMode(
     }
     const TransformInput level   = ReadTransformInput(input);
     const TransformInput pressed = level & ~state.transformPrevInput;
-    const float    mx      = input != nullptr ? input->mouseX : -1.0f;
-    const float    my      = input != nullptr ? input->mouseY : -1.0f;
+    const float          mx      = input ? input->mouseX : -1.0f;
+    const float          my      = input ? input->mouseY : -1.0f;
 
     if (state.transformMode == EditorState::TransformMode::None) {
         // Enter a mode only on a live selection. Plain S starts Scale, but a
         // Ctrl+S is the save chord and must never grab the object.
         EditorState::TransformMode mode = EditorState::TransformMode::None;
-        if (input != nullptr && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
+        if (input && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
             if ((pressed & TransformInput::G) != TransformInput::None) {
                 mode = EditorState::TransformMode::Move;
             } else if ((pressed & TransformInput::R) != TransformInput::None) {
@@ -390,8 +390,8 @@ void UpdateTransformMode(
             }
         }
         if (mode != EditorState::TransformMode::None) {
-            const auto* t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
-            if (t != nullptr) {
+            const auto t = reg.Get<Comp::TransformComponent>(state.selectedEntity);
+            if (t) {
                 state.transformMode        = mode;
                 state.transformAxis        = EditorState::TransformAxis::None;
                 state.transformEntity      = state.selectedEntity;
@@ -532,8 +532,8 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
         uint32_t     depth = 0;
         ZHLN::Entity cur   = e;
         for (int guard = 0; guard < 128; ++guard) {
-            const auto* hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
-            if (hierarchy == nullptr || hierarchy->parent == ZHLN::Entity::Null()) {
+            const auto hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
+            if (!hierarchy || hierarchy->parent == ZHLN::Entity::Null()) {
                 break;
             }
             ++depth;
@@ -596,7 +596,7 @@ void DrawHierarchyPanel(GUI::Context& gui, ZHLN::Engine& engine, EditorState& st
     for (const Row& row: rows) {
         std::array<char, 96> fallbackBuf {};
         std::string_view     label;
-        if (const auto* name = reg.Get<Comp::NameComponent>(row.entity)) {
+        if (const auto name = reg.Get<Comp::NameComponent>(row.entity)) {
             label = std::string_view(name->name);
         } else {
             label = ZHLN::FormatTo(fallbackBuf, "Entity {}", row.entity.index);
@@ -642,10 +642,10 @@ void DrawInspectorPanel(GUI::Context& gui, ZHLN::ECS::Registry& reg, EditorState
     // type. The transpiler fallback extracts the field list from the object's
     // type, so a call inside a template with a dependent T would flatten to
     // zero rows.
-    const auto section = [&](std::string_view sectionId, std::string_view title, auto* comp, auto&& reflect) -> void {
-        if (comp == nullptr)
+    const auto section = [&](std::string_view sectionId, std::string_view title, auto comp, auto&& reflect) -> void {
+        if (!comp)
             return;
-        using CompT = std::remove_pointer_t<decltype(comp)>;
+        using CompT = typename decltype(comp)::value_type;
         if (gui.BeginCollapsingHeader(title, true)) {
             CompT local = *comp;
             reflect(local, MakeRowSink(gui, sectionId));

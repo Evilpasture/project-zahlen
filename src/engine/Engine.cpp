@@ -96,7 +96,7 @@ auto Engine::FallbackSceneEnabled() const noexcept -> bool {
 
 void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
     if (_impl->fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
+        if (auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>()) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
@@ -105,8 +105,8 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
         PrefabFactory::CreateFontAtlasTexture(
             GetRenderContext(), reg, GetAssetManager(), GUI::kDefaultFontAssetID
         );
-        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
-            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+        if (const auto uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
+            uiSettings && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
             _impl->fontAtlas = uiSettings->fontAtlas;
         }
     }
@@ -331,15 +331,15 @@ void Engine::ProcessEvents() {
     }
 
     auto& reg        = _impl->world->GetRegistry();
-    auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
-    if (inputState != nullptr) {
+    auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
+    if (inputState) {
         inputState->ResetDeltas();
     }
 
     _impl->kernel->ProcessEvents();
 
     const auto& host = _impl->kernel->GetPlatformHost();
-    if (inputState != nullptr && host.AsWindow() == nullptr && host.HasNativeSurface()) {
+    if (inputState && !host.AsWindow() && host.HasNativeSurface()) {
         inputState->wantCaptureKeyboard = false;
         inputState->wantCaptureMouse    = false;
     }
@@ -361,11 +361,12 @@ auto Engine::GetPlatformHost() const noexcept -> const PlatformHost& {
     return _impl->kernel->GetPlatformHost();
 }
 
-auto Engine::GetWindow() noexcept -> Window* {
+auto Engine::GetWindow() noexcept -> ZHLN::Optional<Window&> {
     return _impl->kernel->GetWindow();
 }
 
-auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window* {
+auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
+    -> ZHLN::Optional<Window&> {
     return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver);
 }
 
@@ -581,8 +582,8 @@ void Engine::AddTeardownHook(TeardownHook hook) {
     }
 }
 
-auto Engine::GetUICallback() const noexcept -> const UICallback* {
-    return _impl->uiCallback ? &_impl->uiCallback : nullptr;
+auto Engine::GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&> {
+    return _impl->uiCallback ? ZHLN::Optional<const UICallback&> {_impl->uiCallback} : ZHLN::Optional<const UICallback&> {std::nullopt};
 }
 
 void Engine::ProvokeDeviceLost() {
@@ -663,7 +664,7 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
 
         {
             auto& r = engine->GetRegistry();
-            if (auto* st = r.GetSingleton<Components::InputStateComponent>(); st != nullptr && st->needsResize) {
+            if (auto st = r.GetSingleton<Components::InputStateComponent>(); st && st->needsResize) {
                 engine->GetRenderContext().SetResolution(st->newSize);
                 st->needsResize = false;
                 continue;

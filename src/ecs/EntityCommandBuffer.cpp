@@ -13,7 +13,7 @@ void EntityCommandBuffer::Playback() {
         Entity target = cmd.entity;
 
         if (target.generation == 0xFFFFFFFF) {
-            if (const auto* realEntity = tempToRealMap.Find(target.index)) {
+            if (const auto realEntity = tempToRealMap.Find(target.index)) {
                 target = *realEntity;
             }
         }

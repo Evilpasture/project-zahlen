@@ -243,8 +243,8 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
             );
             // A box has three vertex streams and three meshlet buffers. Fail
             // immediately rather than timing a scene with invalid geometry.
-            const auto* owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
-            if (!ZHLN::Test::ExpectTrue(owner != nullptr)) {
+            const auto owner = reg.Get<ZHLN::Components::OwnedMeshComponent>(box);
+            if (!ZHLN::Test::ExpectTrue(owner.has_value())) {
                 return std::unexpected(RenderPerfTestError::GeometryThroughputFailed);
             }
             const auto& mesh = owner->mesh;

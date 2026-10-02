@@ -7,6 +7,7 @@
 #include <Zahlen/FileSystem/AssetCache.hpp>
 #include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -135,13 +136,13 @@ class AssetManager {
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
 
-    ModelPrefab* GetCachedPrefab(uint64_t hash);
+    [[nodiscard]] auto GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&>;
     // Bind the uploading renderer via UseRenderContext before caching a prefab
     // whose parts contain GPU meshes (Kernel already does this for Engine users).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
-    GUI::BakedFontAsset* GetCachedFont(uint64_t hash);
+    [[nodiscard]] auto GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&>;
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 

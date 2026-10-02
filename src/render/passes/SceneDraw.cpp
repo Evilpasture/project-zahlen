@@ -62,11 +62,11 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto* pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
-        const Mesh*     gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
-        const Material* gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
+        auto*      pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
+        const auto gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const auto gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
-        if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
+        if ((pBuf == nullptr) || !gpuMesh || !gpuMat) {
             continue;
         }
 
@@ -122,11 +122,11 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto* pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
-        const Mesh*     gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
-        const Material* gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
+        auto*      pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
+        const auto gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const auto gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
-        if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
+        if ((pBuf == nullptr) || !gpuMesh || !gpuMat) {
             continue;
         }
 

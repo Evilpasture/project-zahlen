@@ -485,7 +485,7 @@ void InitComponentRegistry() {
                 } else if constexpr (SceneResources::OwnsExternalResource<Comp> && std::is_default_constructible_v<Comp>) {
                     // A fresh, handle-free component is safe; replacing an
                     // existing owner requires SceneResources::Attach.
-                    return reg.template Get<Comp>(entity) == nullptr ? &reg.template Add<Comp>(entity, Comp {}) : nullptr;
+                    return !reg.template Get<Comp>(entity) ? &reg.template Add<Comp>(entity, Comp {}) : nullptr;
                 } else if constexpr (std::is_default_constructible_v<Comp>) {
                     return &reg.template Add<Comp>(entity, Comp {});
                 } else {
@@ -515,7 +515,7 @@ void RegisterCreativeWorkCommands() {
                     auto& reg = engine->GetRegistry();
                     auto& pc  = engine->GetPhysicsContext();
 
-                    auto* prefab = ZHLN::PrefabFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a.path);
+                    auto prefab = ZHLN::PrefabFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a.path);
                     if (!prefab) {
                         return 0;
                     }
@@ -542,9 +542,9 @@ void RegisterCreativeWorkCommands() {
                     auto  e   = ZHLN::Entity::Unpack(a.entityRaw);
                     auto& reg = engine->GetRegistry();
 
-                    auto* lod = reg.Get<ZHLN::Components::LODComponent>(e);
+                    auto lod = reg.Get<ZHLN::Components::LODComponent>(e);
                     if (!lod) {
-                        lod = &reg.Add(e, ZHLN::Components::LODComponent {});
+                        lod = reg.Add(e, ZHLN::Components::LODComponent {});
                     }
 
                     if (a.index < ZHLN::Components::LODComponent::MAX_LODS) {
@@ -738,7 +738,7 @@ void RegisterCreativeWorkCommands() {
 
 // ECS resolves entity references; a body handle is never an entity ID.
 auto BodyForEntity(ECS::Registry& registry, Entity entity) noexcept -> Physics::BodyHandle {
-    if (const auto* component = registry.Get<Components::PhysicsComponent>(entity); component != nullptr) {
+    if (const auto component = registry.Get<Components::PhysicsComponent>(entity)) {
         return component->physicsHandle;
     }
     return Physics::BodyHandle::Null();
@@ -767,7 +767,7 @@ void RegisterPhysicsCommands() {
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
                     auto&              reg    = engine->GetRegistry();
-                    if (auto* move = reg.Get<ZHLN::Character::MovementComponent>(entity)) {
+                    if (auto move = reg.Get<ZHLN::Character::MovementComponent>(entity)) {
                         move->currentVelX = a.x;
                         move->currentYVel = a.y;
                         move->currentVelZ = a.z;
@@ -779,7 +779,7 @@ void RegisterPhysicsCommands() {
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (const auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(entity)) {
+                    if (const auto move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(entity)) {
                         return move->isGrounded ? 1 : 0;
                     }
                     const auto handle = BodyForEntity(engine->GetRegistry(), entity);
@@ -794,7 +794,7 @@ void RegisterPhysicsCommands() {
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity) != nullptr) {
+                    if (engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity)) {
                         ZHLN::AccumulateImpulse(engine->GetRegistry(), entity, a.x, a.y, a.z);
                         return 0;
                     }
@@ -850,7 +850,7 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetMovementInput", MakeCmd<SetMoveInputArgs>([](ZHLN::Engine* engine, const SetMoveInputArgs& a) -> uint64_t {
-                    if (auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
+                    if (auto move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
                         move->inputX = a.x;
                         move->inputZ = a.z;
                     }
@@ -858,7 +858,7 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetJumpIntent", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    if (auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
+                    if (auto move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
                         move->jumpRequested = true;
                     }
                     return 0;
@@ -891,15 +891,15 @@ void RegisterPhysicsCommands() {
 void RegisterInputAndCameraCommands() {
     RegisterCmd("IsKeyDown", MakeCmd<IsKeyDownArgs>([](ZHLN::Engine* engine, const IsKeyDownArgs& a) -> uint64_t {
                     auto& reg   = engine->GetRegistry();
-                    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-                    return (state != nullptr && state->IsKeyDown(a.key)) ? 1 : 0;
+                    auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+                    return (state && state->IsKeyDown(a.key)) ? 1 : 0;
                 }));
 
     RegisterCmd("GetMouseDelta", MakeCmd<GetMouseDeltaArgs>([](ZHLN::Engine* engine, const GetMouseDeltaArgs& a) -> uint64_t {
                     auto& reg   = engine->GetRegistry();
-                    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-                    *a.outX     = (state != nullptr) ? state->GetMouseDeltaX() : 0.0f;
-                    *a.outY     = (state != nullptr) ? state->GetMouseDeltaY() : 0.0f;
+                    auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+                    *a.outX     = state ? state->GetMouseDeltaX() : 0.0f;
+                    *a.outY     = state ? state->GetMouseDeltaY() : 0.0f;
                     return 0;
                 }));
 
@@ -1132,7 +1132,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("GetAnimationTrackCount", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                    if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
                         if (anim->prefab != nullptr) {
                             return static_cast<uint64_t>(anim->prefab->animations.size());
                         }
@@ -1142,7 +1142,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("GetAnimationTrackName", MakeCmd<GetTrackNameArgs>([](ZHLN::Engine* engine, const GetTrackNameArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                    if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
                         if (anim->prefab != nullptr) {
                             if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
                                 const auto& name    = anim->prefab->animations[a.trackIndex].name;
@@ -1159,7 +1159,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("PlayAnimationTrack", MakeCmd<PlayTrackArgs>([](ZHLN::Engine* engine, const PlayTrackArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
+                    if (auto anim = engine->GetRegistry().Get<ZHLN::Components::AnimatorComponent>(entity)) {
                         if (anim->prefab != nullptr) {
                             if (a.trackIndex >= 0 && a.trackIndex < static_cast<int32_t>(anim->prefab->animations.size())) {
                                 if (anim->currentTrackIdx != a.trackIndex) {
@@ -1194,9 +1194,9 @@ void RegisterSystemCommands() {
                     auto  entity = ZHLN::Entity::Unpack(a.entityRaw);
                     auto& reg    = engine->GetRegistry();
 
-                    auto* ikComp = reg.Get<IK::TwoBoneIKComponent>(entity);
-                    if (ikComp == nullptr) {
-                        ikComp = &reg.Add(entity, IK::TwoBoneIKComponent {});
+                    auto ikComp = reg.Get<IK::TwoBoneIKComponent>(entity);
+                    if (!ikComp) {
+                        ikComp = reg.Add(entity, IK::TwoBoneIKComponent {});
                     }
 
                     IK::TwoBoneIKChain chain;
@@ -1213,7 +1213,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("SetIKTarget", MakeCmd<SetIKTargetArgs>([](ZHLN::Engine* engine, const SetIKTargetArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
+                    if (auto ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
                         if (a.chainIndex < ikComp->chains.size()) {
                             auto& chain          = ikComp->chains[a.chainIndex];
                             chain.targetPosition = JPH::Vec3(a.tx, a.ty, a.tz);
@@ -1227,7 +1227,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("SetIKTargetEntity", MakeCmd<SetIKTargetEntityArgs>([](ZHLN::Engine* engine, const SetIKTargetEntityArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
+                    if (auto ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
                         if (a.chainIndex < ikComp->chains.size()) {
                             auto& chain        = ikComp->chains[a.chainIndex];
                             chain.targetEntity = ZHLN::Entity::Unpack(a.targetEntityRaw);

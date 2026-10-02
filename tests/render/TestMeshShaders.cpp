@@ -912,8 +912,8 @@ struct MeshShaderTestSuite {
                         .materialOverride = *material
                     }
                 );
-                const auto* part = reg.Get<ZHLN::Components::MeshComponent>(plane);
-                const auto mesh = part != nullptr ? rc.GetGPUMesh(part->meshAsset) : std::nullopt;
+                const auto part = reg.Get<ZHLN::Components::MeshComponent>(plane);
+                const auto mesh = part ? rc.GetGPUMesh(part->meshAsset) : std::nullopt;
                 return ZHLN::Test::ExpectTrue(mesh.has_value() && mesh->meshletCount > 0);
             };
 

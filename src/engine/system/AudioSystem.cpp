@@ -16,7 +16,7 @@ namespace ZHLN {
 ZHLN_API void AudioSystem(
     ECS::Query<const Components::AudioListenerComponent, const Components::WorldTransformComponent,
                const Components::TransformComponent, Components::AudioSourceComponent&, Components::LoopSynthComponent&> query,
-    ECS::OptionRes<AudioContext> audio, ECS::OptionRes<Camera> camera, FrameDt dt
+    ZHLN::Optional<AudioContext&> audio, ZHLN::Optional<const Camera&> camera, FrameDt dt
 ) {
     if (!audio) {
         return; // ECS-only/headless graphs need no audio device.
@@ -25,17 +25,17 @@ ZHLN_API void AudioSystem(
 
     bool listenerFound = false;
     for (Entity e: query.Entities<Components::AudioListenerComponent>()) {
-        auto* listener = query.Get<Components::AudioListenerComponent>(e);
-        if ((listener != nullptr) && listener->isPrimary) {
+        auto listener = query.Get<Components::AudioListenerComponent>(e);
+        if (listener && listener->isPrimary) {
             JPH::Vec3 pos = JPH::Vec3::sZero();
             JPH::Vec3 dir = JPH::Vec3::sAxisZ();
             JPH::Vec3 up  = JPH::Vec3::sAxisY();
 
-            if (auto* wt = query.Get<Components::WorldTransformComponent>(e)) {
+            if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
                 pos = wt->world.GetTranslation();
                 dir = -wt->world.GetColumn3(2).Normalized();
                 up  = wt->world.GetColumn3(1).Normalized();
-            } else if (auto* t = query.Get<Components::TransformComponent>(e)) {
+            } else if (auto t = query.Get<Components::TransformComponent>(e)) {
                 pos = t->position;
                 dir = t->rotation * JPH::Vec3::sAxisZ();
                 up  = t->rotation * JPH::Vec3::sAxisY();
@@ -74,9 +74,9 @@ ZHLN_API void AudioSystem(
         if (src.voiceHandle != AudioHandle::Invalid) {
             if (src.isSpatialized) {
                 JPH::Vec3 pos = JPH::Vec3::sZero();
-                if (auto* wt = query.Get<Components::WorldTransformComponent>(e)) {
+                if (auto wt = query.Get<Components::WorldTransformComponent>(e)) {
                     pos = wt->world.GetTranslation();
-                } else if (auto* t = query.Get<Components::TransformComponent>(e)) {
+                } else if (auto t = query.Get<Components::TransformComponent>(e)) {
                     pos = t->position;
                 }
                 device.SetVoicePosition(src.voiceHandle, pos);

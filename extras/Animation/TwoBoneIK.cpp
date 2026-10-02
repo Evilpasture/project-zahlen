@@ -16,7 +16,7 @@ void ApplyTwoBoneIK(
 ) {
     auto& reg = registry;
 
-    if (auto* ikComp = reg.Get<TwoBoneIKComponent>(rootEntity)) {
+    if (auto ikComp = reg.Get<TwoBoneIKComponent>(rootEntity)) {
         for (auto& chain: ikComp->chains) {
             if (chain.weight <= 0.001f || chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0) {
                 continue;
@@ -30,7 +30,7 @@ void ApplyTwoBoneIK(
             JPH::Quat solvedTargetRot = chain.targetRotation;
 
             if (chain.targetEntity != Entity::Null() && reg.IsAlive(chain.targetEntity)) {
-                if (auto* tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
+                if (auto tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
                     JPH::Mat44 tMat = tTrans->GetLocalMatrix();
                     solvedTargetPos = tMat * chain.targetOffset;
                     solvedTargetRot = tTrans->rotation;

@@ -23,7 +23,7 @@ void CameraSystem::Update(ECS::Registry& reg, Camera& cam, Extent2D res, float ,
     }
 
     for (Entity e: reg.GetEntitiesWith<Components::CameraComponent>()) {
-        if (auto* cComp = reg.Get<Components::CameraComponent>(e)) {
+        if (auto cComp = reg.Get<Components::CameraComponent>(e)) {
             if (cComp->frameCounter == 0) {
                 cComp->prevUnjitteredViewProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height) * cam.GetViewMatrix();
                 cComp->unjitteredViewProj     = cComp->prevUnjitteredViewProj;
@@ -35,13 +35,13 @@ void CameraSystem::Update(ECS::Registry& reg, Camera& cam, Extent2D res, float ,
             JPH::Mat44 unjitteredProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height);
             cComp->unjitteredViewProj = unjitteredProj * cam.GetViewMatrix();
 
-            auto* aaComp = reg.Get<Components::AASettingsComponent>(e);
-            if ((aaComp != nullptr) && aaComp->state.mode == AAMode::TAA) {
+            auto aaComp = reg.Get<Components::AASettingsComponent>(e);
+            if (aaComp && aaComp->state.mode == AAMode::TAA) {
                 aaComp->state.frameIndex++;
                 cComp->viewProj = cam.GetJitteredProjectionMatrix(static_cast<float>(res.width) / res.height, res.width, res.height, aaComp->state) *
                                   cam.GetViewMatrix();
             } else {
-                if (aaComp != nullptr) {
+                if (aaComp) {
                     aaComp->state.frameIndex = 0;
                 }
                 cComp->viewProj = cComp->unjitteredViewProj;

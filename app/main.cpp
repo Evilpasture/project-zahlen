@@ -17,16 +17,16 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #if defined(ZHLN_HAS_EDITOR)
 #include <editor/GUIEditor.hpp>
@@ -41,7 +41,6 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-
 #include <Zahlen/physics/Physics.hpp>
 #if defined(ZHLN_HAS_SCENE_TOML)
 // The document layer is an optional extra, and the composition root is the one
@@ -193,9 +192,7 @@ void SaveScene(ZHLN::Engine& engine) {
         return;
     }
 
-    ZHLN::Log(
-        "[WorldEditor] Ctrl+S: '{}' written ({} entities, {} lights)", kSceneSavePath, scene.entities.size(), scene.lights.size()
-    );
+    ZHLN::Log("[WorldEditor] Ctrl+S: '{}' written ({} entities, {} lights)", kSceneSavePath, scene.entities.size(), scene.lights.size());
 #else
     ZHLN::Log(
         "[WorldEditor] Ctrl+S: built without the TOML layer, so there is nothing to write the description through "
@@ -269,10 +266,9 @@ void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateCom
     const bool rmbHeld  = state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
     if (camMoved && !rmbHeld && moveDirection.LengthSq() == 0.0f) {
         ZHLN::Log(
-            "[DIAG-cam] uncaused move: pos ({},{},{}) -> ({},{},{})  yaw {} -> {}  pitch {} -> {}  delta=({},{}) lmb={} capM={} capK={}",
-            camPos0.GetX(), camPos0.GetY(), camPos0.GetZ(), cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(),
-            camYaw0, cam.yaw, camPit0, cam.pitch, state.mouseDeltaX, state.mouseDeltaY,
-            state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)), uiCapturesMouse, uiCapturesKeyboard
+            "[DIAG-cam] uncaused move: pos ({},{},{}) -> ({},{},{})  yaw {} -> {}  pitch {} -> {}  delta=({},{}) lmb={} capM={} capK={}", camPos0.GetX(),
+            camPos0.GetY(), camPos0.GetZ(), cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(), camYaw0, cam.yaw, camPit0, cam.pitch,
+            state.mouseDeltaX, state.mouseDeltaY, state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)), uiCapturesMouse, uiCapturesKeyboard
         );
     }
 }
@@ -281,7 +277,7 @@ ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Ca
     auto& reg    = engine.GetRegistry();
     float mouseX = 0.0f;
     float mouseY = 0.0f;
-    if (auto* st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
+    if (auto st = reg.GetSingleton<ZHLN::Components::InputStateComponent>()) {
         mouseX = st->mouseX;
         mouseY = st->mouseY;
     }
@@ -415,7 +411,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         engine.ProcessEvents();
 
         auto& reg   = engine.GetRegistry();
-        auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+        auto  state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
         auto winSize = engine.GetPlatformHost().GetSize();
 
@@ -442,12 +438,14 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             vpX1 = right->x;
         }
         auto& rc = engine.GetRenderContext();
-        rc.SetViewport(ZHLN::RenderContext::ViewportRect {
-            .x      = static_cast<uint32_t>(std::clamp(vpX0, 0.0f, static_cast<float>(winSize.width))),
-            .y      = 0,
-            .width  = static_cast<uint32_t>(std::max(0.0f, vpX1 - vpX0)),
-            .height = winSize.height,
-        });
+        rc.SetViewport(
+            ZHLN::RenderContext::ViewportRect {
+                .x      = static_cast<uint32_t>(std::clamp(vpX0, 0.0f, static_cast<float>(winSize.width))),
+                .y      = 0,
+                .width  = static_cast<uint32_t>(std::max(0.0f, vpX1 - vpX0)),
+                .height = winSize.height,
+            }
+        );
         const auto sceneViewport = rc.GetViewport();
 
         // TEMP-DIAG (camera jump investigation): log every viewport change so
@@ -458,8 +456,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             if (!hadVp || lastVp.x != sceneViewport.x || lastVp.y != sceneViewport.y || lastVp.width != sceneViewport.width ||
                 lastVp.height != sceneViewport.height) {
                 ZHLN::Log(
-                    "[DIAG-vp] win={}x{} panelEdges l={} r={} -> vp=({},{},{}x{})",
-                    winSize.width, winSize.height, vpX0, vpX1, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height
+                    "[DIAG-vp] win={}x{} panelEdges l={} r={} -> vp=({},{},{}x{})", winSize.width, winSize.height, vpX0, vpX1, sceneViewport.x, sceneViewport.y,
+                    sceneViewport.width, sceneViewport.height
                 );
                 lastVp = sceneViewport;
                 hadVp  = true;
@@ -469,21 +467,23 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // Ctrl+C/X/V in a focused field go to the OS clipboard through the
         // window. Re-set every frame because the handle is rebuilt; the sink is
         // stateless, so this is two stores.
-        gui.SetClipboard(ZHLN::GUI::TextEdit::ClipboardSink {
-            .userdata = &engine,
-            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().SetClipboardText(text); },
-            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().GetClipboardText(); },
-        });
+        gui.SetClipboard(
+            ZHLN::GUI::TextEdit::ClipboardSink {
+                .userdata = &engine,
+                .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().SetClipboardText(text); },
+                .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().GetClipboardText(); },
+            }
+        );
 
         // Viewport bounds: center area between the left hierarchy and right inspector
-        const bool pointerInViewport = state != nullptr && state->mouseX >= vpX0 && state->mouseX <= vpX1;
+        const bool pointerInViewport = state && state->mouseX >= vpX0 && state->mouseX <= vpX1;
 
-        const bool uiCapturesMouse = state != nullptr && (!pointerInViewport || state->wantCaptureMouse);
+        const bool uiCapturesMouse = state && (!pointerInViewport || state->wantCaptureMouse);
         // A focused text field owns the keyboard without setting a capture flag
         // of its own, so it has to be asked directly -- otherwise typing "wasd"
         // into a name box flies the editor camera. This reads last frame's
         // focus, which is the right question to ask before BeginFrame has run.
-        const bool uiCapturesKeyboard = (state != nullptr && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
+        const bool uiCapturesKeyboard = (state && state->wantCaptureKeyboard) || gui.IsTextInputFocused();
 
         // Blender-style modal transform runs before Escape, picking and the
         // fly camera. Sample the mode BEFORE the update: UpdateTransformMode
@@ -492,8 +492,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // the user meant as "abort the manipulation".
         const bool transformActive = s_NativeEditorState.transformMode != ZHLN::Editor::EditorState::TransformMode::None;
         ZHLN::Editor::UpdateTransformMode(
-            reg, s_NativeEditorState, cam,
-            ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height}, uiCapturesKeyboard
+            reg, s_NativeEditorState, cam, ZHLN::Editor::SceneViewport {sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height},
+            uiCapturesKeyboard
         );
 
         // Escape never quits the session -- quitting belongs to the window's
@@ -501,7 +501,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // ladder instead: a live transform modal consumes it above to cancel;
         // a focused text field owns it (GUI unfocus); otherwise it clears the
         // current selection. Edge-detected so a held key clears once.
-        const bool escDown = state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+        const bool escDown = state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
         if (escDown && !escWasDown && !uiCapturesKeyboard && !transformActive) {
             s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
         }
@@ -512,16 +512,15 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // chord would write the file once per frame. Gated on the same keyboard
         // capture as Escape and the camera, or Ctrl+S typed into a text field
         // would save too.
-        const bool controlDown   = state != nullptr && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-                                                      state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
+        const bool controlDown =
+            state && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) || state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
         const bool saveChordDown = controlDown && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
         if (saveChordDown && !saveChordWasDown && !uiCapturesKeyboard) {
             SaveScene(engine);
         }
         saveChordWasDown = saveChordDown;
 
-        if (state != nullptr && pointerInViewport && !transformActive &&
-            !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
+        if (state && pointerInViewport && !transformActive && !state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
             // Window maps GLFW mouse buttons onto the same key stream (see
             // Window.cpp's mouse-button callback), so the raw level needs no
             // platform polling here -- the composition root stays GLFW-free.
@@ -536,8 +535,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 s_NativeEditorState.selectedEntity = ZHLN::Entity::Null();
                 if (hit.hasHit) {
                     for (ZHLN::Entity entity: reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
-                        const auto* physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
-                        if (physics != nullptr && physics->physicsHandle == hit.handle) {
+                        const auto physics = reg.Get<ZHLN::Components::PhysicsComponent>(entity);
+                        if (physics && physics->physicsHandle == hit.handle) {
                             s_NativeEditorState.selectedEntity = entity;
                             break;
                         }
@@ -545,9 +544,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 }
                 // TEMP-DIAG (camera jump investigation): what the click saw.
                 ZHLN::Log(
-                    "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}",
-                    state->mouseX, state->mouseY, sceneViewport.x, sceneViewport.y, sceneViewport.width, sceneViewport.height,
-                    hit.hasHit, s_NativeEditorState.selectedEntity == ZHLN::Entity::Null()
+                    "[DIAG-pick] mouse=({},{}) vp=({},{},{}x{}) hit={} selNull={}", state->mouseX, state->mouseY, sceneViewport.x, sceneViewport.y,
+                    sceneViewport.width, sceneViewport.height, hit.hasHit, s_NativeEditorState.selectedEntity == ZHLN::Entity::Null()
                 );
             }
             wasMouseDown = isMouseDown;
@@ -562,29 +560,39 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             const int kind                     = s_NativeEditorState.requestedSpawn;
             s_NativeEditorState.requestedSpawn = -1;
 
-            const float   yawRad   = JPH::DegreesToRadians(cam.yaw);
-            const float   pitchRad = JPH::DegreesToRadians(cam.pitch);
-            const JPH::Vec3 forward =
-                JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
+            const float     yawRad   = JPH::DegreesToRadians(cam.yaw);
+            const float     pitchRad = JPH::DegreesToRadians(cam.pitch);
+            const JPH::Vec3 forward  = JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
 
             ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = JPH::RVec3(cam.position + forward * 8.0f);
 
             ZHLN::Entity spawned = ZHLN::Entity::Null();
             switch (kind) {
-                case 0: spawned = ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
-                case 1: spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
-                case 2: spawned = ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, sp); break;
-                case 3: spawned = ZHLN::PrefabFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
-                case 4: spawned = ZHLN::PrefabFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
-                default: break;
+                case 0:
+                    spawned = ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp);
+                    break;
+                case 1:
+                    spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp);
+                    break;
+                case 2:
+                    spawned = ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, sp);
+                    break;
+                case 3:
+                    spawned = ZHLN::PrefabFactory::CreateCylinder(engine, 0.5f, 1.0f, sp);
+                    break;
+                case 4:
+                    spawned = ZHLN::PrefabFactory::CreateCone(engine, 0.5f, 1.0f, sp);
+                    break;
+                default:
+                    break;
             }
             if (spawned != ZHLN::Entity::Null()) {
                 s_NativeEditorState.selectedEntity = spawned;
             }
         }
 
-        if (state != nullptr && state->needsResize) {
+        if (state && state->needsResize) {
             engine.GetRenderContext().SetResolution(state->newSize);
             state->needsResize = false;
             continue;
@@ -597,7 +605,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 break;
             }
         } else {
-            if (state != nullptr) {
+            if (state) {
                 UpdateEditorCamera(cam, *state, frameTime, transformActive);
             }
 
@@ -633,7 +641,6 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-
     // Crash diagnostics keep their state in a caller-owned struct; static
     // storage duration is required because its address is copied into the
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
@@ -652,15 +659,16 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Log("[WorldEditor] --editor requested, but this build has no native editor extra.");
                 return std::unexpected(ZHLN::CommandLineError::InvalidValue);
 #else
-                ZHLN::Platform::Init();
-                ZHLN::SetupSignalHandler(crashState);
-                ZHLN::TaskSystem::Scope taskScope;
-                uint32_t w = options.fullscreen ? 0 : 1280;
-                uint32_t h = options.fullscreen ? 0 : 720;
+            ZHLN::Platform::Init();
+            ZHLN::SetupSignalHandler(crashState);
+            ZHLN::TaskSystem::Scope taskScope;
+            uint32_t                w = options.fullscreen ? 0 : 1280;
+            uint32_t                h = options.fullscreen ? 0 : 720;
 
-                ZHLN::EngineConfig config {
-                    .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
-                    .render  = {
+            ZHLN::EngineConfig config {
+                .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
+                .render =
+                    {
                         .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
                         .width          = w,
                         .height         = h,
@@ -669,30 +677,30 @@ auto main(int argc, char* argv[]) -> int {
                         .validationMode = options.validationMode,
                         .headless       = options.headless,
                     },
-                    .enableFallbackScene = false,
-                };
+                .enableFallbackScene = false,
+            };
 
-                auto engine_res = ZHLN::Engine::Create(config);
-                if (!engine_res) {
-                    return std::unexpected(engine_res.error());
-                }
+            auto engine_res = ZHLN::Engine::Create(config);
+            if (!engine_res) {
+                return std::unexpected(engine_res.error());
+            }
 
-                auto engine = std::move(engine_res.value());
+            auto engine = std::move(engine_res.value());
 
 #if defined(ZHLN_HAS_SCRIPTING)
-                // Nothing in core installs a runtime, so a build without the
-                // scripting extra simply has none: ScriptRunner forwards to
-                // nothing and the engine runs C++-only.
-                engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
+            // Nothing in core installs a runtime, so a build without the
+            // scripting extra simply has none: ScriptRunner forwards to
+            // nothing and the engine runs C++-only.
+            engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
 #endif
 
-                InstallGameplayExtras(*engine);
+            InstallGameplayExtras(*engine);
 
-                engine->GetPlatformHost().Focus();
-                engine->InitializeDefaultScene();
+            engine->GetPlatformHost().Focus();
+            engine->InitializeDefaultScene();
 
-                RunWorldEditor(*engine, options);
-                return {};
+            RunWorldEditor(*engine, options);
+            return {};
 #endif
             }
 

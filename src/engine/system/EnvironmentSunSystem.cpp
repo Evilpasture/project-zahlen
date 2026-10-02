@@ -23,16 +23,16 @@ void EnvironmentSunSystem::Update(ECS::Registry& registry, ECS::Res<AssetManager
 
     bool authoredSun = false;
     for (const Entity entity: registry.GetEntitiesWith<LightComponent>()) {
-        const auto* light = registry.Get<LightComponent>(entity);
-        if (registry.Get<EnvironmentSunTagComponent>(entity) == nullptr &&
-            registry.Get<PendingDestroy>(entity) == nullptr && light != nullptr && light->type == LightType::Sun) {
+        const auto light = registry.Get<LightComponent>(entity);
+        if (!registry.Get<EnvironmentSunTagComponent>(entity) &&
+            !registry.Get<PendingDestroy>(entity) && light && light->type == LightType::Sun) {
             authoredSun = true;
             break;
         }
     }
     if (!authoredSun) {
         for (const Entity entity: registry.GetEntitiesWith<SunTagComponent>()) {
-            if (registry.Get<EnvironmentSunTagComponent>(entity) == nullptr && registry.Get<PendingDestroy>(entity) == nullptr) {
+            if (!registry.Get<EnvironmentSunTagComponent>(entity) && !registry.Get<PendingDestroy>(entity)) {
                 authoredSun = true;
                 break;
             }
@@ -40,8 +40,8 @@ void EnvironmentSunSystem::Update(ECS::Registry& registry, ECS::Res<AssetManager
     }
 
     const Entity envEntity = registry.SingletonEntity<EnvironmentMapComponent>();
-    const auto* env = registry.Get<EnvironmentMapComponent>(envEntity);
-    const auto pixels = env != nullptr && !env->source.empty() && registry.Get<PendingDestroy>(envEntity) == nullptr
+    const auto   env       = registry.Get<EnvironmentMapComponent>(envEntity);
+    const auto   pixels    = env && !env->source.empty() && !registry.Get<PendingDestroy>(envEntity)
         ? assets->FindEnvironmentImage(std::string_view(env->source)) : std::nullopt;
     const EnvironmentSun* sun = pixels && pixels->sun ? &*pixels->sun : nullptr;
 
@@ -67,7 +67,7 @@ void EnvironmentSunSystem::Update(ECS::Registry& registry, ECS::Res<AssetManager
     };
     if (owned == Entity::Null()) {
         registry.Create(EnvironmentSunTagComponent {}, baked);
-    } else if (registry.Get<LightComponent>(owned) != nullptr) {
+    } else if (registry.Get<LightComponent>(owned)) {
         registry.Patch<LightComponent>(owned, [&](auto& light) { light = baked; });
     } else {
         registry.Add(owned, baked);

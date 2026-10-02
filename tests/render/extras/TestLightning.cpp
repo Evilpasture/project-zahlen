@@ -79,8 +79,8 @@ struct LightningTestSuite {
 
             ZHLN::Test::ExpectTrue(reg.IsAlive(boltEntity));
 
-            const auto* boltComp  = reg.Get<ZHLN::LightningComponent>(boltEntity);
-            if (!ZHLN::Test::ExpectTrue(boltComp != nullptr)) {
+            const auto boltComp = reg.Get<ZHLN::LightningComponent>(boltEntity);
+            if (!ZHLN::Test::ExpectTrue(boltComp.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
 
@@ -108,7 +108,7 @@ struct LightningTestSuite {
                 ZHLN::Lightning::Update(*engine, dt);
 
                 if (reg.IsAlive(boltEntity)) {
-                    if (const auto* activeBolt = reg.Get<ZHLN::LightningComponent>(boltEntity)) {
+                    if (const auto activeBolt = reg.Get<ZHLN::LightningComponent>(boltEntity)) {
                         if (activeBolt->phase == ZHLN::LightningPhase::ReturnStroke) {
                             returnStrokeObserved = true;
                             if (activeBolt->flashLuminance > 0.01f) {
@@ -192,9 +192,9 @@ struct LightningTestSuite {
             // Spawn second strike while first strike is active (Tests baseline exposure inheritance)
             const ZHLN::Entity bolt2 = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 160, 20), JPH::RVec3(40, 0, 25));
 
-            const auto* c1         = reg.Get<ZHLN::LightningComponent>(bolt1);
-            const auto* c2         = reg.Get<ZHLN::LightningComponent>(bolt2);
-            if (!(ZHLN::Test::ExpectNe(c1, nullptr) && ZHLN::Test::ExpectNe(c2, nullptr))) {
+            const auto c1 = reg.Get<ZHLN::LightningComponent>(bolt1);
+            const auto c2 = reg.Get<ZHLN::LightningComponent>(bolt2);
+            if (!(ZHLN::Test::ExpectTrue(c1.has_value()) && ZHLN::Test::ExpectTrue(c2.has_value()))) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
 
@@ -241,16 +241,16 @@ struct LightningTestSuite {
             auto& rc  = engine->GetRenderContext();
 
             const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 80, 0), JPH::RVec3(0, 0, 0));
-            const auto* raw = reg.Get<ZHLN::LightningComponent>(rawBolt);
-            if (!ZHLN::Test::ExpectTrue(raw != nullptr)) {
+            const auto         raw     = reg.Get<ZHLN::LightningComponent>(rawBolt);
+            if (!ZHLN::Test::ExpectTrue(raw.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
-            const auto oldPos = raw->vboPos;
+            const auto oldPos  = raw->vboPos;
             const auto oldMesh = raw->meshAssetId;
-            const auto oldMat = raw->matAssetId;
+            const auto oldMat  = raw->matAssetId;
             ZHLN::DespawnEntity(*engine, rawBolt);
             ZHLN::Test::ExpectTrue(reg.IsAlive(rawBolt));
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(rawBolt) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(rawBolt).has_value());
             ZHLN::Test::ExpectEq(reg.Get<ZHLN::LightningComponent>(rawBolt)->vboPos, oldPos);
             engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(rawBolt));
@@ -261,8 +261,8 @@ struct LightningTestSuite {
             rc.DestroyBuffer(reusedSlot);
 
             const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(10, 80, 0), JPH::RVec3(10, 0, 0));
-            const auto* bolt = reg.Get<ZHLN::LightningComponent>(despawnBolt);
-            if (!ZHLN::Test::ExpectTrue(bolt != nullptr)) {
+            const auto         bolt        = reg.Get<ZHLN::LightningComponent>(despawnBolt);
+            if (!ZHLN::Test::ExpectTrue(bolt.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
             const ZHLN::Entity flash  = bolt->flashLightEntity;
@@ -271,8 +271,8 @@ struct LightningTestSuite {
             const auto materialAsset = bolt->matAssetId;
             ZHLN::DespawnEntity(*engine, despawnBolt);
             ZHLN::Test::ExpectTrue(reg.IsAlive(despawnBolt));
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(flash) != nullptr);
-            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(impact) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(flash).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<ZHLN::Components::PendingDestroy>(impact).has_value());
             engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
             ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
@@ -281,8 +281,8 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(materialAsset).has_value());
 
             const ZHLN::Entity componentBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(20, 80, 0), JPH::RVec3(20, 0, 0));
-            const auto* component = reg.Get<ZHLN::LightningComponent>(componentBolt);
-            if (!ZHLN::Test::ExpectTrue(component != nullptr)) {
+            const auto         component     = reg.Get<ZHLN::LightningComponent>(componentBolt);
+            if (!ZHLN::Test::ExpectTrue(component.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
             const auto componentMesh = component->meshAssetId;
@@ -292,8 +292,8 @@ struct LightningTestSuite {
             engine->ProcessPendingDestroy();
 
             const ZHLN::Entity cachedBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(30, 80, 0), JPH::RVec3(30, 0, 0));
-            const auto* cached = reg.Get<ZHLN::LightningComponent>(cachedBolt);
-            if (!ZHLN::Test::ExpectTrue(cached != nullptr)) {
+            const auto         cached     = reg.Get<ZHLN::LightningComponent>(cachedBolt);
+            if (!ZHLN::Test::ExpectTrue(cached.has_value())) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
             const auto componentBuffer = cached->vboPos;

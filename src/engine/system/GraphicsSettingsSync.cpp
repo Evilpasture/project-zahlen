@@ -97,10 +97,10 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     GraphicsSettings gfx {};
 
     Entity ppEnt = SettingsEntity(reg);
-    if (reg.Get<PostProcessSettingsComponent>(ppEnt) == nullptr) {
+    if (!reg.Get<PostProcessSettingsComponent>(ppEnt)) {
         ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
     }
-    if (const auto* pp = reg.Get<PostProcessSettingsComponent>(ppEnt); pp != nullptr) {
+    if (const auto pp = reg.Get<PostProcessSettingsComponent>(ppEnt)) {
         gfx.post.mode              = pp->giMode;
         gfx.post.aoRadius          = pp->aoRadius;
         gfx.post.aoBias            = pp->aoBias;
@@ -131,7 +131,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     }
 
     if (const Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>(); shadowEnt != Entity::Null()) {
-        if (const auto* shadow = reg.Get<ShadowSettingsComponent>(shadowEnt); shadow != nullptr) {
+        if (const auto shadow = reg.Get<ShadowSettingsComponent>(shadowEnt)) {
             gfx.shadows.width              = shadow->shadowWidth;
             gfx.shadows.resolution         = static_cast<uint32_t>(shadow->shadowResolution);
             gfx.shadows.maxPunctualShadows = static_cast<uint32_t>(shadow->maxPunctualShadows);
@@ -140,15 +140,15 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     }
 
     Entity aaEnt = CameraEntity(reg);
-    if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
+    if (!reg.Get<AASettingsComponent>(aaEnt)) {
         aaEnt = reg.SingletonEntity<AASettingsComponent>();
     }
-    if (const auto* aa = reg.Get<AASettingsComponent>(aaEnt); aa != nullptr) {
+    if (const auto aa = reg.Get<AASettingsComponent>(aaEnt)) {
         gfx.antiAliasing = aa->state;
     }
 
     if (const Entity rtEnt = reg.SingletonEntity<RayTracingSettingsComponent>(); rtEnt != Entity::Null()) {
-        if (const auto* rt = reg.Get<RayTracingSettingsComponent>(rtEnt); rt != nullptr) {
+        if (const auto rt = reg.Get<RayTracingSettingsComponent>(rtEnt)) {
             gfx.rayTracing = rt->config;
         }
     }
@@ -175,7 +175,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     bool changed = false;
 
     Entity ppEnt = SettingsEntity(reg);
-    if (reg.Get<PostProcessSettingsComponent>(ppEnt) == nullptr) {
+    if (!reg.Get<PostProcessSettingsComponent>(ppEnt)) {
         ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
     }
     if (ppEnt == Entity::Null()) {
@@ -203,7 +203,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     }
 
     Entity aaEnt = CameraEntity(reg);
-    if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
+    if (!reg.Get<AASettingsComponent>(aaEnt)) {
         aaEnt = reg.SingletonEntity<AASettingsComponent>();
     }
     if (aaEnt == Entity::Null()) {

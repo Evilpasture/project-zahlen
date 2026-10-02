@@ -13,7 +13,7 @@ namespace ZHLN {
 
 void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z) {
     const JPH::Vec3 linear(x, y, z);
-    if (auto* cmd = registry.Get<Components::ImpulseCommand>(entity)) {
+    if (auto cmd = registry.Get<Components::ImpulseCommand>(entity)) {
         cmd->linear += linear;
         return;
     }
@@ -31,9 +31,9 @@ void CommitImpulses(Engine& engine) {
     const auto  entities = reg.GetEntitiesWith<Components::ImpulseCommand>();
     for (int i = static_cast<int>(entities.size()) - 1; i >= 0; --i) {
         const Entity e    = entities[static_cast<size_t>(i)];
-        const auto*  cmd  = reg.Get<Components::ImpulseCommand>(e);
-        const auto*  phys = reg.Get<Components::PhysicsComponent>(e);
-        if (cmd != nullptr && phys != nullptr && cmd->linear.LengthSq() > 0.0f) {
+        const auto   cmd  = reg.Get<Components::ImpulseCommand>(e);
+        const auto   phys = reg.Get<Components::PhysicsComponent>(e);
+        if (cmd && phys && cmd->linear.LengthSq() > 0.0f) {
             pc.AddImpulse(phys->physicsHandle, cmd->linear);
         }
         reg.Remove<Components::ImpulseCommand>(e);

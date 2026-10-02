@@ -69,7 +69,7 @@ void CharacterPreStep(Engine& engine, float dt) {
 // --- Free-cam speed query -----------------------------------------------------
 
 std::optional<float> QueryFreeCamSpeed(ECS::Registry& reg, Entity target) {
-    if (auto* move = reg.Get<MovementComponent>(target)) {
+    if (auto move = reg.Get<MovementComponent>(target)) {
         return move->speed;
     }
     return std::nullopt;

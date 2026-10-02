@@ -38,7 +38,7 @@ template <typename T>
     requires requires(Engine& engine, T& component) { Release(engine, component); }
 auto Detach(Engine& engine, Entity entity) -> bool {
     auto& registry = engine.GetRegistry();
-    if (auto* component = registry.Get<T>(entity)) {
+    if (auto component = registry.Get<T>(entity)) {
         Release(engine, *component);
         registry.Remove<T>(entity);
         return true;
@@ -58,7 +58,7 @@ auto Attach(Engine& engine, Entity entity, T component) -> T& {
 template <typename T, typename Owner>
     requires requires(Owner& owner, T& component) { Release(owner, component); }
 auto Detach(Owner& owner, ECS::Registry& registry, Entity entity) -> bool {
-    if (auto* component = registry.Get<T>(entity)) {
+    if (auto component = registry.Get<T>(entity)) {
         Release(owner, *component);
         registry.Remove<T>(entity);
         return true;

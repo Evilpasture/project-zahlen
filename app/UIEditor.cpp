@@ -166,9 +166,9 @@ struct Session {
     bool                        sWasDown      = false;
     bool                        rWasDown      = false;
     bool                        confirmWasDown = false;
-    float                       dt            = 0.016f;
+    float                       dt                   = 0.016f;
     bool                        openPreviewRequested = false;
-    ZHLN::Window*               previewWindow = nullptr; // kernel-owned; see Kernel::AddWindow
+    ZHLN::Optional<ZHLN::Window&> previewWindow; // kernel-owned; see Kernel::AddWindow
     ZHLN::ECS::Registry         previewGui;
     GUI::PropertyStore          previewProperties; // runtime instance; Design keeps `properties`
 
@@ -250,9 +250,9 @@ void DrawHierarchy(GUI::Context& gui, Session& session) {
     constexpr auto kKinds = ZHLN::Reflect::EnumNames<GUI::NodeKind>();
     gui.Dropdown("Add as", std::span<const std::string_view>(kKinds), session.addKindIndex);
 
-    GUI::UINode* selected = GUI::FindNodeById(session.tree, session.selectedId);
-    const bool   canAdd   = selected != nullptr && IsContainer(selected->kind);
-    const bool   canDel   = selected != nullptr && NodeId(session.tree, RootPath(session.tree)) != session.selectedId;
+    auto       selected = GUI::FindNodeById(session.tree, session.selectedId);
+    const bool canAdd   = selected && IsContainer(selected->kind);
+    const bool canDel   = selected && NodeId(session.tree, RootPath(session.tree)) != session.selectedId;
 
     gui.BeginRow(4.0f);
     if (canAdd && gui.Button("Add Child", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
@@ -268,7 +268,7 @@ void DrawHierarchy(GUI::Context& gui, Session& session) {
     }
     gui.EndRow();
 
-    if (!canAdd && selected != nullptr) {
+    if (!canAdd && selected) {
         gui.Text("Select a Box / Row / Column to add children.", 12.0f, {0.55f, 0.55f, 0.58f, 1.0f});
     }
 
@@ -311,8 +311,8 @@ void DrawFloat4(GUI::Context& gui, std::string_view prefix, JPH::Float4& value, 
 void DrawInspector(GUI::Context& gui, Session& session) {
     gui.Text("Inspector", 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
 
-    GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId);
-    if (node == nullptr) {
+    auto node = GUI::FindNodeById(session.tree, session.selectedId);
+    if (!node) {
         gui.Text("No selection", 12.0f, {0.5f, 0.5f, 0.5f, 1.0f});
         return;
     }
@@ -394,7 +394,7 @@ void CancelXform(Session& session) {
     if (session.xform == XformMode::None) {
         return;
     }
-    if (GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId); node != nullptr) {
+    if (auto node = GUI::FindNodeById(session.tree, session.selectedId)) {
         node->box = session.xformBackup;
     }
     session.xform = XformMode::None;
@@ -405,8 +405,8 @@ void ConfirmXform(Session& session) {
 }
 
 void BeginXform(GUI::Context& gui, Session& session, XformMode mode, float mx, float my) {
-    GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId);
-    if (node == nullptr) {
+    auto node = GUI::FindNodeById(session.tree, session.selectedId);
+    if (!node) {
         return;
     }
 
@@ -460,8 +460,8 @@ void BeginXform(GUI::Context& gui, Session& session, XformMode mode, float mx, f
 }
 
 void ApplyXform(Session& session, float mx, float my) {
-    GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId);
-    if (node == nullptr) {
+    auto node = GUI::FindNodeById(session.tree, session.selectedId);
+    if (!node) {
         session.xform = XformMode::None;
         return;
     }
@@ -489,8 +489,8 @@ void ApplyXform(Session& session, float mx, float my) {
     }
 }
 
-void UpdateCanvasXform(GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent* state, bool uiOwnsKeyboard) {
-    if (state == nullptr) {
+void UpdateCanvasXform(GUI::Context& gui, Session& session, ZHLN::Optional<const ZHLN::Components::InputStateComponent&> state, bool uiOwnsKeyboard) {
+    if (!state) {
         return;
     }
 
@@ -543,14 +543,14 @@ void LoadTree(Session& session, std::string_view path);
 #endif
 
 void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
-    if (session.previewWindow == nullptr) {
+    if (!session.previewWindow) {
         return;
     }
     const ZHLN::Extent2D previewSize = session.previewWindow->GetSize();
     if (previewSize.width == 0 || previewSize.height == 0) {
         return;
     }
-    if (auto* src = reg.GetSingleton<GUI::UISettingsComponent>(); src != nullptr) {
+    if (auto src = reg.GetSingleton<GUI::UISettingsComponent>()) {
         session.previewGui.GetOrEmplaceSingleton<GUI::UISettingsComponent>() = *src;
     }
 
@@ -595,15 +595,15 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
-    return session.previewWindow != nullptr && session.previewWindow->IsRunning();
+    return session.previewWindow && session.previewWindow->IsRunning();
 }
 
 void StopPreview(ZHLN::Kernel& kernel, Session& session) {
-    if (session.previewWindow == nullptr) {
+    if (!session.previewWindow) {
         return;
     }
     kernel.RemoveWindow(*session.previewWindow);
-    session.previewWindow = nullptr;
+    session.previewWindow.reset();
 }
 
 void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
@@ -654,7 +654,7 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
     // tree into (and only into) it, so nothing about the window has to declare
     // what kind of content it accepts.
     session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver);
-    if (session.previewWindow == nullptr) {
+    if (!session.previewWindow) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
@@ -709,22 +709,22 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
         .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
     });
 
-    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-    const bool uiOwnsKeyboard = gui.IsTextInputFocused() || (state != nullptr && state->wantCaptureKeyboard);
+    auto       state          = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+    const bool uiOwnsKeyboard = gui.IsTextInputFocused() || (state && state->wantCaptureKeyboard);
 
     const bool xformWasActive = session.xform != XformMode::None;
     UpdateCanvasXform(gui, session, state, uiOwnsKeyboard);
 
-    const bool escDown = state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+    const bool escDown = state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
     if (escDown && !session.escWasDown && !uiOwnsKeyboard && !xformWasActive) {
         session.selectedId.clear();
     }
     session.escWasDown = escDown;
 
 #if defined(ZHLN_HAS_UI_TOML)
-    const bool controlDown = state != nullptr && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
-                                                  state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
-    const bool saveDown    = controlDown && state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool controlDown = state && (state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+                                       state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl)));
+    const bool saveDown    = controlDown && state && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
     if (saveDown && !session.saveWasDown && !uiOwnsKeyboard) {
         SaveTree(session.tree, kDocumentPath);
     }
@@ -975,24 +975,24 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Clock clock;
     while (kernel->IsRunning()) {
         session.dt = clock.GetDeltaTime();
-        if (auto* previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>(); previewInput != nullptr) {
+        if (auto previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>()) {
             previewInput->ResetDeltas();
         }
 
         // Mirrors Engine::ProcessEvents: crash poll, then World-side (here
         // registry-side) input bookkeeping, then the Kernel's window pump.
         ZHLN::CheckForCrashes(crashState, nullptr);
-        if (auto* st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr) {
+        if (auto st = registry.GetSingleton<ZHLN::Components::InputStateComponent>()) {
             st->ResetDeltas();
         }
         kernel->ProcessEvents();
 
-        if (auto* st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr && st->needsResize) {
+        if (auto st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
             kernel->GetRenderContext().SetResolution(st->newSize);
             st->needsResize = false;
         }
 
-        if (session.previewWindow != nullptr && !session.previewWindow->IsRunning()) {
+        if (session.previewWindow && !session.previewWindow->IsRunning()) {
             StopPreview(*kernel, session);
         }
         if (session.openPreviewRequested) {
@@ -1034,7 +1034,7 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         DrawFrame(*kernel, registry, session);
-        if (session.previewWindow != nullptr) {
+        if (session.previewWindow) {
             DrawPreview(*kernel, registry, session);
         }
 

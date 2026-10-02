@@ -39,9 +39,9 @@ constexpr float TestDeltaTime = 0.016f;
 
 using ReadQuery = ZHLN::ECS::Query<const TestCompA&, const TestCompB>;
 using WriteQuery = ZHLN::ECS::Query<TestCompA&>;
-static_assert(std::is_same_v<decltype(std::declval<ReadQuery>().Get<TestCompA>(ZHLN::Entity {})), const TestCompA*>);
+static_assert(std::is_same_v<decltype(std::declval<ReadQuery>().Get<TestCompA>(ZHLN::Entity {})), ZHLN::Optional<const TestCompA&>>);
 static_assert(std::is_same_v<decltype(std::declval<ReadQuery>().Raw<TestCompA>()), ZHLN::RestrictSpan<const TestCompA>>);
-static_assert(std::is_same_v<decltype(std::declval<WriteQuery>().Get<TestCompA>(ZHLN::Entity {})), TestCompA*>);
+static_assert(std::is_same_v<decltype(std::declval<WriteQuery>().Get<TestCompA>(ZHLN::Entity {})), ZHLN::Optional<TestCompA&>>);
 
 template <typename Q>
 concept CanReadB = requires(Q q) { q.template Get<TestCompB>(ZHLN::Entity {}); };
@@ -61,7 +61,7 @@ uint64_t observedFrame = 0;
 bool observedMissingAudio = false;
 
 void DeclarativeWriter(WriteQuery query, ZHLN::FrameDt dt, ZHLN::FrameAlpha alpha, ZHLN::FrameIndex frame,
-                       ZHLN::ECS::OptionRes<ZHLN::AudioContext> audio) {
+                       ZHLN::Optional<ZHLN::AudioContext&> audio) {
     observedDt = dt.value;
     observedAlpha = alpha.value;
     observedFrame = frame.value;
@@ -331,14 +331,14 @@ struct SystemGraphTestSuite {
                     b.value += 5;
                 }
             });
-            if (matches != 1 || reg.Get<TestCompB>(both)->value != 14 || query.Get<TestCompB>(onlyA) != nullptr ||
-                query.Get<TestCompA>(both) != reg.Get<TestCompA>(both)) {
+            if (matches != 1 || reg.Get<TestCompB>(both)->value != 14 || query.Get<TestCompB>(onlyA).has_value() ||
+                &*query.Get<TestCompA>(both) != &*reg.Get<TestCompA>(both)) {
                 return std::unexpected(SystemGraphTestError::QueryIterationFailed);
             }
             // A system can be called with just its declared dependencies,
             // without constructing a SystemContext or any engine services.
             DeclarativeWriter(WriteQuery(reg), ZHLN::FrameDt {0.02f}, ZHLN::FrameAlpha {0.5f},
-                              ZHLN::FrameIndex {4}, ZHLN::ECS::OptionRes<ZHLN::AudioContext> {});
+                              ZHLN::FrameIndex {4}, ZHLN::Optional<ZHLN::AudioContext&> {});
             if (reg.Get<TestCompA>(both)->value != 5 || reg.Get<TestCompA>(onlyA)->value != 6) {
                 return std::unexpected(SystemGraphTestError::QueryIterationFailed);
             }

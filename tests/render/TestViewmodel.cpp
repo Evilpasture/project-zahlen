@@ -126,8 +126,8 @@ struct ViewmodelTestSuite {
             // Flag as Viewmodel
             reg.Patch<ZHLN::Components::MeshComponent>(vmGun, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 
-            const auto* mc      = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
-            if (!ZHLN::Test::ExpectTrue(mc != nullptr)) {
+            const auto mc = reg.Get<ZHLN::Components::MeshComponent>(vmGun);
+            if (!ZHLN::Test::ExpectTrue(mc.has_value())) {
                 return std::unexpected(ViewmodelTestError::ViewmodelComponentMissing);
             }
 

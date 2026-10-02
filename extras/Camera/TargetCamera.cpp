@@ -57,8 +57,8 @@ void TargetCameraSystem::Update(
     reg.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
         // 1. FREE-CAM INTERCEPTION BRANCH
         if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
-            auto* state = reg.GetSingleton<Components::InputStateComponent>();
-            if (state == nullptr) {
+            auto state = reg.GetSingleton<Components::InputStateComponent>();
+            if (!state) {
                 return;
             }
 
@@ -128,8 +128,8 @@ void TargetCameraSystem::Update(
         }
 
         // 3. ZOOM & FOV SMOOTHING
-        auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
-        float wheelDelta = (inputState != nullptr) ? inputState->GetMouseWheel() : 0.0f;
+        auto  inputState = reg.GetSingleton<Components::InputStateComponent>();
+        float wheelDelta = inputState ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
             camComp.targetDistance = JPH::Clamp(camComp.targetDistance - wheelDelta * 0.5f, 1.5f, 15.0f);
         }
@@ -145,7 +145,7 @@ void TargetCameraSystem::Update(
 
         // 4. MOUSE LOOK ORBITING
         const float sensitivity = 0.15f;
-        if (inputState != nullptr && inputState->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
+        if (inputState && inputState->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
             camComp.yaw += inputState->GetMouseDeltaX() * sensitivity;
             camComp.pitch = std::clamp(camComp.pitch - (inputState->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
         }
@@ -194,7 +194,7 @@ void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
 
     if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
         const Entity camEnt = mainCams[0];
-        if (reg.Get<CameraRig::TargetCameraComponent>(camEnt) == nullptr) {
+        if (!reg.Get<CameraRig::TargetCameraComponent>(camEnt)) {
             // Boot rig: the same defaults the core default scene used to
             // create, so the default view (a free-cam host keeps its
             // FreeCamTag) keeps its pre-decomposition framing.

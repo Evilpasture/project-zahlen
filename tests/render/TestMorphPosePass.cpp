@@ -260,12 +260,12 @@ struct MorphPosePassSuite {
         // Spawn order is not a contract; the prefab pointer is.
         std::vector<Instance> instances;
         for (ZHLN::Entity mesh: reg.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-            auto* hier = reg.Get<ZHLN::Components::HierarchyComponent>(mesh);
-            if (hier == nullptr || hier->parent == ZHLN::Entity::Null()) {
+            auto hier = reg.Get<ZHLN::Components::HierarchyComponent>(mesh);
+            if (!hier || hier->parent == ZHLN::Entity::Null()) {
                 continue;
             }
-            auto* animator = reg.Get<ZHLN::Components::AnimatorComponent>(hier->parent);
-            if (animator == nullptr || animator->prefab != &prefab) {
+            auto animator = reg.Get<ZHLN::Components::AnimatorComponent>(hier->parent);
+            if (!animator || animator->prefab != &prefab) {
                 continue;
             }
             instances.push_back(Instance {.root = hier->parent, .mesh = mesh});
@@ -315,8 +315,8 @@ struct MorphPosePassSuite {
             }
 
             ZHLN::Test::Headless::TickFrames(*engine, 8); // fidelity harness settle frames
-            const auto* morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
-            if (!ZHLN::Test::ExpectTrue(morph != nullptr)) {
+            const auto morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
+            if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
             const auto expected = std::array<float, 4> {
@@ -379,17 +379,17 @@ struct MorphPosePassSuite {
             }
 
             for (size_t i = 0; i < instances.size(); ++i) {
-                auto* morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
+                auto morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
 
                 if (i < stripped) {
-                    ZHLN::Test::ExpectTrue(morph == nullptr);
-                    if (morph != nullptr) {
+                    ZHLN::Test::ExpectFalse(morph.has_value());
+                    if (morph) {
                         return std::unexpected(MorphPosePassTestError::PosePassAttachedMorphComponent);
                     }
                     continue;
                 }
 
-                if (!ZHLN::Test::ExpectTrue(morph != nullptr)) {
+                if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                     return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
                 }
 
@@ -451,8 +451,8 @@ struct MorphPosePassSuite {
 
             const size_t degenerateCount = instances.size() / 2;
             for (size_t i = 0; i < instances.size(); ++i) {
-                auto* morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
-                if (!ZHLN::Test::ExpectTrue(morph != nullptr)) {
+                auto morph = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[i].mesh);
+                if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                     return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
                 }
 
@@ -521,8 +521,8 @@ struct MorphPosePassSuite {
             // 0.167 s of a 2.0 s span, so the sampled weights are under a percent
             // and this frame is the box at its authored size.
             ZHLN::Test::Headless::TickFrames(*engine, 10);
-            auto* settled = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
-            if (!ZHLN::Test::ExpectTrue(settled != nullptr)) {
+            auto settled = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
+            if (!ZHLN::Test::ExpectTrue(settled.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
             ZHLN::Test::ExpectInRange(settled->weights[0], 0.0f, 0.1f);
@@ -536,8 +536,8 @@ struct MorphPosePassSuite {
             // two axes, so a frame that does not change here means the weights
             // never reached the draw path.
             ZHLN::Test::Headless::TickFrames(*engine, MorphPosePassSuite::kStressFrames);
-            auto* weighted = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
-            if (!ZHLN::Test::ExpectTrue(weighted != nullptr)) {
+            auto weighted = reg.Get<ZHLN::Components::MorphTargetComponent>(instances[0].mesh);
+            if (!ZHLN::Test::ExpectTrue(weighted.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
             ZHLN::Test::ExpectGt(weighted->weights[0], 0.9f);

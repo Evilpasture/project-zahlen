@@ -589,7 +589,7 @@ struct RenderContext::Impl {
     std::optional<Vk::ImageSlice> sceneTarget;
 
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
-        if (const auto* active = destinations.Active(); active != nullptr) {
+        if (const auto active = destinations.Active()) {
             return active->Presenter();
         }
         return presenter;
@@ -614,9 +614,9 @@ struct RenderContext::Impl {
 
     GpuPipelineCounters pendingPipelineCounters {};
 
-    FS::FileSystemWatcher* fileSystemWatcher    = nullptr;
-    FS::FileWatchHandle    shaderDirectoryWatch = 0;
-    ShaderReloadRegistry   shaderReloads;
+    ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher;
+    FS::FileWatchHandle                    shaderDirectoryWatch = 0;
+    ShaderReloadRegistry                   shaderReloads;
 
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t blueNoiseTexIdx     = 0;
@@ -635,7 +635,7 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher):
+    Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
         pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher) {
@@ -653,7 +653,7 @@ struct RenderContext::Impl {
         submittedStaging.reset();
         DestroyDestinations();
         frameOpen = false;
-        if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
+        if (fileSystemWatcher && shaderDirectoryWatch != 0) {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
 
