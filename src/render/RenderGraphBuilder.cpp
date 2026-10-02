@@ -209,7 +209,18 @@ using SceneGraphFor =
 
 } // namespace
 
+// The five dumps above are five separate compile-time walks of five state tables,
+// and they are built by every build whether or not anything ever asks for one --
+// a measurable slice of this translation unit's front-end time and of its peak
+// memory. Configure with -DZHLN_GRAPH_VISUALIZE=ON to build them again; the strings
+// are byte-for-byte the ones this used to produce, and with the switch off the
+// `--print-graph` command still answers, it just says so.
+#ifndef ZHLN_GRAPH_VISUALIZE
+#define ZHLN_GRAPH_VISUALIZE 0
+#endif
+
 std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
+#if ZHLN_GRAPH_VISUALIZE
     using enum AAMode;
     using Vk::Debug::GraphVisualizer;
 
@@ -232,6 +243,10 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
             return vis_none.string_view();
     }
     return "Not implemented.";
+#else
+    (void) currentMode;
+    return "Render graph visualization is compiled out: build with -DZHLN_GRAPH_VISUALIZE=ON to print the graph.";
+#endif
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {

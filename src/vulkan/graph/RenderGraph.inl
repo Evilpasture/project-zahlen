@@ -69,16 +69,42 @@ struct ExtractResources<TypeList<Usages...>> {
     using type = TypeList<typename Usages::Resource...>;
 };
 
-template <>
-struct CollectAllResources<> {
-    using type = TypeList<>;
+// One resource per usage appended to one accumulator, in first-seen order: a single
+// fold carrying the list, rather than a recursion that rebuilds the tail list at
+// every level on the way back up.
+template <typename Accumulated, typename... Usages>
+struct UniqueResourcesFold {
+    using type = Accumulated;
 };
 
-template <typename Head, typename... Tail>
-struct CollectAllResources<Head, Tail...> {
-    using HeadResources = typename ExtractResources<typename Head::Usages>::type;
-    using TailResources = typename CollectAllResources<Tail...>::type;
-    using type          = typename MergeLists<HeadResources, TailResources>::type;
+template <typename Accumulated, typename Head, typename... Tail>
+struct UniqueResourcesFold<Accumulated, Head, Tail...> {
+    using Next = typename AppendUnique<Accumulated, typename Head::Resource>::type;
+    using type = typename UniqueResourcesFold<Next, Tail...>::type;
+};
+
+template <typename Accumulated, typename Usages>
+struct CollectResources;
+
+template <typename Accumulated, typename... Usages>
+struct CollectResources<Accumulated, TypeList<Usages...>> {
+    using type = typename UniqueResourcesFold<Accumulated, Usages...>::type;
+};
+
+template <typename Accumulated, typename... Passes>
+struct CollectAllResourcesFold {
+    using type = Accumulated;
+};
+
+template <typename Accumulated, typename Head, typename... Tail>
+struct CollectAllResourcesFold<Accumulated, Head, Tail...> {
+    using WithHead = typename CollectResources<Accumulated, typename Head::Usages>::type;
+    using type     = typename CollectAllResourcesFold<WithHead, Tail...>::type;
+};
+
+template <typename... Passes>
+struct CollectAllResources {
+    using type = typename CollectAllResourcesFold<TypeList<>, Passes...>::type;
 };
 
 template <typename Target, typename... Ts>
@@ -321,32 +347,33 @@ template <typename T>
 
 // ---- Automatic fork partition definitions
 
-template <typename C>
-struct AllDisjointFrom<TypeList<>, C> {
+template <typename Resources, typename C>
+struct AllDisjointFrom<Resources, TypeList<>, C> {
     static constexpr bool value = true;
 };
 
-template <typename Head, typename... Tail, typename C>
-struct AllDisjointFrom<TypeList<Head, Tail...>, C> {
-    static constexpr bool value = ArePassesDisjoint<Head, C>::value && AllDisjointFrom<TypeList<Tail...>, C>::value;
+template <typename Resources, typename Head, typename... Tail, typename C>
+struct AllDisjointFrom<Resources, TypeList<Head, Tail...>, C> {
+    static constexpr bool value = ArePassesDisjoint<Resources, Head, C>::value && AllDisjointFrom<Resources, TypeList<Tail...>, C>::value;
 };
 
 // `Acc` is the run built so far and is always non-empty at every call site: a
 // run starts from the first pass of the list and only grows.
-template <typename Acc>
-struct FirstRun<Acc, TypeList<>> {
+template <typename Resources, typename Acc>
+struct FirstRun<Resources, Acc, TypeList<>> {
     using type = Acc;
 };
 
-template <typename... AccT, typename Head, typename... Tail>
-struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
+template <typename Resources, typename... AccT, typename Head, typename... Tail>
+struct FirstRun<Resources, TypeList<AccT...>, TypeList<Head, Tail...>> {
     using Acc = TypeList<AccT...>;
     // A candidate joins only while every current member and the candidate
     // itself can run as a fork body (plain `Passieren`-style passes) and the
     // candidate is hazard-free against the run. Groups and render-pass-
     // context passes fail the forkability test, so they run alone.
-    static constexpr bool can_join = (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
-    using type                     = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
+    static constexpr bool can_join =
+        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Resources, Acc, Head>::value;
+    using type = std::conditional_t<can_join, typename FirstRun<Resources, TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 
 // Drop the first `N` elements in a single expansion: C++26 pack indexing
@@ -363,29 +390,29 @@ struct DropFront<TypeList<Ts...>, N> {
         decltype([]<size_t... Is>(std::index_sequence<Is...>) { return TypeList<Ts...[Is + N]...> {}; }(std::make_index_sequence<sizeof...(Ts) - N> {}));
 };
 
-template <>
-struct AutoForkRuns<TypeList<>> {
+template <typename Resources>
+struct AutoForkRuns<Resources, TypeList<>> {
     using type = TypeList<>;
 };
 
-template <typename Head, typename... Tail>
-struct AutoForkRuns<TypeList<Head, Tail...>> {
-    using First = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+template <typename Resources, typename Head, typename... Tail>
+struct AutoForkRuns<Resources, TypeList<Head, Tail...>> {
+    using First = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
     // The run includes `Head`, which is not part of `Tail`: drop the run's
     // other members (size - 1) off the tail, not the whole run.
     using Rest     = typename DropFront<TypeList<Tail...>, First::size - 1>::type;
-    using RestRuns = typename AutoForkRuns<Rest>::type;
+    using RestRuns = typename AutoForkRuns<Resources, Rest>::type;
     using type     = typename AppendLists<TypeList<typename WrapRun<First>::type>, RestRuns>::type;
 };
 
-template <>
-struct FirstRunOfList<TypeList<>> {
+template <typename Resources>
+struct FirstRunOfList<Resources, TypeList<>> {
     using type = TypeList<>;
 };
 
-template <typename Head, typename... Tail>
-struct FirstRunOfList<TypeList<Head, Tail...>> {
-    using type = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+template <typename Resources, typename Head, typename... Tail>
+struct FirstRunOfList<Resources, TypeList<Head, Tail...>> {
+    using type = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
 };
 
 // Split a tuple into (first `N` elements, the rest), preserving exact
@@ -425,16 +452,16 @@ constexpr auto WrapRunTuple(Tuple front) noexcept {
 // The runtime walk behind `AutoForkPasses`: peel the next run off the front,
 // wrap it, recurse on the remainder. `Run` is the next run's pass types and
 // `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
-template <typename Run, typename RestTypes, typename Tuple>
+template <typename Resources, typename Run, typename RestTypes, typename Tuple>
 constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
     auto [front, rest] = SplitFront<Run::size>(std::move(t));
     auto wrapped       = WrapRunTuple<Run>(std::move(front));
     if constexpr (RestTypes::size == 0) {
         return std::tuple {std::move(wrapped)};
     } else {
-        using NextRun  = typename FirstRunOfList<RestTypes>::type;
+        using NextRun  = typename FirstRunOfList<Resources, RestTypes>::type;
         using RestRest = typename DropFront<RestTypes, NextRun::size>::type;
-        return std::tuple_cat(std::tuple {std::move(wrapped)}, AutoForkPeelImpl<NextRun, RestRest>(std::move(rest)));
+        return std::tuple_cat(std::tuple {std::move(wrapped)}, AutoForkPeelImpl<Resources, NextRun, RestRest>(std::move(rest)));
     }
 }
 
@@ -506,7 +533,7 @@ constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> con
 
 template <typename... Passes>
 constexpr auto PassPack<Passes...>::BuildGraph() && {
-    auto forked = AutoForkPasses(std::move(passes));
+    auto forked = AutoForkPasses<ResourcesOf<Passes...>>(std::move(passes));
     return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
 }
 
@@ -614,16 +641,15 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 
     using Usages = typename PassType::Usages;
 
-    constexpr size_t barrier_count = CountRequiredBarriers<PassIndex, PassType>();
+    constexpr auto barrier_plan = BuildBarrierPlan<PassIndex, PassType>();
 
-    if constexpr (barrier_count > 0) {
-        constexpr auto                                   active_indices = GetBarrierUsageIndices<PassIndex, PassType, barrier_count>();
-        std::array<VkImageMemoryBarrier2, barrier_count> barriers {};
+    if constexpr (barrier_plan.count > 0) {
+        std::array<VkImageMemoryBarrier2, barrier_plan.count> barriers {};
 
         [&]<size_t... Bs>(std::index_sequence<Bs...>) {
             (
                 [&]() {
-                    constexpr size_t us = active_indices[Bs];
+                    constexpr size_t us = barrier_plan.indices[Bs];
                     using UsageType     = typename Usages::template type<us>;
                     using Img           = typename UsageType::Resource;
 
@@ -645,7 +671,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     });
                 }(),
                 ...);
-        }(std::make_index_sequence<barrier_count> {});
+        }(std::make_index_sequence<barrier_plan.count> {});
 
         PipelineBarrier(cmd, {}, barriers);
     }
@@ -910,14 +936,14 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFo
     return ImageSlice {handle, view, extent, format, Tag::aspect};
 }
 
-template <typename... Passes>
+template <typename Resources, typename... Passes>
 constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
     if constexpr (sizeof...(Passes) == 0) {
         return std::tuple {};
     } else {
-        using First = typename TemplatedDetail::FirstRunOfList<TypeList<Passes...>>::type;
+        using First = typename TemplatedDetail::FirstRunOfList<Resources, TypeList<Passes...>>::type;
         using Rest  = typename TemplatedDetail::DropFront<TypeList<Passes...>, First::size>::type;
-        return TemplatedDetail::AutoForkPeelImpl<First, Rest>(std::move(passes));
+        return TemplatedDetail::AutoForkPeelImpl<Resources, First, Rest>(std::move(passes));
     }
 }
 

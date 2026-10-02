@@ -119,6 +119,10 @@ add_dependencies(zahlen_render zahlen_gpu_types)
 
 target_compile_definitions(zahlen_render PRIVATE ZHLN_GPU_ABI_MODULE="${SHADER_GPU_ABI_CS_PATH}")
 
+if(ZHLN_GRAPH_VISUALIZE)
+  target_compile_definitions(zahlen_render PRIVATE ZHLN_GRAPH_VISUALIZE=1)
+endif()
+
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 
 add_subdirectory(OpenGLHacks)

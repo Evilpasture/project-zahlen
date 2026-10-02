@@ -357,6 +357,41 @@ struct HasIntersection: std::false_type {};
 template <typename... As, typename... Bs>
 struct HasIntersection<TypeList<As...>, TypeList<Bs...>>: std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
 
+// A pass's read and write footprint as bitmasks over the graph's resource list: bit
+// N is the resource at index N of that list, the same index a binding and a barrier
+// already use. `ArePassesDisjoint` asks its three hazard questions for every pair of
+// passes in the graph, so two integers turn each pair into three ANDs instead of
+// nested walks of two usage lists, and the type-list machinery those walks
+// instantiated is what the fork partition used to cost.
+//
+// The classification is `IsAnyWrite`/`IsAnyRead` exactly: a usage is a write when its
+// access has a write bit, and every other usage -- including one that names a
+// resource with no access at all -- counts as a read.
+template <typename Resources, typename Pass>
+struct PassFootprint {
+    static constexpr size_t kMaxResources = 64;
+
+    template <typename Usages, size_t I>
+    static constexpr auto Fold(std::array<uint64_t, 2> accumulated) noexcept {
+        using Usage            = typename Usages::template type<I>;
+        constexpr size_t index = GetResourceIndex<Resources, typename Usage::Resource>();
+        static_assert(index < kMaxResources, "The frame graph's hazard masks hold 64 resources; widen them before the graph reaches 65.");
+        const uint64_t bit = uint64_t {1} << index;
+        accumulated[(Usage::access & WriteMask) != 0 ? 0 : 1] |= bit;
+        return accumulated;
+    }
+
+    template <typename Usages, size_t... Is>
+    static consteval auto Build(std::index_sequence<Is...>) noexcept {
+        std::array<uint64_t, 2> accumulated {};
+        ((accumulated = Fold<Usages, Is>(accumulated)), ...);
+        return accumulated;
+    }
+
+    // [0] is what the pass writes, [1] is what it reads.
+    static constexpr std::array<uint64_t, 2> masks = Build<typename Pass::Usages>(std::make_index_sequence<Pass::Usages::size> {});
+};
+
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
     static constexpr bool is_prev_write = (Prev.access & WriteMask) != 0;
@@ -396,10 +431,10 @@ struct AllForkablePasses: std::true_type {};
 template <typename H, typename... T>
 struct AllForkablePasses<TypeList<H, T...>>: std::bool_constant<IsForkablePass<H>::value && AllForkablePasses<TypeList<T...>>::value> {};
 
-template <typename List, typename Candidate>
+template <typename Resources, typename List, typename Candidate>
 struct AllDisjointFrom;
 
-template <typename Acc, typename Rest>
+template <typename Resources, typename Acc, typename Rest>
 struct FirstRun;
 
 template <typename List, size_t N>
@@ -438,32 +473,38 @@ struct WrapRun<TypeList<A, B...>> {
     using type = ParallelPass<A, B...>;
 };
 
-template <typename List>
+template <typename Resources, typename List>
 struct AutoForkRuns;
 
-template <typename List>
+template <typename Resources, typename List>
 struct FirstRunOfList;
 
 }
 
 
-template <typename PassA, typename PassB>
-struct ArePassesDisjoint {
-    using WritesA = TemplatedDetail::Filter<typename PassA::Usages, TemplatedDetail::IsAnyWrite>;
-    using ReadsA  = TemplatedDetail::Filter<typename PassA::Usages, TemplatedDetail::IsAnyRead>;
-    using WritesB = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyWrite>;
-    using ReadsB  = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyRead>;
+// The graph's resource list, as one canonical type. The fork partition and the graph
+// itself both work from this list, so a mask's bit N names the same resource in both
+// -- which is the whole reason the masks are bitmasks and not sets of types.
+template <typename... Passes>
+using ResourcesOf = typename TemplatedDetail::CollectAllResources<Passes...>::type;
 
-    static constexpr bool value = !TemplatedDetail::HasIntersection<WritesA, WritesB>::value && !TemplatedDetail::HasIntersection<WritesA, ReadsB>::value &&
-                                  !TemplatedDetail::HasIntersection<ReadsA, WritesB>::value;
+template <typename Resources, typename PassA, typename PassB>
+struct ArePassesDisjoint {
+    static constexpr auto writes_a = TemplatedDetail::PassFootprint<Resources, PassA>::masks[0];
+    static constexpr auto reads_a  = TemplatedDetail::PassFootprint<Resources, PassA>::masks[1];
+    static constexpr auto writes_b = TemplatedDetail::PassFootprint<Resources, PassB>::masks[0];
+    static constexpr auto reads_b  = TemplatedDetail::PassFootprint<Resources, PassB>::masks[1];
+
+    // Write/write, write/read and read/write, in one expression.
+    static constexpr bool value = ((writes_a & (writes_b | reads_b)) == 0) && ((reads_a & writes_b) == 0);
 };
 
 template <typename... Passes>
 struct AutoFork {
-    using type = typename TemplatedDetail::AutoForkRuns<TypeList<Passes...>>::type;
+    using type = typename TemplatedDetail::AutoForkRuns<ResourcesOf<Passes...>, TypeList<Passes...>>::type;
 };
 
-template <typename... Passes>
+template <typename Resources, typename... Passes>
 constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept;
 
 template <typename... Passes>
@@ -582,52 +623,36 @@ class CompileTimeFrameGraph {
     ) const;
 
   private:
+    // The barriers one pass needs, deduced in a single walk of its usage list: which
+    // usages need a barrier and where each of them sits in that list are two answers
+    // to the same question, so they are computed together instead of by walking the
+    // list twice -- the same resource index, the same state lookup, the same
+    // `NeedsBarrier`, once.
     template <size_t PassIndex, typename PassType>
-    static consteval size_t CountRequiredBarriers() {
-        using Usages = typename PassType::Usages;
-        if constexpr (Usages::size == 0) {
-            return 0;
-        } else {
-            return []<size_t... Is>(std::index_sequence<Is...>) {
-                size_t count = 0;
-                ((count +=
-                  []() {
-                      using UsageType                                     = typename Usages::template type<Is>;
-                      using Img                                           = typename UsageType::Resource;
-                      constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
-                      constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                      return TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
-                  }()),
-                 ...);
-                return count;
-            }(std::make_index_sequence<Usages::size> {});
-        }
-    }
+    struct BarrierPlan {
+        using Usages                     = typename PassType::Usages;
+        std::array<size_t, Usages::size> indices {};
+        size_t                           count = 0;
+    };
 
-    template <size_t PassIndex, typename PassType, size_t BarrierCount>
-    static consteval std::array<size_t, BarrierCount> GetBarrierUsageIndices() {
-        std::array<size_t, BarrierCount> indices {};
-        using Usages = typename PassType::Usages;
-
-        if constexpr (Usages::size == 0) {
-            return indices;
-        } else {
+    template <size_t PassIndex, typename PassType>
+    static consteval auto BuildBarrierPlan() noexcept {
+        BarrierPlan<PassIndex, PassType> plan {};
+        if constexpr (PassType::Usages::size > 0) {
             [&]<size_t... Is>(std::index_sequence<Is...>) {
-                size_t write_idx = 0;
-                (([&]() {
-                     using UsageType                                     = typename Usages::template type<Is>;
+                (([&] {
+                     using UsageType                                     = typename PassType::Usages::template type<Is>;
                      using Img                                           = typename UsageType::Resource;
                      constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
                      constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
                      if constexpr (TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
-                         indices[write_idx++] = Is;
+                         plan.indices[plan.count++] = Is;
                      }
                  }()),
                  ...);
-            }(std::make_index_sequence<Usages::size> {});
-
-            return indices;
+            }(std::make_index_sequence<PassType::Usages::size> {});
         }
+        return plan;
     }
 
     template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
