@@ -996,8 +996,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath);
-            if (prefab == nullptr) {
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath);
+            if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             if (std::string_view(prefab->virtualPath) != kVirtualPath || prefab->nodes.size() != document.nodes_count || prefab->nodes.empty()) {
@@ -1108,7 +1108,8 @@ struct GLTFImportTestSuite {
             }
 
             // The loader is cache-backed: the same virtual path must not import twice.
-            if (ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath) != prefab) {
+            const auto cachedPrefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, kVirtualPath);
+            if (!cachedPrefab || &*cachedPrefab != &*prefab) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
             return {};
@@ -1143,8 +1144,8 @@ struct GLTFImportTestSuite {
             // The prefab cache lives on the pooled engine and outlives the
             // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
-            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
-            if (prefab == nullptr) {
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
+            if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
@@ -1282,9 +1283,9 @@ struct GLTFImportTestSuite {
             // 1. KHR_materials_emissive_strength scales the authored emissive
             //    factor, on top of the import-time unit conversion.
             const std::vector<uint8_t> strengthBytes = MakeEmissiveStrengthFixture();
-            const ZHLN::ModelPrefab*   withStrength =
+            const auto                 withStrength =
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), strengthBytes, "ext_emissive_strength.glb");
-            if (withStrength == nullptr || withStrength->parts.size() != 1) {
+            if (!withStrength || withStrength->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
@@ -1300,8 +1301,8 @@ struct GLTFImportTestSuite {
             //    emissiveStrength = 1 must import identically to one that omits
             //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
-            const ZHLN::ModelPrefab*   plain      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), plainBytes, "ext_emissive_plain.glb");
-            if (plain == nullptr || plain->parts.size() != 1) {
+            const auto                 plain      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), plainBytes, "ext_emissive_plain.glb");
+            if (!plain || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
@@ -1320,8 +1321,8 @@ struct GLTFImportTestSuite {
             //    node it sits on, the part it produces, or the extension that is
             //    read from the same document.
             const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
-            const ZHLN::ModelPrefab*   litMesh  = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), litBytes, "ext_lit_mesh.glb");
-            if (litMesh == nullptr || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
+            const auto                 litMesh  = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), litBytes, "ext_lit_mesh.glb");
+            if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const ZHLN::ModelNode& litNode = litMesh->nodes[0];
@@ -1341,8 +1342,8 @@ struct GLTFImportTestSuite {
             //    dropped: ModelPrefab has nowhere to put it. Pinning that keeps
             //    the gap visible instead of implied.
             const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
-            const ZHLN::ModelPrefab*   lightOnly      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), lightOnlyBytes, "ext_light_only.glb");
-            if (lightOnly == nullptr || lightOnly->nodes.size() != 1) {
+            const auto                 lightOnly      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), lightOnlyBytes, "ext_light_only.glb");
+            if (!lightOnly || lightOnly->nodes.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const ZHLN::ModelNode& lightNode = lightOnly->nodes[0];
@@ -1372,10 +1373,10 @@ struct GLTFImportTestSuite {
             constexpr ZHLN::GLTF::ImportOptions conformant {.emissiveFactorScale = 1.0f};
 
             const auto plainBytes = MakePlainEmissiveFixture();
-            const auto* plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
             const auto strengthBytes = MakeEmissiveStrengthFixture();
-            const auto* strong = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
-            if (plain == nullptr || strong == nullptr || plain->parts.size() != 1 || strong->parts.size() != 1 ||
+            const auto strong = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
+            if (!plain || !strong || plain->parts.size() != 1 || strong->parts.size() != 1 ||
                 plain->emissiveFactorScale != 1.0f || strong->emissiveFactorScale != 1.0f ||
                 plain->maxTextureDimension != ZHLN::kGLTFDefaultMaxTextureDimension) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
@@ -1390,8 +1391,8 @@ struct GLTFImportTestSuite {
             // An emissive image and albedo share a source image. Both must
             // sample sRGB; a PBR data reference to the same image must not.
             const auto texturedBytes = MakeAnisotropyFixture();
-            const auto* textured = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
-            if (textured == nullptr || textured->parts.size() != 1) {
+            const auto textured = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
+            if (!textured || textured->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
@@ -1405,14 +1406,16 @@ struct GLTFImportTestSuite {
             // prefab cache identity. Fidelity can retain 2048px images while
             // other import clients continue using the default 1024px cap.
             constexpr ZHLN::GLTF::ImportOptions detailed {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto* highRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
-            if (highRes == nullptr || highRes->maxTextureDimension != 2048 ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed) != highRes ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant) != nullptr ||
+            const auto highRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            const auto cachedHighRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            const auto cachedPlain   = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            if (!highRes || highRes->maxTextureDimension != 2048 ||
+                !cachedHighRes || &*cachedHighRes != &*highRes ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant).has_value() ||
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {},
-                                                    ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}) != nullptr ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant) != plain ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb") != nullptr) {
+                                                    ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}).has_value() ||
+                !cachedPlain || &*cachedPlain != &*plain ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb").has_value()) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
             }
             return {};
@@ -1440,8 +1443,8 @@ struct GLTFImportTestSuite {
             }
 
             auto& rc = engine->GetRenderContext();
-            const ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, engine->GetAssetManager(), bytes, "ext_anisotropy.glb");
-            if (prefab == nullptr || prefab->parts.size() != 1) {
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, engine->GetAssetManager(), bytes, "ext_anisotropy.glb");
+            if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& expected = source.data->materials[0].anisotropy;
@@ -1531,10 +1534,10 @@ struct GLTFImportTestSuite {
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Unlit");
             if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
                 engine->GetRenderContext(), engine->GetAssetManager(), bytes, "KHR_materials_unlit.glb"
             );
-            if (prefab == nullptr || prefab->parts.size() != 2) {
+            if (!prefab || prefab->parts.size() != 2) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t i = 0; i < 2; ++i) {
@@ -1570,10 +1573,10 @@ struct GLTFImportTestSuite {
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Required SpecGloss");
             if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
                 engine->GetRenderContext(), engine->GetAssetManager(), bytes, "required_specular_glossiness.glb"
             );
-            if (prefab == nullptr || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
+            if (!prefab || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
@@ -1601,10 +1604,10 @@ struct GLTFImportTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless NegativeScale Sidedness");
             if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
 
-            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
                 engine->GetRenderContext(), engine->GetAssetManager(), bytes, "negative_scale_sidedness.glb"
             );
-            if (prefab == nullptr || prefab->parts.size() != 5) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            if (!prefab || prefab->parts.size() != 5) return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
             const auto findPart = [prefab](std::string_view name) -> const ZHLN::ModelPart* {
                 const auto found = std::ranges::find_if(prefab->parts, [name](const auto& part) { return std::string_view(part.name) == name; });
@@ -1663,9 +1666,9 @@ struct GLTFImportTestSuite {
             auto& registry = engine->GetRegistry();
             size_t matched = 0;
             for (uint32_t i = 1; i < count; ++i) { // outBuffer[0] is the prefab root, not a mesh part.
-                const auto* name = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
-                const auto* world = registry.Get<ZHLN::Components::WorldTransformComponent>(spawned[i]);
-                if (name == nullptr || world == nullptr) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                const auto name  = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
+                const auto world = registry.Get<ZHLN::Components::WorldTransformComponent>(spawned[i]);
+                if (!name || !world) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const auto* part = findPart(std::string_view(name->name));
                 if (part == nullptr) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const bool sourceMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(part->nodeIndex)]).GetDeterminant3x3() < 0.0f;
@@ -1698,9 +1701,9 @@ struct GLTFImportTestSuite {
 
             auto& rc = engine->GetRenderContext();
             auto& assets = engine->GetAssetManager();
-            const auto* masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
-            const auto* opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
-            if (masked == nullptr || opaque == nullptr || masked->parts.size() != 1 || opaque->parts.size() != 1) {
+            const auto masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
+            const auto opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
+            if (!masked || !opaque || masked->parts.size() != 1 || opaque->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
@@ -1741,10 +1744,10 @@ struct GLTFImportTestSuite {
                 source.data->meshes[0].primitives[0].attributes_count != 3) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
-            const auto* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
                 engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ext_sheen_transform.glb"
             );
-            if (prefab == nullptr || prefab->parts.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            if (!prefab || prefab->parts.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
             const auto& material = prefab->parts[0].defaultMaterial;
             using ZHLN::MaterialTextureSlot;
@@ -1823,8 +1826,8 @@ struct GLTFImportTestSuite {
             }
 
             const std::vector<uint8_t> bytes  = MakeEmissiveStrengthFixture();
-            const ZHLN::ModelPrefab*   prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "emissive_spawn.glb");
-            if (prefab == nullptr || prefab->parts.size() != 1) {
+            const auto                 prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "emissive_spawn.glb");
+            if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
@@ -1860,27 +1863,27 @@ struct GLTFImportTestSuite {
             const ZHLN::Entity partEntity = entities[1];
             const ZHLN::Entity glowEntity = entities[2];
 
-            const auto* hierarchy = registry.Get<ZHLN::Components::HierarchyComponent>(glowEntity);
-            if (hierarchy == nullptr || hierarchy->parent != partEntity) {
+            const auto hierarchy = registry.Get<ZHLN::Components::HierarchyComponent>(glowEntity);
+            if (!hierarchy || hierarchy->parent != partEntity) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
-            if (registry.Get<ZHLN::Components::LightComponent>(glowEntity) == nullptr) {
+            if (!registry.Get<ZHLN::Components::LightComponent>(glowEntity)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // The stored transform is a local offset. The triangle's bounds sit
             // within a unit box at the origin, so a spawn four metres away must
             // not show up in the light's own TransformComponent.
-            const auto* glowLocal = registry.Get<ZHLN::Components::TransformComponent>(glowEntity);
-            if (glowLocal == nullptr || glowLocal->position.Length() > 2.0f) {
+            const auto glowLocal = registry.Get<ZHLN::Components::TransformComponent>(glowEntity);
+            if (!glowLocal || glowLocal->position.Length() > 2.0f) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
             const JPH::Vec3 localOffset = glowLocal->position;
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
-            const auto* glowWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (glowWorld == nullptr) {
+            const auto glowWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
+            if (!glowWorld) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
             const JPH::Vec3 restingPosition = glowWorld->world.GetTranslation();
@@ -1895,8 +1898,8 @@ struct GLTFImportTestSuite {
 
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
-            const auto* movedWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
-            if (movedWorld == nullptr || !movedWorld->world.GetTranslation().IsClose(restingPosition + delta, 0.001f)) {
+            const auto movedWorld = registry.Get<ZHLN::Components::WorldTransformComponent>(glowEntity);
+            if (!movedWorld || !movedWorld->world.GetTranslation().IsClose(restingPosition + delta, 0.001f)) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 

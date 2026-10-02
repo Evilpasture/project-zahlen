@@ -4,6 +4,7 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/WindowInput.hpp>
@@ -65,8 +66,8 @@ class ZHLN_API PlatformHost {
 
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    [[nodiscard]] auto AsWindow() noexcept -> Window*;
-    [[nodiscard]] auto AsWindow() const noexcept -> const Window*;
+    [[nodiscard]] auto AsWindow() noexcept -> ZHLN::Optional<Window&>;
+    [[nodiscard]] auto AsWindow() const noexcept -> ZHLN::Optional<const Window&>;
 
   private:
     friend class Kernel;

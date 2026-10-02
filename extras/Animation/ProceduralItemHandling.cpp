@@ -211,7 +211,7 @@ void UpdateItemDynamics(
         const JPH::Vec3  origin    = worldItem.GetTranslation();
         const JPH::Vec3  forward   = SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
         Physics::BodyHandle ignoredPhysics {};
-        if (const auto* physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
+        if (const auto physicsComponent = registry.Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsHandle;
         }
         const auto hit = physics.Raycast(JPH::RVec3(origin), forward, handling.avoidance.probeDistance, ignoredPhysics);

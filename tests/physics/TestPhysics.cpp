@@ -190,9 +190,9 @@ struct PhysicsTestSuite {
                 return std::unexpected(PhysicsTestError::RagdollCreationFailed);
             }
             const auto owner = registry.Create(ZHLN::Components::RagdollComponent {.ragdollHandle = first});
-            ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) != nullptr);
+            ZHLN::Test::ExpectTrue(pc.GetRagdoll(first).has_value());
             ZHLN::SceneResources::Detach<ZHLN::Components::RagdollComponent>(pc, registry, owner);
-            ZHLN::Test::ExpectTrue(pc.GetRagdoll(first) == nullptr);
+            ZHLN::Test::ExpectFalse(pc.GetRagdoll(first).has_value());
 
             const auto second = pc.CreateSkeletalRagdoll(skeleton, parts);
             ZHLN::Test::ExpectTrue(second != first);
@@ -200,7 +200,7 @@ struct PhysicsTestSuite {
             const std::vector<ZHLN::Physics::RagdollHandle> handles {second, first, second};
             pc.DestroyRagdolls(handles);
             registry.Clear();
-            ZHLN::Test::ExpectTrue(pc.GetRagdoll(second) == nullptr);
+            ZHLN::Test::ExpectFalse(pc.GetRagdoll(second).has_value());
             pc.DestroyRagdoll(second); // stale generations and repeated release are safe
             return {};
         }

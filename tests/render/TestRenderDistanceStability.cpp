@@ -1047,12 +1047,12 @@ struct DistanceStabilitySuite {
                             // display-space color. Record the CPU submission
                             // decision and actual pixels where the box should
                             // project before attributing this to a culler.
-                            const auto& mainVisible   = eng.GetVisibleEntities();
-                            const auto& shadowVisible = eng.GetVisibleShadowEntities();
-                            const auto& reg           = eng.GetRegistry();
-                            const auto* meshComp      = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
-                            const bool meshRegistered = meshComp != nullptr && eng.GetRenderContext().GetGPUMesh(meshComp->meshAsset).has_value();
-                            const bool matRegistered  = meshComp != nullptr && eng.GetRenderContext().GetGPUMaterial(meshComp->materialAsset).has_value();
+                            const auto& mainVisible    = eng.GetVisibleEntities();
+                            const auto& shadowVisible  = eng.GetVisibleShadowEntities();
+                            const auto& reg            = eng.GetRegistry();
+                            const auto  meshComp       = reg.Get<ZHLN::Components::MeshComponent>(ringEntities[i]);
+                            const bool  meshRegistered = meshComp && eng.GetRenderContext().GetGPUMesh(meshComp->meshAsset).has_value();
+                            const bool  matRegistered  = meshComp && eng.GetRenderContext().GetGPUMaterial(meshComp->materialAsset).has_value();
                             const int cx = std::clamp((windows[i].first + windows[i].second) / 2, 0, frame.width - 1);
                             const int cy = frame.height / 2;
                             const auto sample = [&](int x, int y) -> std::array<int, 3> {

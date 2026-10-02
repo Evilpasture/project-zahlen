@@ -1132,7 +1132,7 @@ auto GetOrCreateCompiledPrimitive(
  * Adheres strictly to aggregate initialization and DRY across disk & memory pathways.
  */
 auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath,
-                      ImportOptions options) -> ModelPrefab* {
+                      ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
     // RAII guard ensures cgltf_data is cleanly freed on function exit
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> dataGuard(data, &cgltf_free);
 
@@ -1390,7 +1390,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     // The asset cache, not the renderer's AssetID lookup, owns the uploaded
     // buffers. One compiled primitive can be referenced by several parts.
     cwMgr.UseRenderContext(ctx);
-    ModelPrefab* raw = prefab.get();
+    ModelPrefab& raw = *prefab;
     cwMgr.CachePrefab(HashAssetPath(virtualPath), std::move(prefab));
     return raw;
 }
@@ -1437,8 +1437,8 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     });
 }
 
-[[nodiscard]] bool MatchesCachedImportOptions(const ModelPrefab* cached, std::string_view path, ImportOptions options) {
-    if (cached == nullptr) {
+[[nodiscard]] bool MatchesCachedImportOptions(ZHLN::Optional<const ModelPrefab&> cached, std::string_view path, ImportOptions options) {
+    if (!cached) {
         return true;
     }
     if (cached->emissiveFactorScale != options.emissiveFactorScale || cached->maxTextureDimension != options.maxTextureDimension) {
@@ -1468,21 +1468,21 @@ void RegisterPrefabGPUResources(RenderContext& ctx, const ModelPrefab& prefab) {
 // Public Entry Points
 // ============================================================================
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options) -> ModelPrefab* {
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
     if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", path, options.emissiveFactorScale);
-        return nullptr;
+        return std::nullopt;
     }
     if (options.maxTextureDimension == 0) {
         Log("[glTF] '{}' requested a zero texture dimension limit.", path);
-        return nullptr;
+        return std::nullopt;
     }
-    const uint64_t hash = HashAssetPath(path);
-    auto* const cached = cwMgr.GetCachedPrefab(hash);
+    const uint64_t hash   = HashAssetPath(path);
+    const auto     cached = cwMgr.GetCachedPrefab(hash);
     if (!MatchesCachedImportOptions(cached, path, options)) {
-        return nullptr;
+        return std::nullopt;
     }
-    if (cached != nullptr && !NeedsGPURefresh(*cached)) {
+    if (cached && !NeedsGPURefresh(*cached)) {
         return cached;
     }
 
@@ -1494,18 +1494,18 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
 
     if (cgltf_parse_file(&opts, rawPath.c_str(), &data) != cgltf_result_success) {
         LogError("Failed to parse GLB from file: {}", rawPath);
-        return nullptr;
+        return std::nullopt;
     }
 
     ValidateDeclaredExtensions(*data, path);
     if (cgltf_load_buffers(&opts, data, rawPath.c_str()) != cgltf_result_success) {
         LogError("Failed to load GLB buffers from file: {}", rawPath);
         cgltf_free(data);
-        return nullptr;
+        return std::nullopt;
     }
     ValidateFeatureUsage(*data, path);
 
-    if (cached != nullptr) {
+    if (cached) {
         cwMgr.UseRenderContext(ctx);
         RefreshPrefabGPUResources(ctx, *cached, data, rawPath);
         cgltf_free(data);
@@ -1522,21 +1522,21 @@ auto LoadGLBPrefabFromMemory(
     std::string_view         virtualPath,
     std::string_view         bytesPath,
     ImportOptions            options
-) -> ModelPrefab* {
+) -> ZHLN::Optional<ModelPrefab&> {
     if (!std::isfinite(options.emissiveFactorScale) || options.emissiveFactorScale <= 0.0f) {
         Log("[glTF] '{}' requested an invalid emissive factor scale {}.", virtualPath, options.emissiveFactorScale);
-        return nullptr;
+        return std::nullopt;
     }
     if (options.maxTextureDimension == 0) {
         Log("[glTF] '{}' requested a zero texture dimension limit.", virtualPath);
-        return nullptr;
+        return std::nullopt;
     }
-    const uint64_t hash = HashAssetPath(virtualPath);
-    auto* const cached = cwMgr.GetCachedPrefab(hash);
+    const uint64_t hash   = HashAssetPath(virtualPath);
+    const auto     cached = cwMgr.GetCachedPrefab(hash);
     if (!MatchesCachedImportOptions(cached, virtualPath, options)) {
-        return nullptr;
+        return std::nullopt;
     }
-    if (cached != nullptr && !NeedsGPURefresh(*cached)) {
+    if (cached && !NeedsGPURefresh(*cached)) {
         return cached;
     }
 
@@ -1550,18 +1550,18 @@ auto LoadGLBPrefabFromMemory(
 
     if (cgltf_parse(&opts, bytes.data(), bytes.size(), &data) != cgltf_result_success) {
         LogError("Failed to parse in-memory GLB: {}", virtualPath);
-        return nullptr;
+        return std::nullopt;
     }
 
     ValidateDeclaredExtensions(*data, virtualPath);
     if (cgltf_load_buffers(&opts, data, basePath.empty() ? nullptr : basePath.c_str()) != cgltf_result_success) {
         LogError("Failed to load in-memory GLB buffers: {}", virtualPath);
         cgltf_free(data);
-        return nullptr;
+        return std::nullopt;
     }
     ValidateFeatureUsage(*data, virtualPath);
 
-    if (cached != nullptr) {
+    if (cached) {
         cwMgr.UseRenderContext(ctx);
         RefreshPrefabGPUResources(ctx, *cached, data, basePath);
         cgltf_free(data);
@@ -1603,8 +1603,8 @@ auto InstantiatePrefabFromMemory(
     Entity*                                  outBuffer,
     uint32_t                                 maxCount
 ) -> uint32_t {
-    const auto* prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
-    if (prefab == nullptr) {
+    const auto prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
+    if (!prefab) {
         return 0;
     }
     return PrefabFactory::InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);

@@ -33,8 +33,8 @@ auto SpatialGrid::GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t {
 }
 
 void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg old_pos) {
-    auto* comp = reg.Get<ALifeComponent>(handle);
-    if (comp == nullptr) {
+    auto comp = reg.Get<ALifeComponent>(handle);
+    if (!comp) {
         return;
     }
 
@@ -59,8 +59,8 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
                 *curr = comp->next_in_grid;
                 break;
             }
-            auto* curr_comp = reg.Get<ALifeComponent>(*curr);
-            if (curr_comp == nullptr) {
+            auto curr_comp = reg.Get<ALifeComponent>(*curr);
+            if (!curr_comp) {
                 break;
             }
             curr = &curr_comp->next_in_grid;
@@ -75,8 +75,8 @@ void SpatialGrid::UpdateEntity(ECS::Registry& reg, Entity handle, JPH::RVec3Arg 
 }
 
 void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
-    auto* comp = reg.Get<ALifeComponent>(handle);
-    if (comp == nullptr) {
+    auto comp = reg.Get<ALifeComponent>(handle);
+    if (!comp) {
         return;
     }
 
@@ -89,8 +89,8 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
                 comp->next_in_grid = Entity::Null();
                 break;
             }
-            auto* curr_comp = reg.Get<ALifeComponent>(*curr);
-            if (curr_comp == nullptr) {
+            auto curr_comp = reg.Get<ALifeComponent>(*curr);
+            if (!curr_comp) {
                 break;
             }
             curr = &curr_comp->next_in_grid;
@@ -120,8 +120,8 @@ auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radiu
 
             Entity current = _cellHeads[(z * static_cast<int32_t>(_width)) + x];
             while (current != Entity::Null()) {
-                const auto* comp = reg.Get<ALifeComponent>(current);
-                if (comp == nullptr) {
+                const auto comp = reg.Get<ALifeComponent>(current);
+                if (!comp) {
                     break; // A destroyed component cannot supply the next link.
                 }
 

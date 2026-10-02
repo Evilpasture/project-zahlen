@@ -50,8 +50,8 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             continue;
         }
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        auto* recording = destinations.FindRecording(dest.id);
-        if (recording == nullptr || !recording->recorder.IsRecording()) {
+        auto recording = destinations.FindRecording(dest.id);
+        if (!recording || !recording->recorder.IsRecording()) {
             ZHLN::Log("[Render] Window target has no command stream to present.");
             dest.acquired.reset();
             destPresenter.AdvanceFrame();

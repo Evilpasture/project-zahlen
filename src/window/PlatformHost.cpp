@@ -337,15 +337,22 @@ void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const File
 }
 
 
-auto PlatformHost::AsWindow() noexcept -> Window* {
+auto PlatformHost::AsWindow() noexcept -> ZHLN::Optional<Window&> {
     if (auto* backend = std::get_if<WindowedBackend>(&_impl->backend)) {
-        return backend->window.get();
+        if (backend->window != nullptr) {
+            return *backend->window;
+        }
     }
-    return nullptr;
+    return std::nullopt;
 }
 
-auto PlatformHost::AsWindow() const noexcept -> const Window* {
-    return const_cast<PlatformHost*>(this)->AsWindow();
+auto PlatformHost::AsWindow() const noexcept -> ZHLN::Optional<const Window&> {
+    if (const auto* backend = std::get_if<WindowedBackend>(&_impl->backend)) {
+        if (backend->window != nullptr) {
+            return *backend->window;
+        }
+    }
+    return std::nullopt;
 }
 
 }

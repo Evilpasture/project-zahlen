@@ -25,7 +25,7 @@ void ReleaseSelected(Engine& engine, bool all) {
     }
     auto components = registry.GetRawArray<T>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        if (all || registry.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+        if (all || registry.Get<Components::PendingDestroy>(entities[i]).has_value()) {
             SceneResources::Release(engine, components[i]);
         }
     }
@@ -43,7 +43,7 @@ void ReleasePhysics(Engine& engine, bool all) {
         bodies.reserve(bodyOwners.size());
         auto components = registry.GetRawArray<Components::PhysicsComponent>();
         for (size_t i = 0; i < bodyOwners.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(bodyOwners[i]) != nullptr) {
+            if (all || registry.Get<Components::PendingDestroy>(bodyOwners[i]).has_value()) {
                 bodies.push_back(std::exchange(components[i].physicsHandle, Physics::BodyHandle::Null()));
             }
         }
@@ -56,7 +56,7 @@ void ReleasePhysics(Engine& engine, bool all) {
         ragdolls.reserve(ragdollOwners.size());
         auto components = registry.GetRawArray<Components::RagdollComponent>();
         for (size_t i = 0; i < ragdollOwners.size(); ++i) {
-            if (all || registry.Get<Components::PendingDestroy>(ragdollOwners[i]) != nullptr) {
+            if (all || registry.Get<Components::PendingDestroy>(ragdollOwners[i]).has_value()) {
                 ragdolls.push_back(std::exchange(components[i].ragdollHandle, Physics::RagdollHandle::Invalid));
                 components[i].isAddedToPhysics = false;
             }

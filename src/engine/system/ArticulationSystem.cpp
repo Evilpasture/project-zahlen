@@ -120,20 +120,20 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity                        e       = entities[i];
         Components::RagdollComponent& ragComp = ragdolls[i];
-        auto*                         phys    = query.Get<Components::PhysicsComponent>(e);
+        auto                          phys    = query.Get<Components::PhysicsComponent>(e);
 
         if (ragComp.ragdollHandle == Physics::RagdollHandle::Invalid) {
             continue;
         }
-        JPH::Ragdoll* ragdoll = pc.GetRagdoll(ragComp.ragdollHandle);
-        if (ragdoll == nullptr) {
+        auto ragdoll = pc.GetRagdoll(ragComp.ragdollHandle);
+        if (!ragdoll) {
             continue;
         }
 
         uint32_t offset = ragComp.jointOffset;
         uint32_t count  = ragComp.jointCount;
 
-        if (auto* hitCmd = query.Get<Components::RagdollHitReactionCommand>(e)) {
+        if (auto hitCmd = query.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
                 sys._jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
@@ -145,7 +145,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             registry.Remove<Components::RagdollHitReactionCommand>(e);
         }
 
-        if (auto* impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
+        if (auto impulseCmd = query.Get<Components::RagdollImpulseCommand>(e)) {
             pc.AddRagdollImpulse(ragComp.ragdollHandle, impulseCmd->jointIndex, impulseCmd->impulse);
             registry.Remove<Components::RagdollImpulseCommand>(e);
         }
@@ -182,7 +182,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         const JPH::Skeleton* skel = ragdoll->GetRagdollSettings()->GetSkeleton();
 
         JPH::RVec3 capsuleWorldPos = JPH::RVec3::sZero();
-        if (phys != nullptr && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
+        if (phys && !pc.TryGetBodyPosition(phys->physicsHandle, capsuleWorldPos)) {
             capsuleWorldPos = JPH::RVec3::sZero();
         }
 
@@ -205,7 +205,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
             }
         }
 
-        if (const auto* poseOverride = query.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride != nullptr && poseOverride->valid) {
+        if (const auto poseOverride = query.Get<Components::KinematicPoseOverrideComponent>(e); poseOverride && poseOverride->valid) {
             const uint32_t overrideCount = std::min<uint32_t>(count, poseOverride->jointCount);
             std::copy_n(poseOverride->modelTransforms.begin(), overrideCount, modelJoints.begin());
         }
@@ -216,7 +216,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
         if (ragComp.state != ragComp.prevState) {
             if (ragComp.state == RagdollState::Dynamic || ragComp.state == RagdollState::Kinematic || ragComp.state == RagdollState::PartialBlend) {
                 if (!ragComp.isAddedToPhysics) {
-                    const JPH::Vec3 initialVelocity = phys != nullptr ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
+                    const JPH::Vec3 initialVelocity = phys ? pc.GetCharacterVelocity(phys->physicsHandle) : JPH::Vec3::sZero();
                     pc.ActivateRagdoll(ragComp.ragdollHandle, animPose, initialVelocity);
                     ragComp.isAddedToPhysics = true;
                 }
@@ -241,9 +241,9 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
 
             auto allSkinnedEntities = query.Entities<Components::SkeletalMeshComponent>();
             for (Entity childEnt: allSkinnedEntities) {
-                auto* skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
-                if (skelMesh != nullptr && skelMesh->jointOffset == offset) {
-                    if (auto* trans = query.Get<Components::TransformComponent>(childEnt)) {
+                auto skelMesh = query.Get<Components::SkeletalMeshComponent>(childEnt);
+                if (skelMesh && skelMesh->jointOffset == offset) {
+                    if (auto trans = query.Get<Components::TransformComponent>(childEnt)) {
                         trans->position = JPH::Vec3(actualRootOffset);
                         trans->rotation = JPH::Quat::sIdentity();
                     }

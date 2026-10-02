@@ -16,20 +16,20 @@
 namespace ZHLN::Character {
 
 namespace {
-[[nodiscard]] const Components::InputStateComponent* GetInputState(const ECS::Registry& reg) noexcept {
+[[nodiscard]] auto GetInputState(const ECS::Registry& reg) noexcept -> ZHLN::Optional<const Components::InputStateComponent&> {
     return reg.GetSingleton<Components::InputStateComponent>();
 }
 } // namespace
 
 void PlayerInputSystem::Update(Engine& engine) {
-    auto&       reg   = engine.GetRegistry();
-    const auto* state = GetInputState(reg);
-    if (state == nullptr) {
+    auto&      reg   = engine.GetRegistry();
+    const auto state = GetInputState(reg);
+    if (!state) {
         return;
     }
 
     for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
-        if (auto* ic = reg.Get<InputComponent>(e)) {
+        if (auto ic = reg.Get<InputComponent>(e)) {
             float moveX = 0.0f;
             float moveZ = 0.0f;
             if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
@@ -79,10 +79,10 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
     auto& reg = engine.GetRegistry();
 
     Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
-    if (camEnt != Entity::Null() && reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
+    if (camEnt != Entity::Null() && reg.Get<Components::FreeCamTagComponent>(camEnt)) {
         // Zero out player intent so they stand frozen in an Idle pose
         for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-            if (auto* move = reg.Get<MovementComponent>(e)) {
+            if (auto move = reg.Get<MovementComponent>(e)) {
                 move->inputX        = 0.0f;
                 move->inputZ        = 0.0f;
                 move->jumpRequested = false;
@@ -92,9 +92,9 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
     }
 
     for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
-        auto* move  = reg.Get<MovementComponent>(e);
-        auto* input = reg.Get<InputComponent>(e);
-        if ((move == nullptr) || (input == nullptr)) {
+        auto move  = reg.Get<MovementComponent>(e);
+        auto input = reg.Get<InputComponent>(e);
+        if (!move || !input) {
             continue;
         }
 

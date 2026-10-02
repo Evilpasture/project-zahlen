@@ -31,9 +31,9 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<En
             continue;
         }
 
-        const auto* worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
-        JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
-        JPH::Vec3   pos        = worldMat * meshes[i].localCenter;
+        const auto worldTrans = query.Get<Components::WorldTransformComponent>(entities[i]);
+        JPH::Mat44 worldMat   = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Vec3  pos        = worldMat * meshes[i].localCenter;
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
 
@@ -145,7 +145,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
     auto entities       = query.Entities<Components::MeshComponent>();
     auto cameraEntities = query.Entities<Components::CameraComponent>();
 
-    Components::CameraComponent* cComp = nullptr;
+    ZHLN::Optional<Components::CameraComponent&> cComp;
     if (!cameraEntities.empty()) {
         cComp = query.Get<Components::CameraComponent>(cameraEntities[0]);
     }
@@ -156,14 +156,14 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
 
     auto settingsEntities = query.Entities<Components::GlobalSettingsTagComponent>();
     if (!settingsEntities.empty()) {
-        if (auto* pp = query.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
+        if (auto pp = query.Get<Components::PostProcessSettingsComponent>(settingsEntities[0])) {
             isFullBright = (pp->fullBright != 0);
         }
     }
 
     auto shadowEntities = query.Entities<Components::ShadowSettingsComponent>();
     if (!shadowEntities.empty()) {
-        if (auto* shadowSettings = query.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
+        if (auto shadowSettings = query.Get<Components::ShadowSettingsComponent>(shadowEntities[0])) {
             shadowWidth      = shadowSettings->shadowWidth;
             shadowResolution = shadowSettings->shadowResolution;
         }
@@ -171,7 +171,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
 
     if (m_stats.FreezeFrustum && engineCam) {
         if (!m_wasFrozen) {
-            if (cComp != nullptr) {
+            if (cComp) {
                 cComp->frozenViewProj = cComp->unjitteredViewProj;
                 JPH::Mat44 invVP      = cComp->frozenViewProj.Inversed();
                 auto       ndc        = std::to_array<JPH::Vec4>(
@@ -194,11 +194,11 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
             }
             m_wasFrozen = true;
         }
-        if (cComp != nullptr) {
+        if (cComp) {
             cam.frustum.Update(cComp->frozenViewProj);
         }
     } else {
-        if (engineCam && cComp != nullptr) {
+        if (engineCam && cComp) {
             cam.frustum.Update(cComp->unjitteredViewProj);
         }
         if (!m_stats.FreezeFrustum) {
@@ -278,8 +278,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
                 meshTris = (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
             }
 
-            const auto* worldTrans = query.Get<Components::WorldTransformComponent>(e);
-            JPH::Mat44  worldMat   = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+            const auto worldTrans = query.Get<Components::WorldTransformComponent>(e);
+            JPH::Mat44 worldMat   = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
 
             batchEntities[n] = e;
             batchCenters[n]  = worldMat * meshComp.localCenter;

@@ -4,6 +4,7 @@
 #pragma once
 
 
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <span>
 #include <utility>
@@ -31,8 +32,8 @@ class EventBus {
 
     template <typename T>
     [[nodiscard]] auto View() const -> std::span<const T> {
-        const Queue* slot = Find(GetTypeHash<T>());
-        if (slot == nullptr || slot->storage == nullptr) {
+        const auto slot = Find(GetTypeHash<T>());
+        if (!slot || slot->storage == nullptr) {
             return {};
         }
         const auto* q = static_cast<const std::vector<T>*>(slot->storage);
@@ -41,8 +42,8 @@ class EventBus {
 
     template <typename T, typename Fn>
     void Drain(Fn&& fn) {
-        Queue* slot = Find(GetTypeHash<T>());
-        if (slot == nullptr || slot->storage == nullptr) {
+        auto slot = Find(GetTypeHash<T>());
+        if (!slot || slot->storage == nullptr) {
             return;
         }
         auto* q = static_cast<std::vector<T>*>(slot->storage);
@@ -54,8 +55,8 @@ class EventBus {
 
     template <typename T>
     void Clear() {
-        Queue* slot = Find(GetTypeHash<T>());
-        if (slot == nullptr || slot->storage == nullptr) {
+        auto slot = Find(GetTypeHash<T>());
+        if (!slot || slot->storage == nullptr) {
             return;
         }
         static_cast<std::vector<T>*>(slot->storage)->clear();
@@ -80,23 +81,26 @@ class EventBus {
 
     std::vector<Queue> _queues;
 
-    [[nodiscard]] auto Find(uint32_t hash) const -> const Queue* {
+    [[nodiscard]] auto Find(uint32_t hash) const -> ZHLN::Optional<const Queue&> {
         for (const Queue& slot: _queues) {
             if (slot.hash == hash) {
-                return &slot;
+                return slot;
             }
         }
-        return nullptr;
+        return std::nullopt;
     }
 
-    [[nodiscard]] auto Find(uint32_t hash) -> Queue* {
-        return const_cast<Queue*>(std::as_const(*this).Find(hash));
+    [[nodiscard]] auto Find(uint32_t hash) -> ZHLN::Optional<Queue&> {
+        if (auto found = std::as_const(*this).Find(hash)) {
+            return const_cast<Queue&>(*found);
+        }
+        return std::nullopt;
     }
 
     template <typename T>
     auto Ensure() -> Queue& {
         const uint32_t hash = GetTypeHash<T>();
-        if (Queue* existing = Find(hash)) {
+        if (auto existing = Find(hash)) {
             return *existing;
         }
         Queue slot;

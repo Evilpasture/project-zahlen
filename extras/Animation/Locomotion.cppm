@@ -301,8 +301,8 @@ auto
         return;
     }
 
-    const auto* trans = reg.Get<Components::TransformComponent>(playerEntity);
-    if (trans == nullptr) {
+    const auto trans = reg.Get<Components::TransformComponent>(playerEntity);
+    if (!trans) {
         return;
     }
 
@@ -318,8 +318,8 @@ auto
     DrawWireframeSphere(rc, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector
-    const auto* move = reg.Get<Character::MovementComponent>(playerEntity);
-    if (move != nullptr) {
+    const auto move = reg.Get<Character::MovementComponent>(playerEntity);
+    if (move) {
         const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
         const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
         if (vel.LengthSq() > 0.01f) {

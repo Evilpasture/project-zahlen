@@ -501,7 +501,7 @@ struct PBRTestSuite {
             }
             // The sun must be scene-owned now, not packed into ambient SH.
             const auto generated = reg.GetEntitiesWith<ZHLN::Components::EnvironmentSunTagComponent>();
-            const auto* light = generated.size() == 1 ? reg.Get<ZHLN::Components::LightComponent>(generated[0]) : nullptr;
+            const auto light     = generated.size() == 1 ? reg.Get<ZHLN::Components::LightComponent>(generated[0]) : ZHLN::Optional<ZHLN::Components::LightComponent&> {};
             if (!light || light->type != ZHLN::LightType::Sun ||
                 std::abs(light->direction.GetX() - expectedSun.direction[0]) > 0.01f ||
                 std::abs(light->color.GetX() - 3.14159265f * expectedSun.irradiance[0]) > 0.02f) {

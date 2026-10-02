@@ -26,7 +26,7 @@ class InteractionSystem {
                                   TriggerComponent&, const Components::InputStateComponent, PickupComponent&,
                                   const ItemBaseComponent, ContainerComponent&, const Components::PhysicsComponent,
                                   const Components::MeshComponent, const UsableComponent> query,
-                       ECS::Registry& registry, ECS::OptionRes<PhysicsContext> physics, ECS::OptionRes<AudioContext> audio);
+                       ECS::Registry& registry, ZHLN::Optional<PhysicsContext&> physics, ZHLN::Optional<AudioContext&> audio);
 };
 
 // Composition-root entry point: registers the interaction components with

@@ -5,6 +5,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -41,11 +42,12 @@ class ZHLN_API Kernel {
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
     [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
 
-    [[nodiscard]] auto GetWindow() noexcept -> Window*;
+    [[nodiscard]] auto GetWindow() noexcept -> ZHLN::Optional<Window&>;
 
     void ProcessEvents();
 
-    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window*;
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
+        -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);
 
     [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;

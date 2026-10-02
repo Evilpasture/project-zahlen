@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -94,9 +95,9 @@ class HashMap {
         _size++;
     }
 
-    [[nodiscard]] auto Find(const Key& key) const noexcept -> const Value* {
+    [[nodiscard]] auto Find(const Key& key) const noexcept -> ZHLN::Optional<const Value&> {
         if (_capacity == 0 || _size == 0) {
-            return nullptr;
+            return std::nullopt;
         }
 
         const size_t mask = _capacity - 1;
@@ -104,15 +105,28 @@ class HashMap {
 
         while (_states[idx] != 0) {
             if (_states[idx] == 1 && _keys[idx] == key) {
-                return &_values[idx];
+                return _values[idx];
             }
             idx = (idx + 1) & mask;
         }
-        return nullptr;
+        return std::nullopt;
     }
 
-    [[nodiscard]] auto Find(const Key& key) noexcept -> Value* {
-        return const_cast<Value*>(std::as_const(*this).Find(key));
+    [[nodiscard]] auto Find(const Key& key) noexcept -> ZHLN::Optional<Value&> {
+        if (_capacity == 0 || _size == 0) {
+            return std::nullopt;
+        }
+
+        const size_t mask = _capacity - 1;
+        size_t       idx  = Hash(key) & mask;
+
+        while (_states[idx] != 0) {
+            if (_states[idx] == 1 && _keys[idx] == key) {
+                return _values[idx];
+            }
+            idx = (idx + 1) & mask;
+        }
+        return std::nullopt;
     }
 
     auto Erase(const Key& key) noexcept -> bool {

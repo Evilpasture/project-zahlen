@@ -8,6 +8,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/CrashState.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
@@ -89,8 +90,9 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
     [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
-    [[nodiscard]] auto GetWindow() noexcept -> Window*;
-    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> Window*;
+    [[nodiscard]] auto GetWindow() noexcept -> ZHLN::Optional<Window&>;
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {})
+        -> ZHLN::Optional<Window&>;
     void RemoveWindow(Window& window);
 
     [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<FrameTarget>;
@@ -162,7 +164,7 @@ class ZHLN_API Engine {
     void AddTeardownHook(TeardownHook hook);
 
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
-    [[nodiscard]] auto GetUICallback() const noexcept -> const UICallback*;
+    [[nodiscard]] auto GetUICallback() const noexcept -> ZHLN::Optional<const UICallback&>;
 
     void ProvokeDeviceLost();
 

@@ -15,6 +15,7 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Vertex.hpp>
 // clang-format on
@@ -241,7 +242,7 @@ class ZHLN_API PhysicsContext {
     void DestroyRagdoll(Physics::RagdollHandle handle) noexcept;
     void DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept;
     // Borrowed until DestroyRagdoll; use only while the owning component is live.
-    [[nodiscard]] auto GetRagdoll(Physics::RagdollHandle handle) const noexcept -> JPH::Ragdoll*;
+    [[nodiscard]] auto GetRagdoll(Physics::RagdollHandle handle) const noexcept -> ZHLN::Optional<JPH::Ragdoll&>;
     void ActivateRagdoll(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
     void RemoveRagdoll(Physics::RagdollHandle handle) noexcept;
     void DriveRagdollPose(Physics::RagdollHandle handle, const JPH::SkeletonPose& pose) noexcept;

@@ -21,7 +21,7 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                                           TriggerComponent&, const Components::InputStateComponent, PickupComponent&,
                                           const ItemBaseComponent, ContainerComponent&, const Components::PhysicsComponent,
                                           const Components::MeshComponent, const UsableComponent> query,
-                               ECS::Registry& registry, ECS::OptionRes<PhysicsContext> physics, ECS::OptionRes<AudioContext> audio) {
+                               ECS::Registry& registry, ZHLN::Optional<PhysicsContext&> physics, ZHLN::Optional<AudioContext&> audio) {
 
     // The player is whoever carries a MovementComponent (character
     // controller's; installed through the same extension seam).
@@ -35,8 +35,8 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
         return;
     }
 
-    auto* playerTrans = query.Get<Components::TransformComponent>(playerEnt);
-    if (playerTrans == nullptr) {
+    auto playerTrans = query.Get<Components::TransformComponent>(playerEnt);
+    if (!playerTrans) {
         return;
     }
 
@@ -45,8 +45,8 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
     auto triggerEntities = query.Entities<TriggerComponent>();
     auto triggers        = query.Raw<TriggerComponent>();
 
-    auto*       inputState          = query.GetSingleton<Components::InputStateComponent>();
-    bool        interactPressed     = (inputState != nullptr) && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
+    auto        inputState          = query.GetSingleton<Components::InputStateComponent>();
+    bool        interactPressed     = inputState && inputState->IsKeyDown(static_cast<uint8_t>(KeyCode::E));
     static bool wasInteractPressed  = false;
     bool        interactJustPressed = interactPressed && !wasInteractPressed;
     wasInteractPressed              = interactPressed;
@@ -61,8 +61,8 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
             continue;
         }
 
-        auto* trans = query.Get<Components::TransformComponent>(triggerEnt);
-        if (trans == nullptr) {
+        auto trans = query.Get<Components::TransformComponent>(triggerEnt);
+        if (!trans) {
             continue;
         }
 
@@ -74,12 +74,12 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                 bool processed = false;
 
                 // Handle Pickups
-                if (auto* pickup = query.Get<PickupComponent>(triggerEnt)) {
-                    auto* itemBase = query.Get<ItemBaseComponent>(triggerEnt);
-                    if (itemBase != nullptr) {
-                        auto* container = query.Get<ContainerComponent>(playerEnt);
-                        if (container == nullptr) {
-                            container = &registry.Add(playerEnt, ContainerComponent {});
+                if (auto pickup = query.Get<PickupComponent>(triggerEnt)) {
+                    auto itemBase = query.Get<ItemBaseComponent>(triggerEnt);
+                    if (itemBase) {
+                        auto container = query.Get<ContainerComponent>(playerEnt);
+                        if (!container) {
+                            container = registry.Add(playerEnt, ContainerComponent {});
                         }
 
                         if (container->count < ContainerComponent::MAX_SLOTS) {
@@ -89,7 +89,7 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                             if (physics) {
                                 SceneResources::Detach<Components::PhysicsComponent>(*physics, registry, triggerEnt);
                             }
-                            if (query.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
+                            if (query.Get<Components::MeshComponent>(triggerEnt)) {
                                 registry.Remove<Components::MeshComponent>(triggerEnt);
                             }
 
@@ -108,7 +108,7 @@ void InteractionSystem::Update(ECS::Query<const Character::MovementComponent, co
                 }
 
                 if (!processed) {
-                    if (auto* usable = query.Get<UsableComponent>(triggerEnt)) {
+                    if (auto usable = query.Get<UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
                             if (audio) audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});

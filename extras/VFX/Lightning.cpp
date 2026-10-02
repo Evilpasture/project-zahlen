@@ -209,7 +209,7 @@ void CleanupLightning(Engine& engine, bool all) {
     }
     auto bolts = reg.GetRawArray<LightningComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
-        if (all || reg.Get<Components::PendingDestroy>(entities[i]) != nullptr) {
+        if (all || reg.Get<Components::PendingDestroy>(entities[i])) {
             ReleaseLightning(engine, bolts[i]);
         }
     }
@@ -234,7 +234,7 @@ void RegisterCleanup(Engine& engine) {
 namespace Lightning {
 
 void Detach(Engine& engine, Entity entity) {
-    if (auto* bolt = engine.GetRegistry().Get<LightningComponent>(entity)) {
+    if (auto bolt = engine.GetRegistry().Get<LightningComponent>(entity)) {
         ReleaseLightning(engine, *bolt);
         engine.GetRegistry().Remove<LightningComponent>(entity);
     }
@@ -255,13 +255,13 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     float      baseExposure = 4.5f;
     const auto existingEnts = reg.GetEntitiesWith<LightningComponent>();
     if (!existingEnts.empty()) {
-        if (const auto* existingComp = reg.Get<LightningComponent>(existingEnts[0])) {
+        if (const auto existingComp = reg.Get<LightningComponent>(existingEnts[0])) {
             baseExposure = existingComp->baseAmbientExposure;
         }
     } else {
         const auto settingsEnts = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>();
         if (!settingsEnts.empty()) {
-            if (const auto* pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
+            if (const auto pp = reg.Get<Components::PostProcessSettingsComponent>(settingsEnts[0])) {
                 baseExposure = pp->ambientExposure;
             }
         }
@@ -365,7 +365,7 @@ auto Update(Engine& engine, float dt) -> void {
         const Entity        e    = ents[i];
         LightningComponent& bolt = bolts[i];
 
-        if (bolt.phase == LightningPhase::Idle || reg.Get<Components::PendingDestroy>(e) != nullptr) {
+        if (bolt.phase == LightningPhase::Idle || reg.Get<Components::PendingDestroy>(e)) {
             continue;
         }
 

@@ -98,7 +98,7 @@ impl<'a> CXXModuleGenerator<'a> {
                     if re.is_match(&body_transformed) {
                         let comp_var = format!("_{}", comp.name.to_lowercase());
                         code.push_str(&format!(
-                            "        auto* {} = reg.Get<{}>(entity);\n",
+                            "        auto {} = reg.Get<{}>(entity);\n",
                             comp_var, comp.name
                         ));
                         code.push_str(&format!("        if (!{}) return;\n", comp_var));
@@ -160,7 +160,7 @@ impl<'a> CXXModuleGenerator<'a> {
                 } else {
                     let comp_var = format!("_{}", comp.to_lowercase());
                     code.push_str(&format!(
-                        "        auto* {} = reg.Get<{}>(e);\n",
+                        "        auto {} = reg.Get<{}>(e);\n",
                         comp_var, comp
                     ));
                     code.push_str(&format!("        if (!{}) continue;\n", comp_var));

@@ -175,9 +175,15 @@ class Reference: public IteratorBase<T> {
         left.swap(right);
     }
 
-    [[nodiscard]] constexpr auto begin() const noexcept -> T* requires(std::is_object_v<T> && !std::is_unbounded_array_v<T>) { return pointer_; }
+    [[nodiscard]] constexpr auto begin() const noexcept -> T*
+        requires(std::is_object_v<T> && !std::is_unbounded_array_v<T>)
+    {
+        return pointer_;
+    }
 
-    [[nodiscard]] constexpr auto end() const noexcept -> T* requires(std::is_object_v<T> && !std::is_unbounded_array_v<T>) {
+    [[nodiscard]] constexpr auto end() const noexcept -> T*
+        requires(std::is_object_v<T> && !std::is_unbounded_array_v<T>)
+    {
         // Do not perform pointer arithmetic on a disengaged null pointer.
         return pointer_ ? pointer_ + 1 : pointer_;
     }
@@ -214,7 +220,7 @@ class Reference: public IteratorBase<T> {
     }
 
     template <typename U = std::remove_cv_t<T>>
-        requires(std::is_copy_constructible_v<std::remove_cv_t<T>> && std::is_convertible_v<U &&, std::remove_cv_t<T>>)
+        requires(std::is_copy_constructible_v<std::remove_cv_t<T>> && std::is_convertible_v<U&&, std::remove_cv_t<T>>)
     [[nodiscard]] constexpr auto value_or(U&& fallback) const {
         using Value = std::remove_cv_t<T>;
         if (pointer_) {

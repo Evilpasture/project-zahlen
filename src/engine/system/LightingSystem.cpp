@@ -38,7 +38,7 @@ auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
             sun.intensity = light.intensity;
             // Preserve the white legacy default for tag-only sun entities.
             sun.color = light.color.LengthSq() > 1e-8f ? light.color : JPH::Vec3::sReplicate(1.0f);
-            sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e) != nullptr;
+            sun.fromEnvironment = reg.Get<Components::EnvironmentSunTagComponent>(e).has_value();
             found = true;
         });
         if (found) break;

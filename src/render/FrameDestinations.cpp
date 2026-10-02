@@ -9,38 +9,56 @@ namespace ZHLN {
 
 FrameDestinations::~FrameDestinations() noexcept { Clear(); }
 
-auto FrameDestinations::Find(const PresentationTarget& target) noexcept -> Window* {
+auto FrameDestinations::Find(const PresentationTarget& target) noexcept -> ZHLN::Optional<Window&> {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const Window& entry) { return entry.target == &target; });
-    return it != windows.end() ? &*it : nullptr;
+    if (it != windows.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
-auto FrameDestinations::Find(const PresentationTarget& target) const noexcept -> const Window* {
+auto FrameDestinations::Find(const PresentationTarget& target) const noexcept -> ZHLN::Optional<const Window&> {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const Window& entry) { return entry.target == &target; });
-    return it != windows.end() ? &*it : nullptr;
+    if (it != windows.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
-auto FrameDestinations::Find(uint64_t id) noexcept -> Window* {
-    if (id == 0) { return nullptr; }
+auto FrameDestinations::Find(uint64_t id) noexcept -> ZHLN::Optional<Window&> {
+    if (id == 0) { return std::nullopt; }
     const auto it = std::find_if(windows.begin(), windows.end(), [id](const Window& entry) { return entry.id == id; });
-    return it != windows.end() ? &*it : nullptr;
+    if (it != windows.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
-auto FrameDestinations::Find(uint64_t id) const noexcept -> const Window* {
-    if (id == 0) { return nullptr; }
+auto FrameDestinations::Find(uint64_t id) const noexcept -> ZHLN::Optional<const Window&> {
+    if (id == 0) { return std::nullopt; }
     const auto it = std::find_if(windows.begin(), windows.end(), [id](const Window& entry) { return entry.id == id; });
-    return it != windows.end() ? &*it : nullptr;
+    if (it != windows.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
 auto FrameDestinations::Windows() noexcept -> std::span<Window> { return windows; }
 
-auto FrameDestinations::FindRecording(uint64_t windowId) noexcept -> Recording* {
+auto FrameDestinations::FindRecording(uint64_t windowId) noexcept -> ZHLN::Optional<Recording&> {
     const auto it = std::find_if(recordings.begin(), recordings.end(), [windowId](const Recording& entry) { return entry.windowId == windowId; });
-    return it != recordings.end() ? &*it : nullptr;
+    if (it != recordings.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
-auto FrameDestinations::FindRecording(uint64_t windowId) const noexcept -> const Recording* {
+auto FrameDestinations::FindRecording(uint64_t windowId) const noexcept -> ZHLN::Optional<const Recording&> {
     const auto it = std::find_if(recordings.begin(), recordings.end(), [windowId](const Recording& entry) { return entry.windowId == windowId; });
-    return it != recordings.end() ? &*it : nullptr;
+    if (it != recordings.end()) {
+        return *it;
+    }
+    return std::nullopt;
 }
 
 void FrameDestinations::AddRecording(uint64_t windowId, Vk::CommandRecorder&& recorder) noexcept {
@@ -57,11 +75,11 @@ void FrameDestinations::AbortRecording(uint64_t windowId) noexcept {
 
 auto FrameDestinations::Full() const noexcept -> bool { return windows.size() >= kMaxWindows; }
 
-auto FrameDestinations::Attach(Window entry) noexcept -> Window* {
-    if (Full()) { return nullptr; }
+auto FrameDestinations::Attach(Window entry) noexcept -> ZHLN::Optional<Window&> {
+    if (Full()) { return std::nullopt; }
     entry.id = nextWindowId++;
     windows.push_back(std::move(entry));
-    return &windows.back();
+    return windows.back();
 }
 
 void FrameDestinations::Detach(const PresentationTarget& target) noexcept {

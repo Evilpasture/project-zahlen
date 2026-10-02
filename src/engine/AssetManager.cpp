@@ -37,7 +37,7 @@ void AssetManager::FreeMemory(AssetLoadRequest& req) {
     _vfs.FreeMemory(req);
 }
 
-ModelPrefab* AssetManager::GetCachedPrefab(uint64_t hash) {
+auto AssetManager::GetCachedPrefab(uint64_t hash) -> ZHLN::Optional<ModelPrefab&> {
     return _prefabCache.Find(hash);
 }
 
@@ -101,7 +101,7 @@ uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCo
     return _prefabCache.GetAll(outPrefabs, maxCount);
 }
 
-GUI::BakedFontAsset* AssetManager::GetCachedFont(uint64_t hash) {
+auto AssetManager::GetCachedFont(uint64_t hash) -> ZHLN::Optional<GUI::BakedFontAsset&> {
     return _fontCache.Find(hash);
 }
 
@@ -152,8 +152,8 @@ auto AssetManager::FindEnvironmentImage(std::string_view key) const noexcept -> 
     if (key.empty()) {
         return std::nullopt;
     }
-    const EnvironmentImage* image = _environmentImages.Find(HashAssetPath(key));
-    if (image == nullptr) {
+    const auto image = _environmentImages.Find(HashAssetPath(key));
+    if (!image) {
         return std::nullopt;
     }
     return EnvironmentImageView {

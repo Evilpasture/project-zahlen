@@ -118,8 +118,8 @@ struct CPUPipelineHarness {
     }
 
     void Tick(float renderDt, float inputX, float inputZ, float verticalVel = 0.0f) {
-        auto* move  = reg.Get<ZHLN::Character::MovementComponent>(player);
-        auto* trans = reg.Get<ZHLN::Components::TransformComponent>(player);
+        auto move  = reg.Get<ZHLN::Character::MovementComponent>(player);
+        auto trans = reg.Get<ZHLN::Components::TransformComponent>(player);
 
         move->inputX = inputX;
         move->inputZ = inputZ;
@@ -222,8 +222,8 @@ struct CharacterMovementTestSuite {
 
             harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
 
-            const auto* trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-            float       lastZ = trans->position.GetZ();
+            const auto trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+            float      lastZ = trans->position.GetZ();
 
             constexpr float dt144 = 1.0f / 144.0f;
             for (int i = 0; i < 144; ++i) {
@@ -253,8 +253,8 @@ struct CharacterMovementTestSuite {
             for (int i = 0; i < 144; ++i) {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
-                const auto* trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-                JPH::Vec3   targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
+                const auto trans        = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+                JPH::Vec3  targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
 
                 float dist = (harness.cam.position - targetCenter).Length();
                 distances.push_back(dist);
@@ -281,8 +281,8 @@ struct CharacterMovementTestSuite {
 
             harness.Tick(1.0f / 60.0f, 0.0f, 1.0f);
 
-            const auto* trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
-            float       lastZ = trans->position.GetZ();
+            const auto trans = harness.reg.Get<ZHLN::Components::TransformComponent>(harness.player);
+            float      lastZ = trans->position.GetZ();
 
             const std::array<float, 5> variableDts = {0.008f, 0.033f, 0.012f, 0.048f, 0.016f};
 

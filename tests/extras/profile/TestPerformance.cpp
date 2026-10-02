@@ -166,7 +166,7 @@ struct PerformanceTestSuite {
                                     }
                                     uint32_t foundCount = 0;
                                     for (uint32_t i = 0; i < kMapOps; ++i) {
-                                        const uint32_t* val = map.Find(i);
+                                        const auto val = map.Find(i);
                                         if (val && *val == (i * 7 + 3)) {
                                             foundCount++;
                                         }
@@ -715,10 +715,10 @@ struct PerformanceTestSuite {
                                  ZHLN::TaskSystem::ParallelFor(kAgentCount, 64, [&](uint32_t start, uint32_t end, uint32_t) {
                                      for (uint32_t i = start; i < end; ++i) {
                                          ZHLN::Entity e       = agentEntities[i];
-                                         auto*        trans   = registry.Get<ZHLN::Components::TransformComponent>(e);
-                                         auto*        percept = registry.Get<SpatialPerceptionComponent>(e);
-                                         auto*        combat  = registry.Get<AgentCombatStateComponent>(e);
-                                         auto*        phys    = registry.Get<ZHLN::Components::PhysicsComponent>(e);
+                                         auto         trans   = registry.Get<ZHLN::Components::TransformComponent>(e);
+                                         auto         percept = registry.Get<SpatialPerceptionComponent>(e);
+                                         auto         combat  = registry.Get<AgentCombatStateComponent>(e);
+                                         auto         phys    = registry.Get<ZHLN::Components::PhysicsComponent>(e);
 
                                          if (!trans || !percept || !combat) {
                                              continue;
@@ -746,8 +746,8 @@ struct PerformanceTestSuite {
                                  // --- PHASE 3: Sub-frame Position Extraction & State Sync ---
                                  for (size_t i = 0; i < kAgentCount; ++i) {
                                      ZHLN::Entity e     = agentEntities[i];
-                                     auto*        trans = registry.Get<ZHLN::Components::TransformComponent>(e);
-                                     auto*        phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
+                                     auto         trans = registry.Get<ZHLN::Components::TransformComponent>(e);
+                                     auto         phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
                                      if (trans && phys) {
                                          JPH::RVec3 pos;
                                          if (physicsContext.TryGetBodyPosition(phys->physicsHandle, pos)) {
@@ -759,8 +759,8 @@ struct PerformanceTestSuite {
                                  // --- PHASE 4: Spatial Audio Event Queuing ---
                                  if (frame % 2 == 0) {
                                      for (size_t a = 0; a < 25; ++a) {
-                                         size_t      idx   = (frame * 25 + a) % kAgentCount;
-                                         const auto* trans = registry.Get<ZHLN::Components::TransformComponent>(agentEntities[idx]);
+                                         size_t     idx   = (frame * 25 + a) % kAgentCount;
+                                         const auto trans = registry.Get<ZHLN::Components::TransformComponent>(agentEntities[idx]);
                                          if (trans) {
                                              audio.PostEvent(
                                                  ZHLN::AudioEvent {

@@ -5,6 +5,7 @@
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Core/Span.hpp>
@@ -272,12 +273,28 @@ class ZHLN_API Registry {
 
     template <typename T>
         requires CompleteType<T>
-    auto Get(Entity entity) const noexcept -> T* {
+    [[nodiscard]] auto Get(Entity entity) noexcept -> ZHLN::Optional<T&> {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
-            return nullptr;
+            return std::nullopt;
         }
-        return static_cast<T*>(_components[id]->Get(entity));
+        if (auto* ptr = static_cast<T*>(_components[id]->Get(entity))) {
+            return *ptr;
+        }
+        return std::nullopt;
+    }
+
+    template <typename T>
+        requires CompleteType<T>
+    [[nodiscard]] auto Get(Entity entity) const noexcept -> ZHLN::Optional<const T&> {
+        uint32_t id = ComponentFamily::GetTypeID<T>();
+        if (id >= _compCapacity || !_components[id]) {
+            return std::nullopt;
+        }
+        if (const auto* ptr = static_cast<const T*>(_components[id]->Get(entity))) {
+            return *ptr;
+        }
+        return std::nullopt;
     }
 
     template <typename T>
@@ -311,16 +328,16 @@ class ZHLN_API Registry {
 
     template <typename T>
         requires CompleteType<T>
-    [[nodiscard]] auto GetSingleton() const noexcept -> const T* {
+    [[nodiscard]] auto GetSingleton() const noexcept -> ZHLN::Optional<const T&> {
         auto entities = GetEntitiesWith<T>();
-        return entities.empty() ? nullptr : Get<T>(entities[0]);
+        return entities.empty() ? ZHLN::Optional<const T&> {std::nullopt} : Get<T>(entities[0]);
     }
 
     template <typename T>
         requires CompleteType<T>
-    [[nodiscard]] auto GetSingleton() noexcept -> T* {
+    [[nodiscard]] auto GetSingleton() noexcept -> ZHLN::Optional<T&> {
         auto entities = GetEntitiesWith<T>();
-        return entities.empty() ? nullptr : Get<T>(entities[0]);
+        return entities.empty() ? ZHLN::Optional<T&> {std::nullopt} : Get<T>(entities[0]);
     }
 
     template <typename T, typename... Args>
@@ -335,21 +352,40 @@ class ZHLN_API Registry {
 
     template <typename T, typename Pred>
         requires CompleteType<T>
-    auto FindWhere(Pred&& pred) const noexcept -> T* {
+    [[nodiscard]] auto FindWhere(Pred&& pred) noexcept -> ZHLN::Optional<T&> {
         uint32_t id = ComponentFamily::GetTypeID<T>();
         if (id >= _compCapacity || !_components[id]) {
-            return nullptr;
+            return std::nullopt;
         }
         auto*  set   = _components[id];
         size_t count = set->Count();
         auto*  data  = static_cast<T*>(set->GetDataArray());
         for (size_t i = 0; i < count; ++i) {
-            T* comp = data + i;
-            if (pred(*comp)) {
+            T& comp = data[i];
+            if (pred(comp)) {
                 return comp;
             }
         }
-        return nullptr;
+        return std::nullopt;
+    }
+
+    template <typename T, typename Pred>
+        requires CompleteType<T>
+    [[nodiscard]] auto FindWhere(Pred&& pred) const noexcept -> ZHLN::Optional<const T&> {
+        uint32_t id = ComponentFamily::GetTypeID<T>();
+        if (id >= _compCapacity || !_components[id]) {
+            return std::nullopt;
+        }
+        auto*       set   = _components[id];
+        size_t      count = set->Count();
+        const auto* data  = static_cast<const T*>(set->GetDataArray());
+        for (size_t i = 0; i < count; ++i) {
+            const T& comp = data[i];
+            if (pred(comp)) {
+                return comp;
+            }
+        }
+        return std::nullopt;
     }
 
     template <typename T>
@@ -405,7 +441,7 @@ class ZHLN_API Registry {
 
     template <typename T, typename Fn>
     auto Patch(Entity e, Fn&& fn) -> bool {
-        if (auto* c = Get<T>(e)) {
+        if (auto c = Get<T>(e)) {
             std::forward<Fn>(fn)(*c);
             return true;
         }
@@ -414,7 +450,7 @@ class ZHLN_API Registry {
 
     template <typename T, typename Fn>
     auto Patch(Entity e, Fn&& fn) const -> bool {
-        if (const auto* c = Get<T>(e)) {
+        if (auto c = Get<T>(e)) {
             std::forward<Fn>(fn)(*c);
             return true;
         }
@@ -424,10 +460,10 @@ class ZHLN_API Registry {
     template <typename... Ts, typename Fn>
         requires(sizeof...(Ts) > 1)
     auto Patch(Entity e, Fn&& fn) -> bool {
-        auto ptrs     = std::make_tuple(Get<Ts>(e)...);
-        bool allValid = std::apply([](auto*... p) -> auto { return (p && ...); }, ptrs);
+        auto comps    = std::make_tuple(Get<Ts>(e)...);
+        bool allValid = std::apply([](const auto&... p) -> auto { return (static_cast<bool>(p) && ...); }, comps);
         if (allValid) {
-            std::apply([&](auto*... p) -> auto { std::forward<Fn>(fn)(*p...); }, ptrs);
+            std::apply([&](auto&... p) -> auto { std::forward<Fn>(fn)(*p...); }, comps);
             return true;
         }
         return false;
@@ -436,10 +472,10 @@ class ZHLN_API Registry {
     template <typename... Ts, typename Fn>
         requires(sizeof...(Ts) > 1)
     auto Patch(Entity e, Fn&& fn) const -> bool {
-        auto ptrs     = std::make_tuple(Get<Ts>(e)...);
-        bool allValid = std::apply([](const auto*... p) -> auto { return (p && ...); }, ptrs);
+        auto comps    = std::make_tuple(Get<Ts>(e)...);
+        bool allValid = std::apply([](const auto&... p) -> auto { return (static_cast<bool>(p) && ...); }, comps);
         if (allValid) {
-            std::apply([&](const auto*... p) -> auto { std::forward<Fn>(fn)(*p...); }, ptrs);
+            std::apply([&](const auto&... p) -> auto { std::forward<Fn>(fn)(*p...); }, comps);
             return true;
         }
         return false;

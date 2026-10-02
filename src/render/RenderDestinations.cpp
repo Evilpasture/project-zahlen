@@ -10,8 +10,8 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
-    if (auto* existing = destinations.Find(aux); existing != nullptr) {
-        return DestinationVend {.entry = existing, .created = false};
+    if (auto existing = destinations.Find(aux)) {
+        return DestinationVend {.entry = &*existing, .created = false};
     }
     if (destinations.Full()) {
         return std::unexpected(DestinationError::TooManyWindows);
@@ -51,8 +51,8 @@ auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux,
         dest.presenter = &presenter;
     }
 
-    if (auto* entry = destinations.Attach(std::move(dest)); entry != nullptr) {
-        return DestinationVend {.entry = entry, .created = true};
+    if (auto entry = destinations.Attach(std::move(dest))) {
+        return DestinationVend {.entry = &*entry, .created = true};
     }
     return std::unexpected(DestinationError::TooManyWindows);
 }
@@ -99,12 +99,12 @@ auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) const 
     if (!frameOpen) {
         return std::nullopt;
     }
-    const auto* dest = destinations.Find(aux);
-    if (dest == nullptr || !dest->acquired) {
+    const auto dest = destinations.Find(aux);
+    if (!dest || !dest->acquired) {
         return std::nullopt;
     }
-    const auto* recording = destinations.FindRecording(dest->id);
-    if (recording == nullptr || !recording->recorder.IsRecording()) {
+    const auto recording = destinations.FindRecording(dest->id);
+    if (!recording || !recording->recorder.IsRecording()) {
         return std::nullopt;
     }
     return FrameTarget {rendererId, frameSerial, dest->id, dest->acquired->serial};
@@ -133,7 +133,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         return std::nullopt;
     }
 
-    if (const auto* existing = destinations.FindRecording(dest.id); existing != nullptr) {
+    if (const auto existing = destinations.FindRecording(dest.id)) {
         if (!existing->recorder.IsRecording()) {
             return std::unexpected(DestinationError::ExpiredFrameTarget);
         }
@@ -157,12 +157,12 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
     if (target._renderer != rendererId || target._frame != frameSerial || !target.Valid()) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
-    auto* dest = destinations.Find(target._window);
-    if (dest == nullptr || !dest->acquired || dest->acquired->serial != target._acquisition) {
+    auto dest = destinations.Find(target._window);
+    if (!dest || !dest->acquired || dest->acquired->serial != target._acquisition) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
-    auto* recording = destinations.FindRecording(dest->id);
-    if (recording == nullptr || !recording->recorder.IsRecording()) {
+    auto recording = destinations.FindRecording(dest->id);
+    if (!recording || !recording->recorder.IsRecording()) {
         return std::unexpected(DestinationError::ExpiredFrameTarget);
     }
     if (target._texture != RenderTextureHandle::Invalid) {
@@ -178,15 +178,15 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
 }
 
 auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
-    const auto* active = destinations.Active();
-    if (active == nullptr) { return VK_NULL_HANDLE; }
-    const auto* recording = destinations.FindRecording(active->id);
-    return recording != nullptr ? recording->recorder.Handle() : VK_NULL_HANDLE;
+    const auto active = destinations.Active();
+    if (!active) { return VK_NULL_HANDLE; }
+    const auto recording = destinations.FindRecording(active->id);
+    return recording ? recording->recorder.Handle() : VK_NULL_HANDLE;
 }
 
 void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept {
-    auto* entry = destinations.Find(aux);
-    if (entry == nullptr || entry->IsPrimary()) {
+    auto entry = destinations.Find(aux);
+    if (!entry || entry->IsPrimary()) {
         return;
     }
     if (ctx.Device() != VK_NULL_HANDLE) {

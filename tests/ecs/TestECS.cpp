@@ -101,8 +101,8 @@ struct ECSTestSuite {
             reg.Add<VelocityComponent>(e, VelocityComponent {.vx = VelX, .vy = VelY, .vz = VelZ});
 
             // Retrieve and verify
-            auto* pos      = reg.Get<PositionComponent>(e);
-            if (!ZHLN::Test::ExpectTrue(pos != nullptr)) {
+            auto pos = reg.Get<PositionComponent>(e);
+            if (!ZHLN::Test::ExpectTrue(pos.has_value())) {
                 return std::unexpected(ECSTestError::ComponentAccessFailed);
             }
 
@@ -120,8 +120,8 @@ struct ECSTestSuite {
 
             // Remove component
             reg.Remove<VelocityComponent>(e);
-            ZHLN::Test::ExpectTrue(reg.Get<VelocityComponent>(e) == nullptr);
-            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e) != nullptr);
+            ZHLN::Test::ExpectFalse(reg.Get<VelocityComponent>(e).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e).has_value());
 
             return {};
         }
@@ -137,20 +137,20 @@ struct ECSTestSuite {
             // Bulk Create with instances
             ZHLN::Entity e1 = reg.Create(PositionComponent {.x = BulkPosX, .y = BulkPosY}, VelocityComponent {.vy = BulkVelY});
 
-            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e1) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e1).has_value());
             ZHLN::Test::ExpectEq(reg.Get<PositionComponent>(e1)->x, BulkPosX);
-            ZHLN::Test::ExpectTrue(reg.Get<VelocityComponent>(e1) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<VelocityComponent>(e1).has_value());
 
             // Bulk Create with Type parameters (default constructed)
             ZHLN::Entity e2 = reg.Create<PositionComponent, TagComponent, FlagComponent>();
 
-            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e2) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(e2).has_value());
             ZHLN::Test::ExpectEq(reg.Get<PositionComponent>(e2)->x, 0.0f); // Default
 
-            ZHLN::Test::ExpectTrue(reg.Get<TagComponent>(e2) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<TagComponent>(e2).has_value());
             ZHLN::Test::ExpectEq(reg.Get<TagComponent>(e2)->tag, std::string("Default"));
 
-            ZHLN::Test::ExpectTrue(reg.Get<FlagComponent>(e2) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<FlagComponent>(e2).has_value());
 
             return {};
         }
@@ -164,7 +164,7 @@ struct ECSTestSuite {
             reg.Add(a, PayloadComponent {.resource = 3});
             ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(a)->resource, 3u);
             reg.Remove<PayloadComponent>(a);
-            ZHLN::Test::ExpectTrue(reg.Get<PayloadComponent>(a) == nullptr);
+            ZHLN::Test::ExpectFalse(reg.Get<PayloadComponent>(a).has_value());
             ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(b)->resource, 2u);
             reg.Destroy(b);
             ZHLN::Test::ExpectFalse(reg.IsAlive(b));
@@ -198,7 +198,7 @@ struct ECSTestSuite {
             struct Marked {};
             ZHLN::ECS::Registry reg;
             ZHLN::ECS::EntityCommandBuffer ecb(reg, [](ZHLN::ECS::Registry& registry, ZHLN::Entity entity) {
-                if (registry.IsAlive(entity) && registry.Get<Marked>(entity) == nullptr) {
+                if (registry.IsAlive(entity) && !registry.Get<Marked>(entity)) {
                     registry.Add(entity, Marked {});
                 }
             });
@@ -207,7 +207,7 @@ struct ECSTestSuite {
             ecb.DestroyEntity(owner);
             ecb.Playback();
             ZHLN::Test::ExpectTrue(reg.IsAlive(owner));
-            ZHLN::Test::ExpectTrue(reg.Get<Marked>(owner) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<Marked>(owner).has_value());
             ZHLN::Test::ExpectEq(reg.Get<PayloadComponent>(owner)->resource, 42u);
 
             // A batch system can inspect every marked component before it
@@ -273,8 +273,8 @@ struct ECSTestSuite {
             ZHLN::Entity realEntity1 = taggedEntities[0];
             ZHLN::Test::ExpectTrue(reg.IsAlive(realEntity1));
 
-            auto* pos = reg.Get<PositionComponent>(realEntity1);
-            ZHLN::Test::ExpectTrue(pos != nullptr);
+            auto pos = reg.Get<PositionComponent>(realEntity1);
+            ZHLN::Test::ExpectTrue(pos.has_value());
             ZHLN::Test::ExpectEq(pos->x, DefPosX);
 
             // Verify the second entity (Velocity + Flag + Position)
@@ -284,8 +284,8 @@ struct ECSTestSuite {
             }
 
             ZHLN::Entity realEntity2 = flaggedEntities[0];
-            ZHLN::Test::ExpectTrue(reg.Get<VelocityComponent>(realEntity2) != nullptr);
-            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(realEntity2) != nullptr);
+            ZHLN::Test::ExpectTrue(reg.Get<VelocityComponent>(realEntity2).has_value());
+            ZHLN::Test::ExpectTrue(reg.Get<PositionComponent>(realEntity2).has_value());
 
             return {};
         }

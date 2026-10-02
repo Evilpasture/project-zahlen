@@ -134,7 +134,7 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
 
     auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        if (auto* settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
+        if (auto settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
                 settings->fontAtlas.texture = ZHLN::PrefabFactory::CreateFontAtlasTexture(
                     engine.GetRenderContext(), engine.GetRegistry(), engine.GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
@@ -207,7 +207,7 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if (root == ZHLN::Entity::Null() || !reg.IsAlive(root)) {
         return;
     }
-    if (reg.Get<ZHLN::Components::AnimatorComponent>(root) == nullptr) {
+    if (!reg.Get<ZHLN::Components::AnimatorComponent>(root)) {
         return;
     }
 
@@ -616,10 +616,10 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     auto& engine = *state.engine;
     ClearInstances(state);
 
-    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
         engine.GetRenderContext(), engine.GetAssetManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
-    if (prefab == nullptr) {
+    if (!prefab) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
         return;
     }
@@ -645,7 +645,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
         prefab->animations.size()
     );
 
-    state.prefab = prefab;
+    state.prefab = &*prefab;
     state.loaded = true;
     ZHLN::Log(
         "[glTF Inspector] Loaded '{}': {} part(s), {} node(s), {} skeleton(s), {} animation(s), {} instance(s).", drop.fileName, prefab->parts.size(),
@@ -680,8 +680,8 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
     if (ents.empty()) {
         return;
     }
-    const auto* input = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
-    if (input == nullptr) {
+    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(ents[0]);
+    if (!input) {
         return;
     }
 

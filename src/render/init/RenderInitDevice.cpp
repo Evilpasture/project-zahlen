@@ -121,7 +121,7 @@ RenderContext::RenderContext(PrivateToken , std::unique_ptr<Impl> impl) noexcept
 #endif
 
 auto RenderContext::Create(
-    PresentationTarget& target, const RenderConfig& cfg, FS::FileSystemWatcher* fileSystemWatcher
+    PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName = cfg.appName;

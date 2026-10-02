@@ -48,7 +48,7 @@ namespace Steps {
 
 
 void HostUICallback(Engine& engine, float , FrameContext& ) {
-    if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
+    if (const auto cb = engine.GetUICallback(); cb && static_cast<bool>(*cb)) {
         (*cb)(engine);
     }
 }

@@ -17,6 +17,7 @@
 // returns it. The importer depends on Core, Core depends on the prefab cache,
 // and no function pointer is installed anywhere.
 
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <array>
@@ -86,7 +87,7 @@ struct ImportOptions {
     uint32_t maxTextureDimension = kGLTFDefaultMaxTextureDimension;
 };
 
-auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ModelPrefab*;
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path, ImportOptions options = {}) -> ZHLN::Optional<ModelPrefab&>;
 
 // Like LoadGLBPrefab, but consumes bytes already read by the caller. Split
 // .gltf assets store geometry and textures in external .bin/image files whose
@@ -101,7 +102,7 @@ auto LoadGLBPrefabFromMemory(
     std::string_view         virtualPath,
     std::string_view         bytesPath = {},
     ImportOptions            options = {}
-) -> ModelPrefab*;
+) -> ZHLN::Optional<ModelPrefab&>;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 
 // Import straight from a byte buffer and spawn it in one call. Core has no

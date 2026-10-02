@@ -429,8 +429,8 @@ struct ContainersTestSuite {
 
             // Verify lookups
             for (uint32_t i = 0; i < kTotalItems; ++i) {
-                const uint32_t* val = map.Find(i);
-                if (val == nullptr || *val != i * 10) {
+                const auto val = map.Find(i);
+                if (!val || *val != i * 10) {
                     return std::unexpected(CoreContainersTestError::HashMapInvariantFailed);
                 }
             }
@@ -444,11 +444,11 @@ struct ContainersTestSuite {
 
             // Verify odd keys persist and even keys are gone
             for (uint32_t i = 0; i < kTotalItems; ++i) {
-                const uint32_t* val = map.Find(i);
+                const auto val = map.Find(i);
                 if (i % 2 == 0) {
-                    ZHLN::Test::ExpectTrue(val == nullptr);
+                    ZHLN::Test::ExpectFalse(val.has_value());
                 } else {
-                    ZHLN::Test::ExpectNe(val, nullptr) && ZHLN::Test::ExpectEq(*val, i * 10);
+                    ZHLN::Test::ExpectTrue(val.has_value()) && ZHLN::Test::ExpectEq(*val, i * 10);
                 }
             }
 
@@ -574,8 +574,8 @@ struct ContainersTestSuite {
             ZHLN::Test::ExpectEq(sl.Size(), static_cast<size_t>(4));
 
             // Verify lock-free Find
-            const std::string* f20      = sl.Find(20);
-            if (!ZHLN::Test::ExpectTrue(f20 != nullptr)) {
+            const auto f20 = sl.Find(20);
+            if (!ZHLN::Test::ExpectTrue(f20.has_value())) {
                 return std::unexpected(CoreContainersTestError::SkipListInvariantFailed);
             }
             ZHLN::Test::ExpectEq(*f20, "twenty");
@@ -596,7 +596,7 @@ struct ContainersTestSuite {
             bool erased = sl.Erase(20);
             ZHLN::Test::ExpectTrue(erased);
             ZHLN::Test::ExpectEq(sl.Size(), static_cast<size_t>(3));
-            ZHLN::Test::ExpectTrue(sl.Find(20) == nullptr);
+            ZHLN::Test::ExpectFalse(sl.Find(20).has_value());
 
             return {};
         }

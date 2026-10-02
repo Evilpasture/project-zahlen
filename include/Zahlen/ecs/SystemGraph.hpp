@@ -21,7 +21,7 @@ namespace ZHLN::ECS {
 // reference cannot bind to a short-lived resolved value.
 template <typename Param>
 struct ParameterResolver {
-    static_assert(!std::is_same_v<Param, Param>, "Unrecognized system parameter type (use Query, Res, OptionRes or a tagged frame value)");
+    static_assert(!std::is_same_v<Param, Param>, "Unrecognized system parameter type (use Query, Res, Optional<T&> or a tagged frame value)");
 };
 
 template <typename... Comps>
@@ -79,6 +79,11 @@ struct ResourceSlot {
     }
 };
 
+template <typename Param>
+concept OptionalResourceParam = requires { typename Param::value_type; } &&
+    std::is_object_v<typename Param::value_type> &&
+    std::is_same_v<Param, ZHLN::Optional<typename Param::value_type&>>;
+
 } // namespace TemplatedDetail
 
 template <typename T>
@@ -99,9 +104,15 @@ struct ParameterResolver<ResMut<T>> {
     }
 };
 
-template <typename T>
-struct ParameterResolver<OptionRes<T>> {
-    static auto Resolve(SystemContext& ctx) noexcept -> OptionRes<T> { return {TemplatedDetail::ResourceSlot<T>::Get(ctx)}; }
+template <TemplatedDetail::OptionalResourceParam Param>
+struct ParameterResolver<Param> {
+    using Value = typename Param::value_type;
+    static auto Resolve(SystemContext& ctx) noexcept -> Param {
+        if (auto* ptr = TemplatedDetail::ResourceSlot<std::remove_const_t<Value>>::Get(ctx)) {
+            return *ptr;
+        }
+        return std::nullopt;
+    }
 };
 
 template <>

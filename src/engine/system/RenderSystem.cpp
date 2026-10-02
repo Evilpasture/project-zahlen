@@ -55,7 +55,7 @@ namespace {
 
 [[nodiscard]] auto HasSceneSun(const ECS::Registry& reg) noexcept -> bool {
     for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-        if (const auto* light = reg.Get<Components::LightComponent>(e); light != nullptr && light->type == LightType::Sun) {
+        if (const auto light = reg.Get<Components::LightComponent>(e); light && light->type == LightType::Sun) {
             return true;
         }
     }
@@ -69,8 +69,8 @@ namespace {
     if (ent == Entity::Null()) {
         return rc.SetEnvironmentRadiance({});
     }
-    const auto* env = reg.Get<Components::EnvironmentMapComponent>(ent);
-    if (env == nullptr || env->source.empty()) {
+    const auto env = reg.Get<Components::EnvironmentMapComponent>(ent);
+    if (!env || env->source.empty()) {
         return rc.SetEnvironmentRadiance({});
     }
     const auto pixels = engine.GetAssetManager().FindEnvironmentImage(std::string_view(env->source));
@@ -124,8 +124,8 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
             continue;
         }
 
-        auto* meshComp = reg.Get<Components::MeshComponent>(e);
-        if (meshComp == nullptr) {
+        auto meshComp = reg.Get<Components::MeshComponent>(e);
+        if (!meshComp) {
             continue;
         }
 
@@ -133,8 +133,8 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
         if (!gpuMeshOpt.has_value()) {
             // Explicit cache clears discard lookups, not scene-owned buffers.
             // Rebind the owner's view instead of allocating another mesh.
-            if (const auto* owned = reg.Get<Components::OwnedMeshComponent>(e);
-                owned != nullptr && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferHandle::Invalid) {
+            if (const auto owned = reg.Get<Components::OwnedMeshComponent>(e);
+                owned && owned->meshAsset == meshComp->meshAsset && owned->mesh.posBuffer != BufferHandle::Invalid) {
                 rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
                 gpuMeshOpt = owned->mesh;
             }
@@ -147,19 +147,19 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
         Mesh     gpuMesh = *gpuMeshOpt;
         Material gpuMat  = *gpuMatOpt;
 
-        auto* skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
-        auto* morphComp  = reg.Get<Components::MorphTargetComponent>(e);
-        auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+        auto skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
+        auto morphComp  = reg.Get<Components::MorphTargetComponent>(e);
+        auto worldTrans = reg.Get<Components::WorldTransformComponent>(e);
 
-        JPH::Mat44 worldMat = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
-        JPH::Mat44 prevMat  = (worldTrans != nullptr) ? worldTrans->previous : worldMat;
+        JPH::Mat44 worldMat = worldTrans ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Mat44 prevMat  = worldTrans ? worldTrans->previous : worldMat;
 
-        bool     isSkinned   = (skelMesh != nullptr);
+        bool     isSkinned   = skelMesh.has_value();
         uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
 
-        uint32_t                   morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
-        uint32_t                   activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
-        const std::array<float, 4> morphWeights     = (morphComp != nullptr) ? morphComp->weights : std::array<float, 4> {};
+        uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
+        uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
+        const std::array<float, 4> morphWeights     = morphComp ? morphComp->weights : std::array<float, 4> {};
 
         BufferHandle scratchVbo = BufferHandle::Invalid;
         if (isSkinned) {
@@ -176,12 +176,12 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
         float roughness = -1.0f;
         float metallic  = -1.0f;
-        if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
+        if (auto pbr = reg.Get<Components::PBRComponent>(e)) {
             roughness = pbr->roughness;
             metallic  = pbr->metallic;
         }
 
-        if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
+        if (auto csg = reg.Get<Components::CSGComponent>(e)) {
             CSGDrawParams csgParams;
             csgParams.eyeParams = {
                 .transform           = worldMat,
@@ -200,17 +200,17 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
             for (const auto& mod: csg->modifiers) {
                 if (reg.IsAlive(mod.operandEntity)) {
-                    if (auto* cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                    if (auto cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
                         auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
                         auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
                         if (cutGpuMeshOpt && cutGpuMatOpt) {
-                            auto*      cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                            auto*      cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
-                            JPH::Mat44 cutWorldMat   = (cutWorldTrans != nullptr) ? cutWorldTrans->world : JPH::Mat44::sIdentity();
-                            JPH::Mat44 cutPrevMat    = (cutWorldTrans != nullptr) ? cutWorldTrans->previous : cutWorldMat;
+                            auto       cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                            auto       cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            JPH::Mat44 cutWorldMat   = cutWorldTrans ? cutWorldTrans->world : JPH::Mat44::sIdentity();
+                            JPH::Mat44 cutPrevMat    = cutWorldTrans ? cutWorldTrans->previous : cutWorldMat;
 
                             BufferHandle cutScratchVbo = BufferHandle::Invalid;
-                            if (cutSkelMesh != nullptr) {
+                            if (cutSkelMesh) {
                                 cutScratchVbo = EnsureSkinnedScratch(rc, *cutSkelMesh, cutGpuMeshOpt->vertexCount);
                             }
 
@@ -221,7 +221,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
                                  .prevTransform       = cutPrevMat,
                                  .cullRadius          = cutMesh->cullRadius,
                                  .operation           = mod.operation,
-                                 .jointOffset         = (cutSkelMesh != nullptr) ? cutSkelMesh->jointOffset : 0,
+                                 .jointOffset         = cutSkelMesh ? cutSkelMesh->jointOffset : 0,
                                  .skinnedVertexBuffer = cutScratchVbo,
                                  .flags               = cutMesh->flags}
                             );
@@ -260,20 +260,20 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
         return extra;
     }
-    if (auto* world = reg.Get<Components::WorldTransformComponent>(cameraEnt); world != nullptr) {
+    if (auto world = reg.Get<Components::WorldTransformComponent>(cameraEnt)) {
         extra.position = world->world.GetTranslation();
     }
     return extra;
 }
 
 SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport) {
-    auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
+    auto cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
-    Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
+    Camera           cam    = cComp ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
     const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
-    const JPH::Mat44 viewProj = cComp != nullptr ? cComp->viewProj : proj * view;
+    const JPH::Mat44 viewProj = cComp ? cComp->viewProj : proj * view;
 
     cam.frustum.Update(viewProj);
 
@@ -347,7 +347,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
     Entity cameraEntity = cameraEntities[0];
 
-    if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
+    if (auto cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
         vp               = cComp->viewProj;
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
@@ -357,14 +357,14 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     outPhysicsDrawMode = 0;
     if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
-        if (auto* dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
+        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
             outPhysicsDrawMode = dbg->physicsDrawMode;
         }
     }
 
     auto sun = LightingSystem::GetSun(LightingSystem::SunQuery {reg});
     if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasSceneSun(reg)) {
-        if (const auto* env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env != nullptr && !env->source.empty()) {
+        if (const auto env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env && !env->source.empty()) {
             sun.intensity = 0.0f;
         }
     }

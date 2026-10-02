@@ -267,7 +267,7 @@ namespace {
 [[nodiscard]] auto ExtractEnvironment(const ECS::Registry& registry) -> SceneEnvironment {
     SceneEnvironment environment;
     for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
-        if (const auto* pp = registry.Get<Components::PostProcessSettingsComponent>(settings); pp != nullptr) {
+        if (const auto pp = registry.Get<Components::PostProcessSettingsComponent>(settings)) {
             CopySharedFields(environment, *pp);
             break;
         }
@@ -279,7 +279,7 @@ namespace {
     const ECS::Registry& registry, Entity entity, const Components::MeshComponent& mesh, const Components::SceneSourceComponent& source,
     MaterialLookup materials
 ) -> SceneMaterial {
-    const auto* pbr = registry.Get<Components::PBRComponent>(entity);
+    const auto pbr = registry.Get<Components::PBRComponent>(entity);
 
     std::optional<Material> gpu;
     if (materials.find != nullptr) {
@@ -291,16 +291,16 @@ namespace {
     const SceneMaterial defaults {};
     return SceneMaterial {
         .baseColor             = (base != nullptr) ? JPH::Float4 {base[0], base[1], base[2], base[3]} : defaults.baseColor,
-        .roughness             = (pbr != nullptr) ? pbr->roughness : defaults.roughness,
-        .metallic              = (pbr != nullptr) ? pbr->metallic : defaults.metallic,
+        .roughness             = pbr ? pbr->roughness : defaults.roughness,
+        .metallic              = pbr ? pbr->metallic : defaults.metallic,
         .emissive              = (glow != nullptr) ? JPH::Float3 {glow[0], glow[1], glow[2]} : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }
 
 [[nodiscard]] auto ExtractBodyKind(const ECS::Registry& registry, Entity entity) noexcept -> BodyKind {
-    const auto* phys = registry.Get<Components::PhysicsComponent>(entity);
-    if (phys == nullptr) {
+    const auto phys = registry.Get<Components::PhysicsComponent>(entity);
+    if (!phys) {
         return BodyKind::None;
     }
     return phys->isStatic ? BodyKind::Static : BodyKind::Dynamic;
@@ -311,23 +311,23 @@ namespace {
     size_t                   unattributed = 0;
 
     for (const Entity entity: registry.GetEntitiesWith<Components::MeshComponent>()) {
-        const auto* source = registry.Get<Components::SceneSourceComponent>(entity);
-        if (source == nullptr) {
+        const auto source = registry.Get<Components::SceneSourceComponent>(entity);
+        if (!source) {
             ++unattributed;
             continue;
         }
         const auto& mesh = *registry.Get<Components::MeshComponent>(entity);
 
-        const auto* name      = registry.Get<Components::NameComponent>(entity);
-        const auto* transform = registry.Get<Components::TransformComponent>(entity);
+        const auto name      = registry.Get<Components::NameComponent>(entity);
+        const auto transform = registry.Get<Components::TransformComponent>(entity);
 
         entities.push_back(SceneEntity {
-            .name        = (name != nullptr) ? std::string {std::string_view {name->name}} : std::string {},
+            .name        = name ? std::string {std::string_view {name->name}} : std::string {},
             .shape       = source->shape,
             .halfExtents = source->halfExtents,
             .extent      = source->extent,
             .source      = std::string {std::string_view {source->source}},
-            .transform   = (transform != nullptr) ? ToDescriptionTransform(*transform) : Transform {},
+            .transform   = transform ? ToDescriptionTransform(*transform) : Transform {},
             .body        = ExtractBodyKind(registry, entity),
             .material    = ExtractMaterial(registry, entity, mesh, *source, materials),
         });
@@ -347,22 +347,22 @@ namespace {
     size_t                  unattributed = 0;
 
     for (const Entity entity: registry.GetEntitiesWith<Components::LightComponent>()) {
-        if (registry.Get<Components::SceneLightTagComponent>(entity) == nullptr) {
+        if (!registry.Get<Components::SceneLightTagComponent>(entity)) {
             ++unattributed;
             continue;
         }
         const auto& light = *registry.Get<Components::LightComponent>(entity);
 
-        const auto* name      = registry.Get<Components::NameComponent>(entity);
-        const auto* transform = registry.Get<Components::TransformComponent>(entity);
+        const auto name      = registry.Get<Components::NameComponent>(entity);
+        const auto transform = registry.Get<Components::TransformComponent>(entity);
 
         const SceneLight defaults {};
 
         lights.push_back(SceneLight {
-            .name        = (name != nullptr) ? std::string {std::string_view {name->name}} : std::string {},
+            .name        = name ? std::string {std::string_view {name->name}} : std::string {},
             .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
-            .position    = (transform != nullptr) ? ToDescriptionFloat3(transform->position) : defaults.position,
-            .rotation    = (transform != nullptr) ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+            .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
+            .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
             .direction   = ToDescriptionFloat3(light.direction),
             .color       = ToDescriptionFloat3(light.color),
             .intensity   = light.intensity,

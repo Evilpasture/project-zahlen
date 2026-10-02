@@ -513,8 +513,8 @@ void ClearSubject(ZHLN::Engine& engine, Subject& subject) {
 // Draco-compressed asset this importer cannot decode, a binary it cannot parse --
 // leaves the previous subject on screen instead of an empty turntable.
 auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8_t> bytes, std::string_view virtualPath) -> bool {
-    ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
-    if (prefab == nullptr) {
+    auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
+    if (!prefab) {
         ZHLN::Log("[RemoteGLB] '{}' is not a glTF this importer can read; the previous subject stays on screen.", virtualPath);
         return false;
     }
@@ -559,7 +559,7 @@ auto ImportSubject(ZHLN::Engine& engine, Subject& subject, std::span<const uint8
     subject.triangles = static_cast<uint32_t>(triangles);
     subject.textures  = static_cast<uint32_t>(uniqueTextures.size());
 
-    subject.prefab = prefab;
+    subject.prefab = &*prefab;
     subject.loaded = true;
     ZHLN::Log(
         "[RemoteGLB] Imported '{}': {} part(s), {} node(s), {} triangle(s), {} texture(s), centre ({:.3f}, {:.3f}, {:.3f}), radius {:.3f} m, {} instance(s).",
@@ -1248,8 +1248,8 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
     if (entities.empty()) {
         return;
     }
-    const auto* input = reg.Get<ZHLN::Components::InputStateComponent>(entities[0]);
-    if (input == nullptr) {
+    const auto input = reg.Get<ZHLN::Components::InputStateComponent>(entities[0]);
+    if (!input) {
         return;
     }
 

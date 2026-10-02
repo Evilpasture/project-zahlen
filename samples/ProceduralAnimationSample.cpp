@@ -192,13 +192,13 @@ void CollectFirstPersonHeadMeshes(
 
     state.headMeshes.clear();
     for (ZHLN::Entity entity: visualParts) {
-        auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(entity);
-        if (mesh == nullptr || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+        auto mesh = registry.Get<ZHLN::Components::MeshComponent>(entity);
+        if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
-        const bool  underHead       = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
-        const auto* skeletalMesh    = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
-        const bool  headSkin        = skeletalMesh != nullptr && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
+        const bool underHead       = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
+        const auto skeletalMesh    = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
+        const bool headSkin        = skeletalMesh && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
         bool        compactNearHead = false;
         for (const ZHLN::ModelPart& part: prefab.parts) {
             if (part.nodeIndex != mesh->nodeIndex) {
@@ -234,8 +234,8 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
     state.cameraEntity = cameraEntities[0];
 
     if (enabled) {
-        auto* targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
-        if (targetCamera == nullptr) {
+        auto targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
+        if (!targetCamera) {
             return;
         }
         state.thirdPersonCamera = *targetCamera;
@@ -245,7 +245,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.lookPitchOffset   = 0.0f;
         registry.Remove<ZHLN::Components::FreeCamTagComponent>(state.cameraEntity);
         registry.Remove<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
-        if (auto* lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
+        if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
             state.thirdPersonLookAtWeight = lookAt->weight;
             state.lookAtWeightSaved       = true;
             lookAt->weight                = 0.0f;
@@ -255,7 +255,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
     } else if (state.thirdPersonSaved) {
         ZHLN::CameraRig::TargetCameraComponent restored = state.thirdPersonCamera;
         restored.hasInitSmoothTarget                     = 0;
-        if (auto* targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity)) {
+        if (auto targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity)) {
             *targetCamera = restored;
         } else {
             registry.Add(state.cameraEntity, std::move(restored));
@@ -265,7 +265,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         engine.GetCamera().fov   = state.thirdPersonCamera.fov;
         engine.GetCamera().nearZ = state.thirdPersonNearZ;
         if (state.lookAtWeightSaved) {
-            if (auto* lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
+            if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
                 lookAt->weight = state.thirdPersonLookAtWeight;
             }
             state.lookAtWeightSaved = false;
@@ -283,7 +283,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         visibility.cameraInitialized = false;
     });
     for (const HiddenHeadMesh& hidden: state.headMeshes) {
-        if (auto* mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
+        if (auto mesh = registry.Get<ZHLN::Components::MeshComponent>(hidden.entity)) {
             mesh->flags = enabled ? hidden.originalFlags | ZHLN::DrawFlags::Hidden : hidden.originalFlags;
         }
     }
@@ -399,8 +399,8 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
 
 void SetHandgunVisibility(ZHLN::ECS::Registry& registry, ZHLN::Entity handgunRoot, bool visible) {
     for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::MeshComponent>()) {
-        const auto* hier = registry.Get<ZHLN::Components::HierarchyComponent>(e);
-        if (hier != nullptr && hier->parent == handgunRoot) {
+        const auto hier = registry.Get<ZHLN::Components::HierarchyComponent>(e);
+        if (hier && hier->parent == handgunRoot) {
             registry.Patch<ZHLN::Components::MeshComponent>(e, [visible](auto& mesh) {
                 if (visible) {
                     mesh.flags &= ~ZHLN::DrawFlags::Hidden;
@@ -511,7 +511,7 @@ auto AttachCharacterRig(
     ZHLN::Engine&                          engine,
     ZHLN::Entity                           player,
     std::string_view                       glbPath,
-    ZHLN::ModelPrefab*                     prefab,
+    ZHLN::Optional<ZHLN::ModelPrefab&>     prefab,
     ZHLN::Animation::ItemHandlingComponent itemHandling,
     FirstPersonViewState&                  viewState
 ) -> void {
@@ -576,7 +576,7 @@ auto AttachCharacterRig(
         ZHLN::Log("[Sample] Leg IK disabled; gait/keyframe layers remain active.");
     }
 
-    if (prefab != nullptr) {
+    if (prefab) {
         ZHLN::Log("[Sample] GLB model '{}' loaded successfully. Instantiating visual parts...", glbPath);
 
         int32_t idleTrack = ZHLN::FindAnimationTrack(*prefab, "idle");
@@ -626,7 +626,7 @@ auto AttachCharacterRig(
             ZHLN::Components::AnimatorComponent {
                 .currentTrackIdx = idleTrack,
                 .currentLoop     = true,
-                .prefab          = prefab,
+                .prefab          = &*prefab,
             },
             ZHLN::ProceduralLocomotionTracksComponent {
                 .idleTrack = idleTrack,
@@ -720,10 +720,11 @@ auto main(int argc, char* argv[]) -> int {
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    ZHLN::ModelPrefab* const prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), rigPath);
+    const auto prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), rigPath);
 
-    const ZHLN::Locomotion::CharacterBoundsEstimate bounds          = prefab != nullptr ? ZHLN::Locomotion::EstimateCharacterBounds(*prefab) :
-                                                                                          ZHLN::Locomotion::CharacterBoundsEstimate {};
+    const ZHLN::Locomotion::CharacterBoundsEstimate bounds =
+        prefab.transform([](const ZHLN::ModelPrefab& p) { return ZHLN::Locomotion::EstimateCharacterBounds(p); })
+            .value_or(ZHLN::Locomotion::CharacterBoundsEstimate {});
     const ZHLN::Physics::DualShapeConfig            dualShapeConfig = ZHLN::Locomotion::FitDualShapeToBounds(bounds);
     if (bounds.valid) {
         const JPH::Vec3 size = bounds.Size();
@@ -849,8 +850,8 @@ auto main(int argc, char* argv[]) -> int {
         if (!viewState.enabled) {
             ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
             registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
-                const auto* gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait);
+                const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
+                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
             });
         }
     }

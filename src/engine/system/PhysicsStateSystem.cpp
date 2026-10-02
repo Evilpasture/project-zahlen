@@ -47,9 +47,9 @@ static void VerifyRealVisualInterpolation(ECS::Query<const Components::PhysicsCo
         if (!snapshots[j].valid) {
             continue;
         }
-        Entity      e     = entities[sourceIndex[j]];
-        const auto* trans = query.Get<Components::TransformComponent>(e);
-        if (trans == nullptr) {
+        Entity     e     = entities[sourceIndex[j]];
+        const auto trans = query.Get<Components::TransformComponent>(e);
+        if (!trans) {
             continue;
         }
         JPH::Vec3 expected = snapshots[j].previousPosition + clampedAlpha * (snapshots[j].currentPosition - snapshots[j].previousPosition);
@@ -98,8 +98,8 @@ void VisualInterpolationSystem::Update(ECS::Query<const Components::PhysicsCompo
             continue;
         }
         Entity e     = entities[sourceIndex[j]];
-        auto*  trans = query.Get<Components::TransformComponent>(e);
-        if (trans == nullptr) {
+        auto   trans = query.Get<Components::TransformComponent>(e);
+        if (!trans) {
             continue;
         }
 

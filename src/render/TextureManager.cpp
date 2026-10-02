@@ -101,8 +101,8 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
     const uint64_t pixelHash = Hash64(static_cast<const char*>(pixels), pixelBytes);
 
     enum class ExistingTexture : uint8_t { Missing, Duplicate, Changed, Collision };
-    const auto stateOf = [&](const TextureRecord* existing) -> ExistingTexture {
-        if (existing == nullptr) {
+    const auto stateOf = [&](ZHLN::Optional<const TextureRecord&> existing) -> ExistingTexture {
+        if (!existing) {
             return ExistingTexture::Missing;
         }
         if (!existing->named || existing->identifier != identifier) {
@@ -133,8 +133,8 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
     // or an anonymous handle may have claimed its hash while the GPU worked.
     std::optional<uint32_t> oldSlot;
     const auto committedState = Lock(_mutex, [&] {
-        const auto* previous = _textures.Find(id);
-        const auto  state    = stateOf(previous);
+        const auto previous = _textures.Find(id);
+        const auto state    = stateOf(previous);
         if (state == ExistingTexture::Collision || state == ExistingTexture::Duplicate) {
             return state;
         }
@@ -176,7 +176,7 @@ auto TextureManager::RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, 
         uint64_t id = 0;
         do {
             id = _nextAnonymousHandle++;
-        } while (id <= static_cast<uint64_t>(SystemTextures::FlatNormal) || _textures.Find(id) != nullptr);
+        } while (id <= static_cast<uint64_t>(SystemTextures::FlatNormal) || _textures.Find(id).has_value());
 
         const auto handle = static_cast<TextureHandle>(id);
         _textures.Insert(
@@ -199,7 +199,7 @@ uint32_t TextureManager::GetBindlessIndex(TextureHandle handle) const noexcept {
 
     const auto id = static_cast<uint64_t>(handle);
     return Lock(_mutex, [&]() -> uint32_t {
-        if (const auto* record = _textures.Find(id)) {
+        if (const auto record = _textures.Find(id)) {
             return record->gpuBindlessIndex;
         }
 
@@ -226,8 +226,8 @@ void TextureManager::Unload(TextureHandle handle) {
     const uint64_t id = static_cast<uint64_t>(handle);
     const auto     released =
         Lock(_mutex, [&]() -> std::optional<uint32_t> {
-            const auto* const record = _textures.Find(id);
-            if (record == nullptr) {
+            const auto record = _textures.Find(id);
+            if (!record) {
                 return std::nullopt;
             }
             const uint32_t bindlessIndex = record->gpuBindlessIndex;

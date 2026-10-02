@@ -12,7 +12,7 @@
 namespace ZHLN {
 
 void MarkPendingDestroy(ECS::Registry& registry, Entity root) {
-    if (registry.IsAlive(root) && registry.Get<Components::PendingDestroy>(root) == nullptr) {
+    if (registry.IsAlive(root) && !registry.Get<Components::PendingDestroy>(root)) {
         registry.Add(root, Components::PendingDestroy {});
     }
 }
@@ -46,7 +46,7 @@ void ExpandPendingDestroy(ECS::Registry& registry) {
         const auto first = std::lower_bound(children.begin(), children.end(), parent.Pack(),
                                             [](const Link& link, uint64_t key) { return link.parent < key; });
         for (auto it = first; it != children.end() && it->parent == parent.Pack(); ++it) {
-            if (registry.IsAlive(it->child) && registry.Get<Components::PendingDestroy>(it->child) == nullptr) {
+            if (registry.IsAlive(it->child) && !registry.Get<Components::PendingDestroy>(it->child)) {
                 registry.Add(it->child, Components::PendingDestroy {});
                 frontier.push_back(it->child);
             }
