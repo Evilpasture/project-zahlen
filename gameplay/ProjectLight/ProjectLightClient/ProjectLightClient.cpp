@@ -202,6 +202,187 @@ auto NetworkPacketSummary(const MsgPackValue& packet) -> std::string {
     return summary;
 }
 
+auto IsKnownReplicatedClassName(std::string_view name) noexcept -> bool {
+    return name == "DataModel" || name == "CoreService" || name == "WorkspaceService" || name == "MathService"
+           || name == "LightingService" || name == "PhysicsService" || name == "SoundService" || name == "UserInputService"
+           || name == "PlayersService" || name == "RunService" || name == "ScriptService" || name == "ShaderService"
+           || name == "Player" || name == "Humanoid" || name == "Camera" || name == "Model" || name == "Part"
+           || name == "MeshPart" || name == "BasePart" || name == "Light" || name == "DirectionalLight" || name == "PointLight"
+           || name == "Weld" || name == "Motor" || name == "Sound" || name == "Decal" || name == "SpawnPoint"
+           || name == "InternalScript" || name == "Gizmo" || name == "Highlight" || name == "Shader" || name == "MaterialModifier";
+}
+
+auto SnapshotClassProbe(const MsgPackValue& snapshot, std::optional<uint16_t>* inferredClassNameChannel = nullptr) -> std::string {
+    if (!snapshot.IsMap()) return "snapshot value is not a map";
+
+    const auto classChannel = PropertyNameChannel("ClassName");
+    const int channelIndex = classChannel ? static_cast<int>(*classChannel) : -1;
+    size_t entries = 0;
+    size_t numericClassKeys = 0;
+    size_t stringClassKeys = 0;
+    size_t stringValues = 0;
+    size_t nonStringValues = 0;
+    size_t missingClassKeys = 0;
+    std::unordered_map<std::string, size_t> classCounts;
+    std::unordered_map<int64_t, std::unordered_map<std::string, size_t>> alternateClassChannels;
+    std::string sampleKeys;
+
+    for (const auto& [uid, properties]: snapshot.mapVal) {
+        (void)uid;
+        if (!properties.IsMap()) continue;
+        ++entries;
+
+        const MsgPackValue* numericClassValue = classChannel ? properties.FindIntKey(*classChannel) : nullptr;
+        const MsgPackValue* stringClassValue = properties.Find("ClassName");
+        if (numericClassValue != nullptr) ++numericClassKeys;
+        if (stringClassValue != nullptr) ++stringClassKeys;
+        const MsgPackValue* classValue = numericClassValue != nullptr ? numericClassValue : stringClassValue;
+        if (classValue == nullptr) {
+            ++missingClassKeys;
+        } else if (classValue->kind == MsgPackValue::Kind::String) {
+            ++stringValues;
+            ++classCounts[classValue->strVal];
+        } else {
+            ++nonStringValues;
+        }
+
+        for (const auto& [key, value]: properties.mapVal) {
+            if ((key.kind != MsgPackValue::Kind::Int && key.kind != MsgPackValue::Kind::UInt)
+                || value.kind != MsgPackValue::Kind::String || !IsKnownReplicatedClassName(value.strVal)) {
+                continue;
+            }
+            const int64_t candidateChannel = key.AsInt(-1);
+            if (candidateChannel >= 0 && (!classChannel || candidateChannel != static_cast<int64_t>(*classChannel))) {
+                ++alternateClassChannels[candidateChannel][value.strVal];
+            }
+        }
+
+        if (sampleKeys.empty()) {
+            for (const auto& [key, value]: properties.mapVal) {
+                (void)value;
+                std::string keyText;
+                if (key.kind == MsgPackValue::Kind::String) keyText = key.strVal;
+                else if (key.kind == MsgPackValue::Kind::Int || key.kind == MsgPackValue::Kind::UInt) keyText = std::format("{}", key.AsInt(-1));
+                else continue;
+                if (!sampleKeys.empty()) sampleKeys += ",";
+                sampleKeys += keyText;
+                if (sampleKeys.size() >= 80u) break;
+            }
+        }
+    }
+
+    std::vector<std::pair<std::string, size_t>> distribution(classCounts.begin(), classCounts.end());
+    std::sort(distribution.begin(), distribution.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.second != rhs.second ? lhs.second > rhs.second : lhs.first < rhs.first;
+    });
+    std::string classSummary;
+    for (size_t i = 0; i < std::min<size_t>(distribution.size(), 12u); ++i) {
+        if (!classSummary.empty()) classSummary += ", ";
+        classSummary += std::format("{}={}", distribution[i].first, distribution[i].second);
+    }
+    if (classSummary.empty()) classSummary = "<none>";
+    if (sampleKeys.empty()) sampleKeys = "<none>";
+
+    std::vector<std::pair<int64_t, size_t>> alternateChannels;
+    alternateChannels.reserve(alternateClassChannels.size());
+    for (const auto& [channel, values]: alternateClassChannels) {
+        size_t count = 0;
+        for (const auto& [name, frequency]: values) {
+            (void)name;
+            count += frequency;
+        }
+        alternateChannels.emplace_back(channel, count);
+    }
+    std::sort(alternateChannels.begin(), alternateChannels.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.second != rhs.second ? lhs.second > rhs.second : lhs.first < rhs.first;
+    });
+    if (inferredClassNameChannel != nullptr) {
+        inferredClassNameChannel->reset();
+        const auto nameChannel = PropertyNameChannel("Name");
+        for (const auto& [channel, count]: alternateChannels) {
+            if (count < 3u) break;
+            if (nameChannel && channel == static_cast<int64_t>(*nameChannel)) continue;
+            if (channel < 0 || channel > static_cast<int64_t>(std::numeric_limits<uint16_t>::max())) continue;
+            *inferredClassNameChannel = static_cast<uint16_t>(channel);
+            break;
+        }
+    }
+    std::string alternateSummary;
+    for (size_t i = 0; i < std::min<size_t>(alternateChannels.size(), 6u); ++i) {
+        const int64_t channel = alternateChannels[i].first;
+        std::vector<std::pair<std::string, size_t>> values(alternateClassChannels[channel].begin(), alternateClassChannels[channel].end());
+        std::sort(values.begin(), values.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.second != rhs.second ? lhs.second > rhs.second : lhs.first < rhs.first;
+        });
+        std::string channelClasses;
+        for (size_t j = 0; j < std::min<size_t>(values.size(), 4u); ++j) {
+            if (!channelClasses.empty()) channelClasses += ",";
+            channelClasses += std::format("{}={}", values[j].first, values[j].second);
+        }
+        if (!alternateSummary.empty()) alternateSummary += "; ";
+        alternateSummary += std::format("{}:[{}]", channel, channelClasses);
+    }
+    if (alternateSummary.empty()) alternateSummary = "<none>";
+
+    return std::format("entries={} ClassNameChannel={} numericKeys={} stringKeys={} stringValues={} nonStringValues={} missingKeys={} classes=[{}] alternateClassChannels=[{}] firstEntryKeys=[{}]",
+                       entries, channelIndex, numericClassKeys, stringClassKeys, stringValues, nonStringValues, missingClassKeys, classSummary,
+                       alternateSummary, sampleKeys);
+}
+
+auto IsArray3OfNumbers(const MsgPackValue* value) noexcept -> bool {
+    if (value == nullptr || value->kind != MsgPackValue::Kind::Array || value->arrayVal.size() != 3u) return false;
+    return std::all_of(value->arrayVal.begin(), value->arrayVal.end(), [](const MsgPackValue& component) {
+        return component.kind == MsgPackValue::Kind::Int || component.kind == MsgPackValue::Kind::UInt
+               || component.kind == MsgPackValue::Kind::Float;
+    });
+}
+
+auto MatchesObservedRemotePropertySchema(const MsgPackValue& snapshot, uint16_t classNameChannel) noexcept -> bool {
+    if (!snapshot.IsMap()) return false;
+    size_t partCount = 0u;
+    size_t positionCount = 0u;
+    size_t rotationCount = 0u;
+    size_t sizeCount = 0u;
+    size_t colorCount = 0u;
+    size_t anchoredCount = 0u;
+    size_t canCollideCount = 0u;
+    size_t transparencyCount = 0u;
+
+    for (const auto& [uid, properties]: snapshot.mapVal) {
+        (void)uid;
+        if (!properties.IsMap()) continue;
+        const MsgPackValue* classValue = properties.FindIntKey(classNameChannel);
+        if (classValue == nullptr || classValue->kind != MsgPackValue::Kind::String
+            || (classValue->strVal != "Part" && classValue->strVal != "MeshPart")) {
+            continue;
+        }
+        ++partCount;
+        if (IsArray3OfNumbers(properties.FindIntKey(5))) ++positionCount;
+        if (IsArray3OfNumbers(properties.FindIntKey(20))) ++rotationCount;
+        if (IsArray3OfNumbers(properties.FindIntKey(21))) ++sizeCount;
+        if (IsArray3OfNumbers(properties.FindIntKey(24))) ++colorCount;
+        const MsgPackValue* anchored = properties.FindIntKey(22);
+        if (anchored != nullptr && anchored->kind == MsgPackValue::Kind::Bool) ++anchoredCount;
+        const MsgPackValue* canCollide = properties.FindIntKey(23);
+        if (canCollide != nullptr && canCollide->kind == MsgPackValue::Kind::Bool) ++canCollideCount;
+        const MsgPackValue* transparency = properties.FindIntKey(25);
+        if (transparency != nullptr && transparency->kind == MsgPackValue::Kind::Float) ++transparencyCount;
+    }
+
+    if (partCount < 3u) return false;
+    const size_t required = (partCount * 4u + 4u) / 5u;
+    return positionCount >= required && rotationCount >= required && sizeCount >= required && colorCount >= required
+           && anchoredCount >= required && canCollideCount >= required && transparencyCount >= required;
+}
+
+constexpr std::array<std::pair<uint16_t, std::string_view>, 22> kObservedRemotePropertyChannels {{
+    {5u, "Position"}, {18u, "UserId"}, {19u, "Character"}, {20u, "Rotation"}, {21u, "Size"},
+    {22u, "Anchored"}, {23u, "CanCollide"}, {24u, "Color"}, {25u, "Transparency"}, {32u, "NetworkOwner"},
+    {33u, "Shape"}, {49u, "RootPart"}, {50u, "State"}, {56u, "Enabled"}, {57u, "Intensity"},
+    {58u, "Shadows"}, {59u, "ShadowRadius"}, {60u, "SourceRadius"}, {61u, "Direction"}, {62u, "IsMain"},
+    {63u, "Range"}, {64u, "Falloff"}
+}};
+
 auto BuildConnectPacket(const LaunchConfig& config, uint16_t udpPort) -> MsgPackValue {
     MsgPackValue packet = MsgPackValue::Map();
     packet.Set("action", MsgPackValue::String("connect"));
@@ -236,11 +417,18 @@ auto IsReferenceProperty(std::string_view property) noexcept -> bool {
            || property == "Character" || property == "RootPart" || property == "PrimaryPart" || property == "Adornee" || property == "ParentShader";
 }
 
-auto ReadPropertyName(const MsgPackValue& key) noexcept -> std::string_view {
+auto ReadPropertyName(
+    const MsgPackValue& key,
+    std::optional<uint16_t> remoteClassNameChannel,
+    const std::array<std::string_view, PROPERTY_CHANNEL_COUNT>& remotePropertyNameOverrides
+) noexcept -> std::string_view {
     if (key.kind == MsgPackValue::Kind::String) return key.strVal;
     const int64_t index = key.AsInt(-1);
     if (index < 0 || index >= static_cast<int64_t>(PROPERTY_CHANNEL_COUNT)) return {};
-    return PropertyChannelName(static_cast<uint16_t>(index));
+    const uint16_t channel = static_cast<uint16_t>(index);
+    if (remoteClassNameChannel && channel == *remoteClassNameChannel) return "ClassName";
+    if (!remotePropertyNameOverrides[channel].empty()) return remotePropertyNameOverrides[channel];
+    return PropertyChannelName(channel);
 }
 
 auto CharacterOffsetForName(std::string_view name) noexcept -> JPH::Vec3 {
@@ -444,6 +632,9 @@ auto ClientSession::Connect(const LaunchConfig& config) -> std::expected<void, s
     m_realtimeModeReceived = false;
     m_networkPollStarted = false;
     m_sceneSyncSummaryLogged = false;
+    m_snapshotClassProbeLogged = false;
+    m_remoteClassNameChannel.reset();
+    m_remotePropertyNameOverrides.fill(std::string_view {});
     m_lastNetworkStatusLog = {};
     m_tcpBytesSent = 0u;
     m_tcpBytesReceived = 0u;
@@ -697,7 +888,7 @@ void ClientSession::ApplySnapshotMap(const MsgPackValue& snapshot) {
 void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue& properties) {
     if (!properties.IsMap()) return;
     for (const auto& [key, value]: properties.mapVal) {
-        const std::string_view property = ReadPropertyName(key);
+        const std::string_view property = ReadPropertyName(key, m_remoteClassNameChannel, m_remotePropertyNameOverrides);
         if (property.empty()) continue;
         if (property == "ClassName") {
             object.className = value.AsString(object.className);
@@ -1090,6 +1281,34 @@ void ClientSession::PollNetwork(Engine& engine) {
             }
 
             const uint64_t frameNumber = ++m_tcpFramesReceived;
+            if (!m_snapshotClassProbeLogged) {
+                if (const MsgPackValue* snapshot = packet->Find("initialObjectsSnapshot")) {
+                    std::optional<uint16_t> inferredClassNameChannel;
+                    Log("[ProjectLight][net] raw initialObjectsSnapshot class probe: {}",
+                        SnapshotClassProbe(*snapshot, &inferredClassNameChannel));
+                    if (inferredClassNameChannel) {
+                        m_remoteClassNameChannel = inferredClassNameChannel;
+                        const auto compiledClassNameChannel = PropertyNameChannel("ClassName");
+                        Log("[ProjectLight][net] inferred remote ClassName channel {}; compiled property table expects {}.",
+                            *m_remoteClassNameChannel, compiledClassNameChannel.value_or(0u));
+                        m_remotePropertyNameOverrides.fill(std::string_view {});
+                        if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel
+                            && MatchesObservedRemotePropertySchema(*snapshot, *m_remoteClassNameChannel)) {
+                            for (const auto& [channel, property]: kObservedRemotePropertyChannels) {
+                                m_remotePropertyNameOverrides[channel] = property;
+                            }
+                            Log("[ProjectLight][net] audited remote property layout matched; mapped Position=5, Rotation=20, Size=21, Anchored=22, CanCollide=23, Color=24, Transparency=25, UserId=18, Character=19, NetworkOwner=32, Shape=33, RootPart=49, State=50, and light fields=56-64.");
+                        } else if (compiledClassNameChannel && *m_remoteClassNameChannel != *compiledClassNameChannel) {
+                            LogWarning("[ProjectLight][net] no known numeric property layout matched this snapshot; only ClassName will use a remote override.");
+                        }
+                    } else {
+                        m_remoteClassNameChannel.reset();
+                        m_remotePropertyNameOverrides.fill(std::string_view {});
+                        Log("[ProjectLight][net] no alternate ClassName channel inferred; using the compiled property table.");
+                    }
+                    m_snapshotClassProbeLogged = true;
+                }
+            }
             const std::string_view action = GetFrameAction(*packet);
             if (action == "realtimeMode") {
                 const MsgPackValue* modeValue = packet->Find("mode");
@@ -1322,6 +1541,21 @@ void ClientSession::SyncSceneEntities(Engine& engine) {
         }
         Log("[ProjectLight][scene] initial sync after snapshot: objects={} parts/meshParts={} lights={} boundEntities={} liveEntities={} workspaceUid={} localPlayerUid={} localRootPartUid={}",
             m_objects.size(), partCount, lightCount, boundEntityCount, liveEntityCount, m_workspaceUid, m_localPlayerUid, m_localRootPartUid);
+        std::unordered_map<std::string, size_t> classCounts;
+        for (const auto& [uid, object]: m_objects) {
+            (void)uid;
+            ++classCounts[object.className.empty() ? "<empty>" : object.className];
+        }
+        std::vector<std::pair<std::string, size_t>> distribution(classCounts.begin(), classCounts.end());
+        std::sort(distribution.begin(), distribution.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.second != rhs.second ? lhs.second > rhs.second : lhs.first < rhs.first;
+        });
+        std::string classSummary;
+        for (size_t i = 0; i < std::min<size_t>(distribution.size(), 12u); ++i) {
+            if (!classSummary.empty()) classSummary += ", ";
+            classSummary += std::format("{}={}", distribution[i].first, distribution[i].second);
+        }
+        Log("[ProjectLight][scene] parsed ClassName distribution: {}", classSummary.empty() ? "<none>" : classSummary);
         if (partCount == 0 && lightCount == 0) {
             LogWarning("[ProjectLight][scene] snapshot completed but contains no renderable Part/MeshPart or light objects.");
         } else if (liveEntityCount == 0) {

@@ -338,6 +338,9 @@ class ClientSession {
     bool                                 m_realtimeModeReceived = false;
     bool                                 m_networkPollStarted = false;
     bool                                 m_sceneSyncSummaryLogged = false;
+    bool                                 m_snapshotClassProbeLogged = false;
+    std::optional<uint16_t>              m_remoteClassNameChannel {};
+    std::array<std::string_view, PROPERTY_CHANNEL_COUNT> m_remotePropertyNameOverrides {};
 
     std::chrono::steady_clock::time_point m_lastNetworkStatusLog {};
     uint64_t                             m_tcpBytesSent       = 0u;
