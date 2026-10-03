@@ -42,7 +42,7 @@
 //
 // The miniature prefab is built by hand so the tests can control the active
 // clip, nonzero default weights and morph deltas independently of an external
-// asset. extras/glTF now populates those fields for imported glTF primitives
+// asset. plugins/glTF now populates those fields for imported glTF primitives
 // (up to four targets). This fixture exercises the same instantiate -> pose ->
 // extract -> shader path with a predictable authored base pose.
 

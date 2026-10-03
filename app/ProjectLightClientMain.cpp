@@ -4,7 +4,7 @@
 // Optional project-light client composition root. This intentionally has a
 // separate entrypoint from app/main.cpp, keeping the default `zahlen` binary
 // deterministic and free of client CLI/configuration code.
-#include <Network/LightProtocol.hpp>
+#include <ProjectLightClient/LightProtocol.hpp>
 #include <ProjectLightClient/ClientConfig.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <Camera/TargetCamera.hpp>

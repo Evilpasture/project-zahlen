@@ -6,7 +6,7 @@
 The tests/ tree may only exercise public behaviour through public headers:
 
   * include/Zahlen/**
-  * extras/** (optional public extras modules)
+  * plugins/**, extensions/**, and gameplay/** (optional public layers)
   * the in-tree test framework
   * third-party and standard-library headers
 
@@ -26,7 +26,13 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 SRC = ROOT / "src"
 INCLUDE = ROOT / "include"
-EXTRAS = ROOT / "extras"
+OPTIONAL_PUBLIC_ROOTS = (
+    ROOT / "plugins",
+    ROOT / "extensions",
+    ROOT / "extensions" / "net",
+    ROOT / "gameplay",
+    ROOT / "gameplay" / "ProjectLight",
+)
 EXTERN = ROOT / "extern"
 THIRD_PARTY = ROOT / "third_party"
 
@@ -36,7 +42,7 @@ CMAKE_NAMES = {"CMakeLists.txt"}
 # Bare-name lookup only needs trees tests can actually include. Walking
 # extern/ (Slang, Jolt, …) on every `#include "Foo.hpp"` is what made this
 # check dominate CMake configure after those vendors landed.
-BARE_HEADER_ROOTS = (TESTS, INCLUDE, EXTRAS, SRC)
+BARE_HEADER_ROOTS = (TESTS, INCLUDE, *OPTIONAL_PUBLIC_ROOTS, SRC)
 SKIP_DIR_NAMES = {".git", "build", ".cache", "__pycache__"}
 
 include_pattern = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
@@ -129,7 +135,7 @@ def include_is_internal(include: str, source: Path) -> bool:
     except ValueError:
         pass
 
-    if exists_under(INCLUDE, include) or exists_under(EXTRAS, include) or exists_under(TESTS, include):
+    if exists_under(INCLUDE, include) or any(exists_under(root, include) for root in OPTIONAL_PUBLIC_ROOTS) or exists_under(TESTS, include):
         return False
     if exists_under(EXTERN, include) or exists_under(THIRD_PARTY, include):
         return False
@@ -181,7 +187,7 @@ def main() -> int:
             print(f"  - {violation}", file=sys.stderr)
         print(
             "Remove the internal include or rewrite the test against include/Zahlen "
-            "(or extras/). Do not add src/ to test include directories.",
+            "(or plugins/, extensions/, or gameplay/). Do not add src/ to test include directories.",
             file=sys.stderr,
         )
         return 1

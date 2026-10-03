@@ -32,7 +32,7 @@
 // (zero while no engine exists) and are meant for workload-scoped deltas.
 #include <Zahlen/Render/Render.hpp>
 
-// Performance baselines live in extras/profile/PerfBaseline.hpp, because
+// Performance baselines live in tests/extras/profile/PerfBaseline.hpp, because
 // storing them is a JSON document and JSON is an extra. This header stays
 // extras-free on purpose: every test suite includes it, and a suite that only
 // exercises core must build in a build without extras.

@@ -51,9 +51,9 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
-// The extras this harness consumes. Optional targets -- no glTF importer, no
-// serialization; no binary -- and samples/CMakeLists.txt skips a sample whose
-// extras were not built, so none of the includes needs a guard here.
+// The optional layer targets this harness consumes. They remain independent of
+// Core. samples/CMakeLists.txt skips the sample when a required target is absent,
+// so these includes do not need target guards.
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>

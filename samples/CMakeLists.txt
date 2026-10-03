@@ -12,8 +12,8 @@ file(GLOB SAMPLE_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
-# Which extras domains each sample consumes (imports, includes, or installs),
-# by sample name. A sample that appears in none of these lists links no extras.
+# Which optional-layer targets each sample consumes (imports, includes, or installs),
+# by sample name. A sample that appears in none of these lists links no optional targets.
 #
 #   ProceduralAnimationSample  imports ZHLN.Locomotion and
 #                              ZHLN.ProceduralAnimation (zahlen_animation),
@@ -21,7 +21,7 @@ file(GLOB SAMPLE_SOURCES
 #                              to load the rig it animates, builds its
 #                              ground with <Terrain/TerrainFactory.hpp>
 #                              (zahlen_terrain), and drives its third-person
-#                              view through the extras camera rig
+#                              view through the extension camera rig
 #                              (<Camera/TargetCamera.hpp>, zahlen_camera), and
 #                              installs the character controller that drives
 #                              its WASD and physics steps
@@ -29,39 +29,39 @@ file(GLOB SAMPLE_SOURCES
 #                              zahlen_character_controller).
 #   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
 #   RemoteGLBSample            fetches through ZHLN::Remote (zahlen_remote_asset
-#                              over extras/HTTP) and imports with ZHLN.glTF
+#                              over extensions/net/HTTP) and imports with ZHLN.glTF
 #                              (zahlen_gltf); its model-list crawl goes through
-#                              ZHLN::GitHub (zahlen_github, over extras/HTTP
-#                              and extras/json).
+#                              ZHLN::GitHub (zahlen_github, over extensions/net/HTTP
+#                              and plugins/json).
 #   FidelityHarness            headless glTF-Render-Fidelity runner: imports
 #                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
 #                              scenario JSONs with ZHLN::ReflectJSON
-#                              (zahlen_serialization -- extras/json), and
+#                              (zahlen_serialization -- plugins/json), and
 #                              supplies images through zahlen_asset_cooking.
 #
-# Linking the named domains instead of the zahlen_extras aggregate is the point
-# of the decomposition: a sample's build waits only on extras it uses, and a
-# sample that wants no extras gets no simdjson, sockets or VFX toolkits.
-set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
-set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
-set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
-set(ZHLN_SAMPLE_EXTRAS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
+# Linking named domains instead of the compatibility aggregate is the point of
+# the decomposition: a sample waits only on the optional targets it uses, and a
+# sample with no optional targets gets no simdjson, sockets, or VFX toolkit.
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)
 
-    # A sample whose extras domains were not built cannot compile -- its import
+    # A sample whose required optional targets were not built cannot compile -- its import
     # would have no BMI to bind to -- so it is skipped rather than failed. The
     # same rule that used to guard ProceduralAnimationSample by name now covers
-    # every sample with an extras dependency.
-    set(ZHLN_SAMPLE_MISSING_EXTRAS "")
-    foreach(ZHLN_SAMPLE_EXTRA IN LISTS ZHLN_SAMPLE_EXTRAS_${SAMPLE_NAME})
-        if(NOT TARGET ${ZHLN_SAMPLE_EXTRA})
-            list(APPEND ZHLN_SAMPLE_MISSING_EXTRAS ${ZHLN_SAMPLE_EXTRA})
+    # every sample with an optional-layer dependency.
+    set(ZHLN_SAMPLE_MISSING_OPTIONAL_TARGETS "")
+    foreach(ZHLN_SAMPLE_OPTIONAL_TARGET IN LISTS ZHLN_SAMPLE_OPTIONAL_TARGETS_${SAMPLE_NAME})
+        if(NOT TARGET ${ZHLN_SAMPLE_OPTIONAL_TARGET})
+            list(APPEND ZHLN_SAMPLE_MISSING_OPTIONAL_TARGETS ${ZHLN_SAMPLE_OPTIONAL_TARGET})
         endif()
     endforeach()
-    if(ZHLN_SAMPLE_MISSING_EXTRAS)
-        message(STATUS "Skipping sample ${SAMPLE_NAME}: extras target(s) not built: ${ZHLN_SAMPLE_MISSING_EXTRAS}")
+    if(ZHLN_SAMPLE_MISSING_OPTIONAL_TARGETS)
+        message(STATUS "Skipping sample ${SAMPLE_NAME}: optional target(s) not built: ${ZHLN_SAMPLE_MISSING_OPTIONAL_TARGETS}")
         continue()
     endif()
 
@@ -81,11 +81,11 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         zahlen_warnings
     )
 
-    # Link only the extras domains this sample uses (e.g. ZHLN.Locomotion and
+    # Link only the optional targets this sample uses (e.g. ZHLN.Locomotion and
     # Character::Install). Each carries its public include root and any module
     # interfaces, so the sample can resolve both <glTF/...> and imports above.
-    foreach(ZHLN_SAMPLE_EXTRA IN LISTS ZHLN_SAMPLE_EXTRAS_${SAMPLE_NAME})
-        target_link_libraries(${SAMPLE_NAME} PRIVATE ${ZHLN_SAMPLE_EXTRA})
+    foreach(ZHLN_SAMPLE_OPTIONAL_TARGET IN LISTS ZHLN_SAMPLE_OPTIONAL_TARGETS_${SAMPLE_NAME})
+        target_link_libraries(${SAMPLE_NAME} PRIVATE ${ZHLN_SAMPLE_OPTIONAL_TARGET})
     endforeach()
 
     target_compile_definitions(${SAMPLE_NAME} PRIVATE
@@ -97,7 +97,7 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     # (see app/main.cpp and Fonts::VendoredDefaultFontSource) so its text renders
     # with a real font instead of core's embedded 8x8 fallback.
     #
-    # Not listed in ZHLN_SAMPLE_EXTRAS_*: those are required domains, and a
+    # Not listed in ZHLN_SAMPLE_OPTIONAL_TARGETS_*: those are required domains, and a
     # missing target there skips the sample. This link is optional by design --
     # without the font domain, ZHLN_HAS_FONTS stays undefined and the sample
     # keeps building and running on the embedded bake.

@@ -3,7 +3,7 @@
 
 // tests/extras/TestBakedFontLoader.cpp
 //
-// extras/Fonts' fontbm path: the BMFont JSON descriptor scan and the bake
+// plugins/Fonts' fontbm path: the BMFont JSON descriptor scan and the bake
 // assembly that turns (descriptor, RGBA page) into core's GUI::BakedFontAsset.
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
 // tools/fontbm.sh). Legacy text format is not supported.

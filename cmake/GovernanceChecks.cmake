@@ -45,9 +45,9 @@ function(zhln_run_governance_check script_name)
   endif()
 endfunction()
 
-# Enforce the one-way dependency boundary: optional extras may consume core,
-# while src/, include/, and modules/ must never consume extras.
-zhln_run_governance_check("check_core_extras_boundary.py")
+# Enforce the one-way dependency boundary: plugins/, extensions/, and gameplay/
+# may consume Core, while src/, include/, and modules/ must never consume them.
+zhln_run_governance_check("check_core_layer_boundary.py")
 
 # Tests may only include public headers. src/ is private implementation.
 zhln_run_governance_check("check_tests_public_api.py")

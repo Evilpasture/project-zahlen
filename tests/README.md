@@ -5,7 +5,7 @@ The suite tests **public behaviour only**.
 Allowed:
 
 - `include/Zahlen/**`
-- optional extras (`extras/**`, `ALife/**`, `import ZHLN.*` extras modules)
+- optional outer layers (`plugins/**`, `extensions/**`, `gameplay/**`, `import ZHLN.*` modules)
 - this directory's framework (`TestsFramework.hpp`)
 - third-party and standard-library headers needed to drive the public API
 

@@ -7,9 +7,9 @@
 # writes for every asset folder.
 #
 # zcook lives in tools/, not src/: it is the offline asset pipeline, and the
-# off-line GLB emitter consumes extras/json's reflection serializer. Core
-# (src/, include/, modules/) must never depend on extras -- see
-# configure/check_core_extras_boundary.py -- so the cooker is outside core roots.
+# off-line GLB emitter consumes plugins/json's reflection serializer. Core
+# (src/, include/, modules/) must never depend on optional layers -- see
+# configure/check_core_layer_boundary.py -- so the cooker is outside core roots.
 #
 # This module defines the zcook target and the zahlen_configure_game_assets()
 # helper. The helper does add_custom_command(TARGET zcook ...) and
@@ -17,10 +17,10 @@
 # after both targets exist.
 
 # Source-image and ZRD1/ZRD2 codecs are optional to the engine, but always needed
-# by the offline cooker. Keep them in one extras target so an application (e.g.
+# by the offline cooker. Keep them in the asset-cooking plugin target so an application (e.g.
 # FidelityHarness) can explicitly supply decoded pixels without pulling any
 # file formats into the runtime libraries.
-add_subdirectory(extras/AssetCooking)
+add_subdirectory(plugins/AssetCooking)
 add_executable(zcook
     tools/zcook/main.cpp
     tools/zcook/Transform.cpp
@@ -33,7 +33,7 @@ target_link_libraries(zcook PRIVATE zahlen_engine zahlen_filesystem zahlen_threa
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
-    ${CMAKE_SOURCE_DIR}/extras
+    ${CMAKE_SOURCE_DIR}/plugins
     ${CMAKE_SOURCE_DIR}/tools/zcook
 )
 

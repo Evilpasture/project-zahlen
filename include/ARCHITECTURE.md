@@ -42,7 +42,7 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Components store plain generational handles. Physics, audio, articulation and rendering do **not** keep entity-owner ledgers or poll ECS liveness. The registry has no removal observers.
 * In an Engine scene, `DespawnEntity(engine, entity)` marks the hierarchy with `Components::PendingDestroy`; the Engine's main ECB also marks instead of destroying. The `SceneCleanup` scheduler step runs after `MainECBPlayback` and before camera/rendering. It queries intact components, collects physics handles for one `PhysicsContext::DestroyBodies(span)` call under one shadow lock, releases other owned handles (including registered VFX cleanup passes), then calls `Registry::Destroy` on the marked entities. Bodies finish retiring on the next physics step.
 * Raw `Registry::Destroy` and `Registry::Clear` remain **immediate, data-only** primitives. Generic ECBs (including standalone `World` ECBs) likewise destroy immediately; only the Engine opts its ECB into deferred destruction. Never use raw destruction on an Engine scene with external-resource components: use `DespawnEntity` and `Engine::ClearScene` instead. `Engine::ProcessPendingDestroy` allows an explicit synchronous cleanup before the next frame. Standalone registries must explicitly release their owned resources before raw removal/clear (e.g. `PrefabFactory::ReleaseOwnedMeshes` and `TerrainSystem::ReleaseTerrainData`).
-* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; extras supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
+* Use the typed `SceneResources::Attach/Detach` helpers from `<Zahlen/SceneResources.hpp>` for direct replacement/removal of core resource-owning components; optional layers supply their own explicit helpers. A raw `Registry::Add` replacement or `Remove` erases the old handle without releasing its external resource. Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
 * Systems modifying global engine state (e.g., Post-Processing, Exposure, Sky Gradients) MUST NOT overwrite global base values.
@@ -106,225 +106,107 @@ void   Update(Engine& engine, float dt);
 
 ---
 
-## 1.2 The Core / Extras Dependency Boundary
+## 1.2 Core and Optional-Layer Boundaries
 
-`src/`, `include/` and `modules/` are the **Core Engine**. `extras/` is the
-optional feature layer built on top of it.
+`src/`, `include/`, and the existing top-level `modules/` directory form the
+**Core Engine**. The `modules/` directory is reserved for the engine's C++
+module interfaces; it is not a catch-all for additional subsystems. Optional
+code is organized by architectural role instead:
 
-> **Rule: the dependency is one-way.** Core must never include, import or link
-> anything from `extras/`. `extras/` may consume Core freely.
-
-`configure/check_core_extras_boundary.py` runs at CMake configure time and fails the
-build on a violation, so the rule is enforced rather than documented. It catches
-both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
-under `extras/` — including the short forms, because `extras/` is itself an
-include root published by every extras target, so `#include <json/JSON.hpp>`
-compiles happily from a core file and has to be rejected by path resolution, not
-by spelling. What the script cannot see is linking: keep the extras targets out
-of every target defined outside `extras/` and `tests/`.
-
-### One target per domain
-
-`extras/` is not one library. Each domain is a target of its own, defined by its
-own `CMakeLists.txt`, owning both its sources and its dependencies:
-
-| Target | Directory | Why it is separate |
+| Root | Owns | Examples |
 | :--- | :--- | :--- |
-| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS, plus the analytic two-bone IK toolkit (`IK.hpp` / `TwoBoneIK.cpp`); needs no serializer and no asset importer |
-| `zahlen_network` | `extras/Network/` | Isolates `ZHLN.Wire` + `ZHLN.Network`; pulls in neither the renderer nor simdjson |
-| `zahlen_alife` | `extras/ALife/` | Pure simulation and GOAP; no graphics dependencies |
-| `zahlen_vfx` | `extras/VFX/` | `ZHLN.CombatFX` / `ZHLN.Explosions` / `ZHLN.Lightning` |
-| `zahlen_gltf` | `extras/glTF/` | Owns cgltf and stb_image |
-| `zahlen_serialization` | `extras/json/` + `extras/toml/` | Reflection-driven documents; owns simdjson |
-| `zahlen_character_controller` | `extras/CharacterController/` | WASD/jump/sprint locomotion over `CharacterVirtual`: a game controller, not substrate (core keeps `CreateCharacter` and the raw `InputStateComponent`) |
-| `zahlen_interaction` | `extras/Interaction/` | Trigger/pickup/container/usable gameplay with the 16-slot inventory; an RPG/adventure game model, not engine substrate |
-| `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
-| `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
-| `zahlen_ui_schema` | `extras/UI/` | The data-driven UI document schema (`UINode`, `ActionRegistry`, `PropertyStore`, `RenderUITree`); core keeps `src/gui/` as the immediate-mode Clay + font layer |
-| `zahlen_fonts` | `extras/Fonts/` | The production baked-font path: fontbm `.fnt`+`.png` pairs (and cooked `'FNT0'` containers) into core's `BakedFontLoader` hook; core keeps the hook, the cooked-format decoder and one embedded default bake, and parses no outline font |
+| `plugins/` | Asset formats, serializers, importers, and codecs | `glTF/`, `json/`, `toml/`, `Fonts/`, `SVG/`, `AssetCooking/` |
+| `extensions/` | Reusable engine subsystems and network/platform I/O | `Animation/`, `Camera/`, `Scripting/`, `UI/`, `VFX/`, `net/Network/`, `net/HTTP/`, `net/RemoteAsset/`, `net/GitHub/` |
+| `gameplay/` | Domain-specific systems and project integrations | `ALife/`, `Interaction/`, `FallbackScene/`, `ProjectLight/` |
 
-`zahlen_extras` is the aggregate: an **INTERFACE** target that links those
-domains and compiles nothing. It exists for consumers that want all of extras;
-consumers that want one domain link one domain. The composition root does
-exactly that — it links `zahlen_serialization` for `SceneTOML`/`UITOML` and
-names the gameplay domains it runs with (`InstallGameplayExtras` in
-`app/main.cpp` installs the character controller, interaction, terrain,
-two-bone IK and the fallback scene through their `Install` entry points, each
-guarded on its `ZHLN_HAS_*` definition). Five more directories were
-already targets of their own — `extras/Scripting/` (`zahlen_scripting` and
-`zahlen_scripting_lua`), `extras/editor/` (`zahlen_editor`),
-`extras/Console/` (`zahlen_console`), `extras/SVG/` (`zahlen_svg`) and
-`extras/HTTP/` (`zahlen_http`) — and are deliberately *not* part of the
-aggregate, for the reasons given in their own files: a LuaJIT runtime, an editor
-gated on `ZHLN_HAS_EDITOR`, a console that depends on the scripting binder, and
-two libraries that may not be installed.
+`gameplay/ProjectLight/` groups the canonical stable-ID `DataModel` and the
+native ProjectLight client that adapts the existing server protocol. The
+ProjectLight-specific MessagePack/zlib protocol types live with that client,
+not in the reusable Zahlen wire-protocol extension.
 
-Because every domain lists its own sources, `extras/CMakeLists.txt` has no
-recursive source globs left: a file added to one of these directories is
-compiled by exactly one target, and a new domain is a new `CMakeLists.txt` plus
-one `add_subdirectory`.
+> **Rule: dependencies point outward from Core.** Plugins, extensions, and
+> gameplay may consume Core; code under `src/`, `include/`, or `modules/` must
+> never include, import, or link an optional-layer target.
 
-One deliberate exception to the *location* of the rule, not to its direction:
-the offline cooker `tools/zcook/` is not core and may consume `extras/`. It
-lives under `tools/` precisely because its GLB emitter serialises the glTF
-document with `extras/json`'s reflection serializer, which a core source tree
-may not touch. It still links no `zahlen_extras` and pulls no simdjson —
-`ReflectJSON::SerializeJSON` is a header template — so an extras-free build
-keeps producing assets.
+`configure/check_core_layer_boundary.py` enforces the source/header half of this
+rule during CMake configuration. It scans module imports and resolves headers
+against the optional layers' public include roots, so both a spelled path and a
+short include such as `#include <json/JSON.hpp>` are caught. CMake links remain
+explicit: the composition roots in `app/`, samples, tests, and host tools may
+select the targets they use, while Core targets must not depend on them.
+
+### Targets and dependency order
+
+Each feature directory owns its sources and target. The directory hierarchy is
+not a monolithic library boundary: consumers link the capability they need,
+and optional third-party dependencies stay local to the owning target.
+
+| Target | Directory | Role |
+| :--- | :--- | :--- |
+| `zahlen_serialization` | `plugins/json/` + `plugins/toml/` | Reflection-driven JSON/TOML documents; JSON owns simdjson |
+| `zahlen_gltf` | `plugins/glTF/` | glTF/GLB importer; owns cgltf and uses the serializer |
+| `zahlen_fonts` | `plugins/Fonts/` | Baked-font loader for fontbm pairs and cooked font containers |
+| `zahlen_svg` | `plugins/SVG/` | Optional resvg-backed SVG rasterizer |
+| `zahlen_asset_cooking` | `plugins/AssetCooking/` | Host-side image and cooked-asset codecs used by `zcook` |
+| `zahlen_network` | `extensions/net/Network/` | `ZHLN.Wire` and replication over the engine ECS |
+| `zahlen_http`, `zahlen_remote_asset`, `zahlen_github` | `extensions/net/{HTTP,RemoteAsset,GitHub}/` | Optional HTTP transfer, remote-asset cache, and GitHub tree adapter |
+| `zahlen_animation`, `zahlen_camera`, `zahlen_character_controller`, `zahlen_terrain`, `zahlen_ui_schema`, `zahlen_vfx` | `extensions/` | Reusable animation, camera, controller, terrain, UI, and VFX capabilities |
+| `zahlen_ragdoll_authoring` | `gameplay/RagdollAuthoring/` | Domain-specific humanoid ragdoll authoring |
+| `zahlen_scripting`, `zahlen_scripting_lua`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent scripting support, optional LuaJIT runtime, console, and editor |
+| `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
+| `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
+
+`ZHLN_BUILD_EXTRAS` remains the existing CMake option for compatibility; it now
+gates the optional `plugins/`, `extensions/`, and `gameplay/` build layers.
+`zahlen_extras` also remains as a downstream compatibility `INTERFACE` target,
+but in-tree code links individual targets so it does not pull unrelated
+subsystems into an executable. `plugins/AssetCooking/` is the deliberate
+exception to the option: `cmake/AssetPipeline.cmake` configures the host-side
+codec target for `zcook` even when optional runtime layers are disabled.
+
+The root CMake configuration establishes target order: plugins provide the
+serializer, extensions provide reusable systems and I/O, gameplay creates the
+ProjectLight DataModel, and the Lua binding target is configured after that
+DataModel exists. `zahlen_serialization` publishes `zahlen_ui_schema` because
+`UITOML.hpp` names the UI schema in its public API. Other dependencies stay
+private where they are implementation details.
 
 ### What the boundary buys
 
-Anything behind it is genuinely optional — its third-party dependencies
-included. The concrete case that motivated the rule:
+The core-only configuration (`-DZHLN_BUILD_EXTRAS=OFF`) does not build the
+optional format/runtime/gameplay libraries or require simdjson, resvg, libcurl,
+or LuaJIT for those layers. The offline `zcook` tool and its asset-cooking
+codecs remain available. More optional dependencies can be disabled at their
+own target, such as `-DZHLN_BUILD_SVG=OFF` or `-DZHLN_BUILD_HTTP=OFF`; an
+unavailable library skips only the target that needs it.
 
-| Layer | Contents | Dependencies it carries |
-| :--- | :--- | :--- |
-| `extras/json/` | `zahlen_serialization` (with `extras/toml/`): `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
-| `extras/toml/` | `zahlen_serialization` (with `extras/json/`): `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
-| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, and `extras/json` for the custom node members |
-| `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
-| `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
-| `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
-| `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
-| `extras/SVG/` | `SVG.hpp`/`SVG.cpp` (`zahlen_svg`): an owning wrapper over resvg's C API — `Options`, the reusable `Rasterizer`, the parsed `Document`, and the `Raster` it renders into, which is where resvg's premultiplied RGBA8888 becomes the straight alpha the engine samples. `resvg.h` is included by `SVG.cpp` alone, and resvg stays a PRIVATE dependency of the target | resvg (optional: no resvg, no target) |
-| `extras/HTTP/` | `HTTP.hpp`/`HTTP.cpp` (`zahlen_http`): a synchronous fetcher over libcurl's easy interface — `Request`, `Response` and `Header`, plus `Fetch`, `Get` and `Post`, all returning `std::expected<Response, ErrorCode>` in which an HTTP status is data and only a failed transfer is an error — a request this client will not put on the wire (a newline in the method, a header, or the URL) is refused as `MalformedRequest` or `InvalidURL` before libcurl sees it, and `Response::FindHeader` answers the case-insensitive field lookup HTTP asks for. `HTTPServer.hpp`/`HTTPServer.cpp` are the other half of testing a fetcher: a loopback HTTP/1.1 server on an ephemeral port, with the fixed routes this extra's suite asserts against, so a test needs no network and no third-party host. Its header names no platform socket type — a socket crosses it as a `std::intptr_t` — and the winsock or POSIX divergence lives in the `.cpp`, the way all of libcurl lives in `HTTP.cpp`. `curl/curl.h` is included by `HTTP.cpp` alone, and libcurl stays a PRIVATE dependency of the target | libcurl (optional: no libcurl, no target) |
+A few examples illustrate the intended seam:
 
-Core has no JSON, TOML, model-file or scripting dependency at all, so a
-core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
-links no parser and no Lua runtime.
+* **Scenes are Core data; text formats are plugins.** `Zahlen/Scene.hpp` and
+  `Scene::Instantiate()` remain Core. `plugins/toml/SceneTOML.hpp` turns a
+  scene into TOML and binds Jolt vectors; Core does not parse a document.
+* **Model import is a plugin.** `plugins/glTF/GLTFImporter.cpp` reads a model
+  using cgltf, stb_image, and `plugins/json`, then writes a plain
+  `ZHLN::ModelPrefab` to the Core prefab cache. Core reads the cached structure
+  and instantiates it; it never calls the importer or depends on glTF parsing.
+* **Fonts follow the same pattern.** Core owns the `BakedFontLoader` seam and
+  embedded fallback bake. `plugins/Fonts/` installs the production loader for
+  fontbm atlases or cooked font containers; Core parses no outline font.
+* **ProjectLight is application/gameplay policy.** Its `DataModel` owns stable
+  Instance IDs and the object graph; bindings and the native client adapt that
+  graph to existing engine APIs without making Core depend on LuaJIT, sockets,
+  or the ProjectLight protocol.
+* **Scripting is optional.** Core exposes `IScriptRuntime` and a null-safe
+  `ScriptRunner`. The reusable binder lives in `extensions/Scripting/`, while
+  `extensions/Scripting/Lua/` owns LuaJIT, the C ABI, and Fennel sources. The
+  host composition root installs a runtime when it wants one.
 
-Two extras are optional in a stronger sense than that flag: `extras/SVG/` and
-`extras/HTTP/` each own their discovery, and when resvg (or libcurl) is not
-installed their `CMakeLists.txt` warns and returns without defining `zahlen_svg`
-(or `zahlen_http`) — a skipped target, not a configure error. Each lists its own
-sources, so neither is ever compiled into an archive that has no include path
-for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
-`if(TARGET zahlen_http)` the way the composition root guards on `zahlen_editor`.
-`-DZHLN_BUILD_SVG=OFF` and `-DZHLN_BUILD_HTTP=OFF` skip the searches themselves.
+The composition root lives in `app/`, not `src/`. It may link optional targets
+and choose what to install; Core remains usable without those targets and does
+not register or call into an optional implementation unless a Core-owned seam
+is explicitly provided.
 
-### Consequences worth knowing
-
-* **`Zahlen/Scene.hpp` is pure data.** The structs, their defaults and
-  `Scene::Instantiate(engine, scene)` are Core. Turning a scene into text and
-  back is `extras/toml/SceneTOML.hpp`, which also holds the
-  `ReflectTOML::TOMLVector<JPH::Float3>` specialisations that make a Jolt vector
-  read as `[x, y, z]`. Include *that* header — not `toml/TOML.hpp` alone — or a
-  scene serialises its vectors as tables of members.
-* **`DefaultPreset` does not parse anything.** The engine's fallback scene is the
-  one scene that has to work when nothing else loaded, so it is a compiled-in
-  `ZHLN::Scene::Scene` handed to `Scene::Instantiate()` rather than a baked-in
-  document parsed at runtime. A mistake in it fails the build instead of
-  surfacing on the day the game already failed to boot. The preset itself
-  lives in `extras/FallbackScene/` (it is demo content coupled to the boot
-  flow); core provides the frame-scheduler extension seam it re-inserts
-  itself through, the `enableFallbackScene` flag that gates it, and the
-  teardown-hook list that releases its process-global state.
-
-* **The glTF importer is an extra, and Core never calls it.** Reading a model
-  file means a container parser, an image decoder, a mesh partitioner and a JSON
-  reader for the custom node members — far more machinery than the engine needs
-  to run, so `extras/glTF/GLTFImporter.cpp` sits behind the boundary and uses
-  the real `extras/json` parser rather than a bespoke scanner. What it produces
-  is a plain `ZHLN::ModelPrefab` — the same struct the ECS already describes —
-  which it leaves in `CreativeWorksManager`'s prefab cache under
-  `HashCreativeWorkPath(path)`. `CreativeWorksFactory::LoadModelPrefab(path)`,
-  the entry point `Scene::ShapeKind::Prefab` and the scripting bindings use, is
-  that cache lookup and nothing else:
-
-  ```cpp
-  // the extra: parse, upload, cache
-  auto prefab = ZHLN::GLTF::LoadGLBPrefab(ctx, cwMgr, "Crate.glb");
-
-  // core only: read the struct back out of the cache and spawn it
-  ZHLN::CreativeWorksFactory::InstantiatePrefab(engine, "Crate.glb", params);
-  ```
-
-  There is no function table and no registration step. The importer writes the
-  cache, Core reads it, and nothing has to be installed first. In a core-only
-  build nothing ever fills the cache, so the lookup returns null — a core-only
-  build simply has no model files, the same way it has no JSON.
-* **Core never parses an outline font.** Text metrics used to come from
-  stb_truetype and a scraper for `/usr/share/fonts`, `C:/Windows/Fonts` and
-  friends, compiled into `CreativeWorksFactory.cpp` so a zero-asset build could
-  still draw text. All of that is tooling now: `zcook font` bakes a `.ttf` into
-  the cooked `'FNT0'` container (`CookedFontHeader`), `extras/Fonts` installs
-  the `GUI::BakedFontLoader` hook that serves fontbm `.fnt`+`.png` bakes (or a
-  container out of `data/base.pak`), and `FontAtlas` carries the bake's own
-  glyph range, font size, baseline, line height, atlas dimensions and SDF flag
-  instead of the historical 32px/28px/36px/96-glyph constants. What core keeps
-  is the seam (`include/Zahlen/gui/FontLoader.hpp`), the decoder, and one
-  embedded default bake (generated from the checked-in Font8x8 data by
-  `tools/gen_default_font.py`, embedded the way `Resources.cpp` embeds cooked
-  SPIR-V). Resolution order at atlas creation and on device-loss rebuild:
-  installed loader, then the default bake slot (primed from the pak's
-  `fonts/default.zfont`), then the embedded default -- a core-only build simply
-  renders with the embedded bake, the same way it has no model files.
-
-  What the composition roots install is the repo's own font, not the embedded
-  fallback: `Fonts::VendoredDefaultFontSource()` points the loader at the
-  vendored JetBrainsMono NF bake under `resources/fonts/JetBrainsMonoNerdFontRegular/`
-  (a fontbm `.fnt`+`.png` pair, located through `FS::Paths::FindDataFile` so it
-  resolves from the repository root or the build directory). `app/main.cpp`,
-  `app/UIEditor.cpp` and every sample pass it, which is the only layer that may
-  name both the font extra and the engine's path helper. Because zcook always
-  packs a cooked font at `fonts/default.zfont` -- the Font8x8 placeholder, so a
-  pak is never font-less -- that source asks for the pair first
-  (`BakedFontSource::preferFontbmPair`); otherwise the placeholder answers in
-  its place, which is indistinguishable from the embedded bake because it is the
-  same data. A build without extras, or a run without the checkout's
-  `resources/`, falls back to that placeholder and then to the embedded bake.
-* **Device loss is the case where a callback is the right shape.** The GPU
-  handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
-  means reading the `.glb` again — an action only the importer can perform, and
-  one Core cannot reach by inspecting state it already owns. So `Engine` keeps a
-  list of `DeviceLostCallback`s and runs it, in registration order, once
-  `CreativeWorksFactory::RebuildVulkanResources()` has rebuilt what Core owns:
-
-  ```cpp
-  ZHLN::GLTF::InstallDeviceLostHandler(*engine);   // once, next to the first import
-  ```
-
-  The list lives on `Engine` rather than on `RenderContext` because the context
-  is destroyed and rebuilt inside `HandleDeviceLost()`; anything stored on it
-  would die with the device it is meant to survive. `ZHLN::glTF::Initialize()`
-  installs the handler for the inspector, and an application that imports models
-  directly calls it once itself. `Engine::DeviceLostCallbackCount()` lets a host
-  assert that the owners it expects actually subscribed.
-
-* **Core has no scripting implementation.** `include/Zahlen/IScriptRuntime.hpp`
-  is seven virtual functions and `ScriptRunner` is a null-safe forwarder — 122
-  lines in total. There is no `lua_State`, no `extern "C"` surface, no integer
-  command table and no marshalling code anywhere in `src/`, `include/` or
-  `modules/`. The Lua-independent bindings live in `extras/Scripting/`; the
-  LuaJIT runtime, the C ABI and the Fennel sources live in
-  `extras/Scripting/Lua/`, which implements the interface, owns the
-  LuaJIT link, and compiles the Fennel sources:
-
-  ```cpp
-  // the composition root, app/main.cpp — not core
-  engine->GetScriptRunner().SetRuntime(std::make_unique<ZHLN::LuaScriptRuntime>());
-  ```
-
-  Every `ScriptRunner` method is a no-op while nothing is installed, so the
-  engine and the fallback preset ask for script work without a
-  guard and without knowing whether anything is listening. A core-only build
-  simply runs C++.
-* **The composition root lives in `app/`, not `src/`.** Wiring an engine
-  together means naming the optional layers it runs with, which is exactly what
-  `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
-  boundary rule — `configure/check_core_extras_boundary.py` scans `src/`, `include/`
-  and `modules/` only — and it is the one place allowed to link
-  `zahlen_scripting_lua`.
-
-That is the whole distinction, and it is worth stating precisely because the two
-cases look alike. **When Core needs *data* an extra produces, the extra writes
-ordinary Core state and Core reads it back** — a prefab cache, a `Scene::Scene`,
-a `ModelPrefab` — with nothing to register and no way for the seam to be
-forgotten. **When Core needs an extra to *act*, because the work requires
-knowledge Core does not have, the extra subscribes to a notification.** The
-first needs no callback; the second cannot work without one. Neither points the
-dependency arrow the wrong way, and the build still works with the extra absent
-— a callback that was never registered is simply never called.
+---
 
 ## 1.3 Type Ownership and Include Discipline
 
@@ -416,8 +298,8 @@ Each frame executes in a strict, deterministic sequence:
 1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
 2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
-5. **Gameplay Update**: The active gameplay driver (`--driver=scripted`, `cpp`, or `hybrid`) executes the update ticks. A scripted driver runs the scripting extra's runtime (Fennel/LuaJIT); a C++ driver loads a native `.so`/`.dll`.
-6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching extras domains are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
+5. **Gameplay Update**: The active gameplay driver (`--driver=scripted`, `cpp`, or `hybrid`) executes the update ticks. A scripted driver runs the optional scripting runtime (Fennel/LuaJIT); a C++ driver loads a native `.so`/`.dll`.
+6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching gameplay systems are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
 7. **Render Graph Execution**:
    * `CullingSystem`: Performs frustum culling on main and shadow viewports.
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
@@ -644,19 +526,19 @@ bound values in a `PropertyStore`. Preview mode invokes; Design mode
 records the clicked node id (including empty Box/Row/Column hits) instead
 so a builder click cannot fire Save, and tints `selectedId`.
 `FindNodeById` / `InsertChild` / `RemoveNodeById` turn that string into a
-live node. The tree is format-free — `extras/toml/UITOML.hpp` walks it
+live node. The tree is format-free — `plugins/toml/UITOML.hpp` walks it
 the same way `SceneTOML.hpp` walks `Scene::Scene`.
 
-### Extras: the native editor
+### Optional layer: the native editor
 
-The native world editor (Hierarchy + Inspector) is `extras/editor/`
+The native world editor (Hierarchy + Inspector) is `extensions/editor/`
 (`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only
-by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
+by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without the editor target fails
 the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
-(`app/UIEditor.cpp`), built only when extras are (the document it edits,
-`GUI::UINode`, is the `extras/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
+(`app/UIEditor.cpp`), built only when optional layers are enabled (the document it edits,
+`GUI::UINode`, is the `extensions/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
@@ -665,7 +547,7 @@ the editor itself: `RenderUI` into the frame target
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — the caller picks the passes
 (`RenderScene` / `RenderUI` / `DispatchSimulations`).
-`BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
+`BlitPrimary` passes mirror the resolved 3D output; a `RenderScene` call
 targeting a second window's frame target re-executes the graph for it. CameraSystem
 still writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.

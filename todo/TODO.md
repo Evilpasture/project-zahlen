@@ -1072,7 +1072,7 @@ same data.
   colour / intensity), render N frames at a fixed time step, and write one PNG
   per frame.
 * **Test side** — a Zahlen test imports the same GLB (fetched through
-  `extras/RemoteAsset`, see the prework below), applies the exact same camera
+  `extensions/net/RemoteAsset`, see the prework below), applies the exact same camera
   matrices (no user orbit; TAA jitter deterministically seeded or disabled;
   animation time pinned for skinned models), renders the same N frames, and
   compares.
@@ -1093,9 +1093,9 @@ same data.
 Prework, landed on this branch: the fetch machinery the sample used to get its
 GLBs had to move out of `samples/RemoteGLBSample.cpp` so a *test* — not just a
 sample — can fetch and cache remote assets: `URLResolver`, `DiskCache` and
-`AsyncAssetFetcher` in `ZHLN::Remote` (`extras/RemoteAsset`, target
+`AsyncAssetFetcher` in `ZHLN::Remote` (`extensions/net/RemoteAsset`, target
 `zahlen_remote_asset`), the GitHub git-trees crawl as `ZHLN::GitHub`
-(`extras/GitHub`, target `zahlen_github`, which the test needs to enumerate
+(`extensions/net/GitHub`, target `zahlen_github`, which the test needs to enumerate
 the GLBs), and the sample rewired onto them. The sample keeps only showroom
 policy: the dropdown, the turntable, the studio rig, the HUD.
 

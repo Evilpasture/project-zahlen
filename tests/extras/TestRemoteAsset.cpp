@@ -3,12 +3,12 @@
 
 // tests/extras/TestRemoteAsset.cpp
 //
-// RemoteAsset is an optional layer (extras/RemoteAsset) over an optional
-// third-party library (libcurl, through extras/HTTP), so this suite is built
+// RemoteAsset is an optional layer (extensions/net/RemoteAsset) over an optional
+// third-party library (libcurl, through extensions/net/HTTP), so this suite is built
 // only when both exist. The pure half -- URL rewrites, the GLB validator, the
 // disk cache -- is tested against a temporary directory and never leaves the
 // machine. The async half is tested against a loopback server of its own
-// (extras/HTTP/HTTPServer.hpp), on 127.0.0.1 on an ephemeral port, so no
+// (extensions/net/HTTP/HTTPServer.hpp), on 127.0.0.1 on an ephemeral port, so no
 // assertion depends on a CI runner's egress rules or a third-party host
 // staying up.
 //

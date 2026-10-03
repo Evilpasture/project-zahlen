@@ -3,7 +3,7 @@
 
 // tests/extras/TestJSON.cpp
 //
-// JSON is an optional layer (extras/json), so its suite lives here rather than
+// JSON is an optional layer (plugins/json), so its suite lives here rather than
 // in tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"

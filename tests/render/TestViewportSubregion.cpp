@@ -147,7 +147,7 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives engine.GetCamera() directly; the target-orbit lerp
         // would fight it. AA off so the static scene is actually static. The
-        // rig component is an extras component (extras/Camera); removing it
+        // rig component is an extras component (extensions/Camera); removing it
         // is inert when no sibling suite installed the rig, and when the rig
         // is present its frame step re-seeds the boot default -- a Null
         // target that takes no drive anyway.

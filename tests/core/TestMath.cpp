@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Core math suite. The two-bone IK solver test moved with its code to
-// tests/extras/TestTwoBoneIK.cpp when IK left core for extras/Animation.
+// tests/extras/TestTwoBoneIK.cpp when IK left core for extensions/Animation.
 #include "TestsFramework.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/Math.hpp>

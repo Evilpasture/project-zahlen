@@ -17,7 +17,7 @@ if(TARGET zahlen_project_light_client)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})

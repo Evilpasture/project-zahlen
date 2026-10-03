@@ -5,7 +5,7 @@
 //
 // Entry point for the scripting extras binary. These suites moved out of
 // tests/scripting and tests/ecs when the Lua layer left core: they exercise
-// ScriptBinder and ScriptECSBridge, which now live in extras/Scripting and
+// ScriptBinder and ScriptECSBridge, which now live in extensions/Scripting and
 // are unreachable from a build without it.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace

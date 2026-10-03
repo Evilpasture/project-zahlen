@@ -3,7 +3,7 @@
  *
  * The RHI (zahlen_vulkan, which embeds Volk) is linked into the engine
  * shared library AND can additionally end up -- via its static archive --
- * inside executables that link both (tests, extras consumers). Volk's
+ * inside executables that link both (tests and outer-layer consumers). Volk's
  * dispatch table is per-image by design (visibility hidden), and its loader
  * entry points (volkInitialize, volkLoadInstance, ...) have default
  * visibility, so in that topology the executable's copy silently preempts

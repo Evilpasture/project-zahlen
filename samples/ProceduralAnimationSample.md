@@ -21,7 +21,7 @@ cmake --build build --target ProceduralAnimationSample
 ./build/samples/ProceduralAnimationSample
 ```
 
-The subsystem is an optional extras module. The sample installs its character
+The subsystem is an optional engine extension. The sample installs its character
 controller and follow camera **before** building the core scene, then registers
 procedural animation:
 
@@ -41,10 +41,10 @@ install their frame steps or physics hooks. Consumers using only procedural
 animation (without character movement) can register just that subsystem after
 scene initialization.
 
-`Register` installs the extras-owned ECS types and inserts its evaluator before
+`Register` installs the extension-owned ECS types and inserts its evaluator before
 the generic core `ArticulationSystem` phase. Core knows only about
 `KinematicPoseOverrideComponent`, not about gait, hair, IK, or `RigBoneMap`.
-When a procedural entity gains `RagdollComponent`, the extras evaluator creates
+When a procedural entity gains `RagdollComponent`, the extension evaluator creates
 a missing `KinematicPoseOverrideComponent` automatically before publishing its
 motor target, so articulation cannot silently fall back to bind pose because of
 a spawn omission. Every distinct skin/joint offset on the character receives its
@@ -242,7 +242,7 @@ contact.
 
 The active clip is also inspected for authored upper-body coverage. If it keys
 arms/hands, procedural arm counter-swing is suppressed. If it keys spine, chest,
-neck, or head, procedural look-at is suppressed. This prevents the extras module
+neck, or head, procedural look-at is suppressed. This prevents the extension
 from adding an idle sway on top of an authored GLB track. Explicitly opt back into
 both layers with:
 
@@ -402,7 +402,7 @@ motion to be toggled independently.
 
 `Animation::ItemHandlingComponent` is an optional Stage 4.5 layer between upper-
 body locomotion and XPBD secondary motion. Its dependency direction remains
-extras-to-core only. The layer evaluates the item driver, inertial sway and wall
+outer-layer-to-Core only. The layer evaluates the item driver, inertial sway and wall
 pushback, then applies torso reach, clavicle lead, constrained two-bone arm IK,
 wrist swing/twist limits, and hierarchy-discovered finger curls. Finally it publishes
 the item entity's local and world transforms.

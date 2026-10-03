@@ -7,8 +7,8 @@
 # zcook-style host tool -- no renderer, no window. Link set mirrors what
 # samples/FidelityHarness proves works for this exact API surface:
 #
-#   * zahlen_serialization (extras/json) for ReflectJSON::Document/ValueReader
-#     and <json/JSONSchema.hpp>; it carries the extras include root.
+#   * zahlen_serialization (plugins/json) for ReflectJSON::Document/ValueReader
+#     and <json/JSONSchema.hpp>; it carries the plugins include root.
 #   * zahlen_engine for the stb_image DECODE implementation
 #     (src/engine/stbi_impl.c) and the Zahlen/<...> headers.
 #   * Jolt for JPH_DOUBLE_PRECISION's Vec types (FidelityCore.hpp uses none,
@@ -44,7 +44,7 @@ target_link_libraries(fidelity PRIVATE
 
 target_include_directories(fidelity SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/stb
-    ${CMAKE_SOURCE_DIR}/extras
+    ${CMAKE_SOURCE_DIR}/plugins
     ${CMAKE_SOURCE_DIR}/tools/fidelity
 )
 target_include_directories(fidelity PRIVATE

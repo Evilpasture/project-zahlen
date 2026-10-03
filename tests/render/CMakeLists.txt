@@ -121,11 +121,11 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
     TestAmbientOcclusion.cpp
 )
 
-# TestDecal pins its framing through the extras target camera rig
-# (extras/Camera); the component and the rig's frame step live in that
+# TestDecal pins its framing through the extension camera rig
+# (extensions/Camera); the component and the rig's frame step live in that
 # domain, so the group links it and publishes the extras include root.
 target_link_libraries(GPU_Lighting PRIVATE zahlen_camera zahlen_asset_cooking)
-target_include_directories(GPU_Lighting PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+target_include_directories(GPU_Lighting PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # Pipeline, resource and culling mechanics.
 zahlen_add_gpu_test_group(GPU_Pipeline 300
@@ -149,25 +149,25 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
 # same GLB parsed independently by cgltf, and TestRenderAnimatedMesh.cpp plays
-# one back. Both call ZHLN::GLTF::* in extras/glTF directly -- core's loader is
+# one back. Both call ZHLN::GLTF::* in plugins/glTF directly -- core's loader is
 # only a lookup in the prefab cache the importer fills -- so this group links
 # zahlen_gltf. That one link also supplies the cgltf symbols for the reference
 # parse, and its header path below (zahlen_gltf compiles the one
-# extras/glTF/cgltf_impl.c in the tree).
+# plugins/glTF/cgltf_impl.c in the tree).
 #
 # zahlen_serialization is linked alongside it rather than inherited:
 # TestGLTFImport.cpp includes <json/JSONSchema.hpp> to serialize the JSON chunk
-# of the GLBs it assembles, and zahlen_gltf's own use of extras/json is PRIVATE,
+# of the GLBs it assembles, and zahlen_gltf's own use of plugins/json is PRIVATE,
 # so neither its include path nor JSON.cpp's symbols reach this target through
-# that link. The include path here comes from the extras root below.
+# that link. The include path here comes from the optional-layer include roots below.
 #
 # TestCameraLookAt and TestDescriptorHeaps pin their framing through the
-# extras target camera rig (extras/Camera); the component and the rig's
+# extension camera rig (extensions/Camera); the component and the rig's
 # frame step live in that domain, so it links alongside zahlen_gltf.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime.
 target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
-target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
@@ -187,11 +187,11 @@ zahlen_add_gpu_test_group(GPU_Performance 900
 )
 
 # TestRenderPerformance.cpp checks its measurements against the recorded
-# baselines, and those live in extras/profile/PerfBaseline.hpp on top of
-# extras/json -- so this group links zahlen_serialization, the one extras
+# baselines, and those live in tests/extras/profile/PerfBaseline.hpp on top of
+# plugins/json -- so this group links zahlen_serialization, the one extras
 # domain it touches.
 target_link_libraries(GPU_Performance PRIVATE zahlen_serialization)
-target_include_directories(GPU_Performance PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+target_include_directories(GPU_Performance PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
 # --- Extras VFX & Render Tests ---
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")

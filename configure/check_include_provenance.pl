@@ -50,7 +50,7 @@ use File::Basename qw(basename dirname);
 
 my $ROOT = dirname(dirname(abs_path($0)));
 
-my @SOURCE_ROOTS = qw(include src extras modules tools tests samples app);
+my @SOURCE_ROOTS = qw(include src plugins extensions gameplay modules tools tests samples app);
 my %SOURCE_SUFFIXES = map { $_ => 1 }
     qw(.h .hh .hpp .hxx .inl .ipp .c .cc .cpp .cxx .ixx .cppm);
 my %HEADER_SUFFIXES = map { $_ => 1 } qw(.h .hh .hpp .hxx .inl .ipp);
@@ -354,7 +354,7 @@ for my $rel (keys %tree_files) {
     $entries{$parent}{$name} = 1;
 }
 my @search_roots = ($ROOT, "$ROOT/include", "$ROOT/src");
-for my $name (qw(src extras extern third_party tests modules tools samples app include)) {
+for my $name (qw(src plugins extensions gameplay extern third_party tests modules tools samples app include)) {
     my $base = "$ROOT/$name";
     next unless -d $base;
     push @search_roots, $base;

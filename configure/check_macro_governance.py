@@ -65,7 +65,9 @@ SOURCE_ROOTS = (
     ROOT / "app",
     ROOT / "tests",
     ROOT / "samples",
-    ROOT / "extras",
+    ROOT / "plugins",
+    ROOT / "extensions",
+    ROOT / "gameplay",
     ROOT / "modules",
     ROOT / "tools",
 )
@@ -228,7 +230,11 @@ def check_banned(paths, banned, violations) -> None:
 INCLUDE_DIRS = (
     "include",
     "src",
-    "extras",
+    "plugins",
+    "extensions",
+    "extensions/net",
+    "gameplay",
+    "gameplay/ProjectLight",
     "tests",
     "extern/JoltPhysics",
     "extern/clay",

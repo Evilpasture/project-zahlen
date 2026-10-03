@@ -20,7 +20,7 @@
 //     directory it lands in is outside the repository.
 //   * It crawls the repository's Models/ tree into the HUD's model dropdown.
 //     The crawl is a single call to the GitHub git-trees API (the recursive
-//     tree listing of one branch), parsed with extras/json, and every entry
+//     tree listing of one branch), parsed with plugins/json, and every entry
 //     that is a .glb under Models/ becomes one row. The crawl is a listing,
 //     not a download: a model's bytes are fetched only when its row is picked
 //     -- lazily -- and each one lands in the same disk cache as the default
@@ -28,10 +28,10 @@
 //
 // Three stages, each owned by the layer that knows about it:
 //
-//   1. extras/RemoteAsset does the fetch. ZHLN::Remote::AsyncAssetFetcher owns
+//   1. extensions/net/RemoteAsset does the fetch. ZHLN::Remote::AsyncAssetFetcher owns
 //      the download workers and their whole lifecycle -- the start, the
 //      supersede, the reap, the publish, the join at destruction -- over
-//      extras/HTTP (synchronous on purpose: a worker calls it, the frame keeps
+//      extensions/net/HTTP (synchronous on purpose: a worker calls it, the frame keeps
 //      rendering, and the HUD counts the seconds). The disk cache is
 //      ZHLN::Remote::DiskCache, under the engine's own cache directory
 //      (ZHLN::FS::Paths::CacheDir() -- build/cache in a dev tree, the per-user
@@ -40,11 +40,11 @@
 //      here the 12-byte GLB container check -- before it is trusted, so a
 //      truncated download, or an HTML error page written by an earlier run, is
 //      re-fetched instead of parsed.
-//   2. extras/GitHub does the crawl. ZHLN::GitHub::FetchTree is the single
+//   2. extensions/net/GitHub does the crawl. ZHLN::GitHub::FetchTree is the single
 //      git-trees API call and the JSON parse; this file only decides which
 //      entries are rows (blobs under Models/ that are .glb) and what a row is
 //      called.
-//   3. extras/glTF imports the bytes straight from memory
+//   3. plugins/glTF imports the bytes straight from memory
 //      (GLTF::LoadGLBPrefabFromMemory, the call the inspector's drop handler
 //      makes) and PrefabFactory::InstantiatePrefab spawns the parts.
 //
@@ -104,12 +104,12 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
-// The extras this sample is about. All are optional targets -- no libcurl, no
-// zahlen_http, zahlen_remote_asset or zahlen_github; no extras, no
-// zahlen_gltf -- and samples/CMakeLists.txt skips a sample whose extras were
+// The outer-layer targets this sample is about. All are optional -- no libcurl, no
+// zahlen_http, zahlen_remote_asset or zahlen_github; no optional layers, no
+// zahlen_gltf -- and samples/CMakeLists.txt skips a sample whose optional targets were
 // not built, so none of the includes needs a guard here. The fetch machinery
 // itself (URL rewrites, the disk cache, the worker lifecycle) is
-// extras/RemoteAsset, and the git trees crawl is extras/GitHub; this file
+// extensions/net/RemoteAsset, and the git trees crawl is extensions/net/GitHub; this file
 // keeps only the showroom policy around them -- which rows are interesting,
 // what a row is called, and the turntable the model spins on.
 #include <GitHub/GitHub.hpp>
@@ -158,7 +158,7 @@ inline constexpr std::string_view kDefaultAssetURL =
 // call to the git trees API with recursive=1 -- the unauthenticated API budget
 // is 60 calls/hour, and the crawl is exactly one call -- while the bytes
 // themselves come from raw.githubusercontent.com, which is not API-metered.
-// Both halves live in extras/GitHub; the prefix below is this sample's filter:
+// Both halves live in extensions/net/GitHub; the prefix below is this sample's filter:
 // the rows it wants are the .glb files under Models/.
 inline constexpr std::string_view kDefaultRepo    = "KhronosGroup/glTF-Sample-Assets";
 inline constexpr std::string_view kDefaultBranch  = "main";
@@ -358,7 +358,7 @@ void BuildCatalogLabels(std::vector<GLBEntry>& entries) {
 // anything that is not printable ASCII -- a newline, a NUL, high-bit UTF-8 --
 // replaced by a space, so the line stays one line and one message.
 // The crawl: one API call, one JSON parse, a filter. The call and the parse
-// live in extras/GitHub -- ZHLN::GitHub::FetchTree is the whole mechanism,
+// live in extensions/net/GitHub -- ZHLN::GitHub::FetchTree is the whole mechanism,
 // one transfer, one listing, one failure line -- and this worker is the
 // sample's policy on top of it: which entries are rows, and what the rows
 // are called. It runs on the catalog's own worker, in parallel with the
@@ -990,7 +990,7 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
     } else if (rmb) {
         // Pan in the view plane, grab-the-world way round: the subject follows the
         // cursor instead of running away from it. Right and up come from the view
-        // direction the way extras/Camera's target rig derives them.
+        // direction the way extensions/Camera's target rig derives them.
         const JPH::Vec3 forward = OrbitDirection(orbit.yaw, orbit.pitch).Normalized();
         JPH::Vec3       right   = forward.Cross(JPH::Vec3::sAxisY());
         if (right.LengthSq() > 1e-6f) {

@@ -29,13 +29,13 @@ function(zahlen_register_extras_test TARGET_NAME)
     zahlen_add_runtime_dlls(${TARGET_NAME})
 endfunction()
 
-# Suites below link the extras domain they exercise, not the zahlen_extras
+# Suites below link the layer target they exercise, not the zahlen_extras
 # aggregate: TestALife needs no JSON reader, TestNetworkWire needs no glTF
 # importer, and neither should be waiting on the other's module interfaces to
-# build. The aggregate is still what tests/render/extras and the samples link,
-# because those genuinely span domains.
+# build. zahlen_extras remains only as a downstream compatibility target; these
+# in-tree suites and samples link their selected domains directly.
 #
-# No extras/glTF/cgltf_impl.c here: the importer moved into extras, so zahlen_gltf
+# No plugins/glTF/cgltf_impl.c here: the importer lives in plugins/glTF, so zahlen_gltf
 # compiles the one copy of it and this target gets the cgltf symbols (and the
 # header path) through that link. Compiling it again would be a duplicate
 # definition at link time. The suite needs two domains: zahlen_animation for the
@@ -86,7 +86,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- UI Schema Suite ---
 # The data-driven UI schema (UINode / ActionRegistry / PropertyStore /
-# RenderUITree) left core for extras/UI; its suite followed. Walks a
+# RenderUITree) left core for extensions/UI; its suite followed. Walks a
 # CPU-constructed tree through the registry-only GUI::Context constructor,
 # so it needs no GPU -- just the engine and the schema domain.
 set(TARGET_NAME TestUITree)
@@ -107,7 +107,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -127,7 +127,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Two-Bone IK Solver Suite ---
 # The analytic IK toolkit (solver, chain component, pose post-processor) left
-# core for extras/Animation, and its solver test followed: the suite only
+# core for extensions/Animation, and its solver test followed: the suite only
 # compiles when that domain exists. Same shape as the other extras suites --
 # one executable, public headers only.
 set(TARGET_NAME TestTwoBoneIK)
@@ -148,7 +148,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -185,7 +185,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -222,7 +222,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -241,7 +241,7 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 # --- JSON Test Suite ---
-# extras/json: JSON.hpp is the opaque simdjson document reader; JSONSchema.hpp
+# plugins/json: JSON.hpp is the opaque simdjson document reader; JSONSchema.hpp
 # is the reflection-driven serialisation layer (typed read and write) plus the
 # compile-time schema parser. Moved out of tests/core when JSON became
 # an extra; it is the reason the CPU test groups cannot all link the core engine
@@ -264,7 +264,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -283,7 +283,7 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 # --- TOML Test Suite ---
-# extras/toml: the reflection-driven document layer, plus SceneTOML.hpp, which
+# plugins/toml: the reflection-driven document layer, plus SceneTOML.hpp, which
 # binds Jolt vectors so a core ZHLN::Scene::Scene reads/writes as a document.
 set(TARGET_NAME TestTOML)
 add_executable(${TARGET_NAME} TestTOML.cpp)
@@ -303,7 +303,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -342,7 +342,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -381,7 +381,7 @@ if(TARGET zahlen_scripting_lua)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})
@@ -427,7 +427,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -448,7 +448,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 # --- Performance Baseline Group (tests/extras/profile) ---
 # Moved out of tests/perf when the baseline store was recognized for what it
 # is: a JSON document. extras/profile/PerfBaseline.hpp reads and writes
-# perf-baseline.json through extras/json and defines VerifyBaseline(), the
+# perf-baseline.json through plugins/json and defines VerifyBaseline(), the
 # assertion every baseline check goes through. Core-only groups include
 # TestsFramework.hpp, which no longer pulls any of that in.
 # Sources are listed, not globbed, the same way the CPU groups in
@@ -478,7 +478,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -498,7 +498,7 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Cooker glTF Container Suite ---
 # The one cooker check that needs a JSON reader: it runs `zcook glb`, then reads
-# the emitted chunk back with extras/json and asserts the document declares the
+# the emitted chunk back with plugins/json and asserts the document declares the
 # glTF 2.0 members. The framing checks and everything else the cooker does stay
 # in CPU_Assets, which links the core engine alone.
 set(TARGET_NAME TestCookerGLB)
@@ -519,7 +519,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -546,7 +546,7 @@ zahlen_register_extras_test(${TARGET_NAME}
 
 # --- Scripting Suite (tests/extras/scripting) ---
 # ScriptBinder, ScriptECSBridge and ScriptValueTypes are the generic,
-# Lua-independent half of the scripting layer (extras/Scripting); the suite
+# Lua-independent half of the scripting layer (extensions/Scripting); the suite
 # links the Lua runtime so both halves are built and exercised together. This
 # is the only test target that links zahlen_scripting_lua, and it is the reason
 # CPU_ECS no longer covers the bridge: a build without the scripting extra has
@@ -575,7 +575,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -594,8 +594,8 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 # --- Console Debugger Suite ---
-# extras/Console: GameConsole + ConsoleDebugger. Built as zahlen_console so
-# the extras archive does not pull the scripting binder into every consumer.
+# extensions/Console: GameConsole + ConsoleDebugger. Built as zahlen_console so
+# the compatibility aggregate does not pull the scripting binder into every consumer.
 set(TARGET_NAME TestConsoleDebugger)
 add_executable(${TARGET_NAME} TestConsoleDebugger.cpp)
 
@@ -614,7 +614,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -633,7 +633,7 @@ endif()
 zahlen_register_extras_test(${TARGET_NAME})
 
 # --- SVG Test Suite ---
-# extras/SVG is optional twice over: the extra is only configured when
+# plugins/SVG is optional twice over: the extra is only configured when
 # ZHLN_BUILD_EXTRAS is on, and its target only exists when SVG/CMakeLists.txt
 # found resvg. The suite follows the target, so a machine without resvg gets
 # neither zahlen_svg nor TestSVG -- and no failure from either.
@@ -653,12 +653,12 @@ if(TARGET zahlen_svg)
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
-    # ${PROJECT_SOURCE_DIR}/extras is what makes <SVG/SVG.hpp> resolve; resvg's
+    # ${ZHLN_OPTIONAL_INCLUDE_ROOTS} is what makes <SVG/SVG.hpp> resolve; resvg's
     # own include path stays PRIVATE to zahlen_svg and is not needed here.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})
@@ -678,14 +678,14 @@ if(TARGET zahlen_svg)
 endif()
 
 # --- HTTP Test Suite ---
-# extras/HTTP is optional the same way extras/SVG is: the extra is only
+# extensions/net/HTTP is optional the same way plugins/SVG is: the extra is only
 # configured when ZHLN_BUILD_EXTRAS is on, and its target only exists when
 # HTTP/CMakeLists.txt found libcurl. The suite follows the target, so a machine
 # without libcurl gets neither zahlen_http nor TestHTTP -- and no failure from
 # either. The suite talks to a loopback server it starts itself
-# (extras/HTTP/HTTPServer.hpp), so it needs no network and no third-party host.
+# (extensions/net/HTTP/HTTPServer.hpp), so it needs no network and no third-party host.
 # --- Baked Font Loader Suite ---
-# extras/Fonts' fontbm path: the AngelCode BMFont descriptor scan and the
+# plugins/Fonts' fontbm path: the AngelCode BMFont descriptor scan and the
 # bake assembly feeding core's baked-font hook. Pure CPU over fixture bytes --
 # the production bakes are made offline (fontbm / `zcook font`), so no suite
 # here invokes an outline-font parser.
@@ -707,7 +707,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
 )
 
 zahlen_enable_reflection(${TARGET_NAME})
@@ -741,13 +741,13 @@ if(TARGET zahlen_http)
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
-    # ${PROJECT_SOURCE_DIR}/extras is what makes <HTTP/HTTP.hpp> resolve;
+    # ${ZHLN_OPTIONAL_INCLUDE_ROOTS} is what makes <HTTP/HTTP.hpp> resolve;
     # libcurl's own include path stays PRIVATE to zahlen_http and is not needed
     # here.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})
@@ -767,11 +767,11 @@ if(TARGET zahlen_http)
 endif()
 
 # --- Remote Asset Test Suite ---
-# extras/RemoteAsset follows extras/HTTP's target, which follows libcurl: a
+# extensions/net/RemoteAsset follows extensions/net/HTTP's target, which follows libcurl: a
 # machine without libcurl gets neither zahlen_remote_asset nor
 # TestRemoteAsset -- and no failure from either. The pure half (URL rewrites,
 # the GLB validator, the disk cache) runs against a temporary directory, and
-# the async half talks to the loopback server of extras/HTTP
+# the async half talks to the loopback server of extensions/net/HTTP
 # (HTTPServer.hpp), like TestHTTP: 127.0.0.1 on an ephemeral port, no
 # network.
 if(TARGET zahlen_remote_asset)
@@ -791,13 +791,13 @@ if(TARGET zahlen_remote_asset)
     )
 
     # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
-    # ${PROJECT_SOURCE_DIR}/extras is what makes <RemoteAsset/...> and
+    # ${ZHLN_OPTIONAL_INCLUDE_ROOTS} is what makes <RemoteAsset/...> and
     # <HTTP/HTTPServer.hpp> resolve; libcurl's own include path stays PRIVATE
     # to zahlen_http and is not needed here.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})

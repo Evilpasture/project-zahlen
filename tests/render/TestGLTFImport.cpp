@@ -4,7 +4,7 @@
 // tests/render/TestGLTFImport.cpp
 //
 // Exercises the real importer -- ZHLN::GLTF::LoadGLBPrefabFromMemory in
-// extras/glTF -- and checks the ModelPrefab it produces against the source
+// plugins/glTF -- and checks the ModelPrefab it produces against the source
 // document. Core only ever sees the resulting ModelPrefab, which the importer
 // caches under its virtual path; nothing here goes through core's loader.
 //
