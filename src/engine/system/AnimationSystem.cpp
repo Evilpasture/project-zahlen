@@ -93,9 +93,8 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
 void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
                                         const Components::HierarchyComponent, const Components::MeshComponent,
                                         Components::MorphTargetComponent&, Components::TransformComponent&> query,
-                             ECS::Registry& registry, ECS::ResMut<RenderContext> render, FrameDt frameDt,
+                             ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
                              BonePosePostProcessor postProcessor) {
-    RenderContext& ctx = *render;
     const float dt = frameDt.value;
     auto entities  = query.Entities<Components::AnimatorComponent>();
     auto animators = query.Raw<Components::AnimatorComponent>();
@@ -299,7 +298,9 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
     });
 
     if (totalJoints > 0) {
-        ctx.UpdateJointMatrices(0, std::span {calculatedJoints.data(), static_cast<size_t>(totalJoints)});
+        // One upload for the whole buffer: the palette is indexed by each mesh's
+        // jointOffset, so the frame's poses land in one contiguous region.
+        poseUploads->Push(0, std::span {calculatedJoints.data(), static_cast<size_t>(totalJoints)});
     }
 }
 

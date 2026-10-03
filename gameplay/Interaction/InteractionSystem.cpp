@@ -126,7 +126,7 @@ namespace {
 
 // The graph derives its hazards from Update's query; the explicit Registry&
 // also covers structural changes (container insertion, physics/mesh removal).
-void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
+void AddSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
     updateGraph.AddSystem<&InteractionSystem::Update>();
 }
 

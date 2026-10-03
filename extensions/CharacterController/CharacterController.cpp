@@ -98,7 +98,7 @@ void CharacterOrientationInterpolation(
     });
 }
 
-void AddGraphSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
+void AddGraphSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
     // Imperative writers of MovementComponent run before this graph executes:
     // PlayerInputTranslate (PlayerIntent phase) and the physics substep hooks
     // (MovementSystem + grounded write-back). The anchor gives hazard

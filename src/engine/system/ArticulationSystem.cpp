@@ -108,10 +108,9 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                                             Components::TransformComponent&, const Components::RagdollHitReactionCommand,
                                             const Components::RagdollImpulseCommand> query,
                                  ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
-                                 ECS::ResMut<PhysicsContext> physics, ECS::ResMut<RenderContext> render, FrameDt frameDt) {
+                                 ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt) {
     auto& sys = *articulation;
     auto& pc  = *physics;
-    auto& rc  = *render;
     const float dt = frameDt.value;
 
     auto entities = query.Entities<Components::RagdollComponent>();
@@ -283,7 +282,7 @@ void ArticulationSystem::Update(ECS::Query<Components::RagdollComponent&, const 
                 }
             }
 
-            rc.UpdateJointMatrices(offset, std::span {finalSkinningMatrices.data(), static_cast<size_t>(count)});
+            poseUploads->Push(offset, std::span {finalSkinningMatrices.data(), static_cast<size_t>(count)});
         }
     }
 

@@ -12,7 +12,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/RenderData.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -419,7 +419,7 @@ struct Components {
     // them before reclaiming marked entities; use SceneResources::Detach or
     // Attach for direct component mutations.
     struct ParticleEmitterComponent {
-        ParticleEmitterParams params;
+        ParticleEmitterDesc params;
         TextureHandle         textureAsset   = TextureHandle::Invalid;
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
@@ -433,7 +433,7 @@ struct Components {
         MaterialID                materialAsset = InvalidMaterialID;
         uint32_t                  maxParticles  = 128;
         bool                      active        = true;
-        MeshParticleEmitterParams params;
+        MeshParticleEmitterDesc params;
         BufferHandle             gpuBuffer      = BufferHandle::Invalid;
         uint32_t                 bufferCapacity = 0;
     };

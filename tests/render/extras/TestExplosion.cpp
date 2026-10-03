@@ -6,7 +6,6 @@
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -113,7 +112,8 @@ struct ExplosionTestSuite {
             // Invariant: Root entity and all particles must be destroyed cleanly
             ZHLN::Test::ExpectFalse(reg.IsAlive(expRoot));
             ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::ExplosionComponent>().empty());
-            const auto subsequent = engine->GetRenderContext().CreateStorageBuffer(sizeof(ZHLN::Particle));
+            // The renderer owns the particle layout; the test only asks how big one is.
+            const auto subsequent = engine->GetRenderContext().CreateStorageBuffer(engine->GetRenderContext().ParticleStride());
             ZHLN::Test::ExpectNe(subsequent, fireBuffer);
             engine->GetRenderContext().DestroyBuffer(subsequent);
 

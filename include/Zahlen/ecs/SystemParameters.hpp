@@ -4,7 +4,9 @@
 #pragma once
 
 #include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
@@ -37,6 +39,7 @@ namespace ECS {
 
 template <typename T>
 struct Res {
+    using Target = T;
     const T* ptr = nullptr;
     [[nodiscard]] const T* operator->() const noexcept { return ptr; }
     [[nodiscard]] const T& operator*() const noexcept { return *ptr; }
@@ -45,6 +48,7 @@ struct Res {
 
 template <typename T>
 struct ResMut {
+    using Target = T;
     static_assert(!std::is_const_v<T>, "ResMut<T> requires a mutable resource");
     T* ptr = nullptr;
     [[nodiscard]] T* operator->() const noexcept { return ptr; }
@@ -57,7 +61,76 @@ struct ResMut {
 template <typename T>
 using OptionRes = ZHLN::Optional<T&>;
 
+// A per-worker scratch block of parallel streams, resolved from the worker's own
+// arena (see ZHLN::WorkerScratchPool). Capacity is part of the type rather than a
+// constructor argument because it is a promise the system makes about how much
+// of this data one frame can hold: the arena allocation is exactly the byte
+// count the layout asks for, and an overrun refuses instead of growing.
+//
+// The scratch is a view onto arena memory that the graph resets between frames,
+// so a system may read what it wrote this frame and nothing from the last one.
+template <typename T, size_t Capacity>
+class SoAScratch {
+  public:
+    using Block    = SoABlock<T>;
+    using Streams  = typename Block::Streams;
+    using ProxyRef = typename Block::ProxyRef;
+
+    explicit SoAScratch(void* memory) noexcept: _block(Block::Bind(memory, Capacity)) {
+    }
+
+    [[nodiscard]] auto operator[](size_t index) noexcept -> ProxyRef {
+        return _block[index];
+    }
+
+    [[nodiscard]] auto Get(size_t index) const noexcept -> T {
+        return _block.Get(index);
+    }
+
+    void Set(size_t index, const T& value) noexcept {
+        _block.Set(index, value);
+    }
+
+    // The whole layout at once, for the passes that walk one dense array: a
+    // system that only reads positions reads `GetStreams().position` and touches
+    // nothing else the elements hold.
+    [[nodiscard]] auto GetStreams() noexcept -> Streams& {
+        return _block.GetStreams();
+    }
+
+    [[nodiscard]] auto GetStreams() const noexcept -> const Streams& {
+        return _block.GetStreams();
+    }
+
+    // How much of the block was filled. GetStreams() hands out the whole
+    // capacity; this is what a consumer iterates.
+    [[nodiscard]] auto size() const noexcept -> size_t {
+        return _size;
+    }
+
+    void set_size(size_t size) noexcept {
+        Assert(size <= Capacity, "SoAScratch size exceeds its declared capacity");
+        _size = size;
+    }
+
+    [[nodiscard]] static constexpr auto capacity() noexcept -> size_t {
+        return Capacity;
+    }
+
+  private:
+    Block  _block;
+    size_t _size = 0;
+};
+
 namespace TemplatedDetail {
+
+// A system parameter of the form Optional<T&> / OptionRes<T>: a service the
+// graph may or may not provide. Whether it is provided is answered while
+// compiling (see ParameterResolver), so the absent case is a nullopt the caller
+// asked for rather than a runtime null check.
+template <typename Param>
+concept OptionalResourceParam = requires { typename Param::value_type; } && std::is_object_v<typename Param::value_type> &&
+    std::is_same_v<Param, ZHLN::Optional<typename Param::value_type&>>;
 
 template <typename T>
 using RawComponent = std::remove_cvref_t<T>;

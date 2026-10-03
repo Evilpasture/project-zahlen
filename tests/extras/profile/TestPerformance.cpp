@@ -27,7 +27,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Frame.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -381,7 +381,8 @@ struct PerformanceTestSuite {
         auto isolated_04_system_graph_scheduling_throughput() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 4: SystemGraph Multi-Threading ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
-            ZHLN::ECS::SystemGraph  graph;
+            ZHLN::ECS::Registry                          graphReg;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {graphReg};
             static std::atomic<int> readCounters[4] {};
             static std::atomic<int> writeCounter {0};
 
@@ -393,7 +394,7 @@ struct PerformanceTestSuite {
             // Add 4 Independent Reader Systems
             for (int r = 0; r < 4; ++r) {
                 graph.AddSystem({
-                    .update_func    = [](ZHLN::SystemContext&) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
+                    .update_func    = [](void*) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
                     .name           = "ReaderSystem",
                     .access_pattern = {ZHLN::ECS::Read<AgentHealthComponent>()},
                     .enabled        = true,
@@ -402,7 +403,7 @@ struct PerformanceTestSuite {
 
             // Add Dependent Writer System (Runs after all readers)
             graph.AddSystem({
-                .update_func    = [](ZHLN::SystemContext&) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
+                .update_func    = [](void*) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
                 .name           = "WriterSystem",
                 .access_pattern = {ZHLN::ECS::Write<AgentHealthComponent>()},
                 .enabled        = true,
@@ -410,8 +411,7 @@ struct PerformanceTestSuite {
 
             graph.Compile();
 
-            ZHLN::ECS::Registry graphReg;
-            ZHLN::SystemContext graphCtx {.registry = graphReg, .dt = 0.016f};
+            const ZHLN::Frame graphFrame {.dt = 0.016f};
 
             constexpr int kGraphIterations = 2000;
             auto          graphStats       = ZHLN::Test::Benchmark("cpu.systemgraph_2000_evals")
@@ -424,7 +424,7 @@ struct PerformanceTestSuite {
                                       }
                                       writeCounter.store(0, std::memory_order::relaxed);
                                       for (int i = 0; i < kGraphIterations; ++i) {
-                                          graph.Execute(graphCtx);
+                                          graph.Execute(graphFrame);
                                       }
                                   });
 
@@ -668,12 +668,12 @@ struct PerformanceTestSuite {
             ZHLN::Println("    [Setup] 1,000 Agents spawned across Physics, ECS, and Audio spatial environments.");
 
             // 4. Build and Compile Multi-Threaded SystemGraph for Unified Execution
-            ZHLN::ECS::SystemGraph systemGraph;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> systemGraph {registry};
 
             // System A: Perception & Spatial Raycasting (Parallel over Tasks)
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::SystemContext&) {
+                    [](void*) {
                         // Handled in main loop for fine-grained multi-system sync
                     },
                 .name           = "PerceptionSystem",
@@ -684,7 +684,7 @@ struct PerformanceTestSuite {
             // System B: Combat Logic & Health Management
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::SystemContext&) {
+                    [](void*) {
                         // Handled in main loop
                     },
                 .name           = "CombatSystem",

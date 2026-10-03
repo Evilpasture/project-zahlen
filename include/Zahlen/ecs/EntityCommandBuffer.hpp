@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <cstddef>
 #include <new>
 #include <utility>
 #include <vector>
@@ -16,7 +18,17 @@ class EntityCommandBuffer {
     // Plain ECS buffers destroy immediately; Engine buffers mark for cleanup.
     using DestroyFn = void (*)(Registry&, Entity);
 
-    explicit EntityCommandBuffer(Registry& reg, DestroyFn destroy = nullptr): _registry(&reg), _destroy(destroy) {
+    // Component payloads are copied into `arenaCapacity` bytes of the buffer's
+    // own arena rather than one heap allocation per command: a system that
+    // spawns a thousand entities records a thousand components without a
+    // thousand allocator calls, and Reset() hands the whole block back at once.
+    // The capacity is a hard limit -- an overrun panics in LinearArena rather
+    // than falling back to the heap, so a scene that outgrows its buffer says so
+    // instead of quietly paying for it every frame.
+    static constexpr size_t DefaultArenaCapacity = 256 * 1024;
+
+    explicit EntityCommandBuffer(Registry& reg, DestroyFn destroy = nullptr, size_t arenaCapacity = DefaultArenaCapacity):
+        _registry(&reg), _destroy(destroy), _arena(arenaCapacity) {
     }
     ~EntityCommandBuffer() {
         Reset();
@@ -59,12 +71,16 @@ class EntityCommandBuffer {
         using ComponentType = std::decay_t<T>;
         uint32_t familyId   = ComponentFamily::GetTypeID<ComponentType>();
 
-        void* storage = ::operator new(sizeof(ComponentType), std::align_val_t {alignof(ComponentType)});
+        void* storage = _arena.Allocate(sizeof(ComponentType), alignof(ComponentType));
         ::new (storage) ComponentType(std::forward<T>(component));
 
+        // The destructor runs the component's destructor and nothing else: the
+        // storage is the arena's, and one Reset() reclaims every payload at
+        // once. A type with a destructor and no way to free it is exactly what
+        // the ECB wants -- the lifetime it manages is the buffer's, not each
+        // component's.
         auto destructor = [](void* ptr) -> auto {
             static_cast<ComponentType*>(ptr)->~ComponentType();
-            ::operator delete(ptr, std::align_val_t {alignof(ComponentType)});
         };
 
         auto applyFn = [](Registry& reg, Entity target, void* ptr) -> auto { reg.Add<ComponentType>(target, std::move(*static_cast<ComponentType*>(ptr))); };
@@ -110,6 +126,7 @@ class EntityCommandBuffer {
     Registry*            _registry = nullptr;
     DestroyFn            _destroy  = nullptr;
     std::vector<Command> _commands;
+    LinearArena          _arena;
     uint32_t             _tempIndexCounter = 0xF0000000;
 };
 

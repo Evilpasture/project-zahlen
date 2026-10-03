@@ -16,6 +16,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/PoseUploads.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -108,6 +109,63 @@ constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debu
     }
     rc.RegisterGPUMaterial(kPhysicsDebugMaterialID, *created);
     return *created;
+}
+
+// GPU storage for one emitter: sized to maxParticles by the renderer's own
+// stride, rebuilt if the capacity changed. The layout of a particle is the
+// renderer's business; the engine only knows how many it asked for.
+template <typename Emitter>
+[[nodiscard]] auto EnsureParticleStorage(RenderContext& rc, Emitter& emitter, uint32_t stride) -> BufferHandle {
+    if (emitter.gpuBuffer != BufferHandle::Invalid && emitter.bufferCapacity != emitter.maxParticles) {
+        rc.DestroyBuffer(emitter.gpuBuffer);
+        emitter.gpuBuffer      = BufferHandle::Invalid;
+        emitter.bufferCapacity = 0;
+    }
+    if (emitter.gpuBuffer == BufferHandle::Invalid && emitter.maxParticles != 0) {
+        emitter.gpuBuffer = rc.CreateStorageBuffer(static_cast<size_t>(emitter.maxParticles) * stride);
+        if (emitter.gpuBuffer != BufferHandle::Invalid) {
+            emitter.bufferCapacity = emitter.maxParticles;
+        }
+    }
+    return emitter.gpuBuffer;
+}
+
+// Emitters are component state -- a description and a buffer handle -- so the
+// submit step reads them here rather than a simulation system reaching into the
+// renderer. The buffer handle lives on the component and is filled in here.
+void SubmitParticleEmitters(Engine& engine) {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+    const auto& cam = engine.GetCamera();
+
+    for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
+        if (!emitter.active) {
+            continue;
+        }
+        const BufferHandle buffer = EnsureParticleStorage(rc, emitter, rc.ParticleStride());
+        ParticleEmitterDesc desc  = emitter.params;
+        if (emitter.attachToCamera) {
+            desc.spawnOrigin = cam.position;
+        }
+        rc.SubmitParticleEmitter(buffer, emitter.maxParticles, desc);
+    }
+
+    for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
+        if (!emitter.active) {
+            continue;
+        }
+        const BufferHandle buffer = EnsureParticleStorage(rc, emitter, rc.MeshParticleStride());
+        rc.SubmitMeshParticleEmitter(buffer, emitter.maxParticles, emitter.params, emitter.meshAsset, emitter.materialAsset);
+    }
+}
+
+// The palettes the simulation pushed this frame, applied in order.
+void UploadPosePalettes(Engine& engine) {
+    auto&                       rc      = engine.GetRenderContext();
+    std::vector<PoseUpload>     uploads = engine.GetPoseUploads().Take();
+    for (const auto& upload: uploads) {
+        rc.UpdateJointMatrices(upload.jointOffset, upload.matrices);
+    }
 }
 
 void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {
@@ -396,34 +454,38 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     const AAState& aaState = gfx.antiAliasing;
 
-    FrameUniforms uniforms {};
-    uniforms.viewProj               = vp;
-    uniforms.unjitteredViewProj     = unjitteredVp;
-    uniforms.prevUnjitteredViewProj = prevUnjitteredVp;
-    uniforms.invViewProj            = unjitteredVp.Inversed();
-    std::memcpy(&uniforms.camPos[0], &cam.position, sizeof(float) * 3);
-    uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
-    JPH::Vec3 shaderLightDir = sunDirection;
-    std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
-    uniforms.lightDir[3] = sunIntensity;
-    uniforms.sunRadiance = JPH::Vec4(sunRadiance, 0.0f);
-    uniforms.probeMin =
+    FrameViewData viewData {};
+    viewData.viewProj               = vp;
+    viewData.unjitteredViewProj     = unjitteredVp;
+    viewData.prevUnjitteredViewProj = prevUnjitteredVp;
+    viewData.invViewProj            = unjitteredVp.Inversed();
+    viewData.cameraPosition         = cam.position;
+    viewData.frameClock             = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
+    viewData.sunDirection           = sunDirection;
+    viewData.sunIntensity           = sunIntensity;
+    viewData.sunRadiance            = JPH::Vec4(sunRadiance, 0.0f);
+    viewData.probeMin =
         JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
-    uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
-    uniforms.probePos         = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
-    uniforms.jitterParams     = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
-    uniforms.enableRTR        = gfx.post.enableRTR;
-    uniforms.fullBright       = gfx.environment.fullBright;
-    uniforms.shadowWidth      = gfx.shadows.width;
-    uniforms.shadowResolution = gfx.shadows.resolution;
-    uniforms.sunSize          = gfx.shadows.sunSize;
-    uniforms.ambientExposure  = gfx.environment.ambientExposure;
-    uniforms.skyZenith  = JPH::Vec4(gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]);
-    uniforms.skyHorizon = JPH::Vec4(gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]);
-    uniforms.skyGround  = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
+    viewData.probeMax     = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
+    viewData.probePos     = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
+    viewData.jitterParams = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
+    viewData.enableRTR        = gfx.post.enableRTR;
+    viewData.fullBright       = gfx.environment.fullBright;
+    viewData.shadowWidth      = gfx.shadows.width;
+    viewData.shadowResolution = gfx.shadows.resolution;
+    viewData.sunSize          = gfx.shadows.sunSize;
+    viewData.ambientExposure  = gfx.environment.ambientExposure;
+    viewData.skyZenith  = JPH::Vec4(gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]);
+    viewData.skyHorizon = JPH::Vec4(gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]);
+    viewData.skyGround  = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
 
-    rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
+    rc.SetFrameData(cam, viewData, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);
+
+    // Everything the simulation produced for the GPU goes in before the passes
+    // read it: this frame's poses, then the emitters that consume them.
+    UploadPosePalettes(engine);
+    SubmitParticleEmitters(engine);
 
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());

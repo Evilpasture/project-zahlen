@@ -843,11 +843,16 @@ export class ExplosionSystem {
     }
 
     static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
-        thread_local std::vector<Particle> t_gpuScratch;
+        // Authored particles, as descriptions: the renderer packs them into its
+        // own storage layout (RenderContext::UploadParticles).
+        thread_local std::vector<ParticleDesc> t_gpuScratch;
 
+        // The renderer owns the particle layout, so it owns the stride too: the
+        // author says how many particles it is handing over, nothing about how
+        // one is stored (RenderContext::ParticleStride).
         const auto ensureBuffer = [&rc](BufferHandle& buffer, size_t count) -> BufferHandle {
             if (buffer == BufferHandle::Invalid && count != 0) {
-                buffer = rc.CreateStorageBuffer(count * sizeof(Particle));
+                buffer = rc.CreateStorageBuffer(count * rc.ParticleStride());
             }
             return buffer;
         };
@@ -874,7 +879,7 @@ export class ExplosionSystem {
             }
 
             const BufferHandle buf = ensureBuffer(exp.fireBuffer, exp.fireball.size());
-            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
+            rc.UploadParticles(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.fireball.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_FireTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
@@ -906,7 +911,7 @@ export class ExplosionSystem {
             }
 
             const BufferHandle buf = ensureBuffer(exp.smokeBuffer, exp.soilSmoke.size());
-            rc.UpdateBuffer(buf, std::span {t_gpuScratch});
+            rc.UploadParticles(buf, std::span {t_gpuScratch});
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.soilSmoke.size()),
                 {.textureIndex = rc.GetBindlessIndex(s_SoilTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 0}
@@ -941,7 +946,7 @@ export class ExplosionSystem {
                 }
 
                 const BufferHandle buf = ensureBuffer(exp.shockwaveBuffer, 4);
-                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(4));
+                rc.UploadParticles(buf, std::span {t_gpuScratch}.first(4));
                 rc.SubmitParticleEmitter(
                     buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
                 );
@@ -971,7 +976,7 @@ export class ExplosionSystem {
                 };
 
                 const BufferHandle buf = ensureBuffer(exp.groundRingBuffer, 1);
-                rc.UpdateBuffer(buf, std::span {t_gpuScratch}.first(1));
+                rc.UploadParticles(buf, std::span {t_gpuScratch}.first(1));
                 rc.SubmitParticleEmitter(
                     buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}
                 );

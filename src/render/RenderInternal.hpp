@@ -488,7 +488,17 @@ struct RenderContext::Impl {
     GeometryManager geometry;
 
     DrawQueueManager   queues;
+
+    // Authored particles, packed once per UploadParticles call: the caller's
+    // descriptions are not the storage layout, so they are converted here.
+    ZHLN::Array<Particle> particleStaging;
+
     ZHLN::Array<Light> mappedLights;
+
+    // SetLights takes descriptions; this holds the packed structs for the frame
+    // a pass is about to upload, so the conversion happens once per frame
+    // instead of per consumer.
+    ZHLN::Array<Light> gpuLights;
 
     uint32_t packedLightCount = 0;
 

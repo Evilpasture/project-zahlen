@@ -1,8 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
+
+// The GPU-side structs, under the names the renderer uses internally.
+//
+// This header lives in src/render and not in include/: it is the one place that
+// names generated code, and nothing outside the renderer may include it. The
+// engine's own public vocabulary is include/Zahlen/Render/RenderData.hpp, whose
+// descriptions are converted here (LayoutConvert.cpp).
 
 #include <GeneratedGpuTypes.hpp>
 

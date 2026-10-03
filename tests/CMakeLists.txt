@@ -167,6 +167,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestRayTracedNoiseMetrics.cpp
     core/TestReflection.cpp
     core/TestSignal.cpp
+    core/TestSoA.cpp
     core/TestTextEdit.cpp
 )
 

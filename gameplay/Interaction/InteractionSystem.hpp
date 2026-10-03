@@ -14,8 +14,6 @@ class Engine;
 class PhysicsContext;
 class AudioContext;
 
-namespace ECS { class SystemGraph; }
-
 namespace Interaction {
 
 // E-key proximity interaction: trigger volumes detect the player, pickups

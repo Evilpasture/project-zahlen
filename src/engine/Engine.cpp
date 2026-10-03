@@ -11,6 +11,7 @@
 #include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -74,6 +75,24 @@ struct EngineImpl {
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
     float physicsAccumulator = 0.0f;
+
+    // Created on the first frame that asks for a system context, because that is
+    // the first moment the task system's worker count is known and is also
+    // before any graph dispatch. Sized for the whole app run; ResetWorkerScratch
+    // is what the frame loop does with it.
+    std::unique_ptr<WorkerScratchPool> workerScratch;
+
+    // The engine's services, bound once (they are references), and the two
+    // typed graphs built with them. Created on first use: the graphs need the
+    // world and the kernel to exist, and nothing runs before that.
+    // The simulation -> renderer channel for skinning poses. Engine-owned, so
+    // both graphs reach the same queue through services.
+    PoseUploadQueue poseUploads;
+
+    std::unique_ptr<SimServices>    simServices;
+    std::unique_ptr<RenderServices> renderServices;
+    std::unique_ptr<SimGraph>       updateGraph;
+    std::unique_ptr<RenderGraph>    renderGraph;
 
     std::optional<FontAtlas> fontAtlas;
 
@@ -397,23 +416,68 @@ auto Engine::GetWorld() -> World& {
     return *_impl->world;
 }
 
-auto Engine::MakeSystemContext(float dt) -> SystemContext {
-    return SystemContext {
-        .registry              = _impl->world->GetRegistry(),
-        .render                = &_impl->kernel->GetRenderContext(),
-        .assets                = &_impl->kernel->GetAssetManager(),
-        .physics               = &_impl->world->GetPhysics(),
-        .audio                 = &_impl->kernel->GetAudioContext(),
-        .camera                = &_impl->world->GetCamera(),
-        .culling               = &_impl->world->GetCullingSystem(),
-        .articulation          = &_impl->world->GetArticulationSystem(),
-        .bonePosePostProcessor = _impl->bonePosePostProcessor,
-        .visibleEntities       = &_impl->world->GetVisibleEntities(),
-        .visibleShadowEntities = &_impl->world->GetVisibleShadowEntities(),
-        .frame                 = _impl->frameCounter,
-        .alpha                 = _impl->currentAlpha,
-        .dt                    = dt,
+namespace {
+// Per-worker scratch. A system's SoAScratch allocation is capped by this, so it
+// is the number to raise when a system reports that its scratch does not fit --
+// one arena per worker, so the process total is this times the worker count.
+constexpr size_t kWorkerScratchBytes = 256 * 1024;
+} // namespace
+
+void Engine::EnsureSystemGraphs() {
+    if (_impl->updateGraph != nullptr) {
+        return;
+    }
+
+    auto& render = _impl->kernel->GetRenderContext();
+
+    _impl->simServices = std::make_unique<SimServices>(
+        SimServices {
+            .physics               = _impl->world->GetPhysics(),
+            .audio                 = _impl->kernel->GetAudioContext(),
+            .assets                = _impl->kernel->GetAssetManager(),
+            .camera                = _impl->world->GetCamera(),
+            .articulation          = _impl->world->GetArticulationSystem(),
+            .bonePosePostProcessor = _impl->bonePosePostProcessor,
+            .poseUploads           = _impl->poseUploads,
+        }
+    );
+
+    _impl->renderServices = std::make_unique<RenderServices>(
+        RenderServices {
+            .render  = render,
+            .assets  = _impl->kernel->GetAssetManager(),
+            .camera  = _impl->world->GetCamera(),
+            .culling = _impl->world->GetCullingSystem(),
+            .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
+            .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
+        }
+    );
+
+    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices);
+    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices);
+}
+
+auto Engine::GetPoseUploads() -> PoseUploadQueue& {
+    return _impl->poseUploads;
+}
+
+auto Engine::MakeFrame(float dt) -> Frame {
+    if (_impl->workerScratch == nullptr) {
+        _impl->workerScratch = std::make_unique<WorkerScratchPool>(kWorkerScratchBytes, TaskSystem::GetWorkerCount());
+    }
+
+    return Frame {
+        .frame   = _impl->frameCounter,
+        .alpha   = _impl->currentAlpha,
+        .dt      = dt,
+        .scratch = _impl->workerScratch.get(),
     };
+}
+
+void Engine::ResetWorkerScratch() noexcept {
+    if (_impl->workerScratch != nullptr) {
+        _impl->workerScratch->ResetAll();
+    }
 }
 
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
@@ -445,11 +509,14 @@ auto Engine::GetRegistry() const -> const ECS::Registry& {
     return _impl->world->GetRegistry();
 }
 
-auto Engine::GetUpdateGraph() -> ECS::SystemGraph& {
-    return _impl->world->GetUpdateGraph();
+auto Engine::GetUpdateGraph() -> SimGraph& {
+    EnsureSystemGraphs();
+    return *_impl->updateGraph;
 }
-auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
-    return _impl->world->GetRenderGraph();
+
+auto Engine::GetRenderGraph() -> RenderGraph& {
+    EnsureSystemGraphs();
+    return *_impl->renderGraph;
 }
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
@@ -546,7 +613,7 @@ void Engine::ApplyFrameSchedulerExtensions(FrameScheduler& scheduler) {
     }
 }
 
-void Engine::ApplySystemGraphsExtensions(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
+void Engine::ApplySystemGraphsExtensions(SimGraph& updateGraph, RenderGraph& renderGraph) {
     for (const auto ext: _impl->systemGraphsExtensions) {
         ext(updateGraph, renderGraph);
     }

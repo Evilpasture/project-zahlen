@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "LayoutConvert.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -48,7 +49,8 @@ void RenderContext::ClearDrawQueues() noexcept {
     _impl->queues.CsgDraws().clear();
 }
 
-void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {
+void RenderContext::SetFrameData(const Camera& cam, const FrameViewData& view, const JPH::Mat44& shadowProjView, float dt) noexcept {
+    const FrameUniforms uniforms = ToGpu(view);
     _impl->shadowProjView  = shadowProjView;
     _impl->currentUniforms = uniforms;
     _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
@@ -78,7 +80,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
-    JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
+    JPH::Vec3  sunDir    = view.sunDirection.Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
 
     float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
@@ -89,7 +91,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
         gpuUniforms.lightSpaceMatrices[i] =
             ShadowRenderer::ComputeCascadeLightSpaceMatrix(
-                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution
+                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, view.shadowResolution
             );
     }
 
@@ -113,17 +115,25 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::SetLights(std::span<const Light> lights) noexcept {
+void RenderContext::SetLights(std::span<const LightDesc> lights) noexcept {
     const auto visible = lights.first(std::min(lights.size(), size_t {128}));
     if (!visible.empty()) {
+        // Descriptions in, GPU layout out: the pass below copies the packed
+        // structs straight into the storage buffer and keeps them for the
+        // frame's other consumers.
+        _impl->gpuLights.clear();
+        _impl->gpuLights.reserve(visible.size());
+        for (const auto& desc: visible) {
+            _impl->gpuLights.push_back(ToGpu(desc));
+        }
         auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
         if (mappedLights.data == nullptr) {
             _impl->mappedLights.clear();
             _impl->packedLightCount = 0;
             return;
         }
-        std::memcpy(mappedLights.data, visible.data(), visible.size_bytes());
-        _impl->mappedLights.assign(visible.begin(), visible.end());
+        std::memcpy(mappedLights.data, _impl->gpuLights.data(), _impl->gpuLights.size() * sizeof(Light));
+        _impl->mappedLights.assign(_impl->gpuLights.begin(), _impl->gpuLights.end());
     } else {
         _impl->mappedLights.clear();
     }

@@ -22,12 +22,34 @@ namespace TemplatedDetail {
 template <typename T>
 struct FunctionParameters;
 
+namespace TemplatedDetail {
+template <std::size_t I, typename... Ts>
+struct NthType;
+
+template <typename T, typename... Ts>
+struct NthType<0, T, Ts...> {
+    using type = T;
+};
+
+template <std::size_t I, typename T, typename... Ts>
+struct NthType<I, T, Ts...>: NthType<I - 1, Ts...> {};
+} // namespace TemplatedDetail
+
 template <typename R, typename... Params>
 struct FunctionParameters<R (*)(Params...)> {
     template <typename F>
     static void ForEach(F&& f) {
         (f.template operator()<Params>(), ...);
     }
+
+    // The same two things the reflection path exposes, so a compile-time gate
+    // written against them works in stub mode as well.
+    static consteval auto ParameterCount() -> std::size_t {
+        return sizeof...(Params);
+    }
+
+    template <std::size_t I>
+    using ParameterType = typename TemplatedDetail::NthType<I, Params...>::type;
 
     template <auto Fn, template <typename> class Resolver, typename Context>
     static void Invoke(Context& ctx) {
@@ -85,6 +107,10 @@ struct CallableInspector {
 
     static constexpr auto fnEntity = FunctionEntity();
 
+  public:
+    // The parameter list as types, for callers that must decide something at
+    // compile time without instantiating a callback (AddSystem's admission
+    // gate). The types themselves never become values; only the aliases do.
     static consteval auto ParameterCount() -> std::size_t {
         return std::meta::parameters_of(fnEntity).size();
     }
@@ -97,6 +123,7 @@ struct CallableInspector {
     template <std::size_t I>
     using ParameterType = typename[:ParameterTypeInfo<I>():];
 
+  private:
     template <typename F, std::size_t... Is>
     static void ForEachWithIndices(F&& f, std::index_sequence<Is...>) {
         (f.template operator()<ParameterType<Is>>(), ...);
@@ -175,6 +202,13 @@ struct CallableInspector {
     static void ForEachParameter(F&& f) {
         Params::ForEach(std::forward<F>(f));
     }
+
+    static consteval auto ParameterCount() -> std::size_t {
+        return Params::ParameterCount();
+    }
+
+    template <std::size_t I>
+    using ParameterType = typename Params::template ParameterType<I>;
 
     static consteval auto Name() -> std::string_view {
         // Only for reflection stubs. Native reflection above obtains the

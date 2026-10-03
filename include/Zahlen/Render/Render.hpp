@@ -4,7 +4,7 @@
 #pragma once
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/RenderData.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/RenderContext.hpp>

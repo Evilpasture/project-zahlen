@@ -29,8 +29,6 @@ struct World::Impl {
     ECS::Registry                   registry;
     Camera                          mainCamera;
 
-    std::unique_ptr<ECS::SystemGraph>         updateGraph;
-    std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
@@ -56,8 +54,6 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
     impl.joltAcquired = true;
 
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
-    impl.updateGraph         = std::make_unique<ECS::SystemGraph>();
-    impl.renderGraph         = std::make_unique<ECS::SystemGraph>();
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
     impl.cullingSystem       = std::make_unique<CullingSystem>();
     impl.articulationSystem  = std::make_unique<ArticulationSystem>();
@@ -75,8 +71,6 @@ World::~World() {
     _impl->articulationSystem.reset();
     _impl->cullingSystem.reset();
     _impl->mainECB.reset();
-    _impl->renderGraph.reset();
-    _impl->updateGraph.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
     // handles before clearing their components and tearing down Jolt.
@@ -116,12 +110,6 @@ auto World::GetCamera() -> Camera& {
     return _impl->mainCamera;
 }
 
-auto World::GetUpdateGraph() -> ECS::SystemGraph& {
-    return *_impl->updateGraph;
-}
-auto World::GetRenderGraph() -> ECS::SystemGraph& {
-    return *_impl->renderGraph;
-}
 auto World::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }

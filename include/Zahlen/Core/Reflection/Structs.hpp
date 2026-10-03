@@ -64,6 +64,34 @@ consteval auto IndexOfField() -> std::size_t {
     return static_cast<std::size_t>(-1);
 }
 
+// One synthesized aggregate per (T, Transform): T's data members in declaration
+// order, each replaced by Transform<member type>, each keeping its name.
+//
+// The transformation is the caller's -- `std::add_pointer_t` for a struct of
+// stream pointers, `std::add_lvalue_reference_t` for the proxy one element is
+// read through -- so a third shape is spelled at the use site rather than asked
+// for here. What this owns is the part that has to be right either way: the
+// names survive verbatim and in order, because they are the only identity
+// between the source type and the synthesized one. Everything built on it
+// (`TransformedStruct`, `MapConstruct`, SoABlock) matches the two up by name.
+template <typename T, template <typename> class Transform>
+struct StructTransformGenerator {
+    struct type;
+
+    consteval {
+        std::vector<std::meta::info> specs;
+        for (auto member: NonStaticDataMembers<T>()) {
+            std::vector<std::meta::info> arguments {std::meta::type_of(member)};
+
+            std::meta::data_member_options options;
+            options.name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : std::string_view {};
+
+            specs.push_back(std::meta::data_member_spec(std::meta::substitute(^^Transform, arguments), options));
+        }
+        std::meta::define_aggregate(std::meta::dealias(^^type), specs);
+    }
+};
+
 }
 
 template <typename T, typename F>
@@ -93,6 +121,56 @@ constexpr void ForEachFieldInfo(F&& f) {
 
         f.template operator()<FieldType>(name, offset);
     };
+}
+
+// T with every data member transformed. The two consumers in the tree are the
+// stream struct a structure-of-arrays block binds its arrays into
+// (`std::add_pointer_t`) and the proxy reference one element is accessed
+// through (`std::add_lvalue_reference_t`); see TemplatedDetail::
+// StructTransformGenerator for what "transformed" preserves.
+template <typename T, template <typename> class Transform>
+using TransformedStruct = typename TemplatedDetail::StructTransformGenerator<std::remove_cvref_t<T>, Transform>::type;
+
+// Memberwise construction of one transformed struct from another: `fn` sees each
+// member of `src` in declaration order and its results become the members of
+// `Dst`. This is the read half of an SoA access -- one reference per stream --
+// and it exists because a struct whose members are references cannot be built by
+// naming fields the caller does not have.
+template <typename Dst, typename Src, typename Func>
+constexpr auto MapConstruct(Src&& src, Func&& fn) -> Dst {
+    return [&]<auto... members>(TemplatedDetail::ReplicatorType<members...>) -> Dst {
+        return Dst {fn(std::forward<Src>(src).[:members:])...};
+    }([:Expand(TemplatedDetail::NonStaticDataMembers<Src>()):]);
+}
+
+// Whether T can be split into parallel streams: an aggregate (so every data
+// member is visible to the reflection query rather than filtered by access), and
+// every data member carrying an identifier (the name is what binds a stream to
+// its member) and being an object rather than a reference (a reference has no
+// pointer form to store and no addressable stream to point at).
+//
+// A predicate rather than a generator-side refusal, so a caller that wants the
+// layout can static_assert it and name the type that cannot have one.
+template <typename T>
+consteval auto IsStreamableStruct() -> bool {
+    if constexpr (!std::is_aggregate_v<std::remove_cvref_t<T>>) {
+        return false;
+    } else {
+        // The member walk has to go through the expansion statement rather than
+        // a range-for: the loop variable of a range-for is not a constant
+        // expression, so splicing the member it names is ill-formed -- the
+        // member has to arrive as a template argument.
+        bool streamable = true;
+        [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+            if (!std::meta::has_identifier(member)) {
+                streamable = false;
+            }
+            if (std::is_reference_v<typename[:std::meta::type_of(member):]>) {
+                streamable = false;
+            }
+        };
+        return streamable;
+    }
 }
 
 template <typename T>
@@ -401,6 +479,23 @@ constexpr void ForEachReflectedField(T&& , F&& ) {
 
 template <typename T, typename F>
 constexpr void ForEachFieldAccessor(F&& ) {
+}
+
+// The transform family degrades to a type that cannot be used: there is no
+// member list to transform without P2996, and `void` is what a caller binding it
+// to a stream member finds out with. SoABlock is the only consumer in the tree
+// and refuses to instantiate in this configuration on its own terms.
+template <typename T, template <typename> class Transform>
+using TransformedStruct = void;
+
+template <typename Dst, typename Src, typename Func>
+constexpr auto MapConstruct(Src&& , Func&& ) -> Dst {
+    return Dst {};
+}
+
+template <typename T>
+consteval bool IsStreamableStruct() {
+    return false;
 }
 
 #endif

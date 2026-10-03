@@ -269,8 +269,14 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
 
 namespace {
 
-void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
-    updateGraph.AddSystem<&TerrainSystem::Update>();
+// The bake needs the renderer: it creates GPU meshes and materials for tiles as
+// they come into view and records them on the components. So it is a *render*
+// graph system -- the simulation graph's bundle has no RenderContext, which is
+// what the admission gate says when this is registered on the wrong one. The
+// render graph runs before RenderSystem presents (SystemWiring's FrameScheduler
+// order), so the bake lands in the same frame it was requested.
+void AddSystems(SimGraph& /*updateGraph*/, RenderGraph& renderGraph) {
+    renderGraph.AddSystem<&TerrainSystem::Update>();
 }
 
 } // namespace

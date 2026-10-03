@@ -18,7 +18,6 @@
 // Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Render/GpuLayout.hpp> // ZHLN::Light, the generated GPU struct this fixture fills
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Render/Types.hpp>

@@ -11,7 +11,6 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <cstring>
 #include <span>
 
 namespace ZHLN {
@@ -116,22 +115,23 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         });
     }
 
-    ZHLN::Array<Light> sceneLights;
+    ZHLN::Array<LightDesc> sceneLights;
     JPH::Mat44         viewMatrix    = camera->GetViewMatrix();
     auto               lightEntities = query.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
         query.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            Light packed {};
+            // The renderer's own layout is assembled from this on its side.
+            LightDesc packed {};
             packed.type        = light.type;
             packed.intensity   = light.intensity;
             packed.radius      = light.radius;
             packed.twoSided    = light.twoSided;
             packed.range       = (light.range > 0.0f) ? light.range : 1000.0f;
             packed.shadowLayer = light.shadowLayer;
-            std::memcpy(packed.direction, &light.direction, sizeof(float) * 3);
-            std::memcpy(packed.color, &light.color, sizeof(float) * 3);
+            packed.direction = light.direction;
+            packed.color     = light.color;
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
@@ -148,12 +148,8 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             }
 
             if (hasTransform) {
-                std::memcpy(packed.position, &pos, sizeof(float) * 3);
-
-                JPH::Vec3 posView      = viewMatrix * pos;
-                packed.positionView[0] = posView.GetX();
-                packed.positionView[1] = posView.GetY();
-                packed.positionView[2] = posView.GetZ();
+                packed.position     = pos;
+                packed.positionView = viewMatrix * pos;
 
                 if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
                     JPH::Vec3 dir = JPH::Vec3::sZero();
@@ -162,14 +158,12 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
                     } else {
                         dir = -worldMat.GetColumn3(2).Normalized();
                     }
-                    packed.direction[0] = dir.GetX();
-                    packed.direction[1] = dir.GetY();
-                    packed.direction[2] = dir.GetZ();
+                    packed.direction = dir;
                 }
             }
 
             if (packed.type == LightType::Area) {
-                std::memcpy(packed.points, &light.points, sizeof(JPH::Mat44));
+                packed.points = light.points;
             }
 
             sceneLights.push_back(packed);

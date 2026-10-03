@@ -7,7 +7,7 @@
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include "GpuLayout.hpp"
 #include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstddef>

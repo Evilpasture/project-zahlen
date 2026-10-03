@@ -1622,7 +1622,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 // Registry&: the inspector marks this evaluator as a wildcard component writer.
 // Keep the existing SystemContext entry point below for custom schedules.
 void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept;
+                               ECS::ResMut<PoseUploadQueue> poseUploads, ECS::ResMut<Camera> cameraRes) noexcept;
 
 void ProceduralAnimation::Register(Engine& engine) {
     auto& registry = engine.GetRegistry();
@@ -1848,18 +1848,20 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
     return synchronizedCount;
 }
 
+// Kept for custom schedules: the graph entry point is ProceduralAnimationSystem
+// below. The carrier's services are the simulation domain's, so the pose it
+// produces goes to the palette queue rather than to a renderer reference.
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
-    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {ctx.physics},
-                              ECS::ResMut<RenderContext> {ctx.render}, ECS::ResMut<Camera> {ctx.camera});
+    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads},
+                              ECS::ResMut<Camera> {&ctx.services.camera});
 }
 
 void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<RenderContext> renderRes, ECS::ResMut<Camera> cameraRes) noexcept {
+                               ECS::ResMut<PoseUploadQueue> poseUploads, ECS::ResMut<Camera> cameraRes) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
     const float dt = frameDt.value;
     auto& physics  = *physicsRes;
-    auto& renderer = *renderRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto gait             = registry.Get<ProceduralLocomotionComponent>(entity);
@@ -2402,7 +2404,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                     skeleton, *boneMap, std::span<JPH::Mat44>(palette.data(), paletteCount), firstPerson->hideHead, firstPerson->hideHair
                 );
             }
-            renderer.UpdateJointMatrices(skeletalMesh->jointOffset, std::span {palette}.first(paletteCount));
+            poseUploads->Push(skeletalMesh->jointOffset, std::span {palette}.first(paletteCount));
             uploadedOffsets[uploadedPaletteCount++] = skeletalMesh->jointOffset;
 
             if (skeletalMesh == skin.skeletalMesh) {

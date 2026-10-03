@@ -248,9 +248,14 @@ unchanged tree revalidates instead of rescanning, and a changed or missing file
 is always recomputed from scratch. As with the boundary rule above, this is
 enforced rather than documented.
 
-`Zahlen/Render/GpuLayout.hpp` is the one deliberate exception: the shader tool
-emits it, it is the only public header that reaches the generated file, and only
-the code that assembles GPU data includes it — nothing re-exports it further.
+The generated GPU types are not part of this closure at all. `GeneratedGpuTypes.hpp`
+(shader tool output) is named in exactly one header, `src/render/GpuLayout.hpp`,
+which is renderer implementation: nothing under `include/` includes it, names a
+`GeneratedGpu::` type, or needs the shader tool to have run. The engine-side
+vocabulary for the same data is hand-written in `Zahlen/Render/RenderData.hpp`
+(descriptions, not layouts), and `src/render/LayoutConvert.cpp` converts at the
+boundary. A description field the shader no longer declares breaks the build
+there, in one renderer file, instead of reshaping a public type.
 
 ---
 
@@ -356,8 +361,9 @@ ECS settings components (the editing surface)
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
         ▼
-RenderContext state (FrameUniforms assembly and the scene-pass push block,
-  pipeline-variant selection, reactive GPU target resizes)
+RenderContext state (SetFrameData fills the shader's FrameUniforms from the
+  engine's FrameViewData description; scene-pass push block, pipeline-variant
+  selection, reactive GPU target resizes)
 ```
 
 * **Single collector**: `system/GraphicsSettingsSync.cpp` folds the ECS
@@ -374,9 +380,12 @@ RenderContext state (FrameUniforms assembly and the scene-pass push block,
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
-* **GPU ABI safety**: every GPU type in `GeneratedGpu` (the buffers and uniform
-  blocks the engine publishes, generated from the compiled `gpu_abi.slang` by
-  `tools/zshader`) is checked against that same module at compile time
+* **GPU ABI safety**: every generated GPU type (the buffers and uniform blocks
+  the renderer uploads, generated from the compiled `gpu_abi.slang` by
+  `tools/zshader`) stays inside `src/render/`: the engine hands the renderer
+  `RenderData.hpp` descriptions and the renderer converts them
+  (`src/render/LayoutConvert.cpp`). Each generated type is checked against that
+  same module at compile time
   (`src/render/GpuAbi.hpp`, a renderer header beside the types
   it checks). Push blocks are the renderer's, not the engine's -- they live in
   `src/render/RenderInternal.hpp`, and each is held

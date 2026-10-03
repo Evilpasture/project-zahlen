@@ -13,7 +13,7 @@
 // clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/EngineServices.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 
 struct cgltf_data;
@@ -57,7 +57,7 @@ class ZHLN_API AnimationSystem {
     static void Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
                                   const Components::HierarchyComponent, const Components::MeshComponent,
                                   Components::MorphTargetComponent&, Components::TransformComponent&> query,
-                       ECS::Registry& registry, ECS::ResMut<RenderContext> render, FrameDt frameDt,
+                       ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
                        BonePosePostProcessor postProcessor);
 
   private:

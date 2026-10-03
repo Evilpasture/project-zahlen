@@ -9,8 +9,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/EngineServices.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <array>
 
@@ -31,12 +31,6 @@ class ZHLN_API CullingSystem {
     // are injected by type, not extracted in SystemWiring.cpp.
     static void GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
                             ECS::ResMut<Camera> camera, VisibleEntities visible, VisibleShadowEntities shadow);
-
-    template <bool UsePhysicsTransforms = false>
-    void Update(SystemContext& ctx, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
-
-    template <bool UsePhysicsTransforms = false>
-    void Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
 
     template <bool UsePhysicsTransforms = false>
     void Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);

@@ -1078,15 +1078,20 @@ add_custom_target(zahlen_shader_catalog
 # word protocol rather than the declared layout (see GpuTypes.cpp). The same
 # compile emits the module's SPIR-V, which is what GpuAbi.hpp embeds, so the
 # header and the bytes it is checked against are never more than one build
-# apart. <Zahlen/Render/GpuLayout.hpp> includes the header and re-exports the
-# structs under their engine names, so a Slang edit re-emits the host side on the
-# next build; an unmappable edit fails here, naming the member, instead of
-# compiling against skewed layouts.
+# apart. src/render/GpuLayout.hpp includes the header and re-exports the structs
+# under the names the renderer uses; it is renderer-internal, and nothing under
+# include/ reaches it. The engine's own vocabulary is hand-written
+# (Zahlen/Render/RenderData.hpp), converted at the boundary by
+# src/render/LayoutConvert.cpp, so a Slang edit re-emits the host side on the next
+# build and an unmappable edit fails here, naming the member, instead of
+# compiling against skewed layouts -- or reshaping a public type.
 #
 # The header is generated, so every target compiling a translation unit that
-# reaches it -- directly or through GpuLayout.hpp -- orders itself after the
-# target below: the engine here, the renderer, the RHI and the GUI in their
-# own directory files. Tests and zcook link the engine, which orders them.
+# reaches it -- directly or through src/render/GpuLayout.hpp -- orders itself
+# after the target below: the renderer, the RHI and the GUI in their own
+# directory files. The engine is deliberately absent: nothing under include/
+# names a generated type any more, so zahlen_engine (and everything that links
+# it) can be scanned and built without the shader tool having run at all.
 # The SPIR-V rides the same edge: it is the command's second output, so the
 # compile definition in src/render/CMakeLists.txt never names a file the build
 # has not produced yet.
@@ -1128,7 +1133,10 @@ add_custom_command(
 add_custom_target(zahlen_gpu_types
     DEPENDS "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
 )
-add_dependencies(zahlen_engine zahlen_gpu_types)
+# No add_dependencies(zahlen_engine ...) here on purpose: the engine's include
+# closure never reaches the generated header, and an edge would put zshader back
+# on the critical path of every engine scan (clang-scan-deps for src/audio, for
+# one) for no ordering reason.
 
 # The consumer claims the generated files: a custom command's outputs are only
 # known in the directory that declared them, so src/render/CMakeLists.txt marks

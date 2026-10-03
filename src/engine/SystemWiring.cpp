@@ -13,7 +13,6 @@
 #include "DecalSystem.hpp"
 #include "EnvironmentSunSystem.hpp"
 #include "LightingSystem.hpp"
-#include "ParticleSystem.hpp"
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
@@ -30,7 +29,7 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Frame.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
@@ -89,8 +88,11 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext& ) {
-    SystemContext sysCtx = engine.MakeSystemContext(dt);
-    engine.GetUpdateGraph().Execute(sysCtx);
+    // Before Execute, and on this thread: the scratch arenas are per-worker and
+    // this is the last point at which no worker holds a pointer into one.
+    engine.ResetWorkerScratch();
+    const Frame frame = engine.MakeFrame(dt);
+    engine.GetUpdateGraph().Execute(frame);
 }
 
 void CommandPlayback(Engine& engine, float , FrameContext& ) {
@@ -111,8 +113,9 @@ void LOD(Engine& engine, float , FrameContext& ) {
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext& ) {
-    SystemContext sysCtx = engine.MakeSystemContext(dt);
-    engine.GetRenderGraph().Execute(sysCtx);
+    engine.ResetWorkerScratch();
+    const Frame frame = engine.MakeFrame(dt);
+    engine.GetRenderGraph().Execute(frame);
 }
 
 void Present(Engine& engine, float dt, FrameContext& ctx) {
@@ -175,7 +178,6 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem<&ArticulationSystem::Update>();
     updateGraph.AddSystem<&TransformSystem::Update>();
     updateGraph.AddSystem<&AudioSystem>();
-    updateGraph.AddSystem<&ParticleSystem::Update>();
 
     renderGraph.DeclareExternalWrites("ExternalPreRenderWrites", {ECS::Write<Components::CameraComponent>()});
     renderGraph.AddSystem<&EnvironmentSunSystem::Update>();

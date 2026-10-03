@@ -21,6 +21,7 @@ struct CullingStats;
 
 namespace ECS {
 class Registry;
+template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
 }
@@ -40,8 +41,6 @@ class ZHLN_API World {
     auto GetPhysics() -> PhysicsContext&;
     auto GetCamera() -> Camera&;
 
-    auto GetUpdateGraph() -> ECS::SystemGraph&;
-    auto GetRenderGraph() -> ECS::SystemGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
 
     auto GetCullingSystem() -> CullingSystem&;

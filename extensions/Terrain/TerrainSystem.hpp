@@ -14,10 +14,6 @@ namespace ZHLN {
 class Engine;
 class RenderContext;
 
-namespace ECS {
-class SystemGraph;
-} // namespace ECS
-
 namespace Terrain {
 
 // Owns the terrain slot table and lazy-bakes GPU meshes/materials for

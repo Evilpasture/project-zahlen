@@ -11,7 +11,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
@@ -117,19 +116,11 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    SystemContext ctx {.registry = engine.GetRegistry(), .render = &engine.GetRenderContext(), .camera = &engine.GetCamera()};
-    Update<UsePhysicsTransforms>(ctx, cam, outVisible, outVisibleShadow);
-}
-
-template <bool UsePhysicsTransforms>
-void CullingSystem::Update(SystemContext& ctx, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    Update<UsePhysicsTransforms>(ctx, *ctx.camera, outVisible, outVisibleShadow);
-}
-
-template <bool UsePhysicsTransforms>
-void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
-    UpdateCore<UsePhysicsTransforms>(CullingQuery(ctx.registry), *ctx.render, cam, ctx.camera != nullptr && &cam == ctx.camera,
-                                     outVisible, outVisibleShadow);
+    // Explicit parameters rather than a hand-built context: the graph path
+    // (GraphUpdate) is the one the engine uses, and these entry points exist for
+    // callers that hold the pieces already.
+    UpdateCore<UsePhysicsTransforms>(CullingQuery(engine.GetRegistry()), engine.GetRenderContext(), cam, &cam == &engine.GetCamera(), outVisible,
+                                     outVisibleShadow);
 }
 
 void CullingSystem::GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
@@ -364,10 +355,6 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
 }
 
-template void CullingSystem::Update<true>(SystemContext&, JPH::Array<Entity>&, JPH::Array<Entity>&);
-template void CullingSystem::Update<false>(SystemContext&, JPH::Array<Entity>&, JPH::Array<Entity>&);
-template void CullingSystem::Update<true>(SystemContext&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
-template void CullingSystem::Update<false>(SystemContext&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<true>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);

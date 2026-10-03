@@ -45,6 +45,7 @@ struct EngineImpl;
 
 namespace ECS {
 class Registry;
+template <typename Services>
 class SystemGraph;
 class EntityCommandBuffer;
 }
@@ -60,7 +61,7 @@ class ZHLN_API Engine {
 
     using FrameSchedulerExtension = void (*)(FrameScheduler&);
 
-    using SystemGraphsExtension = void (*)(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph);
+    using SystemGraphsExtension = void (*)(SimGraph& updateGraph, RenderGraph& renderGraph);
 
     struct CharacterStepHooks {
         void (*preStep)(Engine&, float dt) = nullptr;
@@ -103,7 +104,14 @@ class ZHLN_API Engine {
     auto GetKernel() -> Kernel&;
     auto GetWorld() -> World&;
 
-    auto MakeSystemContext(float dt) -> SystemContext;
+    // This execution's clock and scratch pool. Engine services are not part of
+    // it: they belong to the graphs, bound once (see EnsureSystemGraphs).
+    auto MakeFrame(float dt) -> Frame;
+
+    // Hand every worker's scratch arena back. Called at the start of each graph,
+    // where no system is running: the memory the previous graph's systems were
+    // handed stops being valid here.
+    void ResetWorkerScratch() noexcept;
 
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;
@@ -115,8 +123,8 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
 
-    auto GetUpdateGraph() -> ECS::SystemGraph&;
-    auto GetRenderGraph() -> ECS::SystemGraph&;
+    auto GetUpdateGraph() -> SimGraph&;
+    auto GetRenderGraph() -> RenderGraph&;
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
     // Run the batched cleanup pass now (normally after ECB playback each frame).
     void ProcessPendingDestroy();
@@ -126,6 +134,8 @@ class ZHLN_API Engine {
     [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
     void RunSceneCleanupPasses(bool all);
     [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
+    // Simulation-produced skinning poses, drained once per frame by RenderSystem.
+    auto               GetPoseUploads() -> PoseUploadQueue&;
     auto               GetCullingSystem() -> CullingSystem&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
     auto               GetVisibleEntities() -> JPH::Array<Entity>&;
@@ -150,7 +160,7 @@ class ZHLN_API Engine {
     void AddSystemGraphsExtension(SystemGraphsExtension ext);
 
     void ApplyFrameSchedulerExtensions(FrameScheduler& scheduler);
-    void ApplySystemGraphsExtensions(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph);
+    void ApplySystemGraphsExtensions(SimGraph& updateGraph, RenderGraph& renderGraph);
 
     void               SetCharacterStepHooks(CharacterStepHooks hooks);
     [[nodiscard]] auto GetCharacterStepHooks() const noexcept -> const CharacterStepHooks&;
@@ -186,6 +196,9 @@ class ZHLN_API Engine {
         -> std::expected<void, ErrorCode>;
 
   private:
+    // Build the service bundles and the two typed graphs on first use.
+    void EnsureSystemGraphs();
+
     auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
 
     void RegisterBootScriptWatches();
