@@ -24,10 +24,13 @@ usage; repos default to `build/fidelity/`.
 
 ## What the harness does — and does not — do
 
-RemoteGLBSample "looked good" because of hardcoded studio cheats (0.08 exposure,
-ACES grading, `ambientExposure = 4`, an extra sun with two punctual fills and a
-0.03-roughness mirror floor). None of those exist in a conformance render, and
-this harness builds none of them. Specifically:
+RemoteGLBSample "looked good" because of a hand-tuned studio profile (0.08
+exposure, `ambientExposure = 4`, an extra sun with two punctual fills, and a
+0.03-roughness mirror floor). This harness builds none of that studio. It does
+use the display transform selected by Khronos' glTF Sample Viewer fidelity
+wrapper: ACES Hill with the historical 1/0.6 exposure boost. The interactive
+viewer's default is PBR Neutral, but its fidelity wrapper explicitly overrides
+that setting. Specifically:
 
 * **No extra authored lights.** `InitializeDefaultScene` spawns no authored
   `LightComponent`. Prefab virtual point lights are disabled; the harness
@@ -55,9 +58,11 @@ this harness builds none of them. Specifically:
   same cache path with a different resolution limit. Material samplers already
   use trilinear mipmapping and hardware anisotropic filtering; texture detail
   cannot be recovered from an image downsampled before GPU upload.
-* **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
-  `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
-  `saturation = 1`, identity colour filter. The blit writes linear color; the
+* **Factor-1 exposure and Khronos' generator-selected ACES Hill Exposure
+  Boost** (`post.tonemapper = 4` in `blit.slang`). The curve applies its own
+  `1 / 0.6` boost before the fitted ACES RRT+ODT. Bloom and other artistic
+  grades remain off (`bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
+  `saturation = 1`, identity colour filter). The blit writes linear color; the
   headless target is `R8G8B8A8_SRGB`, so the store encodes sRGB the way a
   swapchain does. A `_UNORM` target was writing the linear bytes into the PAM.
 * **Spatial SMAA** (`AAMode::SMAA`) smooths rasterized edges in the still,

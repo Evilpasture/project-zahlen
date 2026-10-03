@@ -66,6 +66,31 @@ float3 NeutralTonemap(float3 color) {
     return color;
 }
 
+// Stephen Hill's fitted ACES RRT+ODT, ported from KhronosGroup/glTF-Sample-Renderer
+// source/Renderer/shaders/tonemapping.glsl (Apache-2.0). The fidelity generator
+// selects its historical 1/0.6 exposure boost variant. Matrices are explicit rows
+// here to avoid shader-language layout ambiguity.
+float3 ACESHillFilm(float3 color) {
+    color = float3(
+        dot(float3(0.59719f, 0.35458f, 0.04823f), color),
+        dot(float3(0.07600f, 0.90834f, 0.01566f), color),
+        dot(float3(0.02840f, 0.13383f, 0.83777f), color)
+    );
+
+    float3 a = color * (color + 0.0245786f) - 0.000090537f;
+    float3 b = color * (0.983729f * color + 0.4329510f) + 0.238081f;
+    color = a / b;
+
+    color = float3(
+        dot(float3(1.60475f, -0.53108f, -0.07367f), color),
+        dot(float3(-0.10208f, 1.10813f, -0.00605f), color),
+        dot(float3(-0.00327f, -0.07276f, 1.07602f), color)
+    );
+    return saturate(color);
+}
+
+// tonemapper push-constant IDs: 0 linear, 1 Narkowicz ACES, 2 Reinhard,
+// 3 Khronos PBR Neutral, 4 ACES Hill with the generator's 1/0.6 boost.
 float4 PSMain(VSOutput input) : SV_Target0 {
     float4 hdrSample = texInput.SampleLevel(smp, input.uv, 0);
     float3 hdrColor  = hdrSample.rgb;
@@ -85,6 +110,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         case 1: finalColor = ACESFilm(hdrColor); break;
         case 2: finalColor = ReinhardTonemap(hdrColor); break;
         case 3: finalColor = NeutralTonemap(hdrColor); break;
+        // Khronos glTF Render Fidelity Generator's glTF Sample Viewer path:
+        // exposure *= 1/0.6 before Hill's RRT+ODT. The SRGB target performs
+        // the display encoding after this linear-light tone curve.
+        case 4: finalColor = ACESHillFilm(hdrColor / 0.6f); break;
         default: finalColor = hdrColor; break;
     }
 

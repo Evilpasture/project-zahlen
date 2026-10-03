@@ -176,7 +176,7 @@ inline constexpr size_t   kMaxDetailChars = 400;
 // radiance number below is chosen against that one multiplier rather than in
 // isolation: the sun is dim because the exposure is bright.
 inline constexpr float kExposure        = 0.080f;
-inline constexpr int   kTonemapperACES  = 1;      // blit.slang: 0 linear, 1 ACES, 2 Reinhard, 3 neutral
+inline constexpr int   kTonemapperACES  = 1;      // blit.slang: 0 linear, 1 ACES, 2 Reinhard, 3 Neutral, 4 ACES Hill boost
 inline constexpr float kBloomStrength   = 0.08f;  // was 0.15 — emissive bloom was bleeding into blur chain, oil-painting look
 inline constexpr float kGlowIntensity   = 0.12f;  // was 0.22 — helmet emissive decals should not smear
 inline constexpr float kContrast        = 1.03f;
