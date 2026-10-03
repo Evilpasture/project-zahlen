@@ -187,7 +187,7 @@ void PushInstance(lua_State* state, const InstancePtr& instance) {
     lua_pushlightuserdata(state, &kInstanceCacheRegistryKey);
     lua_rawget(state, LUA_REGISTRYINDEX);
     if (lua_istable(state, -1)) {
-        lua_pushlightuserdata(state, instance.get());
+        lua_pushlightuserdata(state, instance.GetPtr());
         lua_rawget(state, -2);
         if (!lua_isnil(state, -1)) {
             lua_remove(state, -2);
@@ -200,7 +200,7 @@ void PushInstance(lua_State* state, const InstancePtr& instance) {
         luaL_getmetatable(state, kInstanceMetatable);
         lua_setmetatable(state, -2);
 
-        lua_pushlightuserdata(state, instance.get());
+        lua_pushlightuserdata(state, instance.GetPtr());
         lua_pushvalue(state, -2);
         lua_rawset(state, -4);
         lua_remove(state, -2);
@@ -212,6 +212,11 @@ void PushInstance(lua_State* state, const InstancePtr& instance) {
     new (value) LuaInstance {.instance = instance};
     luaL_getmetatable(state, kInstanceMetatable);
     lua_setmetatable(state, -2);
+}
+
+template <typename T>
+void PushInstance(lua_State* state, const JPH::Ref<T>& instance) {
+    PushInstance(state, StaticRefCast<Instance>(instance));
 }
 
 void PushSignal(lua_State* state, const InstancePtr& owner, SignalKind kind) {
@@ -475,7 +480,7 @@ int InstanceToString(lua_State* state) {
 int InstanceEqual(lua_State* state) {
     const auto* lhs = TestInstance(state, 1);
     const auto* rhs = TestInstance(state, 2);
-    lua_pushboolean(state, lhs != nullptr && rhs != nullptr && lhs->instance.get() == rhs->instance.get());
+    lua_pushboolean(state, lhs != nullptr && rhs != nullptr && lhs->instance.GetPtr() == rhs->instance.GetPtr());
     return 1;
 }
 
@@ -805,7 +810,7 @@ int MethodDestroy(lua_State* state) {
 int MethodPlay(lua_State* state) {
     const auto* self = TestInstance(state, 1);
     if (self != nullptr && self->instance && self->instance->IsA("Sound")) {
-        static_cast<Sound*>(self->instance.get())->Play();
+        static_cast<Sound*>(self->instance.GetPtr())->Play();
     }
     return 0;
 }
@@ -813,7 +818,7 @@ int MethodPlay(lua_State* state) {
 int MethodStop(lua_State* state) {
     const auto* self = TestInstance(state, 1);
     if (self != nullptr && self->instance && self->instance->IsA("Sound")) {
-        static_cast<Sound*>(self->instance.get())->Stop();
+        static_cast<Sound*>(self->instance.GetPtr())->Stop();
     }
     return 0;
 }
@@ -824,7 +829,7 @@ int MethodGetPlayers(lua_State* state) {
         lua_newtable(state);
         return 1;
     }
-    const auto players = static_cast<PlayersService*>(self->instance.get())->GetPlayers();
+    const auto players = static_cast<PlayersService*>(self->instance.GetPtr())->GetPlayers();
     lua_createtable(state, static_cast<int>(players.size()), 0);
     int index = 1;
     for (const auto& player: players) {
@@ -845,7 +850,7 @@ int MethodFindPlayerByUserId(lua_State* state) {
         lua_pushnil(state);
         return 1;
     }
-    PushInstance(state, static_cast<PlayersService*>(self->instance.get())->FindPlayerByUserId(static_cast<uint64_t>(number)));
+    PushInstance(state, static_cast<PlayersService*>(self->instance.GetPtr())->FindPlayerByUserId(static_cast<uint64_t>(number)));
     return 1;
 }
 
@@ -890,63 +895,63 @@ int InstanceIndex(lua_State* state) {
              property == "DescendantRemoved" || property == "Destroying" || property == "AncestryChanged" ||
              property == "PropertyChanged" || property == "StateChanged" || property == "Ended") {
         PushSignalProperty(state, instance, property);
-    } else if (instance->IsA("BasePart") && property == "Position") PushVector3(state, static_cast<BasePart*>(instance.get())->Position());
-    else if (instance->IsA("BasePart") && property == "Rotation") PushVector3(state, static_cast<BasePart*>(instance.get())->Rotation());
-    else if (instance->IsA("BasePart") && property == "Size") PushVector3(state, static_cast<BasePart*>(instance.get())->Size());
+    } else if (instance->IsA("BasePart") && property == "Position") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Position());
+    else if (instance->IsA("BasePart") && property == "Rotation") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Rotation());
+    else if (instance->IsA("BasePart") && property == "Size") PushVector3(state, static_cast<BasePart*>(instance.GetPtr())->Size());
     else if (instance->IsA("BasePart") && property == "Color") {
-        const JPH::Vec3& color = static_cast<BasePart*>(instance.get())->Color();
+        const JPH::Vec3& color = static_cast<BasePart*>(instance.GetPtr())->Color();
         PushColor3(state, color.GetX(), color.GetY(), color.GetZ());
-    } else if (instance->IsA("BasePart") && property == "Anchored") lua_pushboolean(state, static_cast<BasePart*>(instance.get())->Anchored());
-    else if (instance->IsA("BasePart") && property == "CanCollide") lua_pushboolean(state, static_cast<BasePart*>(instance.get())->CanCollide());
-    else if (instance->IsA("BasePart") && property == "Transparency") lua_pushnumber(state, static_cast<BasePart*>(instance.get())->Transparency());
-    else if (instance->IsA("BasePart") && property == "NetworkOwner") PushInstance(state, static_cast<BasePart*>(instance.get())->NetworkOwner());
-    else if (instance->IsA("Part") && property == "Shape") PushPartShape(state, static_cast<Part*>(instance.get())->Shape());
-    else if (instance->IsA("Part") && property == "FrontSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->FrontSurface());
-    else if (instance->IsA("Part") && property == "BackSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->BackSurface());
-    else if (instance->IsA("Part") && property == "TopSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->TopSurface());
-    else if (instance->IsA("Part") && property == "BottomSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->BottomSurface());
-    else if (instance->IsA("Part") && property == "LeftSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->LeftSurface());
-    else if (instance->IsA("Part") && property == "RightSurface") PushPartSurface(state, static_cast<Part*>(instance.get())->RightSurface());
+    } else if (instance->IsA("BasePart") && property == "Anchored") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->Anchored());
+    else if (instance->IsA("BasePart") && property == "CanCollide") lua_pushboolean(state, static_cast<BasePart*>(instance.GetPtr())->CanCollide());
+    else if (instance->IsA("BasePart") && property == "Transparency") lua_pushnumber(state, static_cast<BasePart*>(instance.GetPtr())->Transparency());
+    else if (instance->IsA("BasePart") && property == "NetworkOwner") PushInstance(state, static_cast<BasePart*>(instance.GetPtr())->NetworkOwner());
+    else if (instance->IsA("Part") && property == "Shape") PushPartShape(state, static_cast<Part*>(instance.GetPtr())->Shape());
+    else if (instance->IsA("Part") && property == "FrontSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->FrontSurface());
+    else if (instance->IsA("Part") && property == "BackSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->BackSurface());
+    else if (instance->IsA("Part") && property == "TopSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->TopSurface());
+    else if (instance->IsA("Part") && property == "BottomSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->BottomSurface());
+    else if (instance->IsA("Part") && property == "LeftSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->LeftSurface());
+    else if (instance->IsA("Part") && property == "RightSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->RightSurface());
     else if (instance->IsA("MeshPart") && property == "MeshId") {
-        const std::string& meshId = static_cast<MeshPart*>(instance.get())->MeshId();
+        const std::string& meshId = static_cast<MeshPart*>(instance.GetPtr())->MeshId();
         lua_pushlstring(state, meshId.data(), meshId.size());
-    } else if (instance->IsA("SpawnPoint") && property == "Position") PushVector3(state, static_cast<SpawnPoint*>(instance.get())->Position());
-    else if (instance->IsA("SpawnPoint") && property == "Rotation") PushVector3(state, static_cast<SpawnPoint*>(instance.get())->Rotation());
-    else if (instance->IsA("Model") && property == "PrimaryPart") PushInstance(state, static_cast<Model*>(instance.get())->PrimaryPart());
-    else if (instance->IsA("Humanoid") && property == "WalkSpeed") lua_pushnumber(state, static_cast<Humanoid*>(instance.get())->WalkSpeed());
-    else if (instance->IsA("Humanoid") && property == "JumpPower") lua_pushnumber(state, static_cast<Humanoid*>(instance.get())->JumpPower());
-    else if (instance->IsA("Humanoid") && property == "Health") lua_pushnumber(state, static_cast<Humanoid*>(instance.get())->Health());
-    else if (instance->IsA("Humanoid") && property == "MaxHealth") lua_pushnumber(state, static_cast<Humanoid*>(instance.get())->MaxHealth());
-    else if (instance->IsA("Humanoid") && property == "RootPart") PushInstance(state, static_cast<Humanoid*>(instance.get())->RootPart());
-    else if (instance->IsA("Humanoid") && property == "State") PushHumanoidState(state, static_cast<Humanoid*>(instance.get())->State());
-    else if (instance->IsA("Player") && property == "UserId") lua_pushnumber(state, static_cast<lua_Number>(static_cast<Player*>(instance.get())->UserId()));
-    else if (instance->IsA("Player") && property == "Character") PushInstance(state, static_cast<Player*>(instance.get())->Character());
-    else if (instance->IsA("PlayersService") && property == "LocalPlayer") PushInstance(state, static_cast<PlayersService*>(instance.get())->LocalPlayer());
-    else if (instance->IsA("WorkspaceService") && property == "CurrentCamera") PushInstance(state, static_cast<WorkspaceService*>(instance.get())->CurrentCamera());
-    else if (instance->IsA("PhysicsService") && property == "ServerAuthority") lua_pushboolean(state, static_cast<PhysicsService*>(instance.get())->ServerAuthority());
+    } else if (instance->IsA("SpawnPoint") && property == "Position") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Position());
+    else if (instance->IsA("SpawnPoint") && property == "Rotation") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Rotation());
+    else if (instance->IsA("Model") && property == "PrimaryPart") PushInstance(state, static_cast<Model*>(instance.GetPtr())->PrimaryPart());
+    else if (instance->IsA("Humanoid") && property == "WalkSpeed") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->WalkSpeed());
+    else if (instance->IsA("Humanoid") && property == "JumpPower") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->JumpPower());
+    else if (instance->IsA("Humanoid") && property == "Health") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->Health());
+    else if (instance->IsA("Humanoid") && property == "MaxHealth") lua_pushnumber(state, static_cast<Humanoid*>(instance.GetPtr())->MaxHealth());
+    else if (instance->IsA("Humanoid") && property == "RootPart") PushInstance(state, static_cast<Humanoid*>(instance.GetPtr())->RootPart());
+    else if (instance->IsA("Humanoid") && property == "State") PushHumanoidState(state, static_cast<Humanoid*>(instance.GetPtr())->State());
+    else if (instance->IsA("Player") && property == "UserId") lua_pushnumber(state, static_cast<lua_Number>(static_cast<Player*>(instance.GetPtr())->UserId()));
+    else if (instance->IsA("Player") && property == "Character") PushInstance(state, static_cast<Player*>(instance.GetPtr())->Character());
+    else if (instance->IsA("PlayersService") && property == "LocalPlayer") PushInstance(state, static_cast<PlayersService*>(instance.GetPtr())->LocalPlayer());
+    else if (instance->IsA("WorkspaceService") && property == "CurrentCamera") PushInstance(state, static_cast<WorkspaceService*>(instance.GetPtr())->CurrentCamera());
+    else if (instance->IsA("PhysicsService") && property == "ServerAuthority") lua_pushboolean(state, static_cast<PhysicsService*>(instance.GetPtr())->ServerAuthority());
     else if (instance->IsA("Sound") && property == "SoundId") {
-        const std::string& soundId = static_cast<Sound*>(instance.get())->SoundId();
+        const std::string& soundId = static_cast<Sound*>(instance.GetPtr())->SoundId();
         lua_pushlstring(state, soundId.data(), soundId.size());
-    } else if (instance->IsA("Sound") && property == "Volume") lua_pushnumber(state, static_cast<Sound*>(instance.get())->Volume());
-    else if (instance->IsA("Sound") && property == "Loops") lua_pushboolean(state, static_cast<Sound*>(instance.get())->Loops());
-    else if (instance->IsA("Sound") && property == "Playing") lua_pushboolean(state, static_cast<Sound*>(instance.get())->Playing());
+    } else if (instance->IsA("Sound") && property == "Volume") lua_pushnumber(state, static_cast<Sound*>(instance.GetPtr())->Volume());
+    else if (instance->IsA("Sound") && property == "Loops") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Loops());
+    else if (instance->IsA("Sound") && property == "Playing") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Playing());
     else if (instance->IsA("Decal") && property == "TextureId") {
-        const std::string& textureId = static_cast<Decal*>(instance.get())->TextureId();
+        const std::string& textureId = static_cast<Decal*>(instance.GetPtr())->TextureId();
         lua_pushlstring(state, textureId.data(), textureId.size());
     } else if (instance->IsA("Decal") && property == "Color") {
-        const JPH::Vec3& color = static_cast<Decal*>(instance.get())->Color();
+        const JPH::Vec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
         PushColor3(state, color.GetX(), color.GetY(), color.GetZ());
-    } else if (instance->IsA("Decal") && property == "Face") PushDecalFace(state, static_cast<Decal*>(instance.get())->Face());
-    else if (instance->IsA("Decal") && property == "WrapMode") PushDecalWrapMode(state, static_cast<Decal*>(instance.get())->WrapMode());
-    else if (instance->IsA("Decal") && property == "Scale") lua_pushnumber(state, static_cast<Decal*>(instance.get())->Scale());
-    else if (instance->IsA("Decal") && property == "Transparency") lua_pushnumber(state, static_cast<Decal*>(instance.get())->Transparency());
-    else if (instance->IsA("Motor") && property == "Part1") PushInstance(state, static_cast<Motor*>(instance.get())->Part1());
-    else if (instance->IsA("Motor") && property == "Part2") PushInstance(state, static_cast<Motor*>(instance.get())->Part2());
-    else if (instance->IsA("Motor") && property == "Offset1") PushVector3(state, static_cast<Motor*>(instance.get())->Offset1());
-    else if (instance->IsA("Motor") && property == "Offset2") PushVector3(state, static_cast<Motor*>(instance.get())->Offset2());
-    else if (instance->IsA("Motor") && property == "CurrentAngle") lua_pushnumber(state, static_cast<Motor*>(instance.get())->CurrentAngle());
-    else if (instance->IsA("Motor") && property == "DesiredAngle") lua_pushnumber(state, static_cast<Motor*>(instance.get())->DesiredAngle());
-    else if (instance->IsA("Motor") && property == "MaxVelocity") lua_pushnumber(state, static_cast<Motor*>(instance.get())->MaxVelocity());
+    } else if (instance->IsA("Decal") && property == "Face") PushDecalFace(state, static_cast<Decal*>(instance.GetPtr())->Face());
+    else if (instance->IsA("Decal") && property == "WrapMode") PushDecalWrapMode(state, static_cast<Decal*>(instance.GetPtr())->WrapMode());
+    else if (instance->IsA("Decal") && property == "Scale") lua_pushnumber(state, static_cast<Decal*>(instance.GetPtr())->Scale());
+    else if (instance->IsA("Decal") && property == "Transparency") lua_pushnumber(state, static_cast<Decal*>(instance.GetPtr())->Transparency());
+    else if (instance->IsA("Motor") && property == "Part1") PushInstance(state, static_cast<Motor*>(instance.GetPtr())->Part1());
+    else if (instance->IsA("Motor") && property == "Part2") PushInstance(state, static_cast<Motor*>(instance.GetPtr())->Part2());
+    else if (instance->IsA("Motor") && property == "Offset1") PushVector3(state, static_cast<Motor*>(instance.GetPtr())->Offset1());
+    else if (instance->IsA("Motor") && property == "Offset2") PushVector3(state, static_cast<Motor*>(instance.GetPtr())->Offset2());
+    else if (instance->IsA("Motor") && property == "CurrentAngle") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->CurrentAngle());
+    else if (instance->IsA("Motor") && property == "DesiredAngle") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->DesiredAngle());
+    else if (instance->IsA("Motor") && property == "MaxVelocity") lua_pushnumber(state, static_cast<Motor*>(instance.GetPtr())->MaxVelocity());
     else {
         PushMethod(state, property);
         if (!lua_isnil(state, -1)) return 1;
@@ -1004,7 +1009,7 @@ int InstanceNewIndex(lua_State* state) {
         InstancePtr owner;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner({});
         else if (ReadInstance(state, 3, owner) && owner->IsA("Player")) {
-            [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner(std::static_pointer_cast<Player>(owner));
+            [[maybe_unused]] const auto result = static_cast<BasePart&>(instance).SetNetworkOwner(StaticRefCast<Player>(owner));
         }
     } else if (instance.IsA("Part") && property == "Shape") {
         PartShape shape {};
@@ -1040,7 +1045,7 @@ int InstanceNewIndex(lua_State* state) {
         InstancePtr part;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart({});
         else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart(std::static_pointer_cast<BasePart>(part));
+            [[maybe_unused]] const auto result = static_cast<Model&>(instance).SetPrimaryPart(StaticRefCast<BasePart>(part));
         }
     } else if (instance.IsA("Humanoid") && property == "WalkSpeed") {
         float number = 0.0f;
@@ -1058,7 +1063,7 @@ int InstanceNewIndex(lua_State* state) {
         InstancePtr part;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart({});
         else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart(std::static_pointer_cast<BasePart>(part));
+            [[maybe_unused]] const auto result = static_cast<Humanoid&>(instance).SetRootPart(StaticRefCast<BasePart>(part));
         }
     } else if (instance.IsA("Humanoid") && property == "State") {
         HumanoidState humanoidState {};
@@ -1070,13 +1075,13 @@ int InstanceNewIndex(lua_State* state) {
         InstancePtr character;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter({});
         else if (ReadInstance(state, 3, character) && character->IsA("Model")) {
-            [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter(std::static_pointer_cast<Model>(character));
+            [[maybe_unused]] const auto result = static_cast<Player&>(instance).SetCharacter(StaticRefCast<Model>(character));
         }
     } else if (instance.IsA("PlayersService") && property == "LocalPlayer") {
         InstancePtr player;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer({});
         else if (ReadInstance(state, 3, player) && player->IsA("Player")) {
-            [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer(std::static_pointer_cast<Player>(player));
+            [[maybe_unused]] const auto result = static_cast<PlayersService&>(instance).SetLocalPlayer(StaticRefCast<Player>(player));
         }
     } else if (instance.IsA("WorkspaceService") && property == "CurrentCamera") {
         InstancePtr camera;
@@ -1114,13 +1119,13 @@ int InstanceNewIndex(lua_State* state) {
         InstancePtr part;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1({});
         else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1(std::static_pointer_cast<BasePart>(part));
+            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart1(StaticRefCast<BasePart>(part));
         }
     } else if (instance.IsA("Motor") && property == "Part2") {
         InstancePtr part;
         if (lua_isnil(state, 3)) [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2({});
         else if (ReadInstance(state, 3, part) && part->IsA("BasePart")) {
-            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2(std::static_pointer_cast<BasePart>(part));
+            [[maybe_unused]] const auto result = static_cast<Motor&>(instance).SetPart2(StaticRefCast<BasePart>(part));
         }
     } else if (instance.IsA("Motor") && property == "Offset1") {
         JPH::Vec3 vector;
@@ -1241,7 +1246,7 @@ int SignalConnect(lua_State* state) {
         return 1;
     case SignalKind::HumanoidStateChanged:
         if (owner->IsA("Humanoid")) {
-            ConnectSignal(state, *context, static_cast<Humanoid*>(owner.get())->StateChanged, 2,
+            ConnectSignal(state, *context, static_cast<Humanoid*>(owner.GetPtr())->StateChanged, 2,
                 [](lua_State* target, HumanoidState oldState, HumanoidState newState) {
                     PushHumanoidState(target, oldState);
                     PushHumanoidState(target, newState);
@@ -1251,7 +1256,7 @@ int SignalConnect(lua_State* state) {
         break;
     case SignalKind::SoundEnded:
         if (owner->IsA("Sound")) {
-            ConnectSignal(state, *context, static_cast<Sound*>(owner.get())->Ended, 2,
+            ConnectSignal(state, *context, static_cast<Sound*>(owner.GetPtr())->Ended, 2,
                 [](lua_State*) {});
             return 1;
         }

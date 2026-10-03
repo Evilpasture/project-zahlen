@@ -11,13 +11,13 @@
 // the adapter may bind renderable Instances to generation-safe ECS entities.
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Core/Reference.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Entity.hpp>
 #include <cstdint>
 #include <expected>
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -43,7 +43,28 @@ enum class DataModelError : uint8_t {
 
 class Instance;
 class Player;
-using InstancePtr = std::shared_ptr<Instance>;
+class BasePart;
+
+// Strong Instance ownership is intrusive. The tree owns children; parent and
+// semantic cross-Instance relationships are stored by stable ID to avoid cycles.
+using InstancePtr = JPH::Ref<Instance>;
+
+template <typename To, typename From>
+[[nodiscard]] auto StaticRefCast(const JPH::Ref<From>& value) noexcept -> JPH::Ref<To> {
+    return JPH::Ref<To> {static_cast<To*>(value.GetPtr())};
+}
+
+template <typename Left, typename Right>
+    requires(std::is_base_of_v<Instance, Left> && std::is_base_of_v<Instance, Right> && !std::is_same_v<Left, Right>)
+[[nodiscard]] auto operator==(const JPH::Ref<Left>& lhs, const JPH::Ref<Right>& rhs) noexcept -> bool {
+    return static_cast<const Instance*>(lhs.GetPtr()) == static_cast<const Instance*>(rhs.GetPtr());
+}
+
+template <typename Left, typename Right>
+    requires(std::is_base_of_v<Instance, Left> && std::is_base_of_v<Instance, Right> && !std::is_same_v<Left, Right>)
+[[nodiscard]] auto operator!=(const JPH::Ref<Left>& lhs, const JPH::Ref<Right>& rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
 
 struct DataModelState;
 
@@ -53,9 +74,10 @@ template <typename... Args>
 class DataModelSignal {
   private:
     using Callback = std::function<void(Args...)>;
-    struct SlotState {
+    struct SlotState: JPH::RefTarget<SlotState> {
         uint64_t                                      nextId = 1;
         ZHLN::Array<std::pair<uint64_t, Callback>, 2> slots;
+        bool                                          active = true;
     };
 
   public:
@@ -84,33 +106,42 @@ class DataModelSignal {
             if (m_id == 0) {
                 return;
             }
-            if (const auto state = m_state.lock()) {
-                auto slot = state->slots.begin();
-                while (slot != state->slots.end()) {
+            if (m_state && m_state->active) {
+                auto slot = m_state->slots.begin();
+                while (slot != m_state->slots.end()) {
                     if (slot->first == m_id) {
-                        slot = state->slots.erase(slot);
+                        slot = m_state->slots.erase(slot);
                     } else {
                         ++slot;
                     }
                 }
             }
-            m_state.reset();
-            m_id = 0;
+            m_state = nullptr;
+            m_id    = 0;
         }
 
         [[nodiscard]] auto IsConnected() const noexcept -> bool {
-            return m_id != 0 && !m_state.expired();
+            return m_id != 0 && m_state && m_state->active;
         }
 
       private:
         friend class DataModelSignal;
-        Connection(const std::shared_ptr<SlotState>& state, uint64_t id): m_state(state), m_id(id) {
+        Connection(const JPH::Ref<SlotState>& state, uint64_t id): m_state(state), m_id(id) {
         }
-        std::weak_ptr<SlotState> m_state;
-        uint64_t                 m_id = 0;
+        JPH::Ref<SlotState> m_state;
+        uint64_t             m_id = 0;
     };
 
-    DataModelSignal()                                          = default;
+    DataModelSignal() = default;
+    ~DataModelSignal() {
+        if (m_state) {
+            // Invalidate outstanding tokens before releasing their callbacks;
+            // callback captures can own tokens that refer back to this state.
+            m_state->active = false;
+            m_state->slots.clear();
+            m_state = nullptr;
+        }
+    }
     DataModelSignal(const DataModelSignal&)                    = delete;
     auto operator=(const DataModelSignal&) -> DataModelSignal& = delete;
     DataModelSignal(DataModelSignal&&)                         = delete;
@@ -121,7 +152,7 @@ class DataModelSignal {
             return {};
         }
         if (!m_state) {
-            m_state = std::make_shared<SlotState>();
+            m_state = new SlotState();
         }
         const uint64_t id = m_state->nextId++;
         m_state->slots.emplace_back(id, std::move(callback));
@@ -129,8 +160,8 @@ class DataModelSignal {
     }
 
     void Fire(Args... args) const {
-        const std::shared_ptr<SlotState> state = m_state;
-        if (!state) {
+        const JPH::Ref<SlotState> state = m_state;
+        if (!state || !state->active) {
             return;
         }
         ZHLN::Array<Callback, 2> callbacks;
@@ -144,16 +175,16 @@ class DataModelSignal {
     }
 
     [[nodiscard]] auto Empty() const noexcept -> bool {
-        return !m_state || m_state->slots.empty();
+        return !m_state || !m_state->active || m_state->slots.empty();
     }
 
   private:
-    std::shared_ptr<SlotState> m_state;
+    JPH::Ref<SlotState> m_state;
 };
 
-class Instance: public std::enable_shared_from_this<Instance> {
+class Instance: public JPH::RefTarget<Instance> {
   public:
-    virtual ~Instance() = default;
+    virtual ~Instance();
 
     Instance(const Instance&)                    = delete;
     auto operator=(const Instance&) -> Instance& = delete;
@@ -174,9 +205,7 @@ class Instance: public std::enable_shared_from_this<Instance> {
         return m_name;
     }
     void               SetName(std::string name);
-    [[nodiscard]] auto Parent() const noexcept -> InstancePtr {
-        return m_parent.lock();
-    }
+    [[nodiscard]] auto Parent() const noexcept -> InstancePtr;
     [[nodiscard]] auto IsDestroyed() const noexcept -> bool {
         return m_destroyed;
     }
@@ -191,9 +220,21 @@ class Instance: public std::enable_shared_from_this<Instance> {
     [[nodiscard]] auto FindFirstChildOfClass(std::string_view className, bool recursive = false) const -> InstancePtr;
     [[nodiscard]] auto FindFirstChildWhichIsA(std::string_view className, bool recursive = false) const -> InstancePtr;
     [[nodiscard]] auto IsDescendantOf(const InstancePtr& ancestor) const noexcept -> bool;
+
+    template <typename T>
+        requires(std::is_base_of_v<Instance, T>)
+    [[nodiscard]] auto IsDescendantOf(const JPH::Ref<T>& ancestor) const noexcept -> bool {
+        return IsDescendantOf(StaticRefCast<Instance>(ancestor));
+    }
     [[nodiscard]] auto GetFullName() const -> std::string;
 
     [[nodiscard]] auto SetParent(const InstancePtr& parent) -> std::expected<void, DataModelError>;
+
+    template <typename T>
+        requires(std::is_base_of_v<Instance, T>)
+    [[nodiscard]] auto SetParent(const JPH::Ref<T>& parent) -> std::expected<void, DataModelError> {
+        return SetParent(StaticRefCast<Instance>(parent));
+    }
     void               Destroy();
 
     // ECS entities are optional implementation bindings, not Instance IDs.
@@ -215,10 +256,11 @@ class Instance: public std::enable_shared_from_this<Instance> {
     DataModelSignal<std::string>              PropertyChanged;
 
   protected:
-    Instance(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot = false);
+    Instance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name, bool isRoot = false);
 
     void               NotifyChanged(std::string_view property) const noexcept;
     [[nodiscard]] auto BelongsTo(const Instance& other) const noexcept -> bool;
+    [[nodiscard]] auto ResolveInstance(InstanceId id, bool allowLocalRoot = false) const noexcept -> InstancePtr;
 
   private:
     friend class DataModel;
@@ -229,11 +271,12 @@ class Instance: public std::enable_shared_from_this<Instance> {
     void RemoveChild(const InstancePtr& child) noexcept;
     void DestroyChildren();
 
-    std::weak_ptr<DataModelState> m_state;
+    JPH::Ref<DataModelState>      m_state;
     InstanceId                    m_id = 0;
     std::string                   m_className;
     std::string                   m_name;
-    std::weak_ptr<Instance>       m_parent;
+    InstanceId                    m_parentId = 0;
+    bool                          m_hasParent = false;
     ZHLN::Array<InstancePtr, 4>   m_children;
     std::optional<Entity>         m_backingEntity;
     bool                          m_destroyed  = false;
@@ -243,7 +286,7 @@ class Instance: public std::enable_shared_from_this<Instance> {
 
 class Service: public Instance {
   protected:
-    Service(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    Service(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
@@ -258,24 +301,30 @@ class WorkspaceService final: public Service {
     [[nodiscard]] auto                CurrentCamera() const noexcept -> InstancePtr;
     [[nodiscard]] auto                SetCurrentCamera(const InstancePtr& camera) -> std::expected<void, DataModelError>;
 
+    template <typename T>
+        requires(std::is_base_of_v<Instance, T>)
+    [[nodiscard]] auto SetCurrentCamera(const JPH::Ref<T>& camera) -> std::expected<void, DataModelError> {
+        return SetCurrentCamera(StaticRefCast<Instance>(camera));
+    }
+
   private:
     friend class DataModel;
-    WorkspaceService(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
-    std::weak_ptr<Instance> m_currentCamera;
+    WorkspaceService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    InstanceId              m_currentCameraId = 0;
 };
 
 class PlayersService final: public Service {
   public:
     static constexpr std::string_view ClassNameValue = "PlayersService";
-    [[nodiscard]] auto                GetPlayers() const -> std::vector<std::shared_ptr<class Player>>;
-    [[nodiscard]] auto                FindPlayerByUserId(uint64_t userId) const -> std::shared_ptr<class Player>;
-    [[nodiscard]] auto                LocalPlayer() const noexcept -> std::shared_ptr<class Player>;
-    [[nodiscard]] auto                SetLocalPlayer(const std::shared_ptr<class Player>& player) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto                GetPlayers() const -> std::vector<JPH::Ref<class Player>>;
+    [[nodiscard]] auto                FindPlayerByUserId(uint64_t userId) const -> JPH::Ref<class Player>;
+    [[nodiscard]] auto                LocalPlayer() const noexcept -> JPH::Ref<class Player>;
+    [[nodiscard]] auto                SetLocalPlayer(const JPH::Ref<class Player>& player) -> std::expected<void, DataModelError>;
 
   private:
     friend class DataModel;
-    PlayersService(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
-    std::weak_ptr<class Player> m_localPlayer;
+    PlayersService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    InstanceId                 m_localPlayerId = 0;
 };
 
 class LightingService final: public Service {
@@ -284,7 +333,7 @@ class LightingService final: public Service {
 
   private:
     friend class DataModel;
-    LightingService(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    LightingService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 class PhysicsService final: public Service {
@@ -297,7 +346,7 @@ class PhysicsService final: public Service {
 
   private:
     friend class DataModel;
-    PhysicsService(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    PhysicsService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     bool m_serverAuthority = false;
 };
 
@@ -307,7 +356,7 @@ class SoundService final: public Service {
 
   private:
     friend class DataModel;
-    SoundService(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    SoundService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 // A service class known to project-light but not yet represented by a typed
@@ -316,25 +365,30 @@ class SoundService final: public Service {
 class OpaqueService final: public Service {
   private:
     friend class DataModel;
-    OpaqueService(const std::shared_ptr<DataModelState>& state, InstanceId id, const std::string& className, std::string name);
+    OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, const std::string& className, std::string name);
 };
 
 class Folder final: public Instance {
   private:
     friend class DataModel;
-    Folder(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Folder(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
 };
 
 class Model final: public Instance {
   public:
-    [[nodiscard]] auto PrimaryPart() const noexcept -> std::shared_ptr<class BasePart>;
-    [[nodiscard]] auto SetPrimaryPart(const std::shared_ptr<class BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto PrimaryPart() const noexcept -> JPH::Ref<class BasePart>;
+    [[nodiscard]] auto SetPrimaryPart(const JPH::Ref<class BasePart>& part) -> std::expected<void, DataModelError>;
+
+    template <typename T>
+        requires(std::is_base_of_v<BasePart, T>)
+    [[nodiscard]] auto SetPrimaryPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError>;
+
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
   private:
     friend class DataModel;
-    Model(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
-    std::weak_ptr<class BasePart> m_primaryPart;
+    Model(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    InstanceId                   m_primaryPartId = 0;
 };
 
 class BasePart: public Instance {
@@ -371,11 +425,11 @@ class BasePart: public Instance {
         return m_transparency;
     }
     void               SetTransparency(float value);
-    [[nodiscard]] auto NetworkOwner() const noexcept -> std::shared_ptr<Player>;
-    [[nodiscard]] auto SetNetworkOwner(const std::shared_ptr<Player>& player) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto NetworkOwner() const noexcept -> JPH::Ref<Player>;
+    [[nodiscard]] auto SetNetworkOwner(const JPH::Ref<Player>& player) -> std::expected<void, DataModelError>;
 
   protected:
-    BasePart(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    BasePart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 
   private:
     friend class DataModel;
@@ -384,7 +438,7 @@ class BasePart: public Instance {
     JPH::Vec3             m_rotationEuler = JPH::Vec3::sZero();
     JPH::Vec3             m_size          = JPH::Vec3(4.0f, 1.0f, 2.0f);
     JPH::Vec3             m_color         = JPH::Vec3(0.75f, 0.75f, 0.75f);
-    std::weak_ptr<Player> m_networkOwner;
+    InstanceId           m_networkOwnerId = 0;
     bool                  m_anchored     = false;
     bool                  m_canCollide   = true;
     float                 m_transparency = 0.0f;
@@ -442,7 +496,7 @@ class Part final: public BasePart {
 
   private:
     friend class DataModel;
-    Part(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Part(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     PartShape   m_shape         = PartShape::Cube;
     PartSurface m_frontSurface  = PartSurface::Smooth;
     PartSurface m_backSurface   = PartSurface::Smooth;
@@ -462,7 +516,7 @@ class MeshPart final: public BasePart {
 
   private:
     friend class DataModel;
-    MeshPart(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    MeshPart(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string m_meshId;
 };
 
@@ -479,7 +533,7 @@ class SpawnPoint final: public Instance {
 
   private:
     friend class DataModel;
-    SpawnPoint(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    SpawnPoint(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     JPH::Vec3 m_position = JPH::Vec3::sZero();
     // Protocol-facing Euler degrees; convert only in the physics/ECS adapter.
     JPH::Vec3 m_rotation = JPH::Vec3::sZero();
@@ -517,7 +571,7 @@ class Decal final: public Instance {
 
   private:
     friend class DataModel;
-    Decal(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Decal(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string   m_textureId;
     JPH::Vec3     m_color        = JPH::Vec3(1.0f, 1.0f, 1.0f);
     DecalFace     m_face         = DecalFace::Front;
@@ -551,7 +605,7 @@ class Sound final: public Instance {
 
   private:
     friend class DataModel;
-    Sound(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Sound(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     std::string m_soundId;
     float       m_volume  = 1.0f;
     bool        m_loops   = false;
@@ -563,10 +617,23 @@ enum class HumanoidState : uint8_t { Idle, Running, Jumping, Freefall, FallingDo
 class Motor final: public Instance {
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
-    [[nodiscard]] auto Part1() const noexcept -> std::shared_ptr<BasePart>;
-    [[nodiscard]] auto SetPart1(const std::shared_ptr<BasePart>& part) -> std::expected<void, DataModelError>;
-    [[nodiscard]] auto Part2() const noexcept -> std::shared_ptr<BasePart>;
-    [[nodiscard]] auto SetPart2(const std::shared_ptr<BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto Part1() const noexcept -> JPH::Ref<BasePart>;
+    [[nodiscard]] auto SetPart1(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+
+    template <typename T>
+        requires(std::is_base_of_v<BasePart, T>)
+    [[nodiscard]] auto SetPart1(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+        return SetPart1(StaticRefCast<BasePart>(part));
+    }
+
+    [[nodiscard]] auto Part2() const noexcept -> JPH::Ref<BasePart>;
+    [[nodiscard]] auto SetPart2(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+
+    template <typename T>
+        requires(std::is_base_of_v<BasePart, T>)
+    [[nodiscard]] auto SetPart2(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+        return SetPart2(StaticRefCast<BasePart>(part));
+    }
     [[nodiscard]] auto Offset1() const noexcept -> const JPH::Vec3& {
         return m_offset1;
     }
@@ -590,9 +657,9 @@ class Motor final: public Instance {
 
   private:
     friend class DataModel;
-    Motor(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
-    std::weak_ptr<BasePart> m_part1;
-    std::weak_ptr<BasePart> m_part2;
+    Motor(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
+    InstanceId              m_part1Id = 0;
+    InstanceId              m_part2Id = 0;
     JPH::Vec3               m_offset1      = JPH::Vec3::sZero();
     JPH::Vec3               m_offset2      = JPH::Vec3::sZero();
     float                   m_currentAngle = 0.0f;
@@ -618,8 +685,15 @@ class Humanoid final: public Instance {
         return m_maxHealth;
     }
     void               SetMaxHealth(float value);
-    [[nodiscard]] auto RootPart() const noexcept -> std::shared_ptr<BasePart>;
-    [[nodiscard]] auto SetRootPart(const std::shared_ptr<BasePart>& part) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto RootPart() const noexcept -> JPH::Ref<BasePart>;
+    [[nodiscard]] auto SetRootPart(const JPH::Ref<BasePart>& part) -> std::expected<void, DataModelError>;
+
+    template <typename T>
+        requires(std::is_base_of_v<BasePart, T>)
+    [[nodiscard]] auto SetRootPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+        return SetRootPart(StaticRefCast<BasePart>(part));
+    }
+
     [[nodiscard]] auto State() const noexcept -> HumanoidState {
         return m_state;
     }
@@ -630,13 +704,13 @@ class Humanoid final: public Instance {
 
   private:
     friend class DataModel;
-    Humanoid(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Humanoid(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     float                   m_walkSpeed = 16.0f;
     float                   m_jumpPower = 50.0f;
     float                   m_health    = 100.0f;
     float                   m_maxHealth = 100.0f;
     HumanoidState           m_state     = HumanoidState::Idle;
-    std::weak_ptr<BasePart> m_rootPart;
+    InstanceId              m_rootPartId = 0;
 };
 
 class Player final: public Instance {
@@ -645,15 +719,15 @@ class Player final: public Instance {
         return m_userId;
     }
     void               SetUserId(uint64_t value);
-    [[nodiscard]] auto Character() const noexcept -> std::shared_ptr<Model>;
-    [[nodiscard]] auto SetCharacter(const std::shared_ptr<Model>& character) -> std::expected<void, DataModelError>;
+    [[nodiscard]] auto Character() const noexcept -> JPH::Ref<Model>;
+    [[nodiscard]] auto SetCharacter(const JPH::Ref<Model>& character) -> std::expected<void, DataModelError>;
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
 
   private:
     friend class DataModel;
-    Player(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string name);
+    Player(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name);
     uint64_t             m_userId = 0;
-    std::weak_ptr<Model> m_character;
+    InstanceId           m_characterId = 0;
 };
 
 // Unknown server classes can still retain their identity and tree position;
@@ -661,7 +735,7 @@ class Player final: public Instance {
 class OpaqueInstance final: public Instance {
   private:
     friend class DataModel;
-    OpaqueInstance(const std::shared_ptr<DataModelState>& state, InstanceId id, std::string className, std::string name);
+    OpaqueInstance(const JPH::Ref<DataModelState>& state, InstanceId id, std::string className, std::string name);
 };
 
 class DataModel final {
@@ -677,12 +751,12 @@ class DataModel final {
         return m_root;
     }
     [[nodiscard]] auto FindById(InstanceId id) const noexcept -> InstancePtr;
-    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> std::shared_ptr<Service>;
+    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> JPH::Ref<Service>;
 
     template <typename T>
-    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> std::shared_ptr<T> {
+    [[nodiscard]] auto GetService(std::string_view nameOrClass) const -> JPH::Ref<T> {
         static_assert(std::is_base_of_v<Service, T>);
-        const std::shared_ptr<Service> service = GetService(nameOrClass);
+        const JPH::Ref<Service> service = GetService(nameOrClass);
         if (!service) {
             return {};
         }
@@ -692,14 +766,14 @@ class DataModel final {
             if (service->ClassName() != T::ClassNameValue) {
                 return {};
             }
-            return std::static_pointer_cast<T>(service);
+            return StaticRefCast<T>(service);
         } else {
             return {};
         }
     }
 
     template <typename T>
-    [[nodiscard]] auto Create(std::string name = {}) -> std::expected<std::shared_ptr<T>, DataModelError> {
+    [[nodiscard]] auto Create(std::string name = {}) -> std::expected<JPH::Ref<T>, DataModelError> {
         auto id = AllocateId();
         if (!id) {
             return std::unexpected(id.error());
@@ -708,7 +782,7 @@ class DataModel final {
     }
 
     template <typename T>
-    [[nodiscard]] auto CreateWithId(InstanceId id, std::string name = {}) -> std::expected<std::shared_ptr<T>, DataModelError> {
+    [[nodiscard]] auto CreateWithId(InstanceId id, std::string name = {}) -> std::expected<JPH::Ref<T>, DataModelError> {
         static_assert(std::is_base_of_v<Instance, T>);
         if (id == 0) {
             return std::unexpected(DataModelError::InvalidId);
@@ -716,13 +790,13 @@ class DataModel final {
         if (HasEverUsedId(id)) {
             return std::unexpected(DataModelError::DuplicateId);
         }
-        std::shared_ptr<T> instance;
+        JPH::Ref<T> instance;
         if constexpr (std::is_same_v<T, BasePart>) {
-            instance.reset(new BasePart(m_state, id, "BasePart", std::move(name)));
+            instance = new BasePart(m_state, id, "BasePart", std::move(name));
         } else {
-            instance.reset(new T(m_state, id, std::move(name)));
+            instance = new T(m_state, id, std::move(name));
         }
-        RegisterInstance(instance);
+        RegisterInstance(instance.GetPtr());
         return instance;
     }
 
@@ -734,10 +808,16 @@ class DataModel final {
   private:
     [[nodiscard]] auto AllocateId() noexcept -> std::expected<InstanceId, DataModelError>;
     [[nodiscard]] auto HasEverUsedId(InstanceId id) const noexcept -> bool;
-    void               RegisterInstance(const InstancePtr& instance);
+    void               RegisterInstance(Instance* instance);
 
-    std::shared_ptr<DataModelState> m_state;
-    InstancePtr                     m_root;
+    JPH::Ref<DataModelState> m_state;
+    InstancePtr              m_root;
 };
+
+template <typename T>
+    requires(std::is_base_of_v<BasePart, T>)
+auto Model::SetPrimaryPart(const JPH::Ref<T>& part) -> std::expected<void, DataModelError> {
+    return SetPrimaryPart(StaticRefCast<BasePart>(part));
+}
 
 } // namespace ZHLN::ProjectLight

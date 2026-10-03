@@ -75,6 +75,22 @@ struct TestDataModelSuite {
             return {};
         }
 
+        std::expected<void, ZHLN::ErrorCode> preserves_parent_links_when_the_local_root_gets_a_server_id() {
+            DataModel model;
+            auto child = model.Create<Folder>("RootChild");
+            ZHLN::Test::ExpectTrue(child.has_value());
+            if (!child) return {};
+            ZHLN::Test::ExpectTrue((*child)->SetParent(model.Root()).has_value());
+
+            auto serverRoot = model.CreateInstanceWithId(99, "DataModel", "game");
+            ZHLN::Test::ExpectTrue(serverRoot.has_value());
+            if (!serverRoot) return {};
+            ZHLN::Test::ExpectTrue((*child)->Parent() == *serverRoot);
+            ZHLN::Test::ExpectTrue(model.FindById(99) == *serverRoot);
+            ZHLN::Test::ExpectTrue(!model.FindById(0));
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> maintains_parentage_signals_and_rejects_cycles() {
             DataModel model;
             auto workspace = model.Create<WorkspaceService>("Workspace");
@@ -140,7 +156,7 @@ struct TestDataModelSuite {
                 ZHLN::Test::ExpectTrue(child.has_value());
                 if (!child) return {};
                 ZHLN::Test::ExpectTrue((*child)->SetParent(*workspace).has_value());
-                created.push_back(*child);
+                created.push_back(StaticRefCast<Instance>(*child));
             }
 
             // The public snapshot type stays std::vector for API compatibility,
@@ -200,6 +216,39 @@ struct TestDataModelSuite {
             ZHLN::Test::ExpectEq(secondCalls, size_t {1});
             ZHLN::Test::ExpectEq(thirdCalls, size_t {2});
             ZHLN::Test::ExpectTrue(first.IsConnected() && third.IsConnected());
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> signal_tokens_invalidate_when_the_signal_is_destroyed() {
+            DataModelSignal<>::Connection token;
+            {
+                DataModelSignal<> temporarySignal;
+                token = temporarySignal.Connect([] {});
+                ZHLN::Test::ExpectTrue(token.IsConnected());
+            }
+            ZHLN::Test::ExpectTrue(!token.IsConnected());
+            token.Disconnect();
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> cross_instance_references_do_not_own_targets() {
+            DataModel model;
+            auto part = model.Create<Part>("TransientOwnerTarget");
+            ZHLN::Test::ExpectTrue(part.has_value());
+            if (!part) return {};
+
+            InstanceId playerId = 0;
+            {
+                auto player = model.Create<Player>("TransientOwner");
+                ZHLN::Test::ExpectTrue(player.has_value());
+                if (!player) return {};
+                playerId = (*player)->Id();
+                ZHLN::Test::ExpectTrue((*part)->SetNetworkOwner(*player).has_value());
+                ZHLN::Test::ExpectTrue((*part)->NetworkOwner() == *player);
+            }
+
+            ZHLN::Test::ExpectTrue(!model.FindById(playerId));
+            ZHLN::Test::ExpectTrue(!(*part)->NetworkOwner());
             return {};
         }
 

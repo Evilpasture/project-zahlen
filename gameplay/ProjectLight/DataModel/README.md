@@ -12,14 +12,21 @@ a snapshot is decoded. Ordinary IDs are never reused, including after an
 instance is destroyed. Services are intentionally not created automatically:
 the snapshot is the authority for both their IDs and their presence.
 
-Instances own their children and hold weak parent/reference links. Parenting
+Instances derive from Jolt's `JPH::RefTarget` and public strong handles use
+`JPH::Ref`, whose count is atomic. Parentage and semantic cross-Instance links
+store stable IDs, while each parent's child list owns its children. The ID index
+is non-owning and keeps tombstones after final release, so IDs cannot be reused;
+these one-way ownership rules avoid intrusive-reference cycles. Parenting
 rejects cycles and cross-DataModel references. Tree, property, and lifecycle
-events use `DataModelSignal`; its connections are RAII tokens, so retain a token
-for as long as the listener should remain active. Signals are synchronous and
-main-thread only. Private child links, callback slots, and traversal scratch use
-Zahlen's inline-capacity `Array`, while the public tree snapshot methods keep
-their `std::vector` return types. Instance IDs are indexed with Zahlen's
-`HashMap`; names remain owning, unrestricted `std::string` values.
+events use `DataModelSignal`; its connection state also uses Jolt intrusive
+references, and its RAII tokens invalidate cleanly when the signal is destroyed.
+Signals are synchronous and main-thread only. Tree mutation and ID resolution
+remain owner-thread operations; atomic reference counts protect handle lifetime,
+not concurrent access to the graph or ID index. Private child links, callback
+slots, and traversal scratch use Zahlen's inline-capacity `Array`, while the
+public tree snapshot methods keep their `std::vector` return types. Instance IDs
+are indexed with Zahlen's `HashMap`; names remain owning, unrestricted
+`std::string` values.
 
 The `Entity` binding on `Instance` is optional and generation-safe. It is an
 adapter hook into the ECS, not a second identity system: scripts and replication
@@ -58,9 +65,11 @@ parts, spawn points, decals, sounds, and motors.
 
 LuaJIT integration lives in `extensions/Scripting/Lua`; it registers against the
 existing `LuaScriptRuntime` through `AddBindingInitializer`, so scripts and
-C++ continue to use this same Instance graph. Instance userdata are weakly
-cached by their underlying C++ object pointer to preserve Lua identity without
-creating another object world. Sound `Play`/`Stop` currently update model state
-only; audio-backend integration is not part of this binding layer. The
-Instance-to-ECS synchronization adapter remains a separate consumer of the
+C++ continue to use this same Instance graph. Instance userdata retain
+`JPH::Ref<Instance>` handles and are weakly cached by their underlying C++ object
+pointer to preserve Lua identity without creating another object world. The
+Lua bridge's shared ownership for callback/connection records is separate from
+Instance ownership and remains unchanged. Sound `Play`/`Stop` currently update
+model state only; audio-backend integration is not part of this binding layer.
+The Instance-to-ECS synchronization adapter remains a separate consumer of the
 DataModel target.

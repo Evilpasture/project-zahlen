@@ -130,11 +130,11 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(characterInstance != nullptr);
             if (!characterInstance) return {};
             ZHLN::Test::ExpectTrue(characterInstance->IsA("Model"));
-            const auto character = std::static_pointer_cast<Model>(characterInstance);
+            const auto character = StaticRefCast<Model>(characterInstance);
             const auto torsoInstance = character->FindFirstChild("Torso");
             ZHLN::Test::ExpectTrue(torsoInstance && torsoInstance->IsA("Part"));
             if (!torsoInstance || !torsoInstance->IsA("Part")) return {};
-            const auto torso = std::static_pointer_cast<Part>(torsoInstance);
+            const auto torso = StaticRefCast<Part>(torsoInstance);
 
             ZHLN::Test::ExpectTrue(torso->Anchored());
             ZHLN::Test::ExpectTrue(torso->CanCollide());
@@ -158,11 +158,11 @@ struct TestLuaDataModelSuite {
             ZHLN::Test::ExpectTrue(spawnInstance && spawnInstance->IsA("SpawnPoint"));
             if (!humanoidInstance || !decalInstance || !soundInstance || !motorInstance || !spawnInstance) return {};
 
-            const auto humanoid = std::static_pointer_cast<Humanoid>(humanoidInstance);
-            const auto decal = std::static_pointer_cast<Decal>(decalInstance);
-            const auto sound = std::static_pointer_cast<Sound>(soundInstance);
-            const auto motor = std::static_pointer_cast<Motor>(motorInstance);
-            const auto spawn = std::static_pointer_cast<SpawnPoint>(spawnInstance);
+            const auto humanoid = StaticRefCast<Humanoid>(humanoidInstance);
+            const auto decal = StaticRefCast<Decal>(decalInstance);
+            const auto sound = StaticRefCast<Sound>(soundInstance);
+            const auto motor = StaticRefCast<Motor>(motorInstance);
+            const auto spawn = StaticRefCast<SpawnPoint>(spawnInstance);
             ZHLN::Test::ExpectTrue(humanoid->RootPart() == torso);
             ZHLN::Test::ExpectTrue(humanoid->State() == HumanoidState::Running);
             ZHLN::Test::ExpectEq(decal->TextureId(), std::string("images/logo_tshirt.png"));
