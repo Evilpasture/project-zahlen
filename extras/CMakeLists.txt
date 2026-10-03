@@ -27,6 +27,9 @@ endif()
 #                                    them. Rig maths over Jolt vectors and the ECS.
 #   Network/    zahlen_network       ZHLN.Wire + ZHLN.Network. Isolates the wire
 #                                    format from the renderer and from simdjson.
+#   DataModel/  zahlen_datamodel     canonical stable-ID Instance graph and
+#                                    typed project-light object wrappers, separate
+#                                    from LuaJIT and ECS storage.
 #   ALife/      zahlen_alife         factions, GOAP, graph, spatial grid,
 #                                    simulator. No graphics dependencies.
 #   VFX/        zahlen_vfx           ZHLN.CombatFX / ZHLN.Explosions /
@@ -79,7 +82,7 @@ endif()
 # CMakeLists.txt plus one add_subdirectory below.
 #
 # zahlen_extras, at the bottom of this file, is the aggregate: an INTERFACE
-# target that links the six domains above and nothing else. It exists for
+# target that links the core extras domains and nothing else. It exists for
 # consumers that want all of extras the way they used to get it; consumers that
 # want one domain link that domain.
 
@@ -123,7 +126,7 @@ endif()
 
 target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 
-# --- the six domain targets --------------------------------------------------
+# --- the core domain targets -------------------------------------------------
 
 # CharacterController and Camera precede Animation on purpose: Animation
 # links both (Locomotion's SpawnCharacter authors the follow camera as a
@@ -138,6 +141,7 @@ add_subdirectory(Animation)
 # articulation system and only depends on core.
 add_subdirectory(RagdollAuthoring)
 add_subdirectory(Network)
+add_subdirectory(DataModel)
 add_subdirectory(ALife)
 add_subdirectory(VFX)
 add_subdirectory(Interaction)
@@ -178,10 +182,10 @@ add_subdirectory(RemoteAsset)
 add_subdirectory(GitHub)
 
 # --- the aggregate -----------------------------------------------------------
-# INTERFACE, because there is nothing left to compile: every source in the six
-# directories above belongs to a target of its own. What this target carries is
-# the link graph, and through it each domain's PUBLIC include path, module
-# interfaces and dependency set.
+# INTERFACE, because there is nothing left to compile: every source in the
+# feature directories above belongs to a target of its own. What this target
+# carries is the link graph, and through it each domain's PUBLIC include path,
+# module interfaces and dependency set.
 #
 # After this decomposition nothing inside the tree links it: every in-tree
 # consumer takes the domain it actually uses, the composition root included (it
@@ -192,16 +196,17 @@ add_subdirectory(GitHub)
 # tests/CMakeLists.txt and tests/extras/CMakeLists.txt, which read it as "the
 # extras layer was built". A consumer that wants one domain links one domain.
 #
-# The five targets defined by their own directories above are deliberately not
-# aggregated here: zahlen_scripting_lua is a LuaJIT dependency, zahlen_editor is
-# gated on ZHLN_HAS_EDITOR, zahlen_console depends on the scripting binder, and
-# zahlen_svg / zahlen_http do not exist on a host without their libraries. A
-# consumer that wants them links them by name, guarded on TARGET.
+# Optional targets are deliberately not aggregated here: zahlen_scripting_lua
+# has a LuaJIT dependency, zahlen_editor is gated on ZHLN_HAS_EDITOR,
+# zahlen_console depends on the scripting binder, and zahlen_svg / zahlen_http
+# exist only when their optional libraries are installed. A consumer that wants
+# them links them by name, guarded on TARGET.
 add_library(zahlen_extras INTERFACE)
 
 target_link_libraries(zahlen_extras INTERFACE
     zahlen_animation
     zahlen_network
+    zahlen_datamodel
     zahlen_vfx
     zahlen_alife
     zahlen_gltf

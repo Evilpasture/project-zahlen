@@ -12,6 +12,7 @@
 #include <format>
 #include <span>
 #include <string>
+#include <utility>
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -137,6 +138,12 @@ LuaScriptRuntime::~LuaScriptRuntime() {
     Shutdown();
 }
 
+void LuaScriptRuntime::AddBindingInitializer(BindingInitializer initializer) {
+    if (!initializer || L == nullptr) return;
+    if (_initialized) initializer(L);
+    _bindingInitializers.push_back(std::move(initializer));
+}
+
 void LuaScriptRuntime::Initialize(Engine* engine) {
     if (_initialized || L == nullptr) {
         return;
@@ -154,6 +161,11 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
     // without this the registry is empty and all of them fail with
     // TypeNotFound. Idempotent, so a runtime re-init does not duplicate work.
     [[maybe_unused]] const auto registeredTypes = RegisterCoreScriptTypes();
+
+    const std::size_t initializerCount = _bindingInitializers.size();
+    for (std::size_t index = 0; index < initializerCount; ++index) {
+        if (_bindingInitializers[index]) _bindingInitializers[index](L);
+    }
 
 #ifdef ZHLN_COMPILED_SCRIPTS_DIR
     std::string appendPath = std::format("package.path = package.path .. ';{}/?.lua;{}/?/init.lua'", ZHLN_COMPILED_SCRIPTS_DIR, ZHLN_COMPILED_SCRIPTS_DIR);
@@ -190,6 +202,7 @@ void LuaScriptRuntime::Shutdown() {
         lua_close(L);
         L            = nullptr;
         _initialized = false;
+        _bindingInitializers.clear();
     }
 }
 

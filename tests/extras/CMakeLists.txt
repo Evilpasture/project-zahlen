@@ -321,6 +321,85 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# --- DataModel Instance graph Suite ---
+# Exercises stable instance IDs, typed class factories, parent/descendant events,
+# reference validation and the optional ECS entity binding without requiring a
+# Lua runtime or a second scripting object graph.
+set(TARGET_NAME TestDataModel)
+add_executable(${TARGET_NAME} TestDataModel.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_datamodel
+)
+
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})
+
+# --- LuaJIT / DataModel Integration Suite ---
+# Exercises the DataModel adapter through the existing scripting runtime and
+# proves that Lua userdata refer to the same C++ Instance graph.
+if(TARGET zahlen_scripting_lua)
+    set(TARGET_NAME TestLuaDataModel)
+    add_executable(${TARGET_NAME} TestLuaDataModel.cpp)
+
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        zahlen_scripting_lua
+        zahlen_datamodel
+    )
+
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/extras
+    )
+
+    zahlen_enable_reflection(${TARGET_NAME})
+
+    if(USE_SANITIZERS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+        )
+        target_link_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+        )
+        target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+    endif()
+
+    zahlen_register_extras_test(${TARGET_NAME})
+endif()
+
 # --- Network Wire / Serialization Test Suite ---
 # Exercises ZHLN.Wire (dependency-free reflection serialization) and the
 # ZHLN.Network protocol codecs: annotated round-trips, hostile input sweeps,
@@ -736,3 +815,5 @@ if(TARGET zahlen_remote_asset)
 
     zahlen_register_extras_test(${TARGET_NAME})
 endif()
+
+include(${CMAKE_CURRENT_LIST_DIR}/ProjectLightClientTests.cmake)

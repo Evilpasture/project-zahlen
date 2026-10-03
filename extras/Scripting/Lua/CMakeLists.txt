@@ -15,6 +15,7 @@ set(TARGET_NAME zahlen_scripting_lua)
 
 add_library(${TARGET_NAME} STATIC
     LuaScriptRuntime.cpp
+    DataModelBindings.cpp
     Scripting.cpp
     ScriptingABI.cpp
 )
@@ -41,6 +42,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_animation
     zahlen_camera
     zahlen_ragdoll_authoring
+    zahlen_datamodel
 )
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT

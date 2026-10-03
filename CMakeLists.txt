@@ -462,6 +462,32 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
     target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
   endif()
+  # Keep the default Zahlen composition root untouched. The project-light
+  # bridge gets its own opt-in application entrypoint and CLI/config lifecycle.
+  if(TARGET zahlen_project_light_client)
+    add_executable(zahlen_project_light_app EXCLUDE_FROM_ALL app/ProjectLightClientMain.cpp)
+    set_target_properties(zahlen_project_light_app PROPERTIES
+      CXX_STANDARD 26
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      OUTPUT_NAME "project-light-client"
+    )
+    target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
+    target_link_libraries(zahlen_project_light_app PRIVATE
+      zahlen_engine
+      Jolt
+      zahlen_project_light_client
+      zahlen_character_controller
+      zahlen_camera
+      zahlen_warnings
+    )
+    add_dependencies(zahlen_project_light_app link_resources)
+    zahlen_add_runtime_dlls(zahlen_project_light_app)
+    zahlen_enable_reflection(zahlen_project_light_app)
+    if(USE_SANITIZERS)
+      zahlen_install_sanitizer_runtime(zahlen_project_light_app)
+    endif()
+  endif()
 endif()
 
 if(ZHLN_BUILD_TESTS)

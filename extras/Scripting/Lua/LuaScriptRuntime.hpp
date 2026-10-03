@@ -3,8 +3,10 @@
 
 #pragma once
 #include <Zahlen/IScriptRuntime.hpp>
+#include <functional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 struct lua_State;
 
@@ -14,6 +16,12 @@ class LuaScriptRuntime: public IScriptRuntime {
   public:
     LuaScriptRuntime();
     ~LuaScriptRuntime() override;
+
+    // Extras can add LuaJIT bindings to this runtime without creating another
+    // state or changing the core IScriptRuntime contract. Initializers run
+    // before any boot/user script; their captures remain alive until Shutdown.
+    using BindingInitializer = std::function<void(lua_State*)>;
+    void AddBindingInitializer(BindingInitializer initializer);
 
     void Initialize(Engine* engine) override;
     void Shutdown() override;
@@ -31,6 +39,7 @@ class LuaScriptRuntime: public IScriptRuntime {
   private:
     lua_State* L            = nullptr;
     bool       _initialized = false;
+    std::vector<BindingInitializer> _bindingInitializers;
 };
 
 } // namespace ZHLN
