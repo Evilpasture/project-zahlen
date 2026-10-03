@@ -145,6 +145,64 @@ auto IsLightClass(std::string_view className) noexcept -> bool {
     return className == "DirectionalLight" || className == "PointLight";
 }
 
+struct ResolvedDirectionalLight {
+    JPH::Vec3 direction = JPH::Vec3(0.0f, 1.0f, 0.0f); // toward the source, as Zahlen expects
+    JPH::Vec3 color = JPH::Vec3::sReplicate(1.0f);
+    float intensity = 1.0f;
+};
+
+auto ProjectLightSunDirectionToSource(float timeOfDay, float latitude) noexcept -> JPH::Vec3 {
+    // Match LightingService.GetSunDirection(yUp=true): X=east, Y=up, Z=north.
+    constexpr float kDegreesToRadians = 0.01745329251994329577f;
+    constexpr float kSolarDeclination = 23.44f * kDegreesToRadians;
+    if (!std::isfinite(timeOfDay) || !std::isfinite(latitude)) return JPH::Vec3(0.0f, 1.0f, 0.0f);
+
+    const float lat = latitude * kDegreesToRadians;
+    const float hourAngle = (timeOfDay - 12.0f) * 15.0f * kDegreesToRadians;
+    const float sinLat = std::sin(lat);
+    const float cosLat = std::cos(lat);
+    const float sinDec = std::sin(kSolarDeclination);
+    const float cosDec = std::cos(kSolarDeclination);
+    const float sinHour = std::sin(hourAngle);
+    const float cosHour = std::cos(hourAngle);
+
+    const JPH::Vec3 towardSource(
+        -cosDec * sinHour,
+        sinLat * sinDec + cosLat * cosDec * cosHour,
+        cosLat * sinDec - sinLat * cosDec * cosHour
+    );
+    return towardSource.LengthSq() > 1.0e-8f ? towardSource.Normalized() : JPH::Vec3(0.0f, 1.0f, 0.0f);
+}
+
+auto ResolveDirectionalLight(const ReplicatedObject& light, const ReplicatedObject* lighting) noexcept -> ResolvedDirectionalLight {
+    // ProjectLight's shaders use L = -sunDirection because that property is
+    // the direction light rays travel. Zahlen's LightComponent.direction is L
+    // itself: the direction from a surface toward the light source.
+    JPH::Vec3 travelDirection = light.direction;
+    if (light.isMain && lighting != nullptr) {
+        travelDirection = -ProjectLightSunDirectionToSource(lighting->timeOfDay, lighting->latitude);
+    }
+    if (travelDirection.LengthSq() <= 1.0e-8f) travelDirection = JPH::Vec3(0.0f, -1.0f, 0.0f);
+    travelDirection = travelDirection.Normalized();
+
+    JPH::Vec3 color = light.color;
+    float intensity = light.intensity;
+    // Match ProjectLight's sun-to-moon handoff when the rays would point above
+    // the horizon. The moon is antipodal, so convert the final travel vector
+    // to the renderer's toward-source convention only after this switch.
+    if (travelDirection.GetY() > 0.0f) {
+        travelDirection = -travelDirection;
+        color = light.nightColor;
+        intensity = light.nightIntensity;
+    }
+
+    return {
+        .direction = -travelDirection,
+        .color = color,
+        .intensity = std::max(intensity, 0.0f),
+    };
+}
+
 auto PartShapeFromValue(int64_t value) noexcept -> PartShape {
     if (value < 0 || value > static_cast<int64_t>(PartShape::Head)) return PartShape::Cube;
     return static_cast<PartShape>(value);
@@ -996,6 +1054,12 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
         } else if (property == "Direction") {
             object.direction = value.AsVec3(VEC3_SCALE, object.direction);
             object.visualDirty = true;
+        } else if (property == "NightColor") {
+            object.nightColor = value.AsVec3(COLOR3_SCALE, object.nightColor);
+            object.visualDirty = true;
+        } else if (property == "NightIntensity") {
+            object.nightIntensity = value.AsFloat(object.nightIntensity);
+            object.visualDirty = true;
         } else if (property == "IsMain") {
             object.isMain = value.AsBool(object.isMain);
             object.visualDirty = true;
@@ -1003,11 +1067,14 @@ void ClientSession::ApplyProperties(ReplicatedObject& object, const MsgPackValue
             object.range = value.AsFloat(object.range);
             object.visualDirty = true;
         } else if (property == "Ambient") {
-            object.ambient = value.AsVec3(COLOR3_SCALE, object.ambient);
+            // LightingService.Ambient is a scalar in ProjectLight, not Color3.
+            object.ambient = value.AsFloat(object.ambient);
         } else if (property == "TimeOfDay") {
             object.timeOfDay = value.AsFloat(object.timeOfDay);
         } else if (property == "Latitude") {
             object.latitude = value.AsFloat(object.latitude);
+        } else if (property == "ProceduralSky") {
+            object.proceduralSky = value.AsBool(object.proceduralSky);
         } else if (property == "ServerAuthority") {
             object.serverAuthority = value.AsBool(object.serverAuthority);
             m_serverAuthority = object.serverAuthority;
@@ -1695,6 +1762,11 @@ void ClientSession::SpawnOrUpdatePartEntity(Engine& engine, ReplicatedObject& ob
 void ClientSession::SpawnOrUpdateLightEntity(Engine& engine, ReplicatedObject& object) {
     auto& registry = engine.GetRegistry();
     const bool directional = object.className == "DirectionalLight";
+    const ReplicatedObject* lighting = directional ? FindObject(m_lightingUid) : nullptr;
+    const ResolvedDirectionalLight resolved = directional
+        ? ResolveDirectionalLight(object, lighting)
+        : ResolvedDirectionalLight {.direction = object.direction, .color = object.color, .intensity = object.intensity};
+    const float rendererIntensity = object.enabled ? resolved.intensity * (directional ? 180.0f : 1.0f) : 0.0f;
     if (object.entity == Entity::Null() || !registry.IsAlive(object.entity)
         || registry.Get<Components::PendingDestroy>(object.entity).has_value()) {
         object.entity = registry.Create();
@@ -1706,10 +1778,10 @@ void ClientSession::SpawnOrUpdateLightEntity(Engine& engine, ReplicatedObject& o
             Components::WorldTransformComponent {.world = matrix, .previous = matrix},
             Components::LightComponent {
                 .type = directional ? LightType::Sun : LightType::Point,
-                .color = object.color,
-                .intensity = object.enabled ? object.intensity * (directional ? 180.0f : 1.0f) : 0.0f,
+                .color = resolved.color,
+                .intensity = rendererIntensity,
                 .radius = object.sourceRadius,
-                .direction = object.direction,
+                .direction = resolved.direction,
                 .range = object.range,
                 .shadowLayer = -1
             },
@@ -1731,10 +1803,10 @@ void ClientSession::SpawnOrUpdateLightEntity(Engine& engine, ReplicatedObject& o
     }
     if (auto light = registry.Get<Components::LightComponent>(object.entity)) {
         light->type      = directional ? LightType::Sun : LightType::Point;
-        light->color     = object.color;
-        light->intensity = object.enabled ? object.intensity * (directional ? 180.0f : 1.0f) : 0.0f;
+        light->color     = resolved.color;
+        light->intensity = rendererIntensity;
         light->radius    = object.sourceRadius;
-        light->direction = object.direction;
+        light->direction = resolved.direction;
         light->range     = object.range;
     }
     object.transformDirty = false;
@@ -1745,12 +1817,27 @@ void ClientSession::SyncEnvironment(Engine& engine) {
     const ReplicatedObject* lighting = FindObject(m_lightingUid);
     if (lighting == nullptr) return;
     auto& registry = engine.GetRegistry();
-    const JPH::Vec3 ambient = lighting->ambient;
+
+    // ProjectLight Ambient is a normalized scalar (default 0.01). Zahlen uses
+    // ambientExposure as the environment-light multiplier (default 25), so
+    // preserve both defaults and carry server-side relative changes across.
+    constexpr float kProjectLightDefaultAmbient = 0.01f;
+    constexpr float kZahlenDefaultAmbientExposure = 25.0f;
+    const float ambient = std::isfinite(lighting->ambient) ? std::max(lighting->ambient, 0.0f) : kProjectLightDefaultAmbient;
+    const float ambientExposure = kZahlenDefaultAmbientExposure * (ambient / kProjectLightDefaultAmbient);
+
     for (Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& post) {
-            post.skyZenith  = JPH::Vec4(ambient.GetX(), ambient.GetY(), ambient.GetZ(), 1.0f);
-            post.skyHorizon = JPH::Vec4(ambient.GetX(), ambient.GetY(), ambient.GetZ(), 1.0f);
-            post.skyGround  = JPH::Vec4(ambient.GetX() * 0.5f, ambient.GetY() * 0.5f, ambient.GetZ() * 0.5f, 1.0f);
+            post.ambientExposure = ambientExposure;
+            if (lighting->proceduralSky) {
+                post.skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
+                post.skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
+                post.skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
+            } else {
+                post.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                post.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                post.skyGround  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            }
         });
     }
 }

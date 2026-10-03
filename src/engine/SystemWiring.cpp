@@ -196,7 +196,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
-        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {}
+        Components::AASettingsComponent {}, Components::FreeCamTagComponent {}
     );
 
     reg.Create(

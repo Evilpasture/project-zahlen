@@ -232,12 +232,17 @@ struct ReplicatedObject {
     float         intensity        = 1.0f;
     bool          shadows          = true;
     float         sourceRadius     = 0.0f;
+    // ProjectLight directional vectors describe ray travel; the renderer-facing
+    // conversion to a toward-source vector is done at the ECS boundary.
     JPH::Vec3     direction        = JPH::Vec3(0.0f, -1.0f, 0.0f);
+    JPH::Vec3     nightColor       = JPH::Vec3(0.45f, 0.55f, 0.8f);
+    float         nightIntensity   = 0.35f;
     bool          isMain           = false;
     float         range            = 16.0f;
-    JPH::Vec3     ambient           = JPH::Vec3(0.1f, 0.1f, 0.1f);
+    float         ambient          = 0.01f;
     float         timeOfDay        = 14.0f;
-    float         latitude         = 41.7f;
+    float         latitude         = 0.0f;
+    bool          proceduralSky    = true;
     bool          serverAuthority  = false;
 
     std::string   soundId          {};

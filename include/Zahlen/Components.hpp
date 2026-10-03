@@ -191,32 +191,32 @@ struct Components {
     struct ShadowSettingsComponent {
         float shadowWidth        = 200.0f;
         int   shadowResolution   = 2048;
-        int   maxPunctualShadows = 1;
+        int   maxPunctualShadows = 0;
         float sunSize            = 0.05f;
     };
     struct PostProcessSettingsComponent {
-        int       giMode            = 1;
+        int       giMode            = 0;
         float     aoRadius          = 0.5f;
         float     aoBias            = 0.05f;
         float     aoPower           = 1.8f;
-        float     giIntensity       = 1.2f;
+        float     giIntensity       = 1.0f;
         int       giSamples         = 8;
         int       useLocalProbe     = 0;
-        float     vignetteIntensity = 1.10f;
+        float     vignetteIntensity = 0.0f;
         float     vignettePower     = 1.50f;
-        float     glowIntensity     = 0.15f;
-        int       enableSSR         = 1;
+        float     glowIntensity     = 0.0f;
+        int       enableSSR         = 0;
         int       enableRTR         = 0;
         int       fullBright        = 0;
 
-        float     exposure          = 0.015f;
-        float     bloomStrength     = 0.5f;
+        float     exposure          = 1.0f;
+        float     bloomStrength     = 0.0f;
         float     contrast          = 1.0f;
         float     saturation        = 1.0f;
-        int       tonemapper        = 1;
+        int       tonemapper        = 3;
         JPH::Vec3 colorFilter       = JPH::Vec3::sReplicate(1.0f);
 
-        float     ambientExposure   = 25.0f;
+        float     ambientExposure   = 1.0f;
         JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
