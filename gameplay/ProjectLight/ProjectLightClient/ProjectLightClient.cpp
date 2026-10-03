@@ -1826,13 +1826,35 @@ void ClientSession::SyncEnvironment(Engine& engine) {
     const float ambient = std::isfinite(lighting->ambient) ? std::max(lighting->ambient, 0.0f) : kProjectLightDefaultAmbient;
     const float ambientExposure = kZahlenDefaultAmbientExposure * (ambient / kProjectLightDefaultAmbient);
 
+    // This client hands the renderer Zahlen's absolute-radiance light units: a
+    // directional light enters at intensity * 180 (see SpawnOrUpdateLightEntity)
+    // and the environment at `ambientExposure` above. `exposure` is the display
+    // half of that convention -- blit.slang multiplies the whole HDR buffer by
+    // it before tone mapping -- and 0.015 is the value Zahlen's own scene preset
+    // pairs with exactly those numbers (Scene.hpp SceneEnvironment::exposure,
+    // next to a 180-intensity fallback sun). Left at the component default of
+    // 1.0, a lit white surface drives ~57 into the tone curve and both ACES and
+    // PBR Neutral saturate it: the whole frame reads as pastel white.
+    constexpr float kProjectLightExposure = 0.015f;
+
+    // The procedural-sky constants below are Zahlen's night preset (0.003..0.08
+    // radiance). They are also the SH the shadow fill is baked from, and both
+    // reach the image as `skyRadiance * ambientExposure * exposure`, so a daylit
+    // ProjectLight sky wants them scaled well past 1/exposure. This factor is the
+    // sky/shade dial: ~10 is a deep sky with dark shadows, 20 puts the horizon
+    // near sRGB 130, ~30 reproduces the (clipped) sky the scene gets today at the
+    // component default exposure of 1.0. The sun -- and therefore the
+    // highlight-to-shade separation -- is still `exposure`, not this.
+    constexpr float kProjectLightSkyScale = 20.0f;
+
     for (Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& post) {
             post.ambientExposure = ambientExposure;
+            post.exposure        = kProjectLightExposure;
             if (lighting->proceduralSky) {
-                post.skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
-                post.skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
-                post.skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
+                post.skyZenith  = JPH::Vec4(0.003f * kProjectLightSkyScale, 0.008f * kProjectLightSkyScale, 0.020f * kProjectLightSkyScale, 1.0f);
+                post.skyHorizon = JPH::Vec4(0.015f * kProjectLightSkyScale, 0.035f * kProjectLightSkyScale, 0.080f * kProjectLightSkyScale, 1.0f);
+                post.skyGround  = JPH::Vec4(0.001f * kProjectLightSkyScale, 0.001f * kProjectLightSkyScale, 0.003f * kProjectLightSkyScale, 1.0f);
             } else {
                 post.skyZenith  = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
                 post.skyHorizon = JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f);
