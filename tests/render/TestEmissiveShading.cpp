@@ -83,9 +83,12 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // 3.0 has always been at this exposure: 13/255, a dim lamp. Expressing the
 // emitter the way the importer does keeps the test measuring a neon material
 // rather than the accounting error that used to inflate one.
-constexpr std::array<float, 4> kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
-constexpr std::array<float, 4> kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
-constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
+// Not constexpr: Jolt's Float4 constructor is not constexpr, so a lane
+// constant is `const` at namespace scope. It is still one object, not a
+// spelling that has to be converted at the crossing.
+const JPH::Float4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const JPH::Float4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
+const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
 // The ordinary glTF neon case, in the units the importer produces: a
 // spec-clamped emissiveFactor of 0.8 with no KHR_materials_emissive_strength,
@@ -97,7 +100,7 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // thing casting it. That dimness was the actual regression behind "the neon
 // look is gone"; the fix is the unit conversion at import, and this constant
 // tracks it so the test measures what an imported asset really does.
-constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 
 // Builds the unlit scene: one box at the origin, no lights of any kind, and
 // ambient/GI dialled out so nothing but emission can brighten a surface.
@@ -109,7 +112,7 @@ constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDispl
 //
 // Returns false when material creation fails, which is a setup failure rather
 // than a rendering result.
-[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const std::array<float, 4>& emissiveFactor, std::optional<float> glowIntensity) {
+[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity) {
     auto& registry = engine.GetRegistry();
     auto& renderCtx = engine.GetRenderContext();
 
@@ -161,7 +164,7 @@ struct UnlitMeasurement {
 };
 
 // Renders the unlit scene once and measures it.
-[[nodiscard]] auto MeasureUnlitBox(const std::array<float, 4>& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt)
+[[nodiscard]] auto MeasureUnlitBox(const JPH::Float4& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt)
     -> UnlitMeasurement {
     UnlitMeasurement out;
 

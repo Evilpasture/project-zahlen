@@ -253,7 +253,9 @@ struct RTRPBRReflectionTestSuite {
         cam.fov      = 55.0f;
     }
 
-    static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, std::array<float, 4> base, std::array<float, 4> emissive = {0, 0, 0, 1})
+    static auto MakeMat(
+        ZHLN::Engine& engine, float metallic, float roughness, JPH::Float4 base,
+        JPH::Float4 emissive = JPH::Float4 {0.0f, 0.0f, 0.0f, 1.0f})
         -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
         return engine.GetRenderContext().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
