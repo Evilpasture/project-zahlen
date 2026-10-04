@@ -13,7 +13,6 @@
 
 namespace ZHLN {
 class RenderContext;
-struct Camera;
 
 class LightingSystem {
   public:
@@ -29,7 +28,7 @@ class LightingSystem {
 
     static void Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
                                   const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
-                       ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera);
+                       ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<RenderContext> render);
 
     static SunLight GetSun(SunQuery reg) noexcept;
     static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery reg) noexcept;

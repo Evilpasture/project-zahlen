@@ -6,6 +6,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
@@ -17,7 +18,6 @@
 namespace ZHLN {
 class Engine;
 class RenderContext;
-struct Camera;
 
 class ZHLN_API CullingSystem {
   public:
@@ -30,7 +30,7 @@ class ZHLN_API CullingSystem {
     // Reflected graph entry point. The stateful culler and both output lists
     // are injected by type, not extracted in SystemWiring.cpp.
     static void GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
-                            ECS::ResMut<Camera> camera, VisibleEntities visible, VisibleShadowEntities shadow);
+                            VisibleEntities visible, VisibleShadowEntities shadow);
 
     template <bool UsePhysicsTransforms = false>
     void Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
@@ -42,6 +42,11 @@ class ZHLN_API CullingSystem {
         return m_frustumCorners;
     }
 
+    // The culling planes are the culler's own state: it derives them from the
+    // camera entity's view-projection each frame. The camera does not own them,
+    // so there is exactly one writer.
+    [[nodiscard]] const Frustum& GetFrustum() const noexcept { return m_mainFrustum; }
+
     void DrawDebugFrustum(Engine& engine);
 
     CullingStats&       Stats() noexcept { return m_stats; }
@@ -51,6 +56,9 @@ class ZHLN_API CullingSystem {
     template <bool UsePhysicsTransforms>
     void UpdateCore(CullingQuery query, const RenderContext& render, Camera& cam, bool engineCam,
                     JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
+
+    Frustum                  m_mainFrustum {};
+    Frustum                  m_shadowFrustum {};
 
     std::array<JPH::Vec3, 8> m_frustumCorners {};
     CullingStats             m_stats {};

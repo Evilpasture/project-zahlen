@@ -332,13 +332,19 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport) {
     auto cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
-    Camera           cam    = cComp ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
+    // The view's camera is the entity's own component when it has one; a bare
+    // transform entity gets a viewport camera built from the main camera's
+    // optics at that entity's position.
+    Camera           cam    = cComp ? cComp->camera : MakeViewportCamera(engine, cameraEnt);
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
     const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
     const JPH::Mat44 viewProj = cComp ? cComp->viewProj : proj * view;
 
-    cam.frustum.Update(viewProj);
+    // The view's planes belong to the view, not to the camera: handed to the
+    // renderer with the rest of the SceneView.
+    Frustum frustum {};
+    frustum.Update(viewProj);
 
     return SceneView {
         .viewMatrix        = view,
@@ -348,7 +354,7 @@ SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& targe
         .worldPosition     = cam.position,
         .viewport          = viewport,
         .target            = target,
-        .frustum           = cam.frustum,
+        .frustum           = frustum,
         .visibilityMask    = ~0ULL,
         .frameIndex        = static_cast<uint32_t>(engine.GetCurrentFrame()),
         .time              = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep,
@@ -383,7 +389,10 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
-    auto&       cam             = engine.GetCamera();
+    // A copy: the pose this frame renders with. Holding a reference into the
+    // registry across the whole submit would dangle if that component's storage
+    // ever moved.
+    const Camera cam            = engine.GetCamera();
     const auto& visibleEntities = engine.GetVisibleEntities();
 
     JPH::Mat44 vp {};
@@ -455,7 +464,8 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     JPH::Mat44 lightProj = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
     outShadowProjView    = lightProj * lightView;
 
-    cam.shadowFrustum.Update(outShadowProjView);
+    // The shadow planes are the culler's own: CullingSystem derives them from
+    // the same sun and settings, and this matrix is what the passes consume.
 
     const AAState& aaState = gfx.antiAliasing;
 

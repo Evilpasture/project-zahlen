@@ -45,11 +45,12 @@ void AppendComponentAccess(std::vector<ComponentAccess>& accesses) {
 }
 
 // A service is shared state like any component, and the scheduler has to know
-// about it: `ResMut<Camera>` in one system and `Res<Camera>` in another is a
-// hazard whether or not the camera happens to live in the registry. The token
+// about it: `ResMut<RenderContext>` in one system and `Res<RenderContext>` in
+// another is a hazard even though neither names a component family. The token
 // family exists only as a family id -- nothing of this type is ever stored -- so
 // the two systems get an ordering edge without the registry learning a new
-// component.
+// component. A service that *is* world state is an ordinary component family
+// instead and needs no token: the camera is one (see CameraComponent).
 template <typename T>
 struct ServiceToken {};
 

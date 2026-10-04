@@ -14,7 +14,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
-void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<Entity>& visible, const Camera& cam, const CullingStats& stats) noexcept {
+void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<Entity>& visible, const Frustum& frustum, const CullingStats& stats) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
@@ -36,7 +36,7 @@ void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<En
 
         float currentMaxScale = std::max({worldMat.GetColumn3(0).Length(), worldMat.GetColumn3(1).Length(), worldMat.GetColumn3(2).Length()});
 
-        if (cam.frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
+        if (frustum.IsSphereVisible(pos, meshes[i].cullRadius * currentMaxScale)) {
             expectedVisible++;
         }
     }
@@ -124,8 +124,16 @@ void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outV
 }
 
 void CullingSystem::GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
-                                ECS::ResMut<Camera> camera, VisibleEntities visible, VisibleShadowEntities shadow) {
-    culling->UpdateCore<false>(query, *render, *camera, true, visible.values, shadow.values);
+                                VisibleEntities visible, VisibleShadowEntities shadow) {
+    // The pose the culler tests against is the main camera entity's: it is world
+    // data now, not a service. No camera entity means this frame has no view to
+    // cull for -- RenderSystem reports NoMainCamera for it.
+    auto camComp = query.GetSingleton<Components::CameraComponent>();
+    if (!camComp) {
+        return;
+    }
+
+    culling->UpdateCore<false>(query, *render, camComp->camera, true, visible.values, shadow.values);
 }
 
 template <bool UsePhysicsTransforms>
@@ -186,11 +194,11 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
             m_wasFrozen = true;
         }
         if (cComp) {
-            cam.frustum.Update(cComp->frozenViewProj);
+            m_mainFrustum.Update(cComp->frozenViewProj);
         }
     } else {
         if (engineCam && cComp) {
-            cam.frustum.Update(cComp->unjitteredViewProj);
+            m_mainFrustum.Update(cComp->unjitteredViewProj);
         }
         if (!m_stats.FreezeFrustum) {
             m_wasFrozen = false;
@@ -216,7 +224,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
         JPH::Mat44 lightProj      = Math::CreateOrtho(-halfWidth, halfWidth, -halfWidth, halfWidth, Shadows::NearClip, Shadows::FarDepth);
         JPH::Mat44 shadowProjView = lightProj * lightView;
 
-        cam.shadowFrustum.Update(shadowProjView);
+        m_shadowFrustum.Update(shadowProjView);
     }
 
     auto meshes = query.Raw<Components::MeshComponent>();
@@ -244,8 +252,8 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
     outVisibleShadow.clear();
 
     constexpr size_t     kBatch = 4;
-    const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(cam.frustum);
-    const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(cam.shadowFrustum);
+    const BatchedFrustum mainPlanes   = BatchedFrustum::FromFrustum(m_mainFrustum);
+    const BatchedFrustum shadowPlanes = BatchedFrustum::FromFrustum(m_shadowFrustum);
 
     std::array<Entity, kBatch>  batchEntities {};
     std::array<JPH::Vec3, kBatch> batchCenters {};
@@ -317,7 +325,7 @@ void CullingSystem::UpdateCore(CullingQuery query, const RenderContext& rc, Came
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(query, outVisible, cam, m_stats);
+        ZHLN::Tests::VerifyCullingResults(query, outVisible, m_mainFrustum, m_stats);
     }
 }
 

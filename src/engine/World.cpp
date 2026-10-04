@@ -27,7 +27,6 @@ enum class WorldInitError : uint8_t {
 struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
-    Camera                          mainCamera;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
@@ -107,7 +106,13 @@ auto World::GetPhysics() -> PhysicsContext& {
     return *_impl->physicsContext;
 }
 auto World::GetCamera() -> Camera& {
-    return _impl->mainCamera;
+    // The camera is world data: the main camera entity carries it. Same contract
+    // the bundle used to state -- a world asked for a camera has one -- but
+    // resolved from the registry instead of being bound into a service slot.
+    const Entity cameraEntity = _impl->registry.SingletonEntity<Components::MainCameraTagComponent>();
+    auto         camera       = _impl->registry.Get<Components::CameraComponent>(cameraEntity);
+    ZHLN::Assert(camera.has_value(), "World::GetCamera(): no main camera entity carrying a CameraComponent");
+    return camera->camera;
 }
 
 auto World::GetMainECB() -> ECS::EntityCommandBuffer& {

@@ -139,14 +139,23 @@ void DumpEngineState(void* context, const SignalEvent& ) noexcept {
 }
 
 void DumpCameraState(void* context, const SignalEvent& ) noexcept {
-    auto& cam = *static_cast<Camera*>(context);
+    // A crash dump is best-effort and must not assert: resolve the camera the
+    // way the frame does, but tolerate a world that has no camera entity.
+    auto&      world   = *static_cast<World*>(context);
+    const auto camComp = world.GetRegistry().GetSingleton<Components::CameraComponent>();
 
-    auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
-    auto cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
-    Diagnostics::WriteCrashOutput(cam_pos);
-    Diagnostics::WriteCrashOutput(cam_dir);
+    if (camComp) {
+        const Camera& cam     = camComp->camera;
+        auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+        auto          cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
+        Diagnostics::WriteCrashOutput(cam_pos);
+        Diagnostics::WriteCrashOutput(cam_dir);
+    } else {
+        Diagnostics::WriteCrashOutput("  (no main camera entity)\n");
+    }
 
-    auto& f         = cam.frustum;
+    // The planes belong to the culler that derived them, not to the camera.
+    const Frustum& f = world.GetCullingSystem().GetFrustum();
     auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
     Diagnostics::WriteCrashOutput(frust_hdr);
     const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
@@ -160,7 +169,7 @@ void DumpCameraState(void* context, const SignalEvent& ) noexcept {
         Diagnostics::WriteCrashOutput(plane_str);
     }
 
-    ZHLN::Dump(cam.frustum);
+    ZHLN::Dump(f);
 }
 
 void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
@@ -169,7 +178,7 @@ void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
 
 void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
     Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world.GetCamera());
+    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world);
     Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
 }
 
@@ -435,7 +444,6 @@ void Engine::EnsureSystemGraphs() {
             .physics               = _impl->world->GetPhysics(),
             .audio                 = _impl->kernel->GetAudioContext(),
             .assets                = _impl->kernel->GetAssetManager(),
-            .camera                = _impl->world->GetCamera(),
             .articulation          = _impl->world->GetArticulationSystem(),
             .bonePosePostProcessor = _impl->bonePosePostProcessor,
             .poseUploads           = _impl->poseUploads,
@@ -446,7 +454,6 @@ void Engine::EnsureSystemGraphs() {
         RenderServices {
             .render  = render,
             .assets  = _impl->kernel->GetAssetManager(),
-            .camera  = _impl->world->GetCamera(),
             .culling = _impl->world->GetCullingSystem(),
             .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
             .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},

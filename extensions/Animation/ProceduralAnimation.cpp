@@ -1622,7 +1622,7 @@ void BuildStandardProceduralRig(RigBoneMap& outMap) noexcept {
 // Registry&: the inspector marks this evaluator as a wildcard component writer.
 // Keep the existing SystemContext entry point below for custom schedules.
 void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<PoseUploadQueue> poseUploads, ECS::ResMut<Camera> cameraRes) noexcept;
+                               ECS::ResMut<PoseUploadQueue> poseUploads) noexcept;
 
 void ProceduralAnimation::Register(Engine& engine) {
     auto& registry = engine.GetRegistry();
@@ -1852,12 +1852,13 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
 // below. The carrier's services are the simulation domain's, so the pose it
 // produces goes to the palette queue rather than to a renderer reference.
 void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
-    ProceduralAnimationSystem(ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads},
-                              ECS::ResMut<Camera> {&ctx.services.camera});
+    ProceduralAnimationSystem(
+        ctx.registry, FrameDt {dt}, ECS::Res<PhysicsContext> {&ctx.services.physics}, ECS::ResMut<PoseUploadQueue> {&ctx.services.poseUploads}
+    );
 }
 
 void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Res<PhysicsContext> physicsRes,
-                               ECS::ResMut<PoseUploadQueue> poseUploads, ECS::ResMut<Camera> cameraRes) noexcept {
+                               ECS::ResMut<PoseUploadQueue> poseUploads) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
     const float dt = frameDt.value;
@@ -2362,15 +2363,20 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                     );
                 }
 
-                Camera& camera            = *cameraRes;
-                camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
-                const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
-                JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
-                forward                   = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();
-                camera.yaw                = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
-                camera.pitch              = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
-                camera.fov                = firstPerson->fov;
-                camera.nearZ              = firstPerson->nearPlane;
+                // The first-person pose goes to the camera entity's own
+                // component: the engine owns no camera, so there is no service
+                // to reach through.
+                if (auto cameraComp = registry.Get<Components::CameraComponent>(registry.SingletonEntity<Components::MainCameraTagComponent>())) {
+                    Camera& camera            = cameraComp->camera;
+                    camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
+                    const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
+                    JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();
+                    forward                   = forward.LengthSq() > 1.0e-8f ? forward.Normalized() : rootRotation * JPH::Vec3::sAxisZ();
+                    camera.yaw                = std::atan2(forward.GetZ(), forward.GetX()) * (180.0f / std::numbers::pi_v<float>);
+                    camera.pitch              = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * (180.0f / std::numbers::pi_v<float>);
+                    camera.fov                = firstPerson->fov;
+                    camera.nearZ              = firstPerson->nearPlane;
+                }
             }
         } else if (firstPerson) {
             firstPerson->cameraInitialized = false;

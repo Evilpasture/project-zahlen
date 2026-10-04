@@ -5,6 +5,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
@@ -153,13 +154,21 @@ struct Components {
     };
     static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
 
+    // The camera -- pose, optics, and the entity that carries them -- is world
+    // data. The engine owns no camera of its own: a camera entity carries this,
+    // and Engine::GetCamera()/World::GetCamera() resolve it from the registry.
     struct CameraComponent {
+        Camera camera {};
+
         JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
         JPH::Mat44 unjitteredViewProj     = JPH::Mat44::sIdentity();
         JPH::Mat44 prevUnjitteredViewProj = JPH::Mat44::sIdentity();
         JPH::Mat44 frozenViewProj         = JPH::Mat44::sIdentity();
         uint32_t   frameCounter           = 0;
     };
+    // The pose rides in the same storage as the matrices, so it must stay a pod
+    // the SoA sets can memcpy -- the invariant the camera fold relies on.
+    static_assert(std::is_trivially_copyable_v<CameraComponent>);
     struct NameComponent {
         ZHLN::String64 name;
     };

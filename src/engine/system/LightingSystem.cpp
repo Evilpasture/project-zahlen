@@ -68,8 +68,12 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery
 
 void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
                                        const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
-                            ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
+                            ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<RenderContext> render) {
     auto& rc = *render;
+
+    // The view camera is world data now: lighting sorts and packs relative to
+    // the main camera entity's pose, the same state the renderer projects.
+    const auto cameraComp = cameraQuery.GetSingleton<Components::CameraComponent>();
 
     struct LightImportance {
         Entity entity;
@@ -77,7 +81,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
     };
     ZHLN::Array<LightImportance> lightPriorities;
 
-    const JPH::Vec3 viewPos = camera->position;
+    const JPH::Vec3 viewPos = cameraComp ? cameraComp->camera.position : JPH::Vec3::sZero();
 
     for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
         query.Patch<Components::LightComponent>(e, [&](auto& light) {
@@ -116,7 +120,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
     }
 
     ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = camera->GetViewMatrix();
+    JPH::Mat44         viewMatrix    = cameraComp ? cameraComp->camera.GetViewMatrix() : JPH::Mat44::sIdentity();
     auto               lightEntities = query.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 

@@ -57,19 +57,23 @@ struct MathTestSuite {
             cam.farZ     = 100.0f;
 
             JPH::Mat44 vp = cam.GetProjectionMatrix(16.0f / 9.0f) * cam.GetViewMatrix();
-            cam.frustum.Update(vp);
+
+            // The planes are derived from the view-projection, as the culler
+            // derives them: they are not camera members.
+            ZHLN::Frustum frustum {};
+            frustum.Update(vp);
 
             // 1. Point directly in front of camera (Inside)
-            ZHLN::Test::ExpectTrue(cam.frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, 0.0f), 1.0f));
+            ZHLN::Test::ExpectTrue(frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, 0.0f), 1.0f));
 
             // 2. Point far behind the camera (Outside)
-            ZHLN::Test::ExpectFalse(cam.frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, 25.0f), 1.0f));
+            ZHLN::Test::ExpectFalse(frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, 25.0f), 1.0f));
 
             // 3. Point far past the Far plane (Outside)
-            ZHLN::Test::ExpectFalse(cam.frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, -150.0f), 1.0f));
+            ZHLN::Test::ExpectFalse(frustum.IsSphereVisible(JPH::Vec3(0.0f, 0.0f, -150.0f), 1.0f));
 
             // 4. Point far to the left (Outside)
-            ZHLN::Test::ExpectFalse(cam.frustum.IsSphereVisible(JPH::Vec3(-100.0f, 0.0f, 0.0f), 1.0f));
+            ZHLN::Test::ExpectFalse(frustum.IsSphereVisible(JPH::Vec3(-100.0f, 0.0f, 0.0f), 1.0f));
 
             return {};
         }

@@ -33,7 +33,6 @@ class PhysicsContext;
 class AudioContext;
 class CullingSystem;
 class ArticulationSystem;
-struct Camera;
 struct ModelPrefab;
 
 namespace ECS {
@@ -62,7 +61,6 @@ struct SimServices {
     PhysicsContext& physics;
     AudioContext&   audio;
     AssetManager&   assets;
-    Camera&         camera;
 
     ArticulationSystem&    articulation;
     BonePosePostProcessor& bonePosePostProcessor;
@@ -78,7 +76,6 @@ struct SimServices {
 struct RenderServices {
     RenderContext&  render;
     AssetManager&   assets;
-    Camera&         camera;
     CullingSystem&  culling;
 
     VisibleEntities       visible;

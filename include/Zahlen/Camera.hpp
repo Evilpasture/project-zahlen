@@ -76,9 +76,11 @@ struct Camera {
     float nearZ = 0.1f;
     float farZ  = 1000.0f;
 
-    Frustum frustum {};
-    Frustum shadowFrustum {};
-
+    // Pose and optics only. The view-projection matrices live on the entity's
+    // CameraComponent, and the culling planes live on the culler that derived
+    // them (see CullingSystem::GetFrustum). A camera that owned its frustum was
+    // camera *state*, not camera data: a second writer had to reach the same
+    // object through a shared service.
     [[nodiscard]] auto GetViewMatrix() const -> JPH::Mat44 {
         JPH::Vec3 direction {};
         direction.SetX(JPH::Cos(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));
