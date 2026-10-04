@@ -334,10 +334,13 @@ struct ServiceTargetOf<ResMut<T>> {
     using Type                    = T;
 };
 
-template <typename T>
-struct ServiceTargetOf<ZHLN::Optional<T&>> {
+// ZHLN::Optional is an alias template whose expansion puts T in a non-deduced
+// context, so a partial specialization on ZHLN::Optional<T&> is never matched.
+// Use a concept-constrained specialization (see OptionalResourceParam) instead.
+template <OptionalResourceParam Param>
+struct ServiceTargetOf<Param> {
     static constexpr bool defined = true;
-    using Type                    = T;
+    using Type                    = typename Param::value_type;
 };
 
 template <typename Inspector, std::size_t I, std::size_t J>
