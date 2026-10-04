@@ -56,6 +56,10 @@ ipch/
 env/
 node_modules/
 
+# Local project-light client credentials (the tracked *.env.example is safe).
+/.env
+/project-light.env
+
 # Fidelity test harness data (scripts/run_fidelity.sh clones the Khronos
 # repositories under build/fidelity/ by default — already covered by the build/
 # rule). These scoped rules cover users who point the runner at an external/

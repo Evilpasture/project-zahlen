@@ -8,7 +8,7 @@
 // Dependency-free core of the fidelity runner: the pixelmatch YIQ metric, the
 // P6 PPM reader for engine captures, and the area-average downscale used to
 // reconcile candidate/golden sizes. Nothing in this header names the engine,
-// extras, stb or simdjson, so it compiles and unit-tests standalone (g++ only),
+// engine, format-plugin, stb, or simdjson headers, so it compiles and unit-tests standalone (g++ only),
 // which the heavier halves of tools/fidelity/ cannot do away from the repo's
 // full build tree.
 //

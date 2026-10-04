@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Two-bone IK left core with the rest of the analytic-IK toolkit
-// (extras/Animation, ZHLN::IK); its solver test moved with it. The scalar
+// (extensions/Animation, ZHLN::IK); its solver test moved with it. The scalar
 // math, frustum and packing tests stayed in tests/core/TestMath.cpp.
 #include "TestsFramework.hpp"
 #include <Animation/IK.hpp>

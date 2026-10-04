@@ -1,0 +1,647 @@
+// extensions/net/Network/Network.cppm
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// ============================================================================
+// ZHLN.Network — client networking stack for the Zahlen engine.
+//
+// Dependency-free: serialization, framing, integrity checking and block
+// compression all live in ZHLN.Wire; only OS sockets are used here. The
+// module is fully exception-free (-fno-exceptions / -fno-rtti clean) and
+// reports every failure through std::expected.
+//
+// Transport layout (see extensions/net/Network/WireProtocol.md for the full spec):
+//   * TCP — framed message stream: handshake, snapshot bursts
+//   * UDP — realtime datagrams: physics batches (in), inputs (out)
+// ============================================================================
+
+module;
+
+#if defined(_WIN32)
+// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
+#include <Zahlen/Core/Platform.hpp>
+#endif
+
+// --- Global Module Fragment: External non-modular includes only ---
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Quat.h>
+#include <Jolt/Math/Vec3.h>
+#include <Zahlen/Common.h>
+#include <Zahlen/Core/HashMap.hpp>
+// The umbrella, not the one module this file happens to name (Enums.hpp).
+//
+// Every ZHLN.Wire template instantiation for a message type happens in this
+// module -- the exported per-message encode/decode wrappers below are
+// non-templates on purpose, so no importer of ZHLN.Network instantiates
+// anything -- and those instantiations evaluate reflection primitives from
+// these headers. HasBases, in Wire::EncodeAggregate's static_assert, is the
+// first one on that path. With the umbrella textually present the instantiation
+// runs on expressions parsed in this translation unit; with only Enums.hpp
+// present the same instantiation runs against what arrives through ZHLN.Wire's
+// PCM, and clang-p2996 segfaults in TreeTransform::TransformExprs (observed on
+// the Network.cppm -> EncodeMessage<ClientHello> path, while instantiating
+// Reflect::BaseClasses<T> at Class.hpp:89). Module ZHLN.Wire carries these same
+// headers in its own GMF -- the pairing that Reflection/Core.hpp's note on
+// std::meta::info NTTPs describes from the GCC side -- so the two are meant to
+// be looking at the same header text. Narrow this include only once that crash
+// is understood: it is not a free weight saving.
+#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Entity.hpp>
+#include <Zahlen/Error.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+export module ZHLN.Network;
+
+export import ZHLN.Wire;
+
+export namespace ZHLN::Net {
+
+// ============================================================================
+// Protocol & Quantization Constants
+// ============================================================================
+
+inline constexpr uint16_t DEFAULT_GAME_PORT    = 5555;
+inline constexpr size_t   MAX_SAFE_UDP_PAYLOAD = 1200;
+
+// Position/velocity quantization: fixed-point with 1/256 m resolution over
+// the full int32 range (~±8.4 million metres).
+inline constexpr double POSITION_SCALE    = 256.0;
+inline constexpr float INV_POSITION_SCALE = 1.0f / 256.0f;
+
+// Rotation quantization: unit quaternion components over int16.
+inline constexpr float QUAT_SCALE     = 32767.0f;
+inline constexpr float INV_QUAT_SCALE = 1.0f / 32767.0f;
+
+// ============================================================================
+// Error Codes (API level — placeholder-free messages; wire-level errors use
+// ZHLN::Wire::WireError and carry formatted context in ZHLN::Wire::Failure)
+// ============================================================================
+
+enum class NetworkError : uint8_t {
+    SocketError ZHLN_ANNOTATION(ZHLN::Description<"Socket operation failed"> {}) = 1,
+    ConnectionFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to establish server connection"> {}),
+    HandshakeFailed ZHLN_ANNOTATION(ZHLN::Description<"Server handshake or token verification failed"> {}),
+    HandshakeTimeout ZHLN_ANNOTATION(ZHLN::Description<"Server did not respond to the handshake in time"> {}),
+    ServerDisconnected ZHLN_ANNOTATION(ZHLN::Description<"Server closed the connection"> {}),
+    ReplicationFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to apply a replicated server update"> {}),
+    InvalidPayload ZHLN_ANNOTATION(ZHLN::Description<"Payload structure does not match expected protocol schema"> {})
+};
+
+// ============================================================================
+// Protocol Messages (wire schema v2 — see WireProtocol.md)
+// ============================================================================
+
+enum class MessageType : uint8_t {
+    ClientHello ZHLN_ANNOTATION(ZHLN::Description<"Client to server: identity and auth token"> {}) = 1,
+    ServerWelcome ZHLN_ANNOTATION(ZHLN::Description<"Server to client: session acceptance and realtime port"> {}) = 2,
+    InitialSnapshot ZHLN_ANNOTATION(ZHLN::Description<"Server to client: full world snapshot"> {}) = 3,
+    PhysicsBatch ZHLN_ANNOTATION(ZHLN::Description<"Server to client: realtime physics state batch"> {}) = 4,
+    ClientInput ZHLN_ANNOTATION(ZHLN::Description<"Client to server: per-frame movement input"> {}) = 5
+};
+
+struct ClientHello {
+    uint32_t    protocolVersion ZHLN_ANNOTATION(ZHLN::Description<"Wire protocol version the client speaks"> {});
+    uint64_t    userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {});
+    std::string token ZHLN_ANNOTATION(ZHLN::Description<"Shared secret used for this login session"> {});
+};
+
+struct ServerWelcome {
+    uint32_t serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick at handshake time"> {}) = 0;
+    uint16_t realtimePort ZHLN_ANNOTATION(ZHLN::Description<"UDP port serving realtime physics and input traffic"> {}) = 0;
+    uint8_t  tickRateHz ZHLN_ANNOTATION(ZHLN::Description<"Authoritative server tick rate in hertz"> {},
+                         = ZHLN::Wire::Range<1, 240> {}) = 0;
+};
+
+struct ObjectSnapshot {
+    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
+    JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
+    JPH::Vec3 size ZHLN_ANNOTATION(ZHLN::Description<"Axis-aligned object extents, quantized to 1/256 m"> {});
+};
+
+struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) InitialSnapshotMessage {
+    uint32_t                    serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this snapshot"> {}) = 0;
+    std::vector<ObjectSnapshot> objects ZHLN_ANNOTATION(ZHLN::Description<"Every replicated object in the world"> {});
+};
+
+struct PhysicsBodyState {
+    uint64_t  uid ZHLN_ANNOTATION(ZHLN::Description<"Server-assigned stable object identity"> {}) = 0;
+    JPH::Vec3 position ZHLN_ANNOTATION(ZHLN::Description<"World-space position, quantized to 1/256 m"> {});
+    JPH::Quat rotation ZHLN_ANNOTATION(ZHLN::Description<"Sign-canonical orientation, quantized to 1/32767 per component"> {});
+    JPH::Vec3 velocity ZHLN_ANNOTATION(ZHLN::Description<"Linear velocity in metres per second"> {});
+};
+
+struct ZHLN_ANNOTATION(ZHLN::Wire::Version<2> {}) PhysicsBatchMessage {
+    uint32_t                      serverTick ZHLN_ANNOTATION(ZHLN::Description<"Server simulation tick of this batch"> {}) = 0;
+    std::vector<PhysicsBodyState> bodies ZHLN_ANNOTATION(ZHLN::Description<"One entry per moving replicated body"> {});
+};
+
+struct ClientInputMessage {
+    uint64_t userId ZHLN_ANNOTATION(ZHLN::Description<"Player identity issued by the server operator"> {}) = 0;
+    uint32_t sequence ZHLN_ANNOTATION(ZHLN::Description<"Monotonically increasing input counter"> {}) = 0;
+    uint8_t  moveFlags ZHLN_ANNOTATION(ZHLN::Description<"Movement bitfield: 1=forward 2=backward 4=left 8=right 16=jump"> {},
+                        = ZHLN::Wire::Range<0, 31> {}) = 0;
+    float    yaw ZHLN_ANNOTATION(ZHLN::Description<"Camera yaw in degrees, clockwise positive"> {},
+               = ZHLN::Wire::Range<-1000.0f, 1000.0f> {}) = 0.0f;
+};
+
+// ============================================================================
+// Stream Frames — length-prefixed, CRC32-protected, optionally compressed
+//
+//   TCP frame:   [u32 BE length][frame body]        (length covers the body)
+//   UDP datagram:                [frame body]
+//   frame body:  [u8 flags][u32 LE rawLen if compressed][payload][u32 LE CRC32]
+//                CRC32 is computed over the uncompressed payload.
+// ============================================================================
+
+inline constexpr uint8_t FRAME_FLAG_COMPRESSED  = 0x01;
+inline constexpr size_t  MAX_STREAM_FRAME_BYTES = 128 * 1024 * 1024;
+inline constexpr size_t  COMPRESSION_MIN_BYTES  = 1024;
+inline constexpr uint8_t PROTOCOL_VERSION       = 2;
+
+// Reads the big-endian frame length from the first 4 bytes of a TCP stream.
+[[nodiscard]] auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t>;
+
+// Encodes payload as a TCP stream frame. Compression is applied when it
+// actually shrinks the payload.
+[[nodiscard]] auto EncodeFrame(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>>;
+
+// Encodes payload as a UDP datagram frame (same body, no length prefix).
+[[nodiscard]] auto EncodeDatagram(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>>;
+
+// Decodes a complete TCP frame (length prefix included, exact size expected).
+[[nodiscard]] auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uint8_t>>;
+
+// Decodes a UDP datagram frame (same body layout, no length prefix).
+[[nodiscard]] auto DecodeDatagram(std::span<const uint8_t> datagram) -> Wire::Result<std::vector<uint8_t>>;
+
+// ============================================================================
+// Message Envelope:  [u8 'Z'][u8 'W'][u8 version][u8 type][payload...]
+// ============================================================================
+
+struct MessageEnvelope {
+    MessageType           type {};
+    std::vector<uint8_t> payload {};
+};
+
+[[nodiscard]] auto EncodeEnvelope(MessageType type, std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodeEnvelope(std::span<const uint8_t> bytes) -> Wire::Result<MessageEnvelope>;
+
+// -- Typed per-message encode/decode (non-template wrappers: every ZHLN.Wire
+// -- template instantiation stays inside this module) -------------------------
+
+[[nodiscard]] auto EncodeClientHello(const ClientHello& message) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodeClientHello(std::span<const uint8_t> bytes) -> Wire::Result<ClientHello>;
+[[nodiscard]] auto EncodeServerWelcome(const ServerWelcome& message) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodeServerWelcome(std::span<const uint8_t> bytes) -> Wire::Result<ServerWelcome>;
+[[nodiscard]] auto EncodeInitialSnapshot(const InitialSnapshotMessage& message) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodeInitialSnapshot(std::span<const uint8_t> bytes) -> Wire::Result<InitialSnapshotMessage>;
+[[nodiscard]] auto EncodePhysicsBatch(const PhysicsBatchMessage& message) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodePhysicsBatch(std::span<const uint8_t> bytes) -> Wire::Result<PhysicsBatchMessage>;
+[[nodiscard]] auto EncodeClientInput(const ClientInputMessage& message) -> Wire::Result<std::vector<uint8_t>>;
+[[nodiscard]] auto DecodeClientInput(std::span<const uint8_t> bytes) -> Wire::Result<ClientInputMessage>;
+
+// ============================================================================
+// Quantization Codecs for Jolt math types (ZHLN::Wire::Codec specializations).
+// Declared before any use: every instantiation of ZHLN.Wire templates inside
+// this module must observe them.
+// ============================================================================
+
+} // namespace ZHLN::Net
+
+template <>
+struct ZHLN::Wire::Codec<JPH::Vec3> {
+    // Quantized wire unit: int32 over POSITION_SCALE (1/256 m) → ±8,388,607 m.
+    static constexpr double WorldMax = 2147483647.0 / ZHLN::Net::POSITION_SCALE;
+
+    static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
+        const float components[3] = {value.GetX(), value.GetY(), value.GetZ()};
+        for (const float component: components) {
+            const double meters = static_cast<double>(component);
+            if (!std::isfinite(component) || meters < -WorldMax || meters > WorldMax) {
+                return std::unexpected(
+                    writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, meters, -WorldMax, WorldMax));
+            }
+            const double scaled  = std::round(meters * ZHLN::Net::POSITION_SCALE);
+            const double clamped = std::clamp(scaled, -2147483647.0, 2147483647.0);
+            const auto   res     = writer.Put(static_cast<int32_t>(clamped));
+            if (!res) {
+                return res;
+            }
+        }
+        return {};
+    }
+
+    static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
+        int32_t quantized[3] = {};
+        for (size_t index = 0; index < 3; ++index) {
+            const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
+            const auto                              res = reader.Get(quantized[index]);
+            if (!res) {
+                return res;
+            }
+        }
+        value = JPH::Vec3(static_cast<float>(quantized[0]) * ZHLN::Net::INV_POSITION_SCALE,
+                          static_cast<float>(quantized[1]) * ZHLN::Net::INV_POSITION_SCALE,
+                          static_cast<float>(quantized[2]) * ZHLN::Net::INV_POSITION_SCALE);
+        return {};
+    }
+};
+
+template <>
+struct ZHLN::Wire::Codec<JPH::Quat> {
+    static auto Encode(const JPH::Quat& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void> {
+        // Canonical form: the representative of the ±q pair with w >= 0, so
+        // the same orientation always produces identical bytes.
+        float x = value.GetX();
+        float y = value.GetY();
+        float z = value.GetZ();
+        float w = value.GetW();
+        if (w < 0.0f) {
+            x = -x;
+            y = -y;
+            z = -z;
+            w = -w;
+        }
+        const float components[4] = {x, y, z, w};
+        for (const float component: components) {
+            if (!std::isfinite(component)) {
+                return std::unexpected(
+                    writer.Fail(ZHLN::Wire::WireError::ValueOutOfRange, static_cast<double>(component), -1.0, 1.0));
+            }
+            // Clamp instead of rejecting: normalized quaternions can overshoot
+            // ±1 by one ULP.
+            const float scaled  = std::round(std::clamp(component, -1.0f, 1.0f) * ZHLN::Net::QUAT_SCALE);
+            const auto  res     = writer.Put(static_cast<int16_t>(scaled));
+            if (!res) {
+                return res;
+            }
+        }
+        return {};
+    }
+
+    static auto Decode(JPH::Quat& value, ZHLN::Wire::Reader& reader) -> ZHLN::Wire::Result<void> {
+        int16_t quantized[4] = {};
+        for (size_t index = 0; index < 4; ++index) {
+            const ZHLN::Wire::IndexPathScope scope(reader.Path(), index);
+            const auto                              res = reader.Get(quantized[index]);
+            if (!res) {
+                return res;
+            }
+        }
+        value = JPH::Quat(static_cast<float>(quantized[0]) * ZHLN::Net::INV_QUAT_SCALE,
+                          static_cast<float>(quantized[1]) * ZHLN::Net::INV_QUAT_SCALE,
+                          static_cast<float>(quantized[2]) * ZHLN::Net::INV_QUAT_SCALE,
+                          static_cast<float>(quantized[3]) * ZHLN::Net::INV_QUAT_SCALE)
+                    .Normalized();
+        return {};
+    }
+};
+
+// ============================================================================
+// Frame & envelope codec implementation
+// ============================================================================
+
+// Not exported: a module hides its internals by not exporting them, so these
+// need no detail namespace and nothing outside ZHLN.Network can name them.
+// Module linkage rather than an anonymous namespace's internal linkage, because
+// the exported definitions below call them from importers' translation units and
+// all of those have to agree on one definition.
+namespace ZHLN::Net {
+
+auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
+    return Wire::MakeFailure(error, static_cast<decltype(args)>(args)...);
+}
+
+auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
+    out.push_back(static_cast<uint8_t>(value & 0xFFu));
+}
+
+auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+    out.push_back(static_cast<uint8_t>(value & 0xFFu));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
+    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
+    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+}
+
+auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
+    return (static_cast<uint32_t>(bytes[0]) << 24) | (static_cast<uint32_t>(bytes[1]) << 16)
+           | (static_cast<uint32_t>(bytes[2]) << 8) | static_cast<uint32_t>(bytes[3]);
+}
+
+auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
+    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8)
+           | (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+// Shared frame-body decoding: [flags][rawLen | compressed payload][crc32].
+auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
+    if (body.size() < 5) { // flags byte + trailing CRC32
+        return std::unexpected(
+            Fail(Wire::WireError::InvalidFrame, std::format("frame body of {} byte(s) is smaller than flags + CRC32", body.size())));
+    }
+    const uint8_t flags = body[0];
+    if ((flags & ~FRAME_FLAG_COMPRESSED) != 0) {
+        return std::unexpected(Fail(Wire::WireError::InvalidFrame, std::format("unknown frame flags 0x{:02x}", flags)));
+    }
+    if ((flags & FRAME_FLAG_COMPRESSED) != 0) {
+        if (body.size() < 9) { // flags + rawLen + crc32
+            return std::unexpected(Fail(Wire::WireError::InvalidFrame, "compressed frame is missing its raw length"));
+        }
+        const uint32_t            rawLength     = ReadLE32(body.subspan(1, 4));
+        const std::span<const uint8_t> compressed    = body.subspan(5, body.size() - 9);
+        const uint32_t            expectedCrc   = ReadLE32(body.subspan(body.size() - 4, 4));
+        if (rawLength > MAX_STREAM_FRAME_BYTES) {
+            return std::unexpected(Fail(Wire::WireError::FrameTooLarge, rawLength, MAX_STREAM_FRAME_BYTES));
+        }
+        auto raw = Wire::Compression::Decompress(compressed, rawLength);
+        if (!raw) {
+            return std::unexpected(raw.error());
+        }
+        if (raw->size() != rawLength) {
+            return std::unexpected(Fail(Wire::WireError::InvalidFrame,
+                                        std::format("decompressed {} byte(s) but the frame announced {}", raw->size(), rawLength)));
+        }
+        const uint32_t computedCrc = Wire::Checksum::Crc32(*raw);
+        if (computedCrc != expectedCrc) {
+            return std::unexpected(Fail(Wire::WireError::ChecksumMismatch, computedCrc, expectedCrc));
+        }
+        return raw;
+    }
+
+    const std::span<const uint8_t> payload      = body.subspan(1, body.size() - 5);
+    const uint32_t            expectedCrc = ReadLE32(body.subspan(body.size() - 4, 4));
+    const uint32_t            computedCrc = Wire::Checksum::Crc32(payload);
+    if (computedCrc != expectedCrc) {
+        return std::unexpected(Fail(Wire::WireError::ChecksumMismatch, computedCrc, expectedCrc));
+    }
+    return std::vector<uint8_t>(payload.begin(), payload.end());
+}
+
+// Shared frame-body encoding: [flags][rawLen | compressed payload][crc32].
+// CRC32 is computed over the uncompressed payload.
+auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
+    uint8_t              flags = 0;
+    std::vector<uint8_t> body; // everything between the flags byte and the CRC32
+
+    if (payload.size() >= COMPRESSION_MIN_BYTES) {
+        auto compressed = Wire::Compression::Compress(payload, MAX_STREAM_FRAME_BYTES);
+        if (compressed && compressed->size() + 4 + 32 < payload.size()) {
+            flags |= FRAME_FLAG_COMPRESSED;
+            body.reserve(compressed->size() + 4);
+            PutLE32(body, static_cast<uint32_t>(payload.size())); // announced raw length
+            body.insert(body.end(), compressed->begin(), compressed->end());
+        }
+    }
+    if ((flags & FRAME_FLAG_COMPRESSED) == 0) {
+        body.reserve(payload.size());
+        body.insert(body.end(), payload.begin(), payload.end());
+    }
+
+    std::vector<uint8_t> frameBody;
+    frameBody.reserve(body.size() + 5);
+    frameBody.push_back(flags);
+    frameBody.insert(frameBody.end(), body.begin(), body.end());
+    PutLE32(frameBody, Wire::Checksum::Crc32(payload));
+    return frameBody;
+}
+
+} // namespace ZHLN::Net
+
+export namespace ZHLN::Net {
+
+auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t> {
+    if (streamPrefix.size() < 4) {
+        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "need at least 4 bytes to read a frame length"));
+    }
+    const uint32_t length = ReadBE32(streamPrefix.subspan(0, 4));
+    if (length < 5 || length > MAX_STREAM_FRAME_BYTES) {
+        return std::unexpected(Fail(Wire::WireError::FrameTooLarge, length, MAX_STREAM_FRAME_BYTES));
+    }
+    return length;
+}
+
+auto EncodeFrame(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
+    auto body = EncodeFrameBody(payload);
+    if (!body) {
+        return std::unexpected(body.error());
+    }
+    std::vector<uint8_t> frame;
+    frame.reserve(body->size() + 4);
+    PutBE32(frame, static_cast<uint32_t>(body->size()));
+    frame.insert(frame.end(), body->begin(), body->end());
+    return frame;
+}
+
+auto EncodeDatagram(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeFrameBody(payload);
+}
+
+auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uint8_t>> {
+    const auto length = PeekFrameLength(frame);
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+    if (frame.size() != static_cast<size_t>(*length) + 4) {
+        return std::unexpected(Fail(Wire::WireError::FrameLengthMismatch, *length + 4ull, frame.size()));
+    }
+    return DecodeFrameBody(frame.subspan(4));
+}
+
+auto DecodeDatagram(std::span<const uint8_t> datagram) -> Wire::Result<std::vector<uint8_t>> {
+    return DecodeFrameBody(datagram);
+}
+
+auto EncodeEnvelope(MessageType type, std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
+    std::vector<uint8_t> bytes;
+    bytes.reserve(payload.size() + 4);
+    bytes.push_back('Z');
+    bytes.push_back('W');
+    bytes.push_back(PROTOCOL_VERSION);
+    bytes.push_back(static_cast<uint8_t>(type));
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    return bytes;
+}
+
+auto DecodeEnvelope(std::span<const uint8_t> bytes) -> Wire::Result<MessageEnvelope> {
+    if (bytes.size() < 4) {
+        return std::unexpected(Fail(
+            Wire::WireError::InvalidFrame, std::format("envelope of {} byte(s) is smaller than its 4 byte header", bytes.size())));
+    }
+    if (bytes[0] != 'Z' || bytes[1] != 'W') {
+        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "envelope magic bytes are not 'ZW'"));
+    }
+    if (bytes[2] != PROTOCOL_VERSION) {
+        return std::unexpected(Fail(Wire::WireError::ProtocolVersionMismatch, bytes[2], PROTOCOL_VERSION));
+    }
+    const uint8_t rawType = bytes[3];
+    if (!ZHLN::Reflect::EnumHasValue<MessageType>(rawType)) {
+        return std::unexpected(Fail(Wire::WireError::UnknownMessageType, rawType, PROTOCOL_VERSION));
+    }
+    MessageEnvelope envelope;
+    envelope.type    = static_cast<MessageType>(rawType);
+    envelope.payload = std::vector<uint8_t>(bytes.begin() + 4, bytes.end());
+    return envelope;
+}
+
+} // namespace ZHLN::Net
+
+// -- Typed message codecs ----------------------------------------------------
+
+// Not exported either, and placed after EncodeEnvelope and DecodeEnvelope on
+// purpose: the calls these templates make to them are not dependent, so they
+// resolve here rather than at instantiation.
+namespace ZHLN::Net {
+
+template <typename T>
+auto EncodeMessage(MessageType type, const T& message) -> Wire::Result<std::vector<uint8_t>> {
+    auto payload = Wire::Encode(message);
+    if (!payload) {
+        return std::unexpected(payload.error());
+    }
+    return EncodeEnvelope(type, *payload);
+}
+
+template <typename T>
+auto DecodeMessage(MessageType expected, std::span<const uint8_t> bytes) -> Wire::Result<T> {
+    auto envelope = DecodeEnvelope(bytes);
+    if (!envelope) {
+        return std::unexpected(envelope.error());
+    }
+    if (envelope->type != expected) {
+        return std::unexpected(Fail(
+            Wire::WireError::InvalidFrame,
+            std::format("expected message type {}, received {}", ZHLN::Reflect::EnumToString(expected),
+                        ZHLN::Reflect::EnumToString(envelope->type))));
+    }
+    return Wire::Decode<T>(envelope->payload);
+}
+
+} // namespace ZHLN::Net
+
+export namespace ZHLN::Net {
+
+auto EncodeClientHello(const ClientHello& message) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeMessage(MessageType::ClientHello, message);
+}
+
+auto DecodeClientHello(std::span<const uint8_t> bytes) -> Wire::Result<ClientHello> {
+    return DecodeMessage<ClientHello>(MessageType::ClientHello, bytes);
+}
+
+auto EncodeServerWelcome(const ServerWelcome& message) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeMessage(MessageType::ServerWelcome, message);
+}
+
+auto DecodeServerWelcome(std::span<const uint8_t> bytes) -> Wire::Result<ServerWelcome> {
+    return DecodeMessage<ServerWelcome>(MessageType::ServerWelcome, bytes);
+}
+
+auto EncodeInitialSnapshot(const InitialSnapshotMessage& message) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeMessage(MessageType::InitialSnapshot, message);
+}
+
+auto DecodeInitialSnapshot(std::span<const uint8_t> bytes) -> Wire::Result<InitialSnapshotMessage> {
+    return DecodeMessage<InitialSnapshotMessage>(MessageType::InitialSnapshot, bytes);
+}
+
+auto EncodePhysicsBatch(const PhysicsBatchMessage& message) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeMessage(MessageType::PhysicsBatch, message);
+}
+
+auto DecodePhysicsBatch(std::span<const uint8_t> bytes) -> Wire::Result<PhysicsBatchMessage> {
+    return DecodeMessage<PhysicsBatchMessage>(MessageType::PhysicsBatch, bytes);
+}
+
+auto EncodeClientInput(const ClientInputMessage& message) -> Wire::Result<std::vector<uint8_t>> {
+    return EncodeMessage(MessageType::ClientInput, message);
+}
+
+auto DecodeClientInput(std::span<const uint8_t> bytes) -> Wire::Result<ClientInputMessage> {
+    return DecodeMessage<ClientInputMessage>(MessageType::ClientInput, bytes);
+}
+
+// ============================================================================
+// ECS Network Components
+// ============================================================================
+
+struct NetworkIdentityComponent {
+    uint64_t serverUID    = 0;
+    bool     isLocalOwner = false;
+};
+
+struct NetworkInterpolationComponent {
+    JPH::Vec3 targetPosition     = JPH::Vec3::sZero();
+    JPH::Quat targetRotation     = JPH::Quat::sIdentity();
+    JPH::Vec3 linearVelocity     = JPH::Vec3::sZero();
+    float     interpolationSpeed = 20.0f;
+};
+
+// ============================================================================
+// Public Subsystem API
+// ============================================================================
+
+} // namespace ZHLN::Net
+
+// ClientReplicator is defined here (module linkage, not exported) so both
+// implementation units of ZHLN.Network see the complete type; the method
+// bodies live in NetworkReplicator.cpp.
+namespace ZHLN::Net {
+
+class ClientReplicator {
+  public:
+    HashMap<uint64_t, Entity> uidToEntityMap;
+
+    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+
+  private:
+    auto GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity;
+};
+
+} // namespace ZHLN::Net
+
+export namespace ZHLN::Net {
+
+class ZHLN_STATIC_API NetworkClient {
+  public:
+    NetworkClient();
+    ~NetworkClient();
+
+    NetworkClient(const NetworkClient&)                    = delete;
+    auto operator=(const NetworkClient&) -> NetworkClient& = delete;
+    NetworkClient(NetworkClient&&) noexcept;
+    auto operator=(NetworkClient&&) noexcept -> NetworkClient&;
+
+    [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
+        -> std::expected<void, ErrorCode>;
+    void Disconnect() noexcept;
+
+    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode>;
+    void               SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept;
+
+    [[nodiscard]] bool IsConnected() const noexcept;
+    [[nodiscard]] bool IsRealtimeReady() const noexcept;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> _impl;
+};
+
+void RegisterNetworkSubsystem(Engine& engine);
+
+} // namespace ZHLN::Net

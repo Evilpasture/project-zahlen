@@ -10,7 +10,7 @@
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/RenderData.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
@@ -107,8 +107,23 @@ class ZHLN_API RenderContext {
     void                                  ClearGPUCaches() noexcept;
 
     BufferHandle CreateStorageBuffer(size_t size);
-    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
-    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
+    // Bytes per particle in this renderer's storage buffers: an emitter's
+    // buffer is sized with these, so the engine knows how many particles it
+    // asked for and nothing about how one is laid out.
+    [[nodiscard]] auto ParticleStride() const noexcept -> uint32_t;
+    [[nodiscard]] auto MeshParticleStride() const noexcept -> uint32_t;
+
+    // Descriptions, not GPU layouts: the renderer converts them at the boundary
+    // (one definition, asserted against Slang by the generated header), so they never appear
+    // in a public header.
+    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc);
+
+    // Author-side particle upload: the caller describes particles, the renderer
+    // packs them into its own storage layout and writes the buffer. Mesh
+    // particles have no author-side path -- they are produced on the GPU by
+    // MeshParticleUpdatePass from their emitter's parameters.
+    void UploadParticles(BufferHandle gpuBuffer, std::span<const Particle> particles) noexcept;
+    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& desc, AssetID mesh, MaterialID mat);
 
     // Raw byte streams declare their element stride; typed spans derive it.
     [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
@@ -218,7 +233,7 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
-    void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+    void SetFrameData(const Camera& cam, const FrameUniforms& view, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
     void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
     void ClearDrawQueues() noexcept;

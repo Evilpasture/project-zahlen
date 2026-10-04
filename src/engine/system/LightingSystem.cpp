@@ -11,7 +11,6 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <cstring>
 #include <span>
 
 namespace ZHLN {
@@ -69,8 +68,12 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery
 
 void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
                                        const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
-                            ECS::ResMut<RenderContext> render, ECS::Res<Camera> camera) {
+                            ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<RenderContext> render) {
     auto& rc = *render;
+
+    // The view camera is world data now: lighting sorts and packs relative to
+    // the main camera entity's pose, the same state the renderer projects.
+    const auto cameraComp = cameraQuery.GetSingleton<Components::CameraComponent>();
 
     struct LightImportance {
         Entity entity;
@@ -78,7 +81,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
     };
     ZHLN::Array<LightImportance> lightPriorities;
 
-    const JPH::Vec3 viewPos = camera->position;
+    const JPH::Vec3 viewPos = cameraComp ? cameraComp->camera.position : JPH::Vec3::sZero();
 
     for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
         query.Patch<Components::LightComponent>(e, [&](auto& light) {
@@ -117,12 +120,16 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
     }
 
     ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = camera->GetViewMatrix();
+    JPH::Mat44         viewMatrix    = cameraComp ? cameraComp->camera.GetViewMatrix() : JPH::Mat44::sIdentity();
     auto               lightEntities = query.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
         query.Patch<Components::LightComponent>(e, [&](const auto& light) {
+            // The light *is* the shader's struct: elements land where the
+            // shader reads them, and SIMD crosses to the pod lane types
+            // through Jolt's own StoreFloat3/StoreFloat4 -- Vec3/Vec4 are the
+            // compute types, never the storage ones.
             Light packed {};
             packed.type        = light.type;
             packed.intensity   = light.intensity;
@@ -130,8 +137,8 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             packed.twoSided    = light.twoSided;
             packed.range       = (light.range > 0.0f) ? light.range : 1000.0f;
             packed.shadowLayer = light.shadowLayer;
-            std::memcpy(packed.direction, &light.direction, sizeof(float) * 3);
-            std::memcpy(packed.color, &light.color, sizeof(float) * 3);
+            light.direction.StoreFloat3(&packed.direction);
+            light.color.StoreFloat3(&packed.color);
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
@@ -148,12 +155,10 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             }
 
             if (hasTransform) {
-                std::memcpy(packed.position, &pos, sizeof(float) * 3);
-
-                JPH::Vec3 posView      = viewMatrix * pos;
-                packed.positionView[0] = posView.GetX();
-                packed.positionView[1] = posView.GetY();
-                packed.positionView[2] = posView.GetZ();
+                pos.StoreFloat3(&packed.position);
+                // View-space position, w = 1: the shader reads .xyz, and a
+                // defined w costs nothing (Vec4(Vec3Arg) leaves it unset).
+                JPH::Vec4(viewMatrix * pos, 1.0f).StoreFloat4(&packed.positionView);
 
                 if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
                     JPH::Vec3 dir = JPH::Vec3::sZero();
@@ -162,14 +167,16 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
                     } else {
                         dir = -worldMat.GetColumn3(2).Normalized();
                     }
-                    packed.direction[0] = dir.GetX();
-                    packed.direction[1] = dir.GetY();
-                    packed.direction[2] = dir.GetZ();
+                    dir.StoreFloat3(&packed.direction);
                 }
             }
 
             if (packed.type == LightType::Area) {
-                std::memcpy(packed.points, &light.points, sizeof(JPH::Mat44));
+                // An area light's quad is a matrix in the component and four
+                // 16-byte lanes in the shader: one column, one lane.
+                for (uint32_t c = 0; c < 4; ++c) {
+                    light.points.GetColumn4(c).StoreFloat4(&packed.points[c]);
+                }
             }
 
             sceneLights.push_back(packed);

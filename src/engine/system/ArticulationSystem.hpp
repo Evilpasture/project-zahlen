@@ -9,6 +9,7 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/EngineServices.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Entity.hpp>
@@ -55,7 +56,7 @@ class ZHLN_API ArticulationSystem {
                                   Components::TransformComponent&, const Components::RagdollHitReactionCommand,
                                   const Components::RagdollImpulseCommand> query,
                        ECS::Registry& registry, ECS::ResMut<ArticulationSystem> articulation,
-                       ECS::ResMut<PhysicsContext> physics, ECS::ResMut<RenderContext> render, FrameDt frameDt);
+                       ECS::ResMut<PhysicsContext> physics, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt);
 
     [[nodiscard]] bool AttachRagdoll(
         Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,

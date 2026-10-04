@@ -4,7 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Frame.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -107,7 +107,8 @@ struct SystemGraphTestSuite {
     struct Tests {
         // --- 1. Conflict Detection & Compile Order ---
         std::expected<void, ZHLN::ErrorCode> hazard_conflict_detection() {
-            ZHLN::ECS::SystemGraph graph;
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
 
             static std::atomic<int> executionCounter {1};
             static std::atomic<int> orderA {0};
@@ -119,7 +120,7 @@ struct SystemGraphTestSuite {
 
             // System 1: Writes to TestCompA
             graph.AddSystem(
-                {.update_func    = [](ZHLN::SystemContext&) { orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](void*) { orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "WriterA",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -127,7 +128,7 @@ struct SystemGraphTestSuite {
 
             // System 2: Reads from TestCompA (Conflicting -> must run AFTER System 1)
             graph.AddSystem(
-                {.update_func    = [](ZHLN::SystemContext&) { orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](void*) { orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "ReaderA",
                  .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                  .enabled        = true}
@@ -135,10 +136,9 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            // Minimal context: these systems only exercise ordering, never services.
-            ZHLN::ECS::Registry reg;
-            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
-            graph.Execute(ctx);
+            // Minimal frame: these systems only exercise ordering, never services.
+            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            graph.Execute(frame);
 
             // Verification: WriterA must precede ReaderA
             if (!ZHLN::Test::ExpectGt(orderA.load(), 0)) {
@@ -153,7 +153,8 @@ struct SystemGraphTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> optional_system_insertion_before_named_phase() {
-            ZHLN::ECS::SystemGraph  graph;
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
             static std::atomic<int> executionCounter {1};
             static std::atomic<int> extensionOrder {0};
             static std::atomic<int> anchorOrder {0};
@@ -162,14 +163,14 @@ struct SystemGraphTestSuite {
             anchorOrder.store(0);
 
             graph.AddSystem({
-                .update_func    = [](ZHLN::SystemContext&) { anchorOrder.store(executionCounter.fetch_add(1)); },
+                .update_func    = [](void*) { anchorOrder.store(executionCounter.fetch_add(1)); },
                 .name           = "GenericAnchor",
                 .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                 .enabled        = true,
             });
             const bool inserted = graph.AddSystemBefore(
                 {
-                    .update_func    = [](ZHLN::SystemContext&) { extensionOrder.store(executionCounter.fetch_add(1)); },
+                    .update_func    = [](void*) { extensionOrder.store(executionCounter.fetch_add(1)); },
                     .name           = "OptionalExtension",
                     .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                     .enabled        = true,
@@ -183,9 +184,8 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            ZHLN::ECS::Registry reg;
-            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
-            graph.Execute(ctx);
+            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            graph.Execute(frame);
             if (!(extensionOrder.load() > 0 && anchorOrder.load() > extensionOrder.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
@@ -194,7 +194,8 @@ struct SystemGraphTestSuite {
 
         // --- 2. Independent Systems Parallel Dispatch ---
         std::expected<void, ZHLN::ErrorCode> independent_systems_dispatch() {
-            ZHLN::ECS::SystemGraph graph;
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
 
             static std::atomic<int> executionCounter {1};
             static std::atomic<int> orderA {0};
@@ -209,7 +210,7 @@ struct SystemGraphTestSuite {
             // SysA and SysB both READ TestCompA (No conflict, run parallel)
             graph.AddSystem(
                 {.update_func =
-                     [](ZHLN::SystemContext&) {
+                     [](void*) {
                          std::this_thread::sleep_for(std::chrono::milliseconds(2)); // Force a slight delay to prove overlap
                          orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
                      },
@@ -220,7 +221,7 @@ struct SystemGraphTestSuite {
 
             graph.AddSystem(
                 {.update_func =
-                     [](ZHLN::SystemContext&) {
+                     [](void*) {
                          std::this_thread::sleep_for(std::chrono::milliseconds(2));
                          orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
                      },
@@ -231,7 +232,7 @@ struct SystemGraphTestSuite {
 
             // SysC WRITES TestCompA (Conflict, must run after BOTH A and B)
             graph.AddSystem(
-                {.update_func    = [](ZHLN::SystemContext&) { orderC.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](void*) { orderC.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "SysC_Write",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -239,9 +240,8 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            ZHLN::ECS::Registry reg;
-            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
-            graph.Execute(ctx);
+            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            graph.Execute(frame);
 
             // SysC MUST execute after both SysA and SysB complete
             if (!(ZHLN::Test::ExpectGt(orderC.load(), orderA.load()) && ZHLN::Test::ExpectGt(orderC.load(), orderB.load()))) {
@@ -257,7 +257,8 @@ struct SystemGraphTestSuite {
         // declared write the graph sees a reader with no writer and builds no
         // edge, so the dependency lives only in the surrounding call order.
         std::expected<void, ZHLN::ErrorCode> external_write_anchor_reaches_dependents() {
-            ZHLN::ECS::SystemGraph graph;
+            ZHLN::ECS::Registry reg;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
 
             static std::atomic<int> executionCounter {1};
             static std::atomic<int> orderReader {0};
@@ -272,13 +273,13 @@ struct SystemGraphTestSuite {
             graph.DeclareExternalWrites("ExternalPreUpdateWrites", {ZHLN::ECS::Write<TestCompA>()});
 
             graph.AddSystem(
-                {.update_func    = [](ZHLN::SystemContext&) { orderReader.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](void*) { orderReader.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "ReaderOfExternal",
                  .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                  .enabled        = true}
             );
             graph.AddSystem(
-                {.update_func    = [](ZHLN::SystemContext&) { orderWriter.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](void*) { orderWriter.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "WriterOfExternal",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -290,9 +291,8 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            ZHLN::ECS::Registry reg;
-            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
-            graph.Execute(ctx);
+            const ZHLN::Frame frame {.dt = TestDeltaTime};
+            graph.Execute(frame);
 
             // Both systems ran exactly once: the null-function anchor neither
             // crashed dispatch nor stranded its dependents.
@@ -306,7 +306,7 @@ struct SystemGraphTestSuite {
 
             // Guards: an empty access set or a null label must add no node, so a
             // mis-built declaration cannot silently create a phantom dependency.
-            ZHLN::ECS::SystemGraph empty;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> empty {reg};
             empty.DeclareExternalWrites("NothingWritten", {});
             empty.DeclareExternalWrites(nullptr, {ZHLN::ECS::Write<TestCompA>()});
             if (empty.GetSystemCount() != 0) {
@@ -336,7 +336,7 @@ struct SystemGraphTestSuite {
                 return std::unexpected(SystemGraphTestError::QueryIterationFailed);
             }
             // A system can be called with just its declared dependencies,
-            // without constructing a SystemContext or any engine services.
+            // without constructing a context or any engine services.
             DeclarativeWriter(WriteQuery(reg), ZHLN::FrameDt {0.02f}, ZHLN::FrameAlpha {0.5f},
                               ZHLN::FrameIndex {4}, ZHLN::Optional<ZHLN::AudioContext&> {});
             if (reg.Get<TestCompA>(both)->value != 5 || reg.Get<TestCompA>(onlyA)->value != 6) {
@@ -396,9 +396,9 @@ struct SystemGraphTestSuite {
             ZHLN::ECS::SystemInfo writeInfo {.access_pattern = writer};
             ZHLN::ECS::SystemInfo readInfo {.access_pattern = reader};
             ZHLN::ECS::SystemInfo wildInfo {.access_pattern = wildcard};
-            if (!ZHLN::ECS::SystemGraph::HasConflict(writeInfo, readInfo) ||
-                !ZHLN::ECS::SystemGraph::HasConflict(wildInfo, readInfo) ||
-                ZHLN::ECS::SystemGraph::HasConflict(readInfo, readInfo)) {
+            if (!ZHLN::ECS::SystemGraphCore::HasConflict(writeInfo, readInfo) ||
+                !ZHLN::ECS::SystemGraphCore::HasConflict(wildInfo, readInfo) ||
+                ZHLN::ECS::SystemGraphCore::HasConflict(readInfo, readInfo)) {
                 return std::unexpected(SystemGraphTestError::HazardMismatch);
             }
             return {};
@@ -414,15 +414,15 @@ struct SystemGraphTestSuite {
             observedFrame = 0;
             observedMissingAudio = false;
 
-            ZHLN::ECS::SystemGraph graph;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> graph {reg};
             graph.AddSystem<&DeclarativeWriter>();
             graph.AddSystem<&DeclarativeReader>();
             if (!graph.IsSystemEnabled("DeclarativeWriter") || graph.GetSystemCount() != 2) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             graph.Compile();
-            ZHLN::SystemContext ctx {.registry = reg, .frame = 42, .alpha = 0.25f, .dt = TestDeltaTime};
-            graph.Execute(ctx);
+            const ZHLN::Frame frame {.frame = 42, .alpha = 0.25f, .dt = TestDeltaTime};
+            graph.Execute(frame);
             if (observedDt != TestDeltaTime || observedAlpha != 0.25f || observedFrame != 42 || !observedMissingAudio ||
                 reg.Get<TestCompA>(entity)->value != 5 || writerOrder.load() == 0 || readerOrder.load() <= writerOrder.load()) {
                 return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
@@ -431,7 +431,7 @@ struct SystemGraphTestSuite {
             if (graph.IsSystemEnabled("DeclarativeWriter")) {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
-            ZHLN::ECS::SystemGraph before;
+            ZHLN::ECS::SystemGraph<ZHLN::ECS::NoServices> before {reg};
             before.AddSystem<&DeclarativeReader>();
             if (!before.AddSystemBefore<&DeclarativeWriter>("DeclarativeReader") ||
                 before.AddSystemBefore<&DeclarativeWriter>("DeclarativeReader") ||
@@ -451,7 +451,7 @@ struct SystemGraphTestSuite {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
             before.Compile();
-            before.Execute(ctx); // all four callable kinds use the same thunk path
+            before.Execute(frame); // all four callable kinds use the same thunk path
             if (nullaryCalls.load() != 1) {
                 return std::unexpected(SystemGraphTestError::ParameterResolutionFailed);
             }

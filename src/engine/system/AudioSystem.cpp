@@ -16,7 +16,7 @@ namespace ZHLN {
 ZHLN_API void AudioSystem(
     ECS::Query<const Components::AudioListenerComponent, const Components::WorldTransformComponent,
                const Components::TransformComponent, Components::AudioSourceComponent&, Components::LoopSynthComponent&> query,
-    ZHLN::Optional<AudioContext&> audio, ZHLN::Optional<const Camera&> camera, FrameDt dt
+    ZHLN::Optional<AudioContext&> audio, ECS::Query<const Components::CameraComponent> cameraQuery, FrameDt dt
 ) {
     if (!audio) {
         return; // ECS-only/headless graphs need no audio device.
@@ -47,12 +47,16 @@ ZHLN_API void AudioSystem(
         }
     }
 
-    if (!listenerFound && camera) {
-        const auto& cam      = *camera;
-        float       yawRad   = JPH::DegreesToRadians(cam.yaw);
-        float       pitchRad = JPH::DegreesToRadians(cam.pitch);
-        JPH::Vec3   dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-        device.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
+    // Without a listener entity the audio device listens from the camera
+    // entity's pose -- world data, not a service.
+    if (!listenerFound) {
+        if (const auto camComp = cameraQuery.GetSingleton<Components::CameraComponent>(); camComp) {
+            const auto& cam      = camComp->camera;
+            float       yawRad   = JPH::DegreesToRadians(cam.yaw);
+            float       pitchRad = JPH::DegreesToRadians(cam.pitch);
+            JPH::Vec3   dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
+            device.UpdateListener(cam.position, dir.Normalized(), JPH::Vec3::sAxisY());
+        }
     }
 
     auto srcEntities = query.Entities<Components::AudioSourceComponent>();

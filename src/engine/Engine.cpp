@@ -11,6 +11,7 @@
 #include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -75,6 +76,24 @@ struct EngineImpl {
     float          currentAlpha = 0.0f;
     float physicsAccumulator = 0.0f;
 
+    // Created on the first frame that asks for a system context, because that is
+    // the first moment the task system's worker count is known and is also
+    // before any graph dispatch. Sized for the whole app run; ResetWorkerScratch
+    // is what the frame loop does with it.
+    std::unique_ptr<WorkerScratchPool> workerScratch;
+
+    // The engine's services, bound once (they are references), and the two
+    // typed graphs built with them. Created on first use: the graphs need the
+    // world and the kernel to exist, and nothing runs before that.
+    // The simulation -> renderer channel for skinning poses. Engine-owned, so
+    // both graphs reach the same queue through services.
+    PoseUploadQueue poseUploads;
+
+    std::unique_ptr<SimServices>    simServices;
+    std::unique_ptr<RenderServices> renderServices;
+    std::unique_ptr<SimGraph>       updateGraph;
+    std::unique_ptr<RenderGraph>    renderGraph;
+
     std::optional<FontAtlas> fontAtlas;
 
     void*        gameState    = nullptr;
@@ -120,14 +139,30 @@ void DumpEngineState(void* context, const SignalEvent& ) noexcept {
 }
 
 void DumpCameraState(void* context, const SignalEvent& ) noexcept {
-    auto& cam = *static_cast<Camera*>(context);
+    // A crash dump is best-effort and must not assert: resolve the camera the
+    // way the frame does, but tolerate a world that has no camera entity.
+    auto&      world   = *static_cast<World*>(context);
+    const auto camComp = world.GetRegistry().GetSingleton<Components::CameraComponent>();
 
-    auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
-    auto cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
-    Diagnostics::WriteCrashOutput(cam_pos);
-    Diagnostics::WriteCrashOutput(cam_dir);
+    if (camComp) {
+        const Camera& cam     = camComp->camera;
+        auto          cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+        auto          cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
+        Diagnostics::WriteCrashOutput(cam_pos);
+        Diagnostics::WriteCrashOutput(cam_dir);
+    } else {
+        Diagnostics::WriteCrashOutput("  (no main camera entity)\n");
+    }
 
-    auto& f         = cam.frustum;
+    // The planes are derived, not stored: the culling pass keeps its own scratch,
+    // so the dump derives the same planes the pass culled against -- from the
+    // view-projection it used, frozen or not.
+    Frustum      f {};
+    const auto   stats   = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
+    const bool   frozen  = stats && stats->stats.FreezeFrustum;
+    if (camComp) {
+        f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
+    }
     auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
     Diagnostics::WriteCrashOutput(frust_hdr);
     const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
@@ -141,7 +176,7 @@ void DumpCameraState(void* context, const SignalEvent& ) noexcept {
         Diagnostics::WriteCrashOutput(plane_str);
     }
 
-    ZHLN::Dump(cam.frustum);
+    ZHLN::Dump(f);
 }
 
 void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
@@ -150,7 +185,7 @@ void DumpPhysicsState(void* context, const SignalEvent& ) noexcept {
 
 void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
     Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world.GetCamera());
+    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world);
     Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
 }
 
@@ -397,23 +432,65 @@ auto Engine::GetWorld() -> World& {
     return *_impl->world;
 }
 
-auto Engine::MakeSystemContext(float dt) -> SystemContext {
-    return SystemContext {
-        .registry              = _impl->world->GetRegistry(),
-        .render                = &_impl->kernel->GetRenderContext(),
-        .assets                = &_impl->kernel->GetAssetManager(),
-        .physics               = &_impl->world->GetPhysics(),
-        .audio                 = &_impl->kernel->GetAudioContext(),
-        .camera                = &_impl->world->GetCamera(),
-        .culling               = &_impl->world->GetCullingSystem(),
-        .articulation          = &_impl->world->GetArticulationSystem(),
-        .bonePosePostProcessor = _impl->bonePosePostProcessor,
-        .visibleEntities       = &_impl->world->GetVisibleEntities(),
-        .visibleShadowEntities = &_impl->world->GetVisibleShadowEntities(),
-        .frame                 = _impl->frameCounter,
-        .alpha                 = _impl->currentAlpha,
-        .dt                    = dt,
+namespace {
+// Per-worker scratch. A system's SoAScratch allocation is capped by this, so it
+// is the number to raise when a system reports that its scratch does not fit --
+// one arena per worker, so the process total is this times the worker count.
+constexpr size_t kWorkerScratchBytes = 256 * 1024;
+} // namespace
+
+void Engine::EnsureSystemGraphs() {
+    if (_impl->updateGraph != nullptr) {
+        return;
+    }
+
+    auto& render = _impl->kernel->GetRenderContext();
+
+    _impl->simServices = std::make_unique<SimServices>(
+        SimServices {
+            .physics               = _impl->world->GetPhysics(),
+            .audio                 = _impl->kernel->GetAudioContext(),
+            .assets                = _impl->kernel->GetAssetManager(),
+            .articulation          = _impl->world->GetArticulationSystem(),
+            .bonePosePostProcessor = _impl->bonePosePostProcessor,
+            .poseUploads           = _impl->poseUploads,
+        }
+    );
+
+    _impl->renderServices = std::make_unique<RenderServices>(
+        RenderServices {
+            .render  = render,
+            .assets  = _impl->kernel->GetAssetManager(),
+            .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
+            .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
+        }
+    );
+
+    _impl->updateGraph = std::make_unique<SimGraph>(_impl->world->GetRegistry(), *_impl->simServices);
+    _impl->renderGraph = std::make_unique<RenderGraph>(_impl->world->GetRegistry(), *_impl->renderServices);
+}
+
+auto Engine::GetPoseUploads() -> PoseUploadQueue& {
+    return _impl->poseUploads;
+}
+
+auto Engine::MakeFrame(float dt) -> Frame {
+    if (_impl->workerScratch == nullptr) {
+        _impl->workerScratch = std::make_unique<WorkerScratchPool>(kWorkerScratchBytes, TaskSystem::GetWorkerCount());
+    }
+
+    return Frame {
+        .frame   = _impl->frameCounter,
+        .alpha   = _impl->currentAlpha,
+        .dt      = dt,
+        .scratch = _impl->workerScratch.get(),
     };
+}
+
+void Engine::ResetWorkerScratch() noexcept {
+    if (_impl->workerScratch != nullptr) {
+        _impl->workerScratch->ResetAll();
+    }
 }
 
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
@@ -445,11 +522,14 @@ auto Engine::GetRegistry() const -> const ECS::Registry& {
     return _impl->world->GetRegistry();
 }
 
-auto Engine::GetUpdateGraph() -> ECS::SystemGraph& {
-    return _impl->world->GetUpdateGraph();
+auto Engine::GetUpdateGraph() -> SimGraph& {
+    EnsureSystemGraphs();
+    return *_impl->updateGraph;
 }
-auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
-    return _impl->world->GetRenderGraph();
+
+auto Engine::GetRenderGraph() -> RenderGraph& {
+    EnsureSystemGraphs();
+    return *_impl->renderGraph;
 }
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
     return _impl->world->GetMainECB();
@@ -479,9 +559,6 @@ void Engine::RunSceneCleanupPasses(bool all) {
 
 auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
-}
-auto Engine::GetCullingSystem() -> CullingSystem& {
-    return _impl->world->GetCullingSystem();
 }
 auto Engine::GetArticulationSystem() -> ArticulationSystem& {
     return _impl->world->GetArticulationSystem();
@@ -546,7 +623,7 @@ void Engine::ApplyFrameSchedulerExtensions(FrameScheduler& scheduler) {
     }
 }
 
-void Engine::ApplySystemGraphsExtensions(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
+void Engine::ApplySystemGraphsExtensions(SimGraph& updateGraph, RenderGraph& renderGraph) {
     for (const auto ext: _impl->systemGraphsExtensions) {
         ext(updateGraph, renderGraph);
     }

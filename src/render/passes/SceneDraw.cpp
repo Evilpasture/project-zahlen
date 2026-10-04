@@ -81,8 +81,10 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress,
-            .baseColorFactor     = gpuMat->baseColorFactor,
-            .emissiveFactor      = gpuMat->emissiveFactor,
+            .baseColorFactor =
+                JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
+            .emissiveFactor =
+                JPH::Float4 {gpuMat->emissiveFactor[0], gpuMat->emissiveFactor[1], gpuMat->emissiveFactor[2], gpuMat->emissiveFactor[3]},
             .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress : 0,
             .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
             .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
@@ -140,7 +142,8 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress,
-            .baseColorFactor     = gpuMat->baseColorFactor,
+            .baseColorFactor =
+                JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor      = {},
             .tangentFrameAddress = 0,
             .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,

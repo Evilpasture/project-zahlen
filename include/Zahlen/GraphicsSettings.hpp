@@ -14,7 +14,7 @@ enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
 struct AAState {
-    AAMode mode = AAMode::TAA;
+    AAMode mode = AAMode::SMAA;
 
     float    taaFeedback = 0.95f;
     float    jitterX     = 0.0f;
@@ -31,23 +31,23 @@ struct AAState {
 };
 
 struct GISettings {
-    int   mode              = 1;
+    int   mode              = 0;
     float aoRadius          = 0.5f;
     float aoBias            = 0.05f;
     float aoPower           = 1.8f;
-    float giIntensity       = 1.2f;
+    float giIntensity       = 1.0f;
     int   giSamples         = 8;
-    float vignetteIntensity = 1.1f;
+    float vignetteIntensity = 0.0f;
     float vignettePower     = 1.5f;
-    float glowIntensity     = 0.15f;
-    int   enableSSR         = 1;
+    float glowIntensity     = 0.0f;
+    int   enableSSR         = 0;
     int   enableRTR         = 0;
 
-    float                exposure      = 0.015f;
-    float                bloomStrength = 0.5f;
+    float                exposure      = 1.0f;
+    float                bloomStrength = 0.0f;
     float                contrast      = 1.0f;
     float                saturation    = 1.0f;
-    int                  tonemapper    = 1;
+    int                  tonemapper    = 3;
     std::array<float, 3> colorFilter   = {1.0f, 1.0f, 1.0f};
 
     auto operator==(const GISettings&) const noexcept -> bool = default;
@@ -56,7 +56,7 @@ struct GISettings {
 struct ShadowSettings {
     float    width              = 200.0f;
     uint32_t resolution         = 2048;
-    uint32_t maxPunctualShadows = 1;
+    uint32_t maxPunctualShadows = 0;
     float    sunSize            = 0.05f;
 
     auto operator==(const ShadowSettings&) const noexcept -> bool = default;
@@ -67,7 +67,7 @@ struct RayTracingConfig {
     bool     enableShadows     = false;
     uint32_t reflectionSamples = 1;
     uint32_t shadowSamples     = 1;
-    uint32_t denoiserPasses    = 1;
+    uint32_t denoiserPasses    = 2;
     uint32_t maxBounces        = 1;
     float    roughnessCutoff   = 0.4f;
     bool     alphaTestingInBVH = true;
@@ -76,7 +76,7 @@ struct RayTracingConfig {
 };
 
 struct EnvironmentSettings {
-    float ambientExposure = 25.0f;
+    float ambientExposure = 1.0f;
     int   fullBright      = 0;
     int   useLocalProbe   = 0;
 
@@ -92,7 +92,7 @@ struct EnvironmentSettings {
 };
 
 struct GraphicsSettings {
-    QualityLevel        qualityPreset = QualityLevel::Medium;
+    QualityLevel        qualityPreset = QualityLevel::Custom;
     GISettings          post;
     AAState             antiAliasing;
     ShadowSettings      shadows;
@@ -100,11 +100,11 @@ struct GraphicsSettings {
     EnvironmentSettings environment;
 
     struct QualitySignature {
-        AAMode   antiAliasMode       = AAMode::TAA;
+        AAMode   antiAliasMode       = AAMode::SMAA;
         float    taaFeedback         = 0.95f;
         uint32_t shadowResolution    = 2048;
         uint32_t giSamples           = 8;
-        int      enableSSR           = 1;
+        int      enableSSR           = 0;
         int      enableRTR           = 0;
         uint32_t rtShadowSamples     = 1;
         uint32_t rtReflectionSamples = 1;
@@ -212,7 +212,16 @@ struct GraphicsSettings {
     }
 };
 
-static_assert(GraphicsSettings {}.DetectPreset() == QualityLevel::Medium);
+static_assert(GraphicsSettings {}.DetectPreset() == QualityLevel::Custom);
+static_assert([] -> bool {
+    const GraphicsSettings settings {};
+    return settings.antiAliasing.mode == AAMode::SMAA && settings.post.mode == 0 && settings.post.giIntensity == 1.0f
+           && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
+           && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
+           && settings.post.tonemapper == 3 && settings.shadows.maxPunctualShadows == 0
+           && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections
+           && settings.rayTracing.denoiserPasses == 2 && settings.environment.ambientExposure == 1.0f;
+}());
 static_assert([] -> bool {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::Ultra);

@@ -151,22 +151,16 @@ struct ProceduralAnimationTestSuite {
             ZHLN::ModelPart nested;
             nested.nodeIndex      = 1;
             nested.localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.5f, 0.0f, 0.25f));
-            nested.localMin[0]    = -1.0f;
-            nested.localMin[1]    = -2.0f;
-            nested.localMin[2]    = -0.5f;
-            nested.localMax[0]    = 1.0f;
-            nested.localMax[1]    = 2.0f;
-            nested.localMax[2]    = 0.5f;
+            // Whole-pod assignments: JPH::Float3's operator[] is const-only, so
+            // the lanes are write-only through .x/.y/.z or not at all.
+            nested.localMin      = JPH::Float3 {-1.0f, -2.0f, -0.5f};
+            nested.localMax      = JPH::Float3 {1.0f, 2.0f, 0.5f};
             prefab.parts.push_back(std::move(nested));
 
             ZHLN::ModelPart rootPart;
             rootPart.nodeIndex   = 0;
-            rootPart.localMin[0] = -2.0f;
-            rootPart.localMin[1] = 0.0f;
-            rootPart.localMin[2] = -1.0f;
-            rootPart.localMax[0] = -1.0f;
-            rootPart.localMax[1] = 1.0f;
-            rootPart.localMax[2] = 1.0f;
+            rootPart.localMin = JPH::Float3 {-2.0f, 0.0f, -1.0f};
+            rootPart.localMax = JPH::Float3 {-1.0f, 1.0f, 1.0f};
             prefab.parts.push_back(std::move(rootPart));
 
             const ZHLN::Locomotion::CharacterBoundsEstimate bounds = ZHLN::Locomotion::EstimateCharacterBounds(prefab);
@@ -359,12 +353,8 @@ struct ProceduralAnimationTestSuite {
                 part.name        = ZHLN::String64("OpaquePart");
                 part.isSkinned   = skinned;
                 part.nodeIndex   = static_cast<int32_t>(meshNode);
-                part.localMin[0] = -0.12f * extentScale;
-                part.localMin[1] = -0.06f * extentScale;
-                part.localMin[2] = -0.18f * extentScale;
-                part.localMax[0] = 0.12f * extentScale;
-                part.localMax[1] = 0.10f * extentScale;
-                part.localMax[2] = 0.22f * extentScale;
+                part.localMin = JPH::Float3 {-0.12f * extentScale, -0.06f * extentScale, -0.18f * extentScale};
+                part.localMax = JPH::Float3 {0.12f * extentScale, 0.10f * extentScale, 0.22f * extentScale};
                 prefab.parts.push_back(std::move(part));
                 return FootPartNodes {.root = shoeRootNode, .part = meshNode};
             };

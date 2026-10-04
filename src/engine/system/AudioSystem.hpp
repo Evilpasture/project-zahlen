@@ -14,7 +14,7 @@ namespace ZHLN {
 ZHLN_API void AudioSystem(
     ECS::Query<const Components::AudioListenerComponent, const Components::WorldTransformComponent,
                const Components::TransformComponent, Components::AudioSourceComponent&, Components::LoopSynthComponent&> query,
-    ZHLN::Optional<AudioContext&> audio, ZHLN::Optional<const Camera&> camera, FrameDt dt
+    ZHLN::Optional<AudioContext&> audio, ECS::Query<const Components::CameraComponent> cameraQuery, FrameDt dt
 );
 
 } // namespace ZHLN

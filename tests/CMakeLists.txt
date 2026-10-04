@@ -22,6 +22,17 @@
 # 1. Enable CTest testing framework
 enable_testing()
 
+# Public include roots for the optional outer layers. Kept as a list because
+# plugin formats, engine extensions, network I/O, and gameplay each have their
+# own include root after the source-tree split.
+set(ZHLN_OPTIONAL_INCLUDE_ROOTS
+    ${PROJECT_SOURCE_DIR}/plugins
+    ${PROJECT_SOURCE_DIR}/extensions
+    ${PROJECT_SOURCE_DIR}/extensions/net
+    ${PROJECT_SOURCE_DIR}/gameplay
+    ${PROJECT_SOURCE_DIR}/gameplay/ProjectLight
+)
+
 # Shared per-target setup for a CPU test group. Sources are listed by the caller,
 # the way zahlen_add_gpu_test_group in tests/render/CMakeLists.txt already lists
 # its own -- see the note at the call sites below for what that costs.
@@ -67,7 +78,7 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
 
-    # Character locomotion (MovementComponent) moved to extras/CharacterController.
+    # Character locomotion (MovementComponent) moved to extensions/CharacterController.
     # TestCharacterMovement exercises the controller's integration math, so the
     # physics group links that domain, publishes the extras include root, and
     # defines the gate macro that RunPhysicsTests.cpp / TestCharacterMovement.cpp
@@ -75,7 +86,7 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     # list otherwise (see ZHLN_PHYSICS_TEST_SOURCES below).
     if(TARGET_NAME STREQUAL "CPU_Physics" AND TARGET zahlen_character_controller)
         target_link_libraries(${TARGET_NAME} PRIVATE zahlen_character_controller)
-        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extensions)
         target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
     endif()
 
@@ -156,6 +167,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestRayTracedNoiseMetrics.cpp
     core/TestReflection.cpp
     core/TestSignal.cpp
+    core/TestSoA.cpp
     core/TestTextEdit.cpp
 )
 
@@ -172,7 +184,7 @@ zahlen_add_cpu_test_group(CPU_ECS
     ecs/TestSystemGraph.cpp
 )
 
-# Character locomotion moved to extras/CharacterController, so the character
+# Character locomotion moved to extensions/CharacterController, so the character
 # movement suite only builds when that domain exists. The suite is the only
 # consumer of the controller here; RunPhysicsTests.cpp gates the registration
 # on the same macro.

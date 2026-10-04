@@ -442,7 +442,7 @@ struct DescriptorHeapsSuite {
 
             // Pin the main-camera entity to our values so the camera system
             // does not overwrite the mid-test pan. The rig component is an
-            // extras component (extras/Camera), authored here rather than
+            // extras component (extensions/Camera), authored here rather than
             // patched: the frame step only re-seeds it when missing.
             const auto applyCameraPose = [&](float yaw) {
                 cam.yaw      = yaw;

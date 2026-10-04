@@ -11,7 +11,11 @@
 namespace ZHLN {
 
 struct Frustum {
-    JPH::Vec4 mX[2], mY[2], mZ[2], mW[2];
+    // The lanes stay JPH::Vec4: the visibility test below is SIMD over six
+    // planes, four at a time, and Vec4 is the compute spelling for that. The
+    // container is not a raw C array -- repeats are std::array -- and the
+    // layout is identical, so every `mX[block]` below is unchanged.
+    std::array<JPH::Vec4, 2> mX {}, mY {}, mZ {}, mW {};
 
     void Update(const JPH::Mat44& vp) {
         JPH::Vec4 r0(vp(0, 0), vp(0, 1), vp(0, 2), vp(0, 3));
@@ -72,9 +76,11 @@ struct Camera {
     float nearZ = 0.1f;
     float farZ  = 1000.0f;
 
-    Frustum frustum {};
-    Frustum shadowFrustum {};
-
+    // Pose and optics only. The view-projection matrices live on the entity's
+    // CameraComponent, and the culling planes live on the culler that derived
+    // them (see CullingSystem::GetFrustum). A camera that owned its frustum was
+    // camera *state*, not camera data: a second writer had to reach the same
+    // object through a shared service.
     [[nodiscard]] auto GetViewMatrix() const -> JPH::Mat44 {
         JPH::Vec3 direction {};
         direction.SetX(JPH::Cos(JPH::DegreesToRadians(yaw)) * JPH::Cos(JPH::DegreesToRadians(pitch)));

@@ -3,59 +3,21 @@
 
 #pragma once
 
-// clang-format off
-#include <Jolt/Jolt.h>
-// clang-format on
-#include <Jolt/Math/Mat44.h>
-#include <Zahlen/Common.h>
-#include <Zahlen/Entity.hpp>
-#include <cstdint>
-#include <span>
-#include <vector>
+// The name survives for extension entry points and for code that predates the
+// split: `SystemContext` is now the simulation domain's *carrier* -- the
+// registry, the simulation graph's services, and this execution's frame. It is
+// not a bag of engine pointers, and it cannot grow into one: the services it
+// exposes are the members of SimServices, and a system can only reach the ones
+// its graph was built with.
+
+#include <Zahlen/EngineServices.hpp>
+#include <Zahlen/Frame.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 
 namespace ZHLN {
 
-class RenderContext;
-class AssetManager;
-class PhysicsContext;
-class AudioContext;
-class CullingSystem;
-class ArticulationSystem;
-struct Camera;
-struct ModelPrefab;
+using SystemContext = ECS::Carrier<SimServices>;
+using SimGraph      = ECS::SystemGraph<SimServices>;
+using RenderGraph   = ECS::SystemGraph<RenderServices>;
 
-namespace ECS {
-class Registry;
-}
-
-using BonePosePostProcessor = void (*)(
-    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
-);
-
-// Distinct parameter types for the two otherwise identically typed output
-// lists. They are resolved from SystemContext without positional guessing.
-struct VisibleEntities { JPH::Array<Entity>& values; };
-struct VisibleShadowEntities { JPH::Array<Entity>& values; };
-
-struct SystemContext {
-    ECS::Registry& registry;
-
-    RenderContext*     render       = nullptr;
-    AssetManager*      assets       = nullptr;
-    PhysicsContext*    physics      = nullptr;
-    AudioContext*      audio        = nullptr;
-    Camera*            camera       = nullptr;
-    CullingSystem*     culling      = nullptr;
-    ArticulationSystem* articulation = nullptr;
-
-    BonePosePostProcessor bonePosePostProcessor = nullptr;
-
-    JPH::Array<Entity>* visibleEntities       = nullptr;
-    JPH::Array<Entity>* visibleShadowEntities = nullptr;
-
-    uint64_t frame = 0;
-    float    alpha = 0.0f;
-    float    dt    = 0.0f;
-};
-
-}
+} // namespace ZHLN

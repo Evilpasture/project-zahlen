@@ -3,8 +3,8 @@
 
 // tests/extras/TestHTTP.cpp
 //
-// HTTP is an optional layer (extras/HTTP) with an optional third-party library
-// behind it, so this suite is built only when extras/HTTP/CMakeLists.txt found
+// HTTP is an optional layer (extensions/net/HTTP) with an optional third-party library
+// behind it, so this suite is built only when extensions/net/HTTP/CMakeLists.txt found
 // libcurl and defined zahlen_http. No libcurl, no target, no test: see
 // tests/extras/CMakeLists.txt.
 //
@@ -15,7 +15,7 @@
 // and a 404 are all things a real host would have to be persuaded to do.
 //
 // The server is not in this file, and not in tests/helpers either: it is
-// extras/HTTP/HTTPServer.hpp, part of the extra. It is an assertion instrument
+// extensions/net/HTTP/HTTPServer.hpp, part of the extra. It is an assertion instrument
 // rather than a fixture -- /echo answers with the request it received, which is
 // the only way to see the half of this API that error paths cannot show: the
 // method on the request line, the Content-Length a bodiless POST still has to
@@ -108,7 +108,7 @@ struct Echo {
 struct HTTPTestSuite {
     enum class HTTPTestError : uint8_t {
         ServerUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The suite's loopback server did not come up, so there was nothing to fetch."> {}) = 1,
-        FetchFailed       ZHLN_ANNOTATION(ZHLN::Description<"extras/HTTP refused a request the suite expected it to carry."> {}),
+        FetchFailed       ZHLN_ANNOTATION(ZHLN::Description<"extensions/net/HTTP refused a request the suite expected it to carry."> {}),
     };
 
     struct Tests {

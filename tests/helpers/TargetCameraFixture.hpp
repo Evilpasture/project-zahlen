@@ -3,7 +3,7 @@
 
 // tests/helpers/TargetCameraFixture.hpp
 //
-// The third-person target camera rig is an extras module (extras/Camera). The
+// The third-person target camera rig is an extras module (extensions/Camera). The
 // headless fixture builds a bare core engine, so a suite that needs the rig
 // installs it through this helper instead of reaching for the module itself.
 //

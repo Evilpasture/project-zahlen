@@ -94,11 +94,23 @@ the `kGpuCullingMax*` budgets, `WorkerCmdContext` (parallel-recorder plumbing),
 — the primary template lives in `src/vulkan/graph/RenderGraph.hpp:749`, so that
 pair belongs with step 4, not with draw payloads.
 
+**Update (sixth cut, the type unification):** the two halves are one struct now.
+`ParticleEmitterParams`, `MeshParticleEmitterParams`, `Light`, `FrameUniforms` and
+`Particle` are hand-written in `include/Zahlen/Render/RenderData.hpp` with the pod
+lane types (`JPH::Float2/3/4`, `JPH::Mat44`, `std::array<T, N>`), and
+`GeneratedGpuTypes.hpp` aliases them and asserts every member offset against
+Slang's reflection. `ToGpu`, `LayoutConvert.cpp` and the five `*Desc` description
+types are gone, and `[CxxArray]`/`[CxxCArray]`/`[CxxQuat]`/`[CxxDefault]` went
+with them. The `GpuLayout.hpp` rule below still holds, with one struct fewer:
+`InstanceData`, `Particle3D`, `ClusterBounds`, `ClusterVolume` are the only
+generated types left in it.
+
 Two include rules are what make the header compile-checkable on its own:
-- It includes `<Zahlen/Render/GpuLayout.hpp>`, where `InstanceData` comes from
-  (`GpuLayout.hpp:36`). `DrawCommand` holds `InstanceData` **by value**, so the
-  generated header is a real dependency of the payload's layout, not an
-  incidental include.
+- It includes `"GpuLayout.hpp"` (renderer-internal since the public-API
+  redesign; it was `<Zahlen/Render/GpuLayout.hpp>`), where `InstanceData` comes
+  from. `DrawCommand` holds `InstanceData` **by value**, so the generated header
+  is a real dependency of the payload's layout, not an incidental include -- and
+  that is fine: this header is renderer-internal too.
 - It does **not** include `src/render/GpuAbi.hpp`. That is the header that makes
   a render TU uncompilable without the shader cook — `GpuAbi.hpp:52` does
   `#embed ZHLN_GPU_ABI_MODULE` and consteval-parses the cooked module. A header
@@ -114,7 +126,10 @@ the types through `RenderInternal.hpp`, confirmed file by file. The stub needs
 Jolt on the include path too, since `LineSegment` and `DecalDrawCommand` are
 JPH math — that is the one extra dependency beyond the Vulkan set.
 
-Update: with an empty-struct `GeneratedGpuTypes.hpp` stub, Jolt cloned from
+Update: the redesign moved the generated types out of the public API entirely,
+so only renderer translation units need this stub now -- the engine, its
+extensions and its tests compile without the shader cook having run. Also: with an
+empty-struct `GeneratedGpuTypes.hpp` stub, Jolt cloned from
 GitHub (`jrouwe/JoltPhysics`, `-DJPH_DOUBLE_PRECISION -DJPH_OBJECT_STREAM`),
 and the umbrella included first, a real render TU that avoids
 `ShaderBindings.hpp` compiles as-is — `src/render/GeometryManager.cpp` did so
@@ -1035,7 +1050,8 @@ sake.
 CI is the arbiter; it compiles and runs on real hardware. In the sandbox
 `src/render` cannot be compiled wholesale: it needs `GeneratedGpuTypes.hpp` and
 `ShaderBindings.hpp` from `tools/zshader`, and the 15 `extern/` submodules are
-empty. What *can* be checked there is any render source that includes neither
+empty. (Since the redesign only `src/render` needs the first of those: the engine
+and its extensions no longer reach it.) What *can* be checked there is any render source that includes neither
 `GpuAbi.hpp` nor `<ShaderBindings.hpp>` — which is why `TextureManager.cpp` was
 compilable early on and why step 2's header is worth keeping free of `GpuAbi.hpp`.
 Note that the generated header is narrower than it looks: `ZHLN_ShaderDesc`
@@ -1072,7 +1088,7 @@ same data.
   colour / intensity), render N frames at a fixed time step, and write one PNG
   per frame.
 * **Test side** — a Zahlen test imports the same GLB (fetched through
-  `extras/RemoteAsset`, see the prework below), applies the exact same camera
+  `extensions/net/RemoteAsset`, see the prework below), applies the exact same camera
   matrices (no user orbit; TAA jitter deterministically seeded or disabled;
   animation time pinned for skinned models), renders the same N frames, and
   compares.
@@ -1093,9 +1109,9 @@ same data.
 Prework, landed on this branch: the fetch machinery the sample used to get its
 GLBs had to move out of `samples/RemoteGLBSample.cpp` so a *test* — not just a
 sample — can fetch and cache remote assets: `URLResolver`, `DiskCache` and
-`AsyncAssetFetcher` in `ZHLN::Remote` (`extras/RemoteAsset`, target
+`AsyncAssetFetcher` in `ZHLN::Remote` (`extensions/net/RemoteAsset`, target
 `zahlen_remote_asset`), the GitHub git-trees crawl as `ZHLN::GitHub`
-(`extras/GitHub`, target `zahlen_github`, which the test needs to enumerate
+(`extensions/net/GitHub`, target `zahlen_github`, which the test needs to enumerate
 the GLBs), and the sample rewired onto them. The sample keeps only showroom
 policy: the dropdown, the turntable, the studio rig, the HUD.
 

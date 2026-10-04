@@ -94,6 +94,11 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
     };
 }
 
+// MaterialDesc and DrawParams spell a colour or a weight set the same way the
+// ABI member does -- JPH::Float4 -- so there is nothing to convert: the
+// crossings below assign one. The Lane() overloads that used to bridge the two
+// spellings are gone with the second spelling.
+
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
@@ -123,10 +128,10 @@ struct InstanceDataDesc {
     float roughnessFactor = 1.0f;
     float alphaCutoff     = 0.0f;
 
-    std::array<float, 3> localCenter     = {};
-    std::array<float, 4> morphWeights    = {};
-    std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+    JPH::Float3          localCenter {0.0f, 0.0f, 0.0f};
+    JPH::Float4          morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
+    JPH::Float4          baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4          emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
 
     float transmissionFactor = 0.0f;
     float iridescenceFactor  = 0.0f;
@@ -148,7 +153,7 @@ struct InstanceDataDesc {
     float    anisotropyStrength      = 0.0f;
     float    anisotropyRotation      = 0.0f;
     uint32_t anisotropyTex           = kNoFilmTexture;
-    std::array<float, 3> sheenColorFactor {};
+    JPH::Float3 sheenColorFactor {};
     float sheenRoughnessFactor = 0.0f;
     uint32_t sheenColorTex = kNoFilmTexture;
     uint32_t sheenRoughnessTex = kNoFilmTexture;
@@ -170,7 +175,7 @@ struct InstanceDataDesc {
     // material: the same primitive can be instanced under either parity.
     const uint32_t isMirrored      = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
-    std::array<float, 4> emissive = desc.emissiveFactor;
+    JPH::Float4 emissive = desc.emissiveFactor;
     uint32_t             paddingCenter = 0;
     uint32_t             paddingMeshlet = 0;
     if (hasTransmission != 0) {
@@ -180,7 +185,7 @@ struct InstanceDataDesc {
         const uint32_t coat8 = static_cast<uint32_t>(std::clamp(desc.clearcoatFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
         if (coat8 != 0) {
             const uint32_t scale8 = static_cast<uint32_t>(std::clamp(desc.clearcoatNormalScale * 64.0f, 0.0f, 255.0f) + 0.5f);
-            emissive[3]           = desc.clearcoatRoughnessFactor;
+            emissive.w            = desc.clearcoatRoughnessFactor;
             paddingCenter         = (desc.clearcoatRoughnessTex << 16) | (desc.clearcoatTex & kNoFilmTexture);
             paddingMeshlet        = (scale8 << 24) | (coat8 << 16) | (desc.clearcoatNormalTex & kNoFilmTexture);
         }
@@ -191,14 +196,14 @@ struct InstanceDataDesc {
     // TextureTransformMultiTest's 90-degree transform must land on the same
     // atlas checkmark as its untransformed Sample column, not the centre slash.
     // Keep the rows per texture reference, even when several slots share an image.
-    std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
-    std::array<JPH::Vec4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
+    std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
+    std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
         const float c = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
         const float s = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot] = JPH::Vec4(c * transform.scale[0], s * transform.scale[1], transform.offset[0], 0.0f);
-        uvRow1[slot] = JPH::Vec4(-s * transform.scale[0], c * transform.scale[1], transform.offset[1], static_cast<float>(transform.texCoord));
+        uvRow0[slot] = JPH::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot] = JPH::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {
@@ -240,7 +245,7 @@ struct InstanceDataDesc {
         .anisotropyTexIndex   = desc.anisotropyTex,
         .samplerCodes0        = PackMaterialSamplerAddresses(desc.textureSamplers, 0),
         .samplerCodes1        = PackMaterialSamplerAddresses(desc.textureSamplers, 8),
-        .sheenParams        = {desc.sheenColorFactor[0], desc.sheenColorFactor[1], desc.sheenColorFactor[2], std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
+        .sheenParams        = {desc.sheenColorFactor.x, desc.sheenColorFactor.y, desc.sheenColorFactor.z, std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
         .sheenColorTexIndex = desc.sheenColorTex,
         .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
         .occlusionTexIndex      = desc.occlusionTex,
@@ -453,10 +458,10 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .metallicFactor           = params.metallic >= 0.0f ? params.metallic : material.metallicFactor,
                  .roughnessFactor          = params.roughness >= 0.0f ? params.roughness : material.roughnessFactor,
                  .alphaCutoff              = material.alphaCutoff,
-                 .localCenter              = {params.localCenter[0], params.localCenter[1], params.localCenter[2]},
+                 .localCenter              = params.localCenter,
                  .morphWeights             = params.morphWeights,
-                 .baseColorFactor          = (params.colorOverride[3] >= 0.0f) ? params.colorOverride : material.baseColorFactor,
-                 .emissiveFactor           = (params.emissiveOverride[3] >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
+                 .baseColorFactor          = (params.colorOverride.w >= 0.0f) ? params.colorOverride : material.baseColorFactor,
+                 .emissiveFactor           = (params.emissiveOverride.w >= 0.0f) ? params.emissiveOverride : material.emissiveFactor,
                  .transmissionFactor       = material.transmissionFactor,
                  .iridescenceFactor        = material.iridescenceFactor,
                  .filmThicknessNm          = material.filmThicknessNm,

@@ -9,21 +9,21 @@ worker while the backdrop and the HUD come up:
 2. it crawls that repository's `Models/` tree into the HUD's model dropdown.
 
 Picking a row in the dropdown fetches that one file — nothing is downloaded
-until it is picked — caches it on disk, imports it through `extras/glTF`, and
+until it is picked — caches it on disk, imports it through `plugins/glTF`, and
 renders it on a studio turntable. A second run (or a second pick of the same
 row) reads it from the cache.
 
 It is the reference for:
 
-* `extras/RemoteAsset` (`zahlen_remote_asset`) — the remote-asset machinery in
+* `extensions/net/RemoteAsset` (`zahlen_remote_asset`) — the remote-asset machinery in
   three primitives: `ZHLN::Remote::ResolveURL` (candidate spellings + the
   cache file name), `ZHLN::Remote::DiskCache` (atomic on-disk cache with
   validators), and `ZHLN::Remote::AsyncAssetFetcher` (the worker lifecycle:
   request, supersede, reap, take). Anything that needs "download a file and
-  remember it without stalling a frame" links this, over `extras/HTTP`.
-* `extras/GitHub` (`zahlen_github`) — `ZHLN::GitHub::FetchTree`, the git trees
+  remember it without stalling a frame" links this, over `extensions/net/HTTP`.
+* `extensions/net/GitHub` (`zahlen_github`) — `ZHLN::GitHub::FetchTree`, the git trees
   API in one call, plus the raw-URL and URL→repo-path mappings the crawl uses.
-* `extras/glTF` (`zahlen_gltf`) — `LoadGLBPrefabFromMemory` from a byte span,
+* `plugins/glTF` (`zahlen_gltf`) — `LoadGLBPrefabFromMemory` from a byte span,
   `InstantiatePrefab`, `InstallDeviceLostHandler` for device-lost rebuild.
 * `FS::Paths::CacheDir()` — build/cache in a dev tree, per-user cache
   otherwise, `ZHLN_CACHE_DIR` overrides both. The same location the pipeline
@@ -38,7 +38,7 @@ The crawl is **one** call to the GitHub git trees API,
 — the unauthenticated API budget is 60 calls/hour, and the crawl is exactly
 one call — with `User-Agent` and `Accept: application/vnd.github+json`, plus
 `Authorization: Bearer $GITHUB_TOKEN` when the variable is set. The call and
-the JSON parse are `ZHLN::GitHub::FetchTree` in `extras/GitHub`: one
+the JSON parse are `ZHLN::GitHub::FetchTree` in `extensions/net/GitHub`: one
 transfer, one listing, one failure line. The response is the recursive tree
 of one branch: a `tree` array of `{path, type, size, …}` and a `truncated`
 flag. The sample's worker filters it: `type == "blob"`, path under `Models/`,
@@ -321,11 +321,10 @@ cmake --build build --target RemoteGLBSample
 Needs `libcurl` with dev headers (`libcurl4-openssl-dev` / `libcurl-devel` /
 `curl` / Homebrew `curl` / vcpkg `curl`). If not found, `zahlen_http` target
 does not exist and the sample is skipped with a CMake status message
-(`Skipping sample RemoteGLBSample: extras target(s) not built: ...`). The
-rest of extras is unaffected. Pass `-DZHLN_BUILD_HTTP=OFF` to silence the
+(`Skipping sample RemoteGLBSample: optional target(s) not built: ...`). Other targets remain unaffected. Pass `-DZHLN_BUILD_HTTP=OFF` to silence the
 search. The crawl's JSON parsing comes from `zahlen_serialization`
-(`extras/json`), which is part of extras and is always built with them — it
-is named in `ZHLN_SAMPLE_EXTRAS_RemoteGLBSample` next to `zahlen_gltf` and
+(`plugins/json`), which is part of the plugin layer and is built when optional layers are enabled — it
+is named in `ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample` next to `zahlen_gltf` and
 `zahlen_http` so the skip logic stays target-based.
 
 Headless smoke:
@@ -366,7 +365,7 @@ import has not finished yet.
 ## Files
 
 * `samples/RemoteGLBSample.cpp` — the sample (~2000 lines)
-* `samples/CMakeLists.txt` — `ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf
+* `samples/CMakeLists.txt` — `ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf
   zahlen_http zahlen_serialization`
 * cache — `<CacheDir>/http/DamagedHelmet-<hash>.glb` and one file per picked
   model, same scheme

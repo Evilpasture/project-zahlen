@@ -16,12 +16,12 @@
 #endif
 
 // Public surface of a library that is linked statically into its consumer
-// rather than shipped as a DLL -- the extras domains.
+// rather than shipped as a DLL -- optional first-party layers.
 //
 // The distinction is Windows-only, and it is not cosmetic: a declaration that
 // reaches a consumer as __declspec(dllimport) makes every reference to it an
 // __imp_* import, and nothing can satisfy that import when the definition is
-// in the consumer's own link line. extras/UI/UITree.hpp declares FindNodeById
+// in the consumer's own link line. extensions/UI/UITree.hpp declares FindNodeById
 // with ZHLN_API, libzahlen_ui_schema.a defines it, a test links the archive --
 // and MinGW ld stops with
 //   undefined reference to `__imp__ZN4ZHLN3GUI12FindNodeByIdE...'

@@ -7,7 +7,7 @@
 // fragments, and a translation unit and the modules it imports have to agree on
 // the intrinsics' language linkage -- otherwise the import reports "conflicting
 // language linkage for imported declaration" for every intrinsic the module
-// declares. Same block as extras/Animation/ProceduralAnimation.cpp's.
+// declares. Same block as extensions/Animation/ProceduralAnimation.cpp's.
 #include <Zahlen/Core/Platform.hpp>
 #endif
 #include <Zahlen/Camera.hpp>
@@ -31,13 +31,13 @@
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
-// Optional extras, grouped like app/main.cpp's guarded include block: the fonts
+// Optional plugin, grouped like app/main.cpp's guarded include block: the fonts
 // domain is what supplies this sample's default bake.
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
 #endif
 
-// Optional extras/toolkit modules
+// Optional outer-layer modules
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 

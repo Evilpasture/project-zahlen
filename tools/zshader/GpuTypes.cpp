@@ -7,11 +7,21 @@
 // It compiles the gpu_abi module in-process through CompileSlangEntry -- the
 // compile it shares with the catalog's reflection (SlangReflect.cpp) -- and
 // walks the reflected layout: member
-// offsets, sizes, strides and alignments come from the compiler's own model,
-// and the [Cxx*] annotations (resources/shaders/cxx_abi.slang) say how each
-// member is spelled. There is no table in this file restating either half,
-// so a Slang edit carries its spelling with it and nothing here can skew a
-// layout behind the shader's back.
+// offsets, sizes, strides and alignments come from the compiler's own model.
+// The Slang type decides the C++ spelling by itself -- float2/float3/float4
+// to JPH::Float2/Float3/Float4, float4x4 to JPH::Mat44, a fixed array to
+// std::array of its element -- with [CxxEnum] the one annotation left, naming
+// the engine enum behind an int/uint scalar. There is no table in this file
+// restating either half, so a Slang edit carries its spelling with it and
+// nothing here can skew a layout behind the shader's back.
+//
+// Five of the structs are not emitted here at all. Particle,
+// ParticleEmitterParams, MeshParticleEmitterParams, Light and FrameUniforms
+// are hand-written in include/Zahlen/Render/RenderData.hpp -- one definition
+// per concept, in the public header -- and this file aliases them and asserts
+// their size and every member offset against the reflection. That assert is
+// the proof the hand-written structs *are* the ABI: a disagreement is a
+// compile error naming the member, not a skew the host uploads.
 //
 // One compile produces two outputs: GeneratedGpuTypes.hpp, the structs, and
 // the module's own SPIR-V, which src/render/GpuAbi.hpp embeds and re-reads
@@ -61,18 +71,19 @@ constexpr std::string_view kEntryPoint = "CSMain";
 
 // The cxx_abi.slang vocabulary this walk answers to. Unknown names fail in
 // ReadMemberAttributes/IsSkipped, so a vocabulary edit lands here loudly.
-constexpr std::string_view kAttrArray   = "CxxArray";
-constexpr std::string_view kAttrCArray  = "CxxCArray";
-constexpr std::string_view kAttrQuat    = "CxxQuat";
-constexpr std::string_view kAttrEnum    = "CxxEnum";
-constexpr std::string_view kAttrDefault = "CxxDefault";
-constexpr std::string_view kAttrSkip    = "CxxSkip";
+// [CxxArray], [CxxCArray], [CxxQuat] and [CxxDefault] used to live here: they
+// existed only to respell a type the Slang kind already names, and the host
+// structs now carry their own defaults, so every one of them is gone.
+constexpr std::string_view kAttrEnum = "CxxEnum";
+constexpr std::string_view kAttrSkip = "CxxSkip";
 
-// The Jolt spellings the defaults reach for: vectors and matrices the engine
-// computes with stay Jolt, plain payload stays arrays and scalars.
-constexpr std::string_view kVec4 = "::JPH::Vec4";
-constexpr std::string_view kQuat = "::JPH::Quat";
-constexpr std::string_view kMat4 = "::JPH::Mat44";
+// The storage spellings: Jolt's pod lane types, one per Slang float vector
+// width. JPH::Vec3/Vec4 are the *compute* types (16 bytes, 16-aligned, three
+// live lanes in a Vec3) and are never a storage destination.
+constexpr std::string_view kFloat2 = "::JPH::Float2";
+constexpr std::string_view kFloat3 = "::JPH::Float3";
+constexpr std::string_view kFloat4 = "::JPH::Float4";
+constexpr std::string_view kMat4   = "::JPH::Mat44";
 
 constexpr auto kUniform = SLANG_PARAMETER_CATEGORY_UNIFORM;
 
@@ -124,22 +135,24 @@ auto KindName(slang::TypeReflection::Kind kind) -> std::string_view {
 }
 
 // How one Slang member is spelled in C++: data, chosen by the member's kind
-// plus its [Cxx*] annotation, rendered to text once at emission. Never string
-// fragments joined through the pipeline: Array and CArray nest structurally,
-// and Render is the only function that turns a type into text.
-enum class CxxForm { Scalar, Enum, Vec, Quat, Mat, Array, CArray, Struct };
+// alone, rendered to text once at emission. Never string fragments joined
+// through the pipeline: Array nests structurally and Render is the only
+// function that turns a type into text.
+enum class CxxForm { Scalar, Enum, Vec, Mat, Array, Struct };
 
 struct CxxType {
     CxxForm                  form = CxxForm::Scalar;
-    std::string spelling {}; // Scalar/Enum/Vec/Quat/Mat/Struct; Array/CArray recurse instead
-    std::unique_ptr<CxxType> element {}; // Array/CArray element
-    uint32_t                 count = 0; // Array/CArray length
+    std::string              spelling {}; // Scalar/Enum/Vec/Mat/Struct; Array recurses instead
+    std::unique_ptr<CxxType> element {}; // Array element
+    uint32_t                 count = 0; // Array length
     uint32_t                 size  = 0;
     uint32_t                 cxxAlign = 0;
 };
 
-// A rendered spelling: the base text plus the C-array dimensions, outermost
-// first (`float` + [4][4], never `float[4]` + `[4]`).
+// A rendered spelling: the base text plus any C-array dimensions -- always
+// empty now, since every repeat is a std::array. Kept as the single shape
+// Render returns rather than a bare string, so a future repeat spelling has
+// one place to land.
 struct Spelling {
     std::string           base {};
     std::vector<uint32_t> dims {};
@@ -153,11 +166,6 @@ auto Render(const CxxType& type, std::string_view structName, std::string_view m
         }
         return {.base = std::format("::std::array<{}, {}>", inner.base, type.count)};
     }
-    if (type.form == CxxForm::CArray) {
-        Spelling inner = Render(*type.element, structName, memberName);
-        inner.dims.insert(inner.dims.begin(), type.count);
-        return inner;
-    }
     return {.base = type.spelling};
 }
 
@@ -168,7 +176,6 @@ auto Render(const CxxType& type, std::string_view structName, std::string_view m
 struct Field {
     std::string name {};
     CxxType     type {};
-    std::string defaultInit {};
     uint32_t    offset     = 0;
     uint32_t    size       = 0;
     uint32_t    slangAlign = 0;
@@ -183,15 +190,12 @@ struct StructDef {
     std::vector<Field> fields {};
 };
 
-// What the member asked for: at most one spelling annotation plus an
-// optional default. Every name outside the vocabulary fails here, so a
-// misspelled or future annotation is loud rather than silently defaulted.
+// What the member asked for. One annotation is left: [CxxEnum], which names
+// the engine enum a uint/int scalar is. Every name outside the vocabulary
+// fails here, so a misspelled or future annotation is loud rather than
+// silently defaulted.
 struct MemberSpelling {
-    bool                       array   = false;
-    bool                       carray  = false;
-    bool                       quat    = false;
     std::optional<std::string> enumName {};
-    std::optional<std::string> defaultInit {};
 };
 
 auto ReadStringArg(
@@ -218,24 +222,11 @@ auto ReadMemberAttributes(slang::VariableReflection* var, std::string_view struc
             Fail("gpu types: {}.{} carries an unnamed annotation", structName, memberName);
         }
         const std::string_view name = raw;
-        if (name == kAttrArray) {
-            spelling.array = true;
-        } else if (name == kAttrCArray) {
-            spelling.carray = true;
-        } else if (name == kAttrQuat) {
-            spelling.quat = true;
-        } else if (name == kAttrEnum) {
+        if (name == kAttrEnum) {
             spelling.enumName = ReadStringArg(attr, structName, memberName, name);
-        } else if (name == kAttrDefault) {
-            spelling.defaultInit = ReadStringArg(attr, structName, memberName, name);
         } else {
             Fail("gpu types: {}.{} carries [{}], which is not a cxx_abi annotation", structName, memberName, name);
         }
-    }
-    const unsigned spellings = (spelling.array ? 1u : 0u) + (spelling.carray ? 1u : 0u) + (spelling.quat ? 1u : 0u) +
-                               (spelling.enumName.has_value() ? 1u : 0u);
-    if (spellings > 1) {
-        Fail("gpu types: {}.{} carries two C++ spellings; pick one", structName, memberName);
     }
     return spelling;
 }
@@ -269,11 +260,11 @@ auto ReadAlignment(std::string_view structName, std::string_view memberName, sla
     return static_cast<uint32_t>(align);
 }
 
-// The default Slang-kind-to-C++ mapping for one member, overridden by its
-// annotation: Jolt math for the vector/matrix kinds the engine computes
-// with, stdint/std::array for the rest. An annotation may respell the
-// member but never its footprint -- the array arm holds the result against
-// the stride Slang reported, so the shader stays the measure of every size.
+// The Slang-kind-to-C++ mapping for one member, which is now the whole
+// story: a float vector is its Jolt pod lane type, a float4x4 is JPH::Mat44,
+// a fixed array is std::array of its element, and the scalars are stdint. No
+// arm holds the result against anything but the size Slang reported, so the
+// shader stays the measure of every size.
 auto MapMember(
     std::string_view structName, std::string_view memberName, slang::TypeLayoutReflection* layout, const MemberSpelling& spelling
 ) -> CxxType {
@@ -284,8 +275,8 @@ auto MapMember(
     const bool               isFloat32 = scalar == slang::TypeReflection::ScalarType::Float32;
 
     if (kind == Kind::Struct) {
-        if (spelling.array || spelling.carray || spelling.quat || spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is a struct; only [CxxDefault] applies to one", structName, memberName);
+        if (spelling.enumName.has_value()) {
+            Fail("gpu types: {}.{} is a struct; [CxxEnum] applies to int and uint scalars", structName, memberName);
         }
         // Named by the caller: the member's own type, resolved through the
         // nested walk rather than any registry.
@@ -300,8 +291,8 @@ auto MapMember(
         if (layout->getMatrixLayoutMode() != SLANG_MATRIX_LAYOUT_COLUMN_MAJOR) {
             Fail("gpu types: {}.{} is not column-major; the host Mat44 assumes column-major", structName, memberName);
         }
-        if (spelling.array || spelling.carray || spelling.quat || spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is a matrix; matrices map to JPH::Mat44 and take no shape annotation", structName, memberName);
+        if (spelling.enumName.has_value()) {
+            Fail("gpu types: {}.{} is a matrix; [CxxEnum] applies to int and uint scalars", structName, memberName);
         }
         return {.form = CxxForm::Mat, .spelling = std::string {kMat4}, .size = 64, .cxxAlign = 16};
     }
@@ -325,13 +316,12 @@ auto MapMember(
         if (count == 0) {
             Fail("gpu types: {}.{} is unsized; only fixed arrays map", structName, memberName);
         }
-        if (spelling.array || spelling.quat || spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is an array; only [CxxCArray] applies to one", structName, memberName);
+        if (spelling.enumName.has_value()) {
+            Fail("gpu types: {}.{} is an array; [CxxEnum] applies to int and uint scalars", structName, memberName);
         }
-        // The element renders by the same choice as the array: C arrays nest
-        // C-style (float[4][4]), the default nests std::array (of Vec4/Mat44).
-        const MemberSpelling elementSpelling = spelling.carray ? MemberSpelling {.carray = true} : MemberSpelling {};
-        CxxType                element         = MapMember(structName, memberName, elementLayout, elementSpelling);
+        // The element maps by the same table, so a repeat of a float4 is a
+        // std::array of the pod lane type -- no second spelling for repeats.
+        CxxType element = MapMember(structName, memberName, elementLayout, MemberSpelling {});
         if (stride != element.size) {
             Fail(
                 "gpu types: {}.{} strides {} but its element occupies {}; padded elements have no C++ spelling here",
@@ -344,9 +334,6 @@ auto MapMember(
         const uint32_t footprint    = stride * count;
         const uint32_t elementAlign = element.cxxAlign;
         auto           boxed        = std::make_unique<CxxType>(std::move(element));
-        if (spelling.carray) {
-            return {.form = CxxForm::CArray, .element = std::move(boxed), .count = count, .size = footprint, .cxxAlign = elementAlign};
-        }
         return {.form = CxxForm::Array, .element = std::move(boxed), .count = count, .size = footprint, .cxxAlign = elementAlign};
     }
     if (kind == Kind::Vector) {
@@ -360,31 +347,15 @@ auto MapMember(
         if (spelling.enumName.has_value()) {
             Fail("gpu types: {}.{} is a vector; [CxxEnum] applies to int and uint scalars", structName, memberName);
         }
-        if (spelling.quat) {
-            if (components != 4) {
-                Fail("gpu types: {}.{} carries [CxxQuat] but is not a float4", structName, memberName);
-            }
-            return {.form = CxxForm::Quat, .spelling = std::string {kQuat}, .size = 16, .cxxAlign = 16};
-        }
-        if (spelling.carray) {
-            auto lanes = std::make_unique<CxxType>(CxxType {.form = CxxForm::Scalar, .spelling = "float", .size = 4, .cxxAlign = 4});
-            return {
-                .form = CxxForm::CArray, .element = std::move(lanes), .count = components, .size = 4 * components, .cxxAlign = 4
-            };
-        }
-        if (components == 4 && !spelling.array) {
-            return {.form = CxxForm::Vec, .spelling = std::string {kVec4}, .size = 16, .cxxAlign = 16};
-        }
-        auto lanes = std::make_unique<CxxType>(CxxType {.form = CxxForm::Scalar, .spelling = "float", .size = 4, .cxxAlign = 4});
-        return {
-            .form = CxxForm::Array, .element = std::move(lanes), .count = components, .size = 4 * components, .cxxAlign = 4
-        };
+        // The pod lane type: same lanes as the shader, layout 4-byte aligned
+        // and 4/8/12/16 bytes wide, which is what the reflected offsets were
+        // measured with. A float4 landing mid-16-byte-boundary is the shader's
+        // own padding rule, and BuildStruct puts the _pad there.
+        const std::string_view lanes = components == 2 ? kFloat2 : (components == 3 ? kFloat3 : kFloat4);
+        return {.form = CxxForm::Vec, .spelling = std::string {lanes}, .size = 4 * components, .cxxAlign = 4};
     }
     if (kind == Kind::Scalar) {
         using Scalar = slang::TypeReflection::ScalarType;
-        if (spelling.array || spelling.carray || spelling.quat) {
-            Fail("gpu types: {}.{} is a scalar; no shape annotation applies to one", structName, memberName);
-        }
         if (spelling.enumName.has_value()) {
             if (scalar != Scalar::Int32 && scalar != Scalar::UInt32) {
                 Fail("gpu types: {}.{} carries [CxxEnum] but is not an int or uint scalar", structName, memberName);
@@ -498,13 +469,12 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
         cursor                   = offset + footprint;
         def.align                = std::max(def.align, slangAlign);
         def.fields.push_back(Field {
-            .name        = std::string {memberName},
-            .type        = std::move(mapped),
-            .defaultInit = spelling.defaultInit.value_or(std::string {}),
-            .offset      = offset,
-            .size        = footprint,
-            .slangAlign  = slangAlign,
-            .cxxAlign    = cxxAlign,
+            .name       = std::string {memberName},
+            .type       = std::move(mapped),
+            .offset     = offset,
+            .size       = footprint,
+            .slangAlign = slangAlign,
+            .cxxAlign   = cxxAlign,
         });
     }
     if (def.fields.empty()) {
@@ -529,21 +499,29 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 
 // GENERATED by tools/zshader from the gpu_abi module, compiled in-process. Do not edit.
 //
-// Slang's half of the GPU ABI, as C++: every struct gpu_abi.slang wraps,
-// with the offsets, sizes and padding of the compiled module. A Slang edit
-// re-emits this file on the next build; a host compiler that packs
-// differently fails the static_asserts below instead of uploading skewed
-// buffers. GPUMeshlet is intentionally absent -- its ABI is the raw word
-// protocol in instance_data.slang's fetchMeshlet, which no std140/std430
-// declaration of consecutive float3s can spell (see GpuTypes.cpp).
+// Slang's half of the GPU ABI, as C++: every struct gpu_abi.slang wraps that
+// the engine does not define itself, with the offsets, sizes and padding of
+// the compiled module. A Slang edit re-emits this file on the next build.
+//
+// The structs the engine *does* define -- Particle, ParticleEmitterParams,
+// MeshParticleEmitterParams, Light and FrameUniforms, all in
+// include/Zahlen/Render/RenderData.hpp -- are aliased here, and the asserts
+// below hold the hand-written definition against the reflection: same size,
+// every member at the offset Slang seated it. A host compiler that packs
+// differently, or a hand edit that moves a member, fails here instead of
+// uploading skewed buffers. GPUMeshlet is intentionally absent -- its ABI is
+// the raw word protocol in instance_data.slang's fetchMeshlet, which no
+// std140/std430 declaration of consecutive float3s can spell (see
+// GpuTypes.cpp).
 
 #pragma once
 
 #include <Jolt/Jolt.h> // First: Jolt wants Jolt.h before any of its own headers
+#include <Jolt/Math/Float2.h>
+#include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Quat.h>
-#include <Jolt/Math/Vec4.h>
-#include <Zahlen/Render/GpuEnums.hpp> // LightType, ParticleAlignment: the engine enums two fields keep
+#include <Zahlen/Render/RenderData.hpp> // the hand-written half this file aliases
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -561,14 +539,13 @@ auto EmitField(std::string& out, const Field& field, std::string_view structName
         );
         return;
     }
-    const Spelling    spelling = Render(field.type, structName, field.name);
+    const Spelling    spelling  = Render(field.type, structName, field.name);
     const std::string alignAttr = field.slangAlign > field.cxxAlign ? std::format("alignas({}) ", field.slangAlign) : std::string {};
-    const std::string init = field.defaultInit.empty() ? std::string {} : std::format(" = {}", field.defaultInit);
     std::format_to(std::back_inserter(out), "    {}{} {}", alignAttr, spelling.base, field.name);
     for (uint32_t dim: spelling.dims) {
         std::format_to(std::back_inserter(out), "[{}]", dim);
     }
-    std::format_to(std::back_inserter(out), "{}; // offset {}, size {}\n", init, field.offset, field.size);
+    std::format_to(std::back_inserter(out), "; // offset {}, size {}\n", field.offset, field.size);
 }
 
 auto EmitInventory(std::string& out, const std::vector<StructDef>& defs) -> void {
@@ -595,18 +572,40 @@ auto EmitInventory(std::string& out, const std::vector<StructDef>& defs) -> void
     std::format_to(std::back_inserter(out), ">;\n\n}} // namespace ZHLN::GeneratedGpu\n");
 }
 
+// The structs the engine defines by hand, in include/Zahlen/Render/RenderData.hpp.
+// For these the header emits an alias and keeps the asserts; for every other
+// struct it emits the body, since nothing else spells it.
+constexpr std::string_view kHostStructs[] {
+    "Particle", "ParticleEmitterParams", "MeshParticleEmitterParams", "Light", "FrameUniforms"
+};
+
+auto IsHostStruct(std::string_view name) -> bool {
+    return std::ranges::find(kHostStructs, name) != std::end(kHostStructs);
+}
+
 auto EmitStructsHeader(const std::vector<StructDef>& defs) -> std::string {
     std::string text {kStructsPreamble};
     bool        first = true;
     for (const StructDef& def: defs) {
-        std::format_to(std::back_inserter(text), "{}struct alignas({}) {} {{\n", first ? "" : "\n", def.align, def.name);
-        first = false;
-        for (const Field& field: def.fields) {
-            EmitField(text, field, def.name);
+        if (IsHostStruct(def.name)) {
+            std::format_to(
+                std::back_inserter(text),
+                "{}\n// Hand-written in <Zahlen/Render/RenderData.hpp>; the asserts below are the contract.\nusing {} = ::ZHLN::{};\n",
+                first ? "" : "\n",
+                def.name,
+                def.name
+            );
+        } else {
+            std::format_to(std::back_inserter(text), "{}struct alignas({}) {} {{\n", first ? "" : "\n", def.align, def.name);
+            for (const Field& field: def.fields) {
+                EmitField(text, field, def.name);
+            }
+            std::format_to(std::back_inserter(text), "}};\n");
         }
+        first = false;
         std::format_to(
             std::back_inserter(text),
-            "}};\nstatic_assert(sizeof({}) == {}, \"GeneratedGpu::{} does not occupy what Slang reported; the host compiler packs "
+            "static_assert(sizeof({}) == {}, \"GeneratedGpu::{} does not occupy what Slang reported; the host compiler packs "
             "differently\");\n",
             def.name,
             def.size,

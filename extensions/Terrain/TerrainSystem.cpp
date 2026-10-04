@@ -1,0 +1,289 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// extensions/Terrain/TerrainSystem.cpp
+#include "TerrainSystem.hpp"
+#include "TerrainFactory.hpp"
+#include <Zahlen/Components.hpp>
+#include <Zahlen/Core/Format.hpp>
+#include <Zahlen/Engine.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace ZHLN::Terrain {
+
+namespace {
+constexpr size_t MAX_TERRAIN_SLOTS = 1024;
+
+struct TerrainSlot {
+    TerrainData            data;
+    ZHLN::Atomic<uint32_t> generation {1};
+    ZHLN::Atomic<bool>     occupied {false};
+};
+
+std::array<TerrainSlot, MAX_TERRAIN_SLOTS> s_TerrainSlots;
+ZHLN::Mutex                                s_LifecycleMutex {};
+std::vector<TerrainData>                   s_DeferredCleanup;
+} // namespace
+
+TerrainHandle TerrainSystem::RegisterTerrainData(TerrainData data) noexcept {
+    return Lock(s_LifecycleMutex, [&]() -> TerrainHandle {
+        for (size_t i = 0; i < MAX_TERRAIN_SLOTS; ++i) {
+            auto& slot = s_TerrainSlots[i];
+            if (!slot.occupied.load(std::memory_order::relaxed)) {
+                slot.data    = std::move(data);
+                uint32_t gen = slot.generation.load(std::memory_order::relaxed);
+                slot.occupied.store(true, std::memory_order::release);
+
+                uint64_t handleRaw = (static_cast<uint64_t>(gen) << 32) | static_cast<uint64_t>(i + 1);
+                return static_cast<TerrainHandle>(handleRaw);
+            }
+        }
+        ZHLN::LogError("[TerrainSystem] Exceeded maximum terrain slot capacity ({})!", MAX_TERRAIN_SLOTS);
+        return TerrainHandle::Invalid;
+    });
+}
+
+const TerrainData* TerrainSystem::GetTerrainData(TerrainHandle handle) noexcept {
+    if (handle == TerrainHandle::Invalid) {
+        return nullptr;
+    }
+    auto     raw     = static_cast<uint64_t>(handle);
+    uint32_t slotIdx = static_cast<uint32_t>(raw & 0xFFFFFFFF) - 1;
+    auto     gen     = static_cast<uint32_t>(raw >> 32);
+
+    if (slotIdx >= MAX_TERRAIN_SLOTS) {
+        return nullptr;
+    }
+
+    const auto& slot = s_TerrainSlots[slotIdx];
+    if (!slot.occupied.load(std::memory_order::acquire)) {
+        return nullptr;
+    }
+    if (slot.generation.load(std::memory_order::relaxed) != gen) {
+        return nullptr;
+    }
+    return &slot.data;
+}
+
+void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
+    if (handle == TerrainHandle::Invalid) {
+        return;
+    }
+    auto     raw     = static_cast<uint64_t>(handle);
+    uint32_t slotIdx = static_cast<uint32_t>(raw & 0xFFFFFFFF) - 1;
+    auto     gen     = static_cast<uint32_t>(raw >> 32);
+
+    if (slotIdx >= MAX_TERRAIN_SLOTS) {
+        return;
+    }
+
+    Lock(s_LifecycleMutex, [&] {
+        auto& slot = s_TerrainSlots[slotIdx];
+        if (slot.occupied.load(std::memory_order::relaxed) && slot.generation.load(std::memory_order::relaxed) == gen) {
+            slot.occupied.store(false, std::memory_order::release);
+            slot.generation.fetch_add(1, std::memory_order::relaxed);
+
+            // Defer buffer deallocation to ensure active frame sampling remains 100% safe
+            s_DeferredCleanup.push_back(std::move(slot.data));
+            slot.data = {};
+        }
+    });
+}
+
+void TerrainSystem::RegisterCleanup(Engine& engine) {
+    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    static_cast<void>(engine.AddSceneCleanupPass(&Cleanup));
+}
+
+void TerrainSystem::Detach(Engine& engine, Entity entity) {
+    auto& registry = engine.GetRegistry();
+    if (auto terrain = registry.Get<TerrainComponent>(entity)) {
+        UnregisterTerrainData(std::exchange(terrain->terrainHandle, TerrainHandle::Invalid));
+        registry.Remove<TerrainComponent>(entity);
+    }
+}
+
+void TerrainSystem::Attach(Engine& engine, Entity entity, TerrainComponent component) {
+    RegisterCleanup(engine);
+    Detach(engine, entity);
+    engine.GetRegistry().Add(entity, std::move(component));
+}
+
+void TerrainSystem::ReleaseTerrainData(ECS::Registry& registry) {
+    if (registry.GetEntitiesWith<TerrainComponent>().empty()) {
+        return;
+    }
+    for (auto& terrain: registry.GetRawArray<TerrainComponent>()) {
+        UnregisterTerrainData(std::exchange(terrain.terrainHandle, TerrainHandle::Invalid));
+    }
+}
+
+void TerrainSystem::Cleanup(Engine& engine, bool all) {
+    auto& registry = engine.GetRegistry();
+    const auto entities = registry.GetEntitiesWith<TerrainComponent>();
+    if (!entities.empty()) {
+        auto terrains = registry.GetRawArray<TerrainComponent>();
+        for (size_t i = 0; i < entities.size(); ++i) {
+            if (all || registry.Get<Components::PendingDestroy>(entities[i])) {
+                UnregisterTerrainData(std::exchange(terrains[i].terrainHandle, TerrainHandle::Invalid));
+            }
+        }
+    }
+    if (all) {
+        Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
+    }
+}
+
+void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshComponent&, Components::OwnedMeshComponent&> query,
+                           ECS::ResMut<RenderContext> render, ECS::Registry& registry) {
+    // Reclaim retired terrain buffers from previous frames
+    Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
+
+    auto& rc = *render;
+
+    auto entities = query.Entities<TerrainComponent>();
+    auto terrains = query.Raw<TerrainComponent>();
+
+    for (size_t i = 0; i < entities.size(); ++i) {
+        Entity e        = entities[i];
+        auto&  terrain  = terrains[i];
+        if (registry.Get<Components::PendingDestroy>(e)) {
+            continue;
+        }
+        auto meshComp = query.Get<Components::MeshComponent>(e);
+
+        if (!meshComp) {
+            continue;
+        }
+
+        // 1. Zero-allocation asset ID assignment using stack buffer formatting
+        if (meshComp->meshAsset == InvalidAssetID) {
+            std::array<char, 64> buf {};
+            meshComp->meshAsset = HashAssetID(ZHLN::FormatTo(buf, "terrain_mesh_{}", e.index));
+        }
+        if (meshComp->materialAsset == InvalidMaterialID) {
+            std::array<char, 64> buf {};
+            meshComp->materialAsset = HashAssetID(ZHLN::FormatTo(buf, "terrain_mat_{}", e.index));
+        }
+
+        const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
+
+        // 2. Cache clears drop only the lookup. Rebind the scene-owned mesh
+        // without baking a second set of buffers; after device loss the owner
+        // has been invalidated, so rebuild from the CPU heightmap instead.
+        if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
+            auto owned = query.Get<Components::OwnedMeshComponent>(e);
+            if (owned && owned->meshAsset != meshComp->meshAsset) {
+                rc.UnregisterGPUMesh(owned->meshAsset);
+                owned->meshAsset = meshComp->meshAsset;
+            }
+            if (owned && owned->mesh.posBuffer != BufferHandle::Invalid) {
+                rc.RegisterGPUMesh(meshComp->meshAsset, owned->mesh);
+            } else if (tData != nullptr && !tData->heights.empty()) {
+                Mesh tMesh = CreateTerrainMeshFromData(
+                    rc, tData->sampleCount, tData->worldSize, tData->heights.data(), tData->colors.empty() ? nullptr : tData->colors.data()
+                );
+                if (owned) {
+                    rc.DestroyMesh(owned->mesh);
+                    owned->mesh = tMesh;
+                } else {
+                    registry.Add(e, Components::OwnedMeshComponent {.meshAsset = meshComp->meshAsset, .mesh = tMesh});
+                }
+                rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
+            }
+        }
+
+        // 3. Lazy bake or re-bake GPU material if invalidated
+        if (!rc.GetGPUMaterial(meshComp->materialAsset).has_value()) {
+            auto mat            = rc.CreateBasicMaterial().value_or(Material {});
+            mat.roughnessFactor = terrain.roughness;
+            mat.metallicFactor  = terrain.metallic;
+            rc.RegisterGPUMaterial(meshComp->materialAsset, mat);
+        }
+    }
+}
+
+float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept {
+    const auto& reg      = engine.GetRegistry();
+    const auto  entities = reg.GetEntitiesWith<TerrainComponent>();
+    const auto  terrains = reg.GetRawArray<TerrainComponent>();
+
+    for (size_t i = 0; i < entities.size(); ++i) {
+        Entity      e       = entities[i];
+        const auto& terrain = terrains[i];
+
+        // Lock-free O(1) slot resolution
+        const TerrainData* tData = GetTerrainData(terrain.terrainHandle);
+        if (tData == nullptr) {
+            continue;
+        }
+
+        const auto trans    = reg.Get<Components::TransformComponent>(e);
+        JPH::Vec3  pos      = trans ? trans->position : JPH::Vec3::sZero();
+        float       halfSize = tData->worldSize * 0.5f;
+
+        float localX = worldX - pos.GetX();
+        float localZ = worldZ - pos.GetZ();
+
+        if (localX >= -halfSize && localX <= halfSize && localZ >= -halfSize && localZ <= halfSize) {
+            if (tData->heights.empty() || tData->sampleCount < 2) {
+                return pos.GetY();
+            }
+
+            // Map [-halfSize, halfSize] -> [0, sampleCount - 1]
+            float normX = (localX + halfSize) / tData->worldSize * static_cast<float>(tData->sampleCount - 1);
+            float normZ = (localZ + halfSize) / tData->worldSize * static_cast<float>(tData->sampleCount - 1);
+
+            int x0 = std::clamp(static_cast<int>(std::floor(normX)), 0, static_cast<int>(tData->sampleCount - 1));
+            int z0 = std::clamp(static_cast<int>(std::floor(normZ)), 0, static_cast<int>(tData->sampleCount - 1));
+            int x1 = std::min(x0 + 1, static_cast<int>(tData->sampleCount - 1));
+            int z1 = std::min(z0 + 1, static_cast<int>(tData->sampleCount - 1));
+
+            float tx = normX - static_cast<float>(x0);
+            float tz = normZ - static_cast<float>(z0);
+
+            float h00 = tData->heights[x0 + z0 * tData->sampleCount];
+            float h10 = tData->heights[x1 + z0 * tData->sampleCount];
+            float h01 = tData->heights[x0 + z1 * tData->sampleCount];
+            float h11 = tData->heights[x1 + z1 * tData->sampleCount];
+
+            float h0 = h00 + tx * (h10 - h00);
+            float h1 = h01 + tx * (h11 - h01);
+
+            return pos.GetY() + (h0 + tz * (h1 - h0));
+        }
+    }
+
+    return 0.0f;
+}
+
+namespace {
+
+// The bake needs the renderer: it creates GPU meshes and materials for tiles as
+// they come into view and records them on the components. So it is a *render*
+// graph system -- the simulation graph's bundle has no RenderContext, which is
+// what the admission gate says when this is registered on the wrong one. The
+// render graph runs before RenderSystem presents (SystemWiring's FrameScheduler
+// order), so the bake lands in the same frame it was requested.
+void AddSystems(SimGraph& /*updateGraph*/, RenderGraph& renderGraph) {
+    renderGraph.AddSystem<&TerrainSystem::Update>();
+}
+
+} // namespace
+
+void Install(Engine& engine) {
+    TerrainSystem::RegisterCleanup(engine);
+    engine.AddSystemGraphsExtension(&AddSystems);
+}
+
+} // namespace ZHLN::Terrain

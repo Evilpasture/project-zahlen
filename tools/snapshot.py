@@ -141,7 +141,7 @@ def get_git_tracked_files(
         ".toml",
     }
     include_filenames = {"CMakeLists.txt"}
-    exclude_paths = {"scripts/core/fennel.lua"}
+    exclude_paths = {"extensions/Scripting/Lua/scripts/core/fennel.lua"}
 
     # Base ignore paths
     ignore_paths = {"third_party", "extern"}
@@ -152,7 +152,9 @@ def get_git_tracked_files(
     if ignore_tests:
         ignore_paths.add("tests")
     if ignore_extras:
-        ignore_paths.add("extras")
+        # Keep the old flag as a compatibility spelling; optional code now has
+        # three architectural roots rather than a single extras/ directory.
+        ignore_paths.update({"plugins", "extensions", "gameplay"})
     if ignore_samples:
         ignore_paths.add("samples")
     if ignore_configure:
@@ -440,7 +442,11 @@ if __name__ == "__main__":
         "--ignore-tests", action="store_true", help="Ignore the tests/ directory."
     )
     parser.add_argument(
-        "--ignore-extras", action="store_true", help="Ignore the extras/ directory."
+        "--ignore-extras",
+        "--ignore-optional-layers",
+        dest="ignore_extras",
+        action="store_true",
+        help="Ignore plugins/, extensions/, and gameplay/ (legacy alias: --ignore-extras).",
     )
     parser.add_argument(
         "--ignore-samples", action="store_true", help="Ignore the samples/ directory."
@@ -453,7 +459,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ignore-all",
         action="store_true",
-        help="Ignore tools, app, scripts, tests, extras, samples, configure, and .inl files altogether.",
+        help="Ignore tools, app, scripts, tests, optional layers, samples, configure, and .inl files altogether.",
     )
 
     args = parser.parse_args()

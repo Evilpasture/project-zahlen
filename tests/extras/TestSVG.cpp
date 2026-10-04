@@ -3,8 +3,8 @@
 
 // tests/extras/TestSVG.cpp
 //
-// SVG is an optional layer (extras/SVG) with an optional third-party library
-// behind it, so this suite is built only when extras/SVG/CMakeLists.txt found
+// SVG is an optional layer (plugins/SVG) with an optional third-party library
+// behind it, so this suite is built only when plugins/SVG/CMakeLists.txt found
 // resvg and defined zahlen_svg. No resvg, no target, no test: see
 // tests/extras/CMakeLists.txt.
 //
@@ -166,8 +166,8 @@ struct ScratchDir {
 
 struct SVGTestSuite {
     enum class SVGTestError : uint8_t {
-        ParseFailed  ZHLN_ANNOTATION(ZHLN::Description<"extras/SVG refused to parse a document the suite expected it to accept."> {}) = 1,
-        RenderFailed ZHLN_ANNOTATION(ZHLN::Description<"extras/SVG refused to render a document the suite had already parsed."> {}),
+        ParseFailed  ZHLN_ANNOTATION(ZHLN::Description<"plugins/SVG refused to parse a document the suite expected it to accept."> {}) = 1,
+        RenderFailed ZHLN_ANNOTATION(ZHLN::Description<"plugins/SVG refused to render a document the suite had already parsed."> {}),
     };
 
     struct Tests {

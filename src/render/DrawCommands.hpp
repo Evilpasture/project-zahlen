@@ -7,7 +7,7 @@
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include "GpuLayout.hpp"
 #include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstddef>
@@ -73,7 +73,10 @@ struct DrawCommand {
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;
-    std::array<float, 4> morphWeights;
+    JPH::Float4          morphWeights; // no initializer: a default member initializer
+                                       // would make DrawCommand non-trivially
+                                       // constructible, which the assert below
+                                       // forbids. Every construction path fills it.
     DrawFlags            flags;
 };
 

@@ -92,7 +92,7 @@ struct DescriptorHeapsParallelSuite {
 
             // 4 strongly separated material colors.
             struct TestMaterial {
-                std::array<float, 4>   baseColor {};
+                JPH::Float4            baseColor {};
                 std::array<uint8_t, 3> rgb {};
             };
             const std::array<TestMaterial, 4> materials {{

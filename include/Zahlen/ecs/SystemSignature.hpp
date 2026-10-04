@@ -29,18 +29,47 @@ struct QueryArguments<Query<Comps...>> {
     static void ForEach(F&& f) { (f.template operator()<Comps>(), ...); }
 };
 
-template <typename Comp>
-void AppendComponentAccess(std::vector<ComponentAccess>& accesses) {
-    using Raw = std::remove_cvref_t<Comp>;
-    const auto id   = ComponentFamily::GetTypeID<Raw>();
-    const auto mode = std::is_const_v<std::remove_reference_t<Comp>> ? Access::Read : Access::Write;
+inline void AppendAccess(std::vector<ComponentAccess>& accesses, uint32_t id, Access mode) {
     auto it = std::ranges::find_if(accesses, [id](const auto& access) { return access.familyId == id; });
     if (it == accesses.end()) {
         accesses.push_back({id, mode});
     } else if (mode == Access::Write) {
-        it->mode = Access::Write; // multiple queries of the same family
+        it->mode = Access::Write; // the strongest access to one family wins
     }
 }
+
+template <typename Comp>
+void AppendComponentAccess(std::vector<ComponentAccess>& accesses) {
+    using Raw = std::remove_cvref_t<Comp>;
+    AppendAccess(accesses, ComponentFamily::GetTypeID<Raw>(), std::is_const_v<std::remove_reference_t<Comp>> ? Access::Read : Access::Write);
+}
+
+// A service is shared state like any component, and the scheduler has to know
+// about it: `ResMut<RenderContext>` in one system and `Res<RenderContext>` in
+// another is a hazard even though neither names a component family. The token
+// family exists only as a family id -- nothing of this type is ever stored -- so
+// the two systems get an ordering edge without the registry learning a new
+// component. A service that *is* world state is an ordinary component family
+// instead and needs no token: the camera is one (see CameraComponent).
+template <typename T>
+struct ServiceToken {};
+
+template <typename Clean>
+struct ResourceView {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct ResourceView<Res<T>> {
+    static constexpr bool value = true;
+    using Target                = T;
+};
+
+template <typename T>
+struct ResourceView<ResMut<T>> {
+    static constexpr bool value = true;
+    using Target                = T;
+};
 
 } // namespace TemplatedDetail
 
@@ -64,6 +93,15 @@ struct SystemSignature {
                 TemplatedDetail::QueryArguments<Clean>::ForEach([&]<typename Comp>() {
                     TemplatedDetail::AppendComponentAccess<Comp>(accesses);
                 });
+            } else if constexpr (TemplatedDetail::ResourceView<Clean>::value) {
+                using Target = typename TemplatedDetail::ResourceView<Clean>::Target;
+                // The family id is a hash of the type's name, so a service whose
+                // type is not complete here cannot be named; in practice every
+                // service is complete where the systems that use it are declared.
+                if constexpr (CompleteType<Target>) {
+                    constexpr Access mode = std::is_same_v<Clean, ResMut<Target>> ? Access::Write : Access::Read;
+                    TemplatedDetail::AppendAccess(accesses, ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
+                }
             } else if constexpr (std::is_same_v<Param, Registry&> || std::is_same_v<Param, const Registry&>) {
                 // Direct registry access can touch any component, including
                 // families not listed in this system's Query parameters.

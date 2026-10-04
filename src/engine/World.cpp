@@ -3,7 +3,6 @@
 
 #include "ArticulationSystem.hpp"
 #include "Hierarchy.hpp"
-#include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
@@ -27,12 +26,8 @@ enum class WorldInitError : uint8_t {
 struct World::Impl {
     std::unique_ptr<PhysicsContext> physicsContext;
     ECS::Registry                   registry;
-    Camera                          mainCamera;
 
-    std::unique_ptr<ECS::SystemGraph>         updateGraph;
-    std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
-    std::unique_ptr<CullingSystem>            cullingSystem;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
 
     JPH::Array<Entity> visibleEntities;
@@ -56,10 +51,7 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
     impl.joltAcquired = true;
 
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
-    impl.updateGraph         = std::make_unique<ECS::SystemGraph>();
-    impl.renderGraph         = std::make_unique<ECS::SystemGraph>();
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
-    impl.cullingSystem       = std::make_unique<CullingSystem>();
     impl.articulationSystem  = std::make_unique<ArticulationSystem>();
 
     return instance;
@@ -73,10 +65,7 @@ World::~World() {
     _impl->visibleShadowEntities.clear();
     _impl->visibleEntities.clear();
     _impl->articulationSystem.reset();
-    _impl->cullingSystem.reset();
     _impl->mainECB.reset();
-    _impl->renderGraph.reset();
-    _impl->updateGraph.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
     // handles before clearing their components and tearing down Jolt.
@@ -113,28 +102,30 @@ auto World::GetPhysics() -> PhysicsContext& {
     return *_impl->physicsContext;
 }
 auto World::GetCamera() -> Camera& {
-    return _impl->mainCamera;
+    // The camera is world data: the main camera entity carries it. Same contract
+    // the bundle used to state -- a world asked for a camera has one -- but
+    // resolved from the registry instead of being bound into a service slot.
+    const Entity cameraEntity = _impl->registry.SingletonEntity<Components::MainCameraTagComponent>();
+    auto         camera       = _impl->registry.Get<Components::CameraComponent>(cameraEntity);
+    ZHLN::Assert(camera.has_value(), "World::GetCamera(): no main camera entity carrying a CameraComponent");
+    return camera->camera;
 }
 
-auto World::GetUpdateGraph() -> ECS::SystemGraph& {
-    return *_impl->updateGraph;
-}
-auto World::GetRenderGraph() -> ECS::SystemGraph& {
-    return *_impl->renderGraph;
-}
 auto World::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }
 
-auto World::GetCullingSystem() -> CullingSystem& {
-    return *_impl->cullingSystem;
-}
 auto World::GetArticulationSystem() -> ArticulationSystem& {
     return *_impl->articulationSystem;
 }
 
 auto World::GetCullingStats() -> CullingStats& {
-    return _impl->cullingSystem->Stats();
+    // The culling pass publishes here: its counters are read by the overlay, the
+    // crash dump and the render tests, so they are world data. The rest of the
+    // culler is the pass's own state and stays on the pass.
+    auto stats = _impl->registry.GetSingleton<Components::CullingStatsComponent>();
+    ZHLN::Assert(stats.has_value(), "the scene has no CullingStatsComponent singleton: InitializeDefaultScene creates it");
+    return stats->stats;
 }
 
 auto World::GetVisibleEntities() -> JPH::Array<Entity>& {

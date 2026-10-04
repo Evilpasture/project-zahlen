@@ -56,6 +56,10 @@ void EntityCommandBuffer::Reset() noexcept {
         }
     }
     _commands.clear();
+    // Every payload lived in the arena, so the storage the destructors just ran
+    // against is reclaimed in one store. Playback() nulls each payload it
+    // consumed, which is why a Reset after one cannot destroy anything twice.
+    _arena.Reset();
     _tempIndexCounter = 0xF0000000;
 }
 

@@ -15,11 +15,11 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
   can still fall back to the compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
 * **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
-* **resvg (optional)**: `extras/SVG` rasterizes `.svg` documents through [resvg](https://github.com/linebender/resvg)'s C API.
+* **resvg (optional)**: `plugins/SVG` rasterizes `.svg` documents through [resvg](https://github.com/linebender/resvg)'s C API.
   CMake looks for it (CMake package, `resvg.pc`, or a bare prefix) and, when it is not installed, warns and skips that one
   target — everything else still builds. Arch and Homebrew: `resvg`; elsewhere build it with `cargo-c`, or point CMake at an
   existing prefix with `-DRESVG_ROOT=/path/to/prefix`. `-DZHLN_BUILD_SVG=OFF` skips the search.
-* **libcurl (optional)**: `extras/HTTP` fetches over HTTP through [libcurl](https://curl.se/libcurl/)'s easy interface.
+* **libcurl (optional)**: `extensions/net/HTTP` fetches over HTTP through [libcurl](https://curl.se/libcurl/)'s easy interface.
   CMake looks for it (`find_package(CURL)`, `libcurl.pc`, or a bare prefix) and, when it is not installed, warns and skips
   that one target — everything else still builds. Debian and Ubuntu: `libcurl4-openssl-dev`; Fedora: `libcurl-devel`;
   Arch: `curl`; Homebrew and vcpkg: `curl`; or point CMake at an existing prefix with `-DCURL_ROOT=/path/to/prefix`.
@@ -81,6 +81,8 @@ and looks for `data/base.pak` next to the executable. `ZHLN_CACHE_DIR` and
 [include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
 
 ## Architecture
+
+The optional source tree is split by role: `plugins/` contains asset formats and codecs, `extensions/` contains reusable engine subsystems plus network/platform I/O, and `gameplay/` contains domain-specific systems and project integrations. The existing top-level `modules/` remains reserved for Core C++ module interfaces.
 
 For a detailed breakdown of the engine's architecture, frame loop execution order, deferred render graph topology, and scripting IPC protocol, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
 

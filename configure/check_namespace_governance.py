@@ -90,7 +90,9 @@ SOURCE_ROOTS = (
     ROOT / "app",
     ROOT / "tests",
     ROOT / "samples",
-    ROOT / "extras",
+    ROOT / "plugins",
+    ROOT / "extensions",
+    ROOT / "gameplay",
     ROOT / "modules",
     ROOT / "tools",
 )

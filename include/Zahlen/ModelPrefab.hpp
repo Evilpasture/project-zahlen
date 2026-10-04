@@ -43,13 +43,15 @@ struct ModelPart {
     int32_t  nodeIndex     = -1;
     int32_t  skeletonIndex = -1;
 
-    uint32_t morphOffset            = 0;
-    uint32_t activeMorphCount       = 0;
-    float    defaultMorphWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    uint32_t morphOffset      = 0;
+    uint32_t activeMorphCount = 0;
+    // The morph weights travel ModelPart -> MorphTargetComponent -> DrawParams
+    // -> InstanceData; one spelling for the four lanes end to end.
+    JPH::Float4 defaultMorphWeights = {0.0f, 0.0f, 0.0f, 0.0f};
 
-    float boundingRadius = 1.0f;
-    float localMin[3]    = {0.0f, 0.0f, 0.0f};
-    float localMax[3]    = {0.0f, 0.0f, 0.0f};
+    float       boundingRadius = 1.0f;
+    JPH::Float3 localMin       = {0.0f, 0.0f, 0.0f};
+    JPH::Float3 localMax       = {0.0f, 0.0f, 0.0f};
 
     JPH::ShapeRefC meshCollider = nullptr;
     JPH::ShapeRefC boxCollider  = nullptr;

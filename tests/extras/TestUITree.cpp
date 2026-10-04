@@ -3,7 +3,7 @@
 
 // Data-driven GUI trees: the ActionRegistry / PropertyStore tables a document
 // can name, and RenderUITree walking a UINode into Clay without a GPU.
-// Followed the schema out of core when it moved to extras/UI.
+// Followed the schema out of core when it moved to extensions/UI.
 
 #include "TestsFramework.hpp"
 #include <UI/UITree.hpp>

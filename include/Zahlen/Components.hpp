@@ -5,14 +5,16 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Profiler.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/RenderData.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -100,9 +102,9 @@ struct Components {
     };
 
     struct MorphTargetComponent {
-        uint32_t             offset      = 0;
-        uint32_t             activeCount = 0;
-        std::array<float, 4> weights     = {0.0f, 0.0f, 0.0f, 0.0f};
+        uint32_t    offset      = 0;
+        uint32_t    activeCount = 0;
+        JPH::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f}; // the same four lanes DrawParams carries
     };
 
     struct LODComponent {
@@ -153,13 +155,21 @@ struct Components {
     };
     static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
 
+    // The camera -- pose, optics, and the entity that carries them -- is world
+    // data. The engine owns no camera of its own: a camera entity carries this,
+    // and Engine::GetCamera()/World::GetCamera() resolve it from the registry.
     struct CameraComponent {
+        Camera camera {};
+
         JPH::Mat44 viewProj               = JPH::Mat44::sIdentity();
         JPH::Mat44 unjitteredViewProj     = JPH::Mat44::sIdentity();
         JPH::Mat44 prevUnjitteredViewProj = JPH::Mat44::sIdentity();
         JPH::Mat44 frozenViewProj         = JPH::Mat44::sIdentity();
         uint32_t   frameCounter           = 0;
     };
+    // The pose rides in the same storage as the matrices, so it must stay a pod
+    // the SoA sets can memcpy -- the invariant the camera fold relies on.
+    static_assert(std::is_trivially_copyable_v<CameraComponent>);
     struct NameComponent {
         ZHLN::String64 name;
     };
@@ -191,32 +201,39 @@ struct Components {
     struct ShadowSettingsComponent {
         float shadowWidth        = 200.0f;
         int   shadowResolution   = 2048;
-        int   maxPunctualShadows = 1;
+        int   maxPunctualShadows = 0;
         float sunSize            = 0.05f;
     };
+    // The culling pass's published counters. Its *scratch* -- the derived planes
+    // and the freeze-frame corners -- is node state and lives in CullingScratch on
+    // the pass itself. These counters are read by the debug overlay, the crash
+    // dump and the render tests, so they are world data and live here.
+    struct CullingStatsComponent {
+        CullingStats stats;
+    };
     struct PostProcessSettingsComponent {
-        int       giMode            = 1;
+        int       giMode            = 0;
         float     aoRadius          = 0.5f;
         float     aoBias            = 0.05f;
         float     aoPower           = 1.8f;
-        float     giIntensity       = 1.2f;
+        float     giIntensity       = 1.0f;
         int       giSamples         = 8;
         int       useLocalProbe     = 0;
-        float     vignetteIntensity = 1.10f;
+        float     vignetteIntensity = 0.0f;
         float     vignettePower     = 1.50f;
-        float     glowIntensity     = 0.15f;
-        int       enableSSR         = 1;
+        float     glowIntensity     = 0.0f;
+        int       enableSSR         = 0;
         int       enableRTR         = 0;
         int       fullBright        = 0;
 
-        float     exposure          = 0.015f;
-        float     bloomStrength     = 0.5f;
+        float     exposure          = 1.0f;
+        float     bloomStrength     = 0.0f;
         float     contrast          = 1.0f;
         float     saturation        = 1.0f;
-        int       tonemapper        = 1;
+        int       tonemapper        = 3;
         JPH::Vec3 colorFilter       = JPH::Vec3::sReplicate(1.0f);
 
-        float     ambientExposure   = 25.0f;
+        float     ambientExposure   = 1.0f;
         JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
         JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);

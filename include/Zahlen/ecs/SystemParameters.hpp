@@ -4,7 +4,9 @@
 #pragma once
 
 #include <Zahlen/Core/Optional.hpp>
+#include <Zahlen/Core/SoA.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
@@ -14,6 +16,7 @@
 #include <span>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 #include <utility>
 
 namespace ZHLN {
@@ -37,6 +40,7 @@ namespace ECS {
 
 template <typename T>
 struct Res {
+    using Target = T;
     const T* ptr = nullptr;
     [[nodiscard]] const T* operator->() const noexcept { return ptr; }
     [[nodiscard]] const T& operator*() const noexcept { return *ptr; }
@@ -45,6 +49,7 @@ struct Res {
 
 template <typename T>
 struct ResMut {
+    using Target = T;
     static_assert(!std::is_const_v<T>, "ResMut<T> requires a mutable resource");
     T* ptr = nullptr;
     [[nodiscard]] T* operator->() const noexcept { return ptr; }
@@ -57,7 +62,110 @@ struct ResMut {
 template <typename T>
 using OptionRes = ZHLN::Optional<T&>;
 
+// Session state owned by the *node*, not by the world and not by the frame:
+// the system's own scratch and memo, alive from the moment the node is added to
+// the moment it is removed, and reachable by nothing else. Think of a culler's
+// derived planes or a solver's working set.
+//
+// Where the state lives
+// ---------------------
+// The graph allocates one block per node when the node is added, constructs each
+// Local<T> slot in it, hands that block to this node's invocation, and destroys
+// the slots when the node is removed or the graph is cleared. Resolution is by
+// type, so a signature may name each Local<T> once; naming the same T twice is
+// rejected where the system is added, because both would resolve to one slot.
+//
+// Why not a service
+// -----------------
+// A service is shared state: putting a system's private scratch in the service
+// bundle makes it nameable by every other system in the domain, which is what
+// this parameter exists to avoid. And why not a component: components are world
+// data -- trivially relocatable, queryable by gameplay, and part of every hazard
+// the scheduler derives. A culler's planes are none of those things.
+template <typename T>
+struct Local {
+    using Target = T;
+    static_assert(!std::is_const_v<T> && !std::is_reference_v<T>,
+                  "Local<T> owns a T: pass the state type, not a reference, and keep it mutable so the system can advance it");
+    static_assert(std::is_object_v<T>, "Local<T> stores a T");
+
+    T* ptr = nullptr;
+
+    [[nodiscard]] T* operator->() const noexcept { return ptr; }
+    [[nodiscard]] T& operator*() const noexcept { return *ptr; }
+    [[nodiscard]] bool Valid() const noexcept { return ptr != nullptr; }
+};
+
+// A per-worker scratch block of parallel streams, resolved from the worker's own
+// arena (see ZHLN::WorkerScratchPool). Capacity is part of the type rather than a
+// constructor argument because it is a promise the system makes about how much
+// of this data one frame can hold: the arena allocation is exactly the byte
+// count the layout asks for, and an overrun refuses instead of growing.
+//
+// The scratch is a view onto arena memory that the graph resets between frames,
+// so a system may read what it wrote this frame and nothing from the last one.
+template <typename T, size_t Capacity>
+class SoAScratch {
+  public:
+    using Block    = SoABlock<T>;
+    using Streams  = typename Block::Streams;
+    using ProxyRef = typename Block::ProxyRef;
+
+    explicit SoAScratch(void* memory) noexcept: _block(Block::Bind(memory, Capacity)) {
+    }
+
+    [[nodiscard]] auto operator[](size_t index) noexcept -> ProxyRef {
+        return _block[index];
+    }
+
+    [[nodiscard]] auto Get(size_t index) const noexcept -> T {
+        return _block.Get(index);
+    }
+
+    void Set(size_t index, const T& value) noexcept {
+        _block.Set(index, value);
+    }
+
+    // The whole layout at once, for the passes that walk one dense array: a
+    // system that only reads positions reads `GetStreams().position` and touches
+    // nothing else the elements hold.
+    [[nodiscard]] auto GetStreams() noexcept -> Streams& {
+        return _block.GetStreams();
+    }
+
+    [[nodiscard]] auto GetStreams() const noexcept -> const Streams& {
+        return _block.GetStreams();
+    }
+
+    // How much of the block was filled. GetStreams() hands out the whole
+    // capacity; this is what a consumer iterates.
+    [[nodiscard]] auto size() const noexcept -> size_t {
+        return _size;
+    }
+
+    void set_size(size_t size) noexcept {
+        Assert(size <= Capacity, "SoAScratch size exceeds its declared capacity");
+        _size = size;
+    }
+
+    [[nodiscard]] static constexpr auto capacity() noexcept -> size_t {
+        return Capacity;
+    }
+
+  private:
+    Block  _block;
+    size_t _size = 0;
+};
+
 namespace TemplatedDetail {
+
+// A system parameter of the form Optional<T&> / OptionRes<T>: a service the
+// graph may or may not provide. Whether it is provided is answered while
+// compiling (see ParameterResolver), so the absent case is a nullopt the caller
+// asked for rather than a runtime null check.
+template <typename Param>
+concept OptionalResourceParam = requires { typename Param::value_type; } && std::is_object_v<typename Param::value_type> &&
+    std::is_same_v<Param, ZHLN::Optional<typename Param::value_type&>>;
 
 template <typename T>
 using RawComponent = std::remove_cvref_t<T>;
@@ -68,6 +176,52 @@ struct UniqueComponents: std::true_type {};
 template <typename T, typename... Ts>
 struct UniqueComponents<T, Ts...>:
     std::bool_constant<(!std::is_same_v<RawComponent<T>, RawComponent<Ts>> && ...) && UniqueComponents<Ts...>::value> {};
+
+// Is this parameter a Local<...>? Answered on the written type, like every other
+// parameter classification in the resolver table.
+template <typename Param>
+inline constexpr bool IsLocalParam = false;
+template <typename T>
+inline constexpr bool IsLocalParam<Local<T>> = true;
+
+// The family id of a Local<T> slot. Locals are not components and are never
+// stored in the registry; the id exists so a node's state can be found by type
+// with the same by-family lookup the scheduler uses for services.
+template <typename T>
+struct LocalToken {};
+
+// One slot of a node's state: where it is in the block, what lives there, and
+// how to bring it to life and take it down. The construct/destroy pair is
+// instantiated per T by the same walk that computes the offset, so a slot
+// cannot describe one type and construct another.
+struct LocalSlotDesc {
+    uint32_t familyId = 0;
+    uint32_t offset   = 0;
+
+    void (*construct)(void* slot) = nullptr;
+    void (*destroy)(void* slot)   = nullptr;
+};
+
+// The layout of one node's state: one slot per Local<T> in the signature, laid
+// out in declaration order, with the total size and alignment the graph allocates
+// from. Built once per node from the signature; the node's block keeps its copy so
+// teardown destroys exactly what was constructed.
+struct LocalLayout {
+    std::vector<LocalSlotDesc> slots;
+    size_t                     size  = 0;
+    size_t                     align = 1;
+
+    [[nodiscard]] bool Empty() const noexcept { return slots.empty(); }
+};
+
+// What a system is handed to resolve its own state: the block the graph
+// allocated for this node, and the layout its signature asked for. The pointer
+// belongs to one node and one invocation; nothing else may read it.
+struct LocalStateView {
+    void*                block = nullptr;
+    const LocalSlotDesc* slots = nullptr;
+    size_t               count = 0;
+};
 
 } // namespace TemplatedDetail
 

@@ -11,24 +11,32 @@
 
 namespace ZHLN::ECS {
 
-struct SystemGraph::NodePayload {
-    SystemGraph::ExecutionContext* ctx     = nullptr;
+struct SystemGraphCore::NodePayload {
+    SystemGraphCore::ExecutionContext* ctx     = nullptr;
     uint32_t                       nodeIdx = 0;
 };
 
-struct SystemGraph::ExecutionContext {
-    SystemGraph*                      graph   = nullptr;
-    ZHLN::SystemContext*              system  = nullptr;
+struct SystemGraphCore::ExecutionContext {
+    SystemGraphCore*                  graph   = nullptr;
+    void*                             carrier = nullptr;
     TaskSystem::Counter               completionCounter {0};
     std::span<ZHLN::Atomic<uint32_t>> dependencyCounts;
     std::span<NodePayload>            payloads;
 };
 
-void SystemGraph::AddSystem(SystemInfo info) {
+void SystemGraphCore::AddSystem(SystemInfo info) {
     _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    AdoptLocal(_nodes.back());
 }
 
-bool SystemGraph::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
+// The node's state is the graph's to own: it is allocated from the layout the
+// signature produced, and the block keeps the layout so teardown knows what to
+// destroy. A node whose system names no Local<T> allocates nothing.
+void SystemGraphCore::AdoptLocal(Node& node) {
+    node.local.Adopt(node.info.local);
+}
+
+bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
     if (info.name == nullptr || beforeSystem.empty()) {
         return false;
     }
@@ -41,11 +49,12 @@ bool SystemGraph::AddSystemBefore(SystemInfo info, std::string_view beforeSystem
     if (anchor == _nodes.end()) {
         return false;
     }
-    _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    auto inserted = _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    AdoptLocal(*inserted);
     return true;
 }
 
-void SystemGraph::DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses) {
+void SystemGraphCore::DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses) {
     if (label == nullptr || accesses.empty()) {
         return;
     }
@@ -58,7 +67,7 @@ void SystemGraph::DeclareExternalWrites(const char* label, std::vector<Component
     );
 }
 
-[[nodiscard]] bool SystemGraph::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
+[[nodiscard]] bool SystemGraphCore::HasConflict(const SystemInfo& systemA, const SystemInfo& systemB) noexcept {
     for (const auto& accA: systemA.access_pattern) {
         for (const auto& accB: systemB.access_pattern) {
             if (accA.familyId == accB.familyId || accA.familyId == AllComponents || accB.familyId == AllComponents) {
@@ -71,7 +80,7 @@ void SystemGraph::DeclareExternalWrites(const char* label, std::vector<Component
     return false;
 }
 
-void SystemGraph::Compile() {
+void SystemGraphCore::Compile() {
     _entryNodes.clear();
 
     for (auto& node: _nodes) {
@@ -92,7 +101,7 @@ void SystemGraph::Compile() {
     }
 }
 
-void SystemGraph::Execute(ZHLN::SystemContext& systemCtx) {
+void SystemGraphCore::Execute(void* carrier) {
     if (_nodes.empty()) {
         return;
     }
@@ -119,7 +128,7 @@ void SystemGraph::Execute(ZHLN::SystemContext& systemCtx) {
         payloadsSpan = std::span<NodePayload>(heapPayloads.data(), nodeCount);
     }
 
-    ExecutionContext ctx {.graph = this, .system = &systemCtx, .completionCounter = {0}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
+    ExecutionContext ctx {.graph = this, .carrier = carrier, .completionCounter = {0}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
 
     for (uint32_t i = 0; i < nodeCount; ++i) {
         ctx.dependencyCounts[i].store(_nodes[i].initialDependencyCount, std::memory_order::relaxed);
@@ -152,16 +161,24 @@ void SystemGraph::Execute(ZHLN::SystemContext& systemCtx) {
     TaskSystem::Wait(&ctx.completionCounter);
 }
 
-void SystemGraph::TaskThunk(void* arg) {
+void SystemGraphCore::TaskThunk(void* arg) {
     auto* payload = static_cast<NodePayload*>(arg);
     payload->ctx->graph->DispatchNode(*payload->ctx, payload->nodeIdx);
 }
 
-void SystemGraph::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
+void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
     const Node& node = _nodes[nodeIdx];
 
-    if (node.info.enabled && node.info.update_func != nullptr && ctx.system != nullptr) {
-        node.info.update_func(*ctx.system);
+    if (node.info.enabled && node.info.update_func != nullptr && ctx.carrier != nullptr) {
+        // Built here, on this dispatcher's own stack: the carrier is shared by
+        // every node, the state is not.
+        SystemCall call {
+            .carrier   = ctx.carrier,
+            .local     = node.local.Pointer(),
+            .slots     = node.local.Slots(),
+            .slotCount = node.local.SlotCount(),
+        };
+        node.info.update_func(&call);
     }
 
     const size_t depCount = node.dependents.size();
@@ -195,7 +212,7 @@ void SystemGraph::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
     ctx.completionCounter.value.fetch_sub(1, std::memory_order::release);
 }
 
-void SystemGraph::SetSystemEnabled(std::string_view name, bool enabled) noexcept {
+void SystemGraphCore::SetSystemEnabled(std::string_view name, bool enabled) noexcept {
     for (auto& node: _nodes) {
         if (std::string_view(node.info.name) == name) {
             node.info.enabled = enabled;
@@ -204,7 +221,7 @@ void SystemGraph::SetSystemEnabled(std::string_view name, bool enabled) noexcept
     }
 }
 
-bool SystemGraph::IsSystemEnabled(std::string_view name) const noexcept {
+bool SystemGraphCore::IsSystemEnabled(std::string_view name) const noexcept {
     for (const auto& node: _nodes) {
         if (std::string_view(node.info.name) == name) {
             return node.info.enabled;
@@ -213,15 +230,17 @@ bool SystemGraph::IsSystemEnabled(std::string_view name) const noexcept {
     return false;
 }
 
-size_t SystemGraph::GetSystemCount() const noexcept {
+size_t SystemGraphCore::GetSystemCount() const noexcept {
     return _nodes.size();
 }
 
-bool SystemGraph::IsEmpty() const noexcept {
+bool SystemGraphCore::IsEmpty() const noexcept {
     return _nodes.empty();
 }
 
-void SystemGraph::Clear() noexcept {
+void SystemGraphCore::Clear() noexcept {
+    // Clearing the nodes destroys the state each one owned, because the storage
+    // lives in the node rather than beside it.
     _nodes.clear();
     _entryNodes.clear();
 }

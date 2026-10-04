@@ -12,13 +12,12 @@
 // It is a header because two binaries share it. tests/assets/TestCooker.cpp
 // drives the cooker end to end and links the core engine alone; the glTF
 // container check lives in tests/extras/TestCookerGLB.cpp, because reading the
-// JSON chunk back needs extras/json. Each binary includes this exactly once, so
+// JSON chunk back needs plugins/json. Each binary includes this exactly once, so
 // the internal-linkage helpers below are defined once per process.
 //
 // Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Render/GpuLayout.hpp> // ZHLN::Light, the generated GPU struct this fixture fills
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Render/Types.hpp>

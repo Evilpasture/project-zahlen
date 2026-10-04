@@ -488,7 +488,17 @@ struct RenderContext::Impl {
     GeometryManager geometry;
 
     DrawQueueManager   queues;
+
+    // Authored particles, packed once per UploadParticles call: the caller's
+    // descriptions are not the storage layout, so they are converted here.
+    ZHLN::Array<Particle> particleStaging;
+
     ZHLN::Array<Light> mappedLights;
+
+    // SetLights takes descriptions; this holds the packed structs for the frame
+    // a pass is about to upload, so the conversion happens once per frame
+    // instead of per consumer.
+    ZHLN::Array<Light> gpuLights;
 
     uint32_t packedLightCount = 0;
 
@@ -746,8 +756,8 @@ struct RenderContext::Impl {
     struct MeshParticleRenderPush {
         VkDeviceAddress      particleBufferAddr;
         VkDeviceAddress      posAddress;
-        std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-        std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+        JPH::Float4          baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+        JPH::Float4          emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
         VkDeviceAddress      tangentFrameAddress;
         VkDeviceAddress      surfaceAddress;
         VkDeviceAddress      iboAddress;
@@ -805,7 +815,7 @@ struct RenderContext::Impl {
         uint32_t        jointOffset;
         uint32_t        morphOffset;
         uint32_t        activeMorphCount;
-        float           morphWeights[4];
+        JPH::Float4     morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
     };
     static_assert(offsetof(SkinningConstants, inFrameAddr) == 8);
     static_assert(offsetof(SkinningConstants, outFrameAddr) == 32);

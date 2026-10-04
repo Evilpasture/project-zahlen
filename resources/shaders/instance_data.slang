@@ -34,12 +34,9 @@ public struct InstanceData {
     public float3 localCenter;
     public uint _paddingCenter;
 
-    [CxxArray]
     public float4 morphWeights;
-    [CxxArray]
     public float4 baseColorFactor;
 
-    [CxxArray]
     public float4 emissiveFactor;
 
     public uint64_t meshletAddress;
@@ -58,7 +55,6 @@ public struct InstanceData {
 
     // Linear-space sheen RGB and independent alpha-channel roughness. A zero
     // color disables the layer; these fields are not part of the film/coat union.
-    [CxxArray]
     public float4 sheenParams;
     public uint sheenColorTexIndex;
     public uint sheenRoughnessTexIndex;

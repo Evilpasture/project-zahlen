@@ -123,7 +123,7 @@ option(ZHLN_GRAPH_VISUALIZE
 option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
 option(ZHLN_BUILD_EXTRAS
-       "Build first-party engine feature modules and VFX toolkits" ON)
+       "Build optional asset plugins, engine extensions, and gameplay systems" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_compile_definitions(ZHLN_DEBUG=1)
@@ -361,7 +361,7 @@ if(ZHLN_BUILD_EXTRAS)
 else()
   message(
     STATUS
-      "Skipping zahlen_ui_editor: the UI document schema lives in extras (ZHLN_BUILD_EXTRAS=OFF)"
+      "Skipping zahlen_ui_editor: the UI document schema is an optional extension (ZHLN_BUILD_EXTRAS=OFF)"
   )
 endif()
 
@@ -408,8 +408,43 @@ zahlen_enable_reflection(zshader)
 
 zahlen_enable_reflection(HostBlitSwapchain)
 
-if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
-  add_subdirectory(extras)
+if(ZHLN_BUILD_EXTRAS)
+  # Keep the optional layers distinct in both the source tree and build graph.
+  # Plugins establish the shared serializer first; extensions then provide the
+  # reusable runtime/network systems; gameplay composes those targets. Lua's
+  # ProjectLight bindings need DataModel, so its runtime is configured last.
+  add_subdirectory(plugins)
+  add_subdirectory(extensions)
+  add_subdirectory(gameplay)
+  if(TARGET zahlen_scripting AND TARGET zahlen_datamodel)
+    add_subdirectory(extensions/Scripting/Lua)
+  endif()
+
+  # UITOML's public surface names GUI::UINode, so serialization publishes the
+  # schema after both sibling targets exist. Keep the longstanding aggregate
+  # target as a downstream compatibility surface; in-tree targets link the
+  # specific capability they use.
+  if(TARGET zahlen_serialization AND TARGET zahlen_ui_schema)
+    target_link_libraries(zahlen_serialization PUBLIC zahlen_ui_schema)
+  endif()
+  add_library(zahlen_extras INTERFACE)
+  target_link_libraries(zahlen_extras INTERFACE
+    zahlen_animation
+    zahlen_network
+    zahlen_datamodel
+    zahlen_vfx
+    zahlen_alife
+    zahlen_gltf
+    zahlen_serialization
+    zahlen_character_controller
+    zahlen_interaction
+    zahlen_terrain
+    zahlen_fallback_scene
+    zahlen_fonts
+    zahlen_ui_schema
+    zahlen_camera
+    zahlen_ragdoll_authoring
+  )
 
   if(TARGET zahlen_scripting_lua)
     target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
@@ -461,6 +496,32 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
     target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
     target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
+  endif()
+  # Keep the default Zahlen composition root untouched. The project-light
+  # bridge gets its own opt-in application entrypoint and CLI/config lifecycle.
+  if(TARGET zahlen_project_light_client)
+    add_executable(zahlen_project_light_app EXCLUDE_FROM_ALL app/ProjectLightClientMain.cpp)
+    set_target_properties(zahlen_project_light_app PROPERTIES
+      CXX_STANDARD 26
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+      OUTPUT_NAME "project-light-client"
+    )
+    target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
+    target_link_libraries(zahlen_project_light_app PRIVATE
+      zahlen_engine
+      Jolt
+      zahlen_project_light_client
+      zahlen_character_controller
+      zahlen_camera
+      zahlen_warnings
+    )
+    add_dependencies(zahlen_project_light_app link_resources)
+    zahlen_add_runtime_dlls(zahlen_project_light_app)
+    zahlen_enable_reflection(zahlen_project_light_app)
+    if(USE_SANITIZERS)
+      zahlen_install_sanitizer_runtime(zahlen_project_light_app)
+    endif()
   endif()
 endif()
 

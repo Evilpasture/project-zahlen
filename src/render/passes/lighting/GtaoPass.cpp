@@ -43,7 +43,7 @@ void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
     const GtaoPushConstants push {
         .halfRes     = {impl.graphResources.ao.extent.width, impl.graphResources.ao.extent.height},
         .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
-        .time        = pc.camPos[3],
+        .time        = pc.camPos.w,
         .aoRadius    = pc.aoRadius,
         .aoBias      = pc.aoBias,
         .aoPower     = pc.aoPower,

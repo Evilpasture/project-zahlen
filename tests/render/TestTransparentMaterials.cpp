@@ -58,9 +58,9 @@ using ZHLN::Test::Image::SubRegionStats;
 constexpr NormalizedRect kThroughPane {.x0 = 0.42, .y0 = 0.42, .x1 = 0.58, .y1 = 0.58};
 constexpr NormalizedRect kWallOnly {.x0 = 0.12, .y0 = 0.42, .x1 = 0.24, .y1 = 0.58};
 
-constexpr std::array<float, 4> kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
-constexpr std::array<float, 4> kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
-constexpr std::array<float, 4> kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
+const JPH::Float4 kWallRed {1.0f, 0.05f, 0.05f, 1.0f};
+const JPH::Float4 kPaneCyan {0.05f, 0.85f, 0.95f, 0.40f};
+const JPH::Float4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
 
 enum class PaneKind : uint8_t { None, Glass, Opaque };
 

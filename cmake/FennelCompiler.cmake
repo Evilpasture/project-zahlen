@@ -4,7 +4,7 @@
 # cmake/FennelCompiler.cmake
 #
 # --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
-# Prefer the vendored Fennel library (extras/Scripting/Lua/scripts/core/fennel.lua)
+# Prefer the vendored Fennel library (extensions/Scripting/Lua/scripts/core/fennel.lua)
 # driven by LuaJIT. A host `fennel` on PATH is not required. -DFENNEL_BIN= still
 # overrides if someone wants a system compiler.
 #
@@ -13,7 +13,7 @@
 # loads from the build tree.
 
 set(ZHLN_FENNEL_LUA
-    "${CMAKE_SOURCE_DIR}/extras/Scripting/Lua/scripts/core/fennel.lua")
+    "${CMAKE_SOURCE_DIR}/extensions/Scripting/Lua/scripts/core/fennel.lua")
 set(ZHLN_FENNELC "${CMAKE_SOURCE_DIR}/tools/fennelc.lua")
 set(ZHLN_FENNEL_DEPENDS "")
 
@@ -49,9 +49,9 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
         # ZHLN_COMPILED_SCRIPTS_DIR, which is the build tree, so the build has to
         # mirror the source path from its `scripts` component onwards rather than
         # from the repository root. While these sources lived at <root>/scripts
-        # the two readings agreed; now that they live under extras/Scripting/Lua,
+        # the two readings agreed; now that they live under extensions/Scripting/Lua,
         # mirroring the whole path puts the compiled modules in
-        # build/extras/Scripting/Lua/scripts/, which is on no package.path, and
+        # build/extensions/Scripting/Lua/scripts/, which is on no package.path, and
         # every `require 'scripts.core.*'` misses. The match is anchored at a
         # path boundary, so a directory that merely ends in the letters --
         # myscripts/ -- is not one, and a source tree with no `scripts` component

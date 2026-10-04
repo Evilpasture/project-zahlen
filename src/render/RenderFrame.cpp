@@ -114,7 +114,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
                 .activeMorphCount = drawCmd.activeMorphCount,
-                .morphWeights     = {drawCmd.morphWeights[0], drawCmd.morphWeights[1], drawCmd.morphWeights[2], drawCmd.morphWeights[3]}
+                .morphWeights     = drawCmd.morphWeights
             };
 
             skinningPass.PushConstants<Shaders::Modules::SkinningCS>(cmd, pcs);
@@ -222,10 +222,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.viewProj           = view.viewProjMatrix;
     currentUniforms.unjitteredViewProj = unjittered;
     currentUniforms.invViewProj        = unjittered.Inversed();
-    currentUniforms.camPos[0]          = view.worldPosition.GetX();
-    currentUniforms.camPos[1]          = view.worldPosition.GetY();
-    currentUniforms.camPos[2]          = view.worldPosition.GetZ();
-    currentUniforms.camPos[3]          = view.time;
+    currentUniforms.camPos = JPH::Float4 {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time};
 
     auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator.Get());
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
@@ -234,7 +231,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
         gpu->unjitteredViewProj = unjittered;
         gpu->invViewProj        = unjittered.Inversed();
         gpu->invProj            = view.projMatrix.Inversed();
-        std::memcpy(&gpu->camPos[0], &currentUniforms.camPos[0], sizeof(float) * 4);
+        gpu->camPos = currentUniforms.camPos;
     }
 }
 

@@ -5,7 +5,7 @@
 //
 // The composition root. It lives outside src/ because wiring an engine together
 // means naming the optional layers it runs with, and the core library may not
-// know extras exist. See include/ARCHITECTURE.md 1.2.
+// know optional layers exist. See include/ARCHITECTURE.md 1.2.
 #include "engine/Platform.hpp"
 #if defined(ZHLN_HAS_SCRIPTING)
 // Core has no scripting of its own; the composition root is what names the
@@ -43,9 +43,9 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #if defined(ZHLN_HAS_SCENE_TOML)
-// The document layer is an optional extra, and the composition root is the one
-// place allowed to name it: core may not reach into extras
-// (configure/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
+// The document layer is an optional plugin, and the composition root is the one
+// place allowed to name it: Core may not reach into any optional layer
+// (configure/check_core_layer_boundary.py). SceneTOML.hpp is what turns a core
 // ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>

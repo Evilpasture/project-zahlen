@@ -113,10 +113,7 @@ struct ViewmodelTestSuite {
 
             // 2. Spawn viewmodel weapon box in front of camera (-Z direction)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor[0] = 0.0f;
-            vmMat.baseColorFactor[1] = 1.0f;
-            vmMat.baseColorFactor[2] = 0.5f;
-            vmMat.baseColorFactor[3] = 1.0f;
+            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 0.5f, 1.0f};
 
             const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.08f, 0.08f, 0.35f),
@@ -177,10 +174,7 @@ struct ViewmodelTestSuite {
 
             // 2. Solid Dark Wall directly in front of camera (at Z = -2.0m, dimensions 8x8m)
             ZHLN::Material wallMat;
-            wallMat.baseColorFactor[0] = 0.15f;
-            wallMat.baseColorFactor[1] = 0.15f;
-            wallMat.baseColorFactor[2] = 0.15f;
-            wallMat.baseColorFactor[3] = 1.0f;
+            wallMat.baseColorFactor    = JPH::Float4 {0.15f, 0.15f, 0.15f, 1.0f};
 
             const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(4.0f, 4.0f, 0.2f),
@@ -190,10 +184,7 @@ struct ViewmodelTestSuite {
 
             // 3. Vibrant Cyan Viewmodel Object placed in front of camera (Z = +1.2m in world, 0.8m from camera)
             ZHLN::Material vmMat;
-            vmMat.baseColorFactor[0] = 0.0f;
-            vmMat.baseColorFactor[1] = 1.0f;
-            vmMat.baseColorFactor[2] = 1.0f;
-            vmMat.baseColorFactor[3] = 1.0f;
+            vmMat.baseColorFactor    = JPH::Float4 {0.0f, 1.0f, 1.0f, 1.0f};
 
             const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.3f, 0.3f, 0.3f),

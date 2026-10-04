@@ -28,7 +28,6 @@ set(RAW_ENGINE_SOURCES
     system/CullingSystem.cpp
     system/PhysicsSystem.cpp
     system/LODSystem.cpp
-    system/ParticleSystem.cpp
     system/SceneResources.cpp
     system/SceneCleanupSystem.cpp
     CommandLine.cpp

@@ -14,16 +14,18 @@ namespace ZHLN {
 
 void CameraSystem::Update(Engine& engine, float dt, float alpha) {
     const auto vp = engine.GetRenderContext().GetViewport();
-    Update(engine.GetRegistry(), engine.GetCamera(), Extent2D {vp.width, vp.height}, dt, alpha);
+    Update(engine.GetRegistry(), Extent2D {vp.width, vp.height}, dt, alpha);
 }
 
-void CameraSystem::Update(ECS::Registry& reg, Camera& cam, Extent2D res, float , float ) {
+void CameraSystem::Update(ECS::Registry& reg, Extent2D res, float , float ) {
     if (res.width == 0 || res.height == 0) {
         return;
     }
 
     for (Entity e: reg.GetEntitiesWith<Components::CameraComponent>()) {
         if (auto cComp = reg.Get<Components::CameraComponent>(e)) {
+            // Each camera entity projects its own pose: no shared camera.
+            const Camera& cam = cComp->camera;
             if (cComp->frameCounter == 0) {
                 cComp->prevUnjitteredViewProj = cam.GetProjectionMatrix(static_cast<float>(res.width) / res.height) * cam.GetViewMatrix();
                 cComp->unjitteredViewProj     = cComp->prevUnjitteredViewProj;

@@ -5,18 +5,17 @@
 //
 // Headless renderer for the Khronos glTF-Render-Fidelity-Generator suite.
 //
-// The contract, in one sentence: illuminate one glTF asset with nothing but a
-// standardized environment (no sun, no point lights, no floor plane, no ACES
-// grade, no bloom, no vignette), view it through a strictly defined camera
-// orbit, and write a 768x768 still the generator can diff against its reference
-// goldens (Blender Cycles, Filament, Dassault STELLAR, <model-viewer>).
+// The contract, in one sentence: illuminate one glTF asset with the scenario's
+// standardized environment (no added sun, point lights, or floor plane), view
+// it through the scenario camera, use the glTF Sample Viewer's fidelity-wrapper
+// display transform (not its separate Neutral UI default), and capture a still
+// the generator can diff against its reference goldens.
 //
 // This is deliberately NOT RemoteGLBSample: that sample's "looked good" came
-// from hardcoded studio cheats -- a forced 0.08 exposure, ACES tonemapping, a
-// 4x scaled SH sky, an extra sun with two punctual fills, and a 0.03-roughness
-// mirror floor -- none of which exist in a conformance render. This harness
-// builds no studio at all, neutralizes every artistic grade, and authors the
-// camera directly from the scenario's spherical orbit.
+// from a hand-tuned studio profile -- 0.08 exposure, 4x SH fill, an extra sun
+// with two punctual fills, and a 0.03-roughness mirror floor. This harness
+// builds no studio; it uses the generator-selected display transform and
+// authors the camera directly from the scenario's spherical orbit.
 //
 /* Usage:
  *
@@ -51,9 +50,9 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
-// The extras this harness consumes. Optional targets -- no glTF importer, no
-// serialization; no binary -- and samples/CMakeLists.txt skips a sample whose
-// extras were not built, so none of the includes needs a guard here.
+// The optional layer targets this harness consumes. They remain independent of
+// Core. samples/CMakeLists.txt skips the sample when a required target is absent,
+// so these includes do not need target guards.
 #include <AssetCooking/RadianceDecoder.hpp>
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
@@ -316,10 +315,12 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // CONFORMANCE SETTINGS
 // ============================================================================
 
-// The conformance look: neutral tone mapping, 1:1 exposure, no bloom, no
+// The Khronos fidelity generator's glTF Sample Viewer look: factor-1 exposure,
+// ACES Hill RRT+ODT with its historical 1/0.6 exposure boost, no bloom, no
 // vignette, no contrast/SAT grade, no AO/GI term over the IBL, no SSR/RTR
-// reflections, spatial SMAA (without TAA's jitter/history), and no scene lights
-// (this function builds no studio; initialization never made any).
+// reflections, spatial SMAA (without TAA's jitter/history), and no added studio
+// lights. The viewer's interactive default is PBR Neutral; its generator wrapper
+// explicitly overrides that with ACES_HILL_EXPOSURE_BOOST.
 //
 // `ambientScale` is the lighting escape hatch. It scales the baked SH and the
 // prefiltered cube at shade time (FrameUniforms::ambientExposure); it is not
@@ -335,11 +336,10 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     ZHLN::GraphicsSettings gfx {};
     gfx.ApplyPreset(ZHLN::QualityLevel::High);
 
-    // Final blit: raw linear sRGB through the Khronos PBR Neutral curve
-    // (blit.slang: 0 linear, 1 ACES, 2 Reinhard, 3 Neutral). No exposure
-    // multiplier, no bloom bleed, no vignette, no grade.
+    // Final blit: the generator's ACES_HILL_EXPOSURE_BOOST path (index 4 in
+    // blit.slang). `exposure` remains 1.0; the curve applies the 1/0.6 boost.
     gfx.post.exposure          = 1.0f;
-    gfx.post.tonemapper        = 3;
+    gfx.post.tonemapper        = 4;
     gfx.post.bloomStrength     = 0.0f;
     gfx.post.glowIntensity     = 0.0f;
     gfx.post.vignetteIntensity = 0.0f;
@@ -571,12 +571,12 @@ enum class DiagnosticCapture {
             // zero), removing albedo removes diffuse SH but preserves F0=0.04,
             // normals, roughness, AO, and specular IBL. Not a specular-only
             // view of metallic materials: their F0 comes from base color.
-            material->baseColorFactor[0] = 0.0f;
-            material->baseColorFactor[1] = 0.0f;
-            material->baseColorFactor[2] = 0.0f;
-            material->emissiveFactor[0]  = 0.0f;
-            material->emissiveFactor[1]  = 0.0f;
-            material->emissiveFactor[2]  = 0.0f;
+            material->baseColorFactor.x  = 0.0f;
+            material->baseColorFactor.y  = 0.0f;
+            material->baseColorFactor.z  = 0.0f;
+            material->emissiveFactor.x   = 0.0f;
+            material->emissiveFactor.y   = 0.0f;
+            material->emissiveFactor.z   = 0.0f;
             renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
         }
     }

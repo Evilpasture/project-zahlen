@@ -5,7 +5,7 @@
 # ZHLN.CombatFX, TestExplosion imports ZHLN.Explosions, TestLightning imports
 # ZHLN.Lightning -- so the loop links zahlen_vfx and the guard is on that target.
 # A future suite here that reaches into another domain needs its own link added
-# explicitly; the list below deliberately does not hand every suite all of extras.
+# explicitly; the list below deliberately does not hand every suite every optional target.
 if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_vfx)
     return()
 endif()
@@ -44,7 +44,7 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
-        ${PROJECT_SOURCE_DIR}/extras
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
     )
 
     zahlen_enable_reflection(${TARGET_NAME})

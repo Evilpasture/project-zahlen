@@ -15,7 +15,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE zahlen_asset_cooking zahlen_engine)
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/extras
+    ${PROJECT_SOURCE_DIR}/plugins
 )
 zahlen_enable_reflection(${TARGET_NAME})
 if(USE_SANITIZERS)

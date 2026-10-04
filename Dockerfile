@@ -116,7 +116,7 @@ WORKDIR /app
 #
 # ./scripts is the tree the build assembles -- Fennel compiled to Lua, the
 # generated ffi_cdef_generated.lua and the static script files -- and not a
-# source directory: the sources moved to extras/Scripting/Lua/scripts in the
+# source directory: the sources moved to extensions/Scripting/Lua/scripts in the
 # layout refactor, so the top-level scripts directory this used to copy is gone.
 # ZHLN_COMPILED_SCRIPTS_DIR is the build tree, which makes build/scripts the tree
 # that `require 'scripts.core.*'` resolves against.
