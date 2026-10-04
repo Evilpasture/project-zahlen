@@ -94,6 +94,17 @@ the `kGpuCullingMax*` budgets, `WorkerCmdContext` (parallel-recorder plumbing),
 — the primary template lives in `src/vulkan/graph/RenderGraph.hpp:749`, so that
 pair belongs with step 4, not with draw payloads.
 
+**Update (sixth cut, the type unification):** the two halves are one struct now.
+`ParticleEmitterParams`, `MeshParticleEmitterParams`, `Light`, `FrameUniforms` and
+`Particle` are hand-written in `include/Zahlen/Render/RenderData.hpp` with the pod
+lane types (`JPH::Float2/3/4`, `JPH::Mat44`, `std::array<T, N>`), and
+`GeneratedGpuTypes.hpp` aliases them and asserts every member offset against
+Slang's reflection. `ToGpu`, `LayoutConvert.cpp` and the five `*Desc` description
+types are gone, and `[CxxArray]`/`[CxxCArray]`/`[CxxQuat]`/`[CxxDefault]` went
+with them. The `GpuLayout.hpp` rule below still holds, with one struct fewer:
+`InstanceData`, `Particle3D`, `ClusterBounds`, `ClusterVolume` are the only
+generated types left in it.
+
 Two include rules are what make the header compile-checkable on its own:
 - It includes `"GpuLayout.hpp"` (renderer-internal since the public-API
   redesign; it was `<Zahlen/Render/GpuLayout.hpp>`), where `InstanceData` comes

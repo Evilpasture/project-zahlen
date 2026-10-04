@@ -114,16 +114,16 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto MeshParticleStride() const noexcept -> uint32_t;
 
     // Descriptions, not GPU layouts: the renderer converts them at the boundary
-    // (src/render/LayoutConvert.cpp), so the shader-facing structs never appear
+    // (one definition, asserted against Slang by the generated header), so they never appear
     // in a public header.
-    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc);
+    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc);
 
     // Author-side particle upload: the caller describes particles, the renderer
     // packs them into its own storage layout and writes the buffer. Mesh
     // particles have no author-side path -- they are produced on the GPU by
     // MeshParticleUpdatePass from their emitter's parameters.
-    void UploadParticles(BufferHandle gpuBuffer, std::span<const ParticleDesc> particles) noexcept;
-    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat);
+    void UploadParticles(BufferHandle gpuBuffer, std::span<const Particle> particles) noexcept;
+    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& desc, AssetID mesh, MaterialID mat);
 
     // Raw byte streams declare their element stride; typed spans derive it.
     [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
@@ -233,7 +233,7 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
-    void SetFrameData(const Camera& cam, const FrameViewData& view, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+    void SetFrameData(const Camera& cam, const FrameUniforms& view, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
     void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
     void ClearDrawQueues() noexcept;
@@ -244,7 +244,7 @@ class ZHLN_API RenderContext {
 
     void SetGISettings(const GISettings& settings) noexcept;
     void SetAAState(const AAState& state);
-    void SetLights(std::span<const LightDesc> lights) noexcept;
+    void SetLights(std::span<const Light> lights) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;

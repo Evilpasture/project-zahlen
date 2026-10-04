@@ -843,9 +843,9 @@ export class ExplosionSystem {
     }
 
     static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
-        // Authored particles, as descriptions: the renderer packs them into its
-        // own storage layout (RenderContext::UploadParticles).
-        thread_local std::vector<ParticleDesc> t_gpuScratch;
+        // Authored particles in the shader's own element: UploadParticles takes
+        // the same type the buffer holds, so there is nothing to pack.
+        thread_local std::vector<Particle> t_gpuScratch;
 
         // The renderer owns the particle layout, so it owns the stride too: the
         // author says how many particles it is handing over, nothing about how
@@ -870,12 +870,11 @@ export class ExplosionSystem {
                 float opacity = (1.0f - t) * 0.98f;
                 float size    = p.startSize * (1.0f + t * 1.15f);
 
-                t_gpuScratch[i] = {
-                    .position = JPH::Vec4(exp.origin + p.position, 1.0f),
-                    .velocity = JPH::Vec4::sZero(),
-                    .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
-                    .params   = JPH::Vec4(p.life, p.maxLife, size, 0.0f)
-                };
+                Particle& gpu = t_gpuScratch[i];
+                JPH::Vec4(exp.origin + p.position, 1.0f).StoreFloat4(&gpu.position);
+                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
+                JPH::Vec4(color * (opacity * 3.5f), opacity).StoreFloat4(&gpu.color);
+                JPH::Vec4(p.life, p.maxLife, size, 0.0f).StoreFloat4(&gpu.params);
             }
 
             const BufferHandle buf = ensureBuffer(exp.fireBuffer, exp.fireball.size());
@@ -902,12 +901,11 @@ export class ExplosionSystem {
                     size    = p.startSize * (1.0f + t * 1.95f);
                 }
 
-                t_gpuScratch[i] = {
-                    .position = JPH::Vec4(exp.origin + p.position, 1.0f),
-                    .velocity = JPH::Vec4::sZero(),
-                    .color    = JPH::Vec4(color, opacity),
-                    .params   = JPH::Vec4(p.life, p.maxLife, size, 0.0f)
-                };
+                Particle& gpu = t_gpuScratch[i];
+                JPH::Vec4(exp.origin + p.position, 1.0f).StoreFloat4(&gpu.position);
+                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
+                JPH::Vec4(color, opacity).StoreFloat4(&gpu.color);
+                JPH::Vec4(p.life, p.maxLife, size, 0.0f).StoreFloat4(&gpu.params);
             }
 
             const BufferHandle buf = ensureBuffer(exp.smokeBuffer, exp.soilSmoke.size());
@@ -937,12 +935,11 @@ export class ExplosionSystem {
                         opacity = std::pow(1.0f - t, 1.2f) * 0.45f;
                     }
 
-                    t_gpuScratch[i] = {
-                        .position = JPH::Vec4(exp.origin, 1.0f),
-                        .velocity = JPH::Vec4::sZero(),
-                        .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
-                        .params   = JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f)
-                    };
+                    Particle& gpu = t_gpuScratch[i];
+                    JPH::Vec4(exp.origin, 1.0f).StoreFloat4(&gpu.position);
+                    JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
+                    JPH::Vec4(color * (opacity * 3.5f), opacity).StoreFloat4(&gpu.color);
+                    JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f).StoreFloat4(&gpu.params);
                 }
 
                 const BufferHandle buf = ensureBuffer(exp.shockwaveBuffer, 4);
@@ -968,12 +965,11 @@ export class ExplosionSystem {
                     opacity = std::pow(1.0f - t, 1.5f) * 0.35f;
                 }
 
-                t_gpuScratch[0] = {
-                    .position = JPH::Vec4(exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f), 1.0f),
-                    .velocity = JPH::Vec4::sZero(),
-                    .color    = JPH::Vec4(color, opacity),
-                    .params   = JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f)
-                };
+                Particle& gpu = t_gpuScratch[0];
+                JPH::Vec4(exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f), 1.0f).StoreFloat4(&gpu.position);
+                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
+                JPH::Vec4(color, opacity).StoreFloat4(&gpu.color);
+                JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f).StoreFloat4(&gpu.params);
 
                 const BufferHandle buf = ensureBuffer(exp.groundRingBuffer, 1);
                 rc.UploadParticles(buf, std::span {t_gpuScratch}.first(1));

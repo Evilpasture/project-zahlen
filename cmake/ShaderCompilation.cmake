@@ -1074,17 +1074,22 @@ add_custom_target(zahlen_shader_catalog
 # zshader's second mode compiles the gpu_abi module in-process -- the same
 # module src/render/GpuAbi.hpp holds the host structs against -- and walks its
 # reflected layout into the generated host structs (GeneratedGpuTypes.hpp):
-# every struct gpu_abi.slang wraps, minus GPUMeshlet, whose ABI is the raw
-# word protocol rather than the declared layout (see GpuTypes.cpp). The same
-# compile emits the module's SPIR-V, which is what GpuAbi.hpp embeds, so the
-# header and the bytes it is checked against are never more than one build
-# apart. src/render/GpuLayout.hpp includes the header and re-exports the structs
-# under the names the renderer uses; it is renderer-internal, and nothing under
-# include/ reaches it. The engine's own vocabulary is hand-written
-# (Zahlen/Render/RenderData.hpp), converted at the boundary by
-# src/render/LayoutConvert.cpp, so a Slang edit re-emits the host side on the next
-# build and an unmappable edit fails here, naming the member, instead of
-# compiling against skewed layouts -- or reshaping a public type.
+# every struct gpu_abi.slang wraps that the engine does not define itself,
+# minus GPUMeshlet, whose ABI is the raw word protocol rather than the declared
+# layout (see GpuTypes.cpp). The same compile emits the module's SPIR-V, which
+# is what GpuAbi.hpp embeds, so the header and the bytes it is checked against
+# are never more than one build apart. src/render/GpuLayout.hpp includes the
+# header and re-exports the renderer-only structs under the names the renderer
+# uses; it is renderer-internal, and nothing under include/ reaches it.
+#
+# There is one definition per concept, and for the structs the engine authors it
+# is the hand-written one: Particle, ParticleEmitterParams,
+# MeshParticleEmitterParams, Light and FrameUniforms live in
+# Zahlen/Render/RenderData.hpp, and the generated header *aliases* them and
+# asserts their size and every member offset against the reflection. A Slang
+# edit that moves a member therefore fails right here, naming it, instead of
+# compiling against a skewed layout -- or reshaping a public type; and nothing
+# is converted between the two halves, because they are the same struct.
 #
 # The header is generated, so every target compiling a translation unit that
 # reaches it -- directly or through src/render/GpuLayout.hpp -- orders itself

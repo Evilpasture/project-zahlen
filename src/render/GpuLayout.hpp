@@ -3,25 +3,25 @@
 
 #pragma once
 
-// The GPU-side structs, under the names the renderer uses internally.
+// The renderer's view of the generated ABI.
 //
-// This header lives in src/render and not in include/: it is the one place that
-// names generated code, and nothing outside the renderer may include it. The
-// engine's own public vocabulary is include/Zahlen/Render/RenderData.hpp, whose
-// descriptions are converted here (LayoutConvert.cpp).
+// The structs the engine and the shaders share are defined once, by hand, in
+// include/Zahlen/Render/RenderData.hpp -- the generated header aliases those and
+// asserts their layout against Slang reflection. What is left here are the
+// structs only the renderer has a name for, aliased out of GeneratedGpu so a
+// render TU can say `InstanceData` the way it always has.
+//
+// This header stays in src/render and not in include/: it names generated code,
+// and the renderer is its only consumer.
 
 #include <GeneratedGpuTypes.hpp>
+#include <Zahlen/Render/RenderData.hpp>
 
 namespace ZHLN {
 
-using InstanceData              = GeneratedGpu::InstanceData;
-using Light                     = GeneratedGpu::Light;
-using FrameUniforms             = GeneratedGpu::FrameUniforms;
-using ClusterBounds             = GeneratedGpu::ClusterBounds;
-using ClusterVolume             = GeneratedGpu::ClusterVolume;
-using Particle                  = GeneratedGpu::Particle;
-using Particle3D                = GeneratedGpu::Particle3D;
-using ParticleEmitterParams     = GeneratedGpu::ParticleEmitterParams;
-using MeshParticleEmitterParams = GeneratedGpu::MeshParticleEmitterParams;
+using InstanceData   = GeneratedGpu::InstanceData;
+using ClusterBounds  = GeneratedGpu::ClusterBounds;
+using ClusterVolume  = GeneratedGpu::ClusterVolume;
+using Particle3D     = GeneratedGpu::Particle3D;
 
-}
+} // namespace ZHLN

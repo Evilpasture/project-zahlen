@@ -756,8 +756,8 @@ struct RenderContext::Impl {
     struct MeshParticleRenderPush {
         VkDeviceAddress      particleBufferAddr;
         VkDeviceAddress      posAddress;
-        std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
-        std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+        JPH::Float4          baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+        JPH::Float4          emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
         VkDeviceAddress      tangentFrameAddress;
         VkDeviceAddress      surfaceAddress;
         VkDeviceAddress      iboAddress;
@@ -815,7 +815,7 @@ struct RenderContext::Impl {
         uint32_t        jointOffset;
         uint32_t        morphOffset;
         uint32_t        activeMorphCount;
-        float           morphWeights[4];
+        JPH::Float4     morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
     };
     static_assert(offsetof(SkinningConstants, inFrameAddr) == 8);
     static_assert(offsetof(SkinningConstants, outFrameAddr) == 32);

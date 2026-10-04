@@ -100,9 +100,9 @@ struct Components {
     };
 
     struct MorphTargetComponent {
-        uint32_t             offset      = 0;
-        uint32_t             activeCount = 0;
-        std::array<float, 4> weights     = {0.0f, 0.0f, 0.0f, 0.0f};
+        uint32_t    offset      = 0;
+        uint32_t    activeCount = 0;
+        JPH::Float4 weights     = {0.0f, 0.0f, 0.0f, 0.0f}; // the same four lanes DrawParams carries
     };
 
     struct LODComponent {
@@ -419,7 +419,7 @@ struct Components {
     // them before reclaiming marked entities; use SceneResources::Detach or
     // Attach for direct component mutations.
     struct ParticleEmitterComponent {
-        ParticleEmitterDesc params;
+        ParticleEmitterParams params;
         TextureHandle         textureAsset   = TextureHandle::Invalid;
         uint32_t              maxParticles   = 65536;
         bool                  active         = true;
@@ -433,7 +433,7 @@ struct Components {
         MaterialID                materialAsset = InvalidMaterialID;
         uint32_t                  maxParticles  = 128;
         bool                      active        = true;
-        MeshParticleEmitterDesc params;
+        MeshParticleEmitterParams params;
         BufferHandle             gpuBuffer      = BufferHandle::Invalid;
         uint32_t                 bufferCapacity = 0;
     };

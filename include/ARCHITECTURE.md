@@ -251,10 +251,18 @@ enforced rather than documented.
 The generated GPU types are not part of this closure at all. `GeneratedGpuTypes.hpp`
 (shader tool output) is named in exactly one header, `src/render/GpuLayout.hpp`,
 which is renderer implementation: nothing under `include/` includes it, names a
-`GeneratedGpu::` type, or needs the shader tool to have run. The engine-side
-vocabulary for the same data is hand-written in `Zahlen/Render/RenderData.hpp`
-(descriptions, not layouts), and `src/render/LayoutConvert.cpp` converts at the
-boundary. A description field the shader no longer declares breaks the build
+`GeneratedGpu::` type, or needs the shader tool to have run.
+
+The structs the engine and the shaders share are hand-written, once, in
+`include/Zahlen/Render/RenderData.hpp` -- `Particle`, `ParticleEmitterParams`,
+`MeshParticleEmitterParams`, `Light`, `FrameUniforms` -- with one storage
+spelling per shader concept (`float2`/`float3`/`float4` -> `JPH::Float2/3/4`,
+`float4x4` -> `JPH::Mat44`, `T name[N]` -> `std::array<T, N>`), and the generated
+header aliases them and asserts every offset against Slang. So the two halves are
+the same struct: the engine fills the shader's own layout, the renderer reads it
+back, and there is nothing in between to convert -- no `ToGpu`, no description
+type per concept, no second spelling to keep in sync. A member the shader no
+longer declares breaks the build
 there, in one renderer file, instead of reshaping a public type.
 
 ---
@@ -362,7 +370,7 @@ GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config
         │ RenderContext::ApplySettings() — delta-detected
         ▼
 RenderContext state (SetFrameData fills the shader's FrameUniforms from the
-  engine's FrameViewData description; scene-pass push block, pipeline-variant
+  engine's FrameUniforms struct; scene-pass push block, pipeline-variant
   selection, reactive GPU target resizes)
 ```
 
@@ -382,10 +390,9 @@ RenderContext state (SetFrameData fills the shader's FrameUniforms from the
   iterations, roughness cutoff, bounce budget).
 * **GPU ABI safety**: every generated GPU type (the buffers and uniform blocks
   the renderer uploads, generated from the compiled `gpu_abi.slang` by
-  `tools/zshader`) stays inside `src/render/`: the engine hands the renderer
-  `RenderData.hpp` descriptions and the renderer converts them
-  (`src/render/LayoutConvert.cpp`). Each generated type is checked against that
-  same module at compile time
+  `tools/zshader`) stays inside `src/render/`; the types the engine also touches
+  are hand-written in `RenderData.hpp` and the generated header aliases them. Each
+  generated type is checked against that same module at compile time
   (`src/render/GpuAbi.hpp`, a renderer header beside the types
   it checks). Push blocks are the renderer's, not the engine's -- they live in
   `src/render/RenderInternal.hpp`, and each is held

@@ -12,6 +12,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/PoseUploads.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/WindowInput.hpp>

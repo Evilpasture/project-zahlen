@@ -73,7 +73,10 @@ struct DrawCommand {
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;
-    std::array<float, 4> morphWeights;
+    JPH::Float4          morphWeights; // no initializer: a default member initializer
+                                       // would make DrawCommand non-trivially
+                                       // constructible, which the assert below
+                                       // forbids. Every construction path fills it.
     DrawFlags            flags;
 };
 

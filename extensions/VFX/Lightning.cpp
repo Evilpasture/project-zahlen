@@ -467,9 +467,11 @@ auto Update(Engine& engine, float dt) -> void {
             Material    mat       = *gpuMatOpt;
             const float intensity = (bolt.phase == LightningPhase::SteppedLeader) ? 15.0f : (bolt.flashLuminance * bolt.config.emissiveIntensity);
 
-            mat.emissiveFactor[0] = 0.88f * intensity;
-            mat.emissiveFactor[1] = 0.95f * intensity;
-            mat.emissiveFactor[2] = 1.00f * intensity;
+            // Lanes 0-2 only: the fourth lane belongs to the ABI's emissive
+            // packing and this path never owned it.
+            mat.emissiveFactor.x  = 0.88f * intensity;
+            mat.emissiveFactor.y  = 0.95f * intensity;
+            mat.emissiveFactor.z  = 1.00f * intensity;
             rc.RegisterGPUMaterial(bolt.matAssetId, mat);
         }
 

@@ -603,10 +603,7 @@ void RegisterCreativeWorkCommands() {
                         return 0;
                     }
                     ZHLN::Material mat     = mat_res.value();
-                    mat.baseColorFactor[0] = a.r;
-                    mat.baseColorFactor[1] = a.g;
-                    mat.baseColorFactor[2] = a.b;
-                    mat.baseColorFactor[3] = a.a;
+                    mat.baseColorFactor    = JPH::Float4 {a.r, a.g, a.b, a.a};
                     *a.outPipeline         = static_cast<uint64_t>(mat.pipeline);
                     *a.outAlbedo           = static_cast<uint64_t>(mat.albedoMap);
                     return 1;
@@ -654,10 +651,7 @@ void RegisterCreativeWorkCommands() {
                 ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error());
             }
             ZHLN::Material mat     = mat_res.value();
-            mat.baseColorFactor[0] = a.r;
-            mat.baseColorFactor[1] = a.g;
-            mat.baseColorFactor[2] = a.b;
-            mat.baseColorFactor[3] = a.a;
+            mat.baseColorFactor    = JPH::Float4 {a.r, a.g, a.b, a.a};
 
             ZHLN::Entity e = reg.Create();
 

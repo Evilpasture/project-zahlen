@@ -88,6 +88,16 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
     }
 }
 
+// The four-lane form of the same sample. The channel's key values are a float
+// array -- that is the cooked track format -- so the sampler reads floats and
+// the lanes cross to the pod here, once, where the format boundary is. Callers
+// downstream carry JPH::Float4 like every other weight set in the engine.
+void SampleWeightsChannel(const AnimationChannel& channel, float time, JPH::Float4& outWeights) noexcept {
+    float lanes[4] {0.0f, 0.0f, 0.0f, 0.0f};
+    SampleWeightsChannel(channel, time, lanes, 4);
+    outWeights = JPH::Float4 {lanes[0], lanes[1], lanes[2], lanes[3]};
+}
+
 }
 
 void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
@@ -146,7 +156,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 baseS[n]                     = trs.scale;
             }
 
-            std::vector<std::array<float, 4>> nodeMorphWeights(prefab.nodes.size(), {0.0f, 0.0f, 0.0f, 0.0f});
+            std::vector<JPH::Float4>          nodeMorphWeights(prefab.nodes.size(), JPH::Float4 {});
             std::vector<uint32_t>             nodeActiveMorphCounts(prefab.nodes.size(), 0);
 
             if (anim.blendDuration > 0.0f && anim.prevTrackIdx >= 0) {
@@ -203,7 +213,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                                                         0u :
                                                         static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
                         nodeActiveMorphCounts[channel.targetNodeIndex] = std::min(numWeights, 4u);
-                        SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex].data(), 4);
+                        SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex]);
                     } else {
                         SampleChannel(
                             channel, anim.currentTrackTime, currT[channel.targetNodeIndex], currR[channel.targetNodeIndex], currS[channel.targetNodeIndex]

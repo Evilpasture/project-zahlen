@@ -9,8 +9,10 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Jolt/Math/Float2.h>
+#include <Jolt/Math/Float3.h>
+#include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
-#include <Jolt/Math/Vec4.h>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -51,9 +53,13 @@ using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<s
 
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
+//
+// A float2 is spelled JPH::Float2 here, as everywhere the engine stores one:
+// the pod is the storage spelling, Vec2 does not exist in Jolt, and a
+// std::array<float, 2> would be a third spelling of the same eight bytes.
 struct MaterialTextureTransform {
-    std::array<float, 2> offset {0.0f, 0.0f};
-    std::array<float, 2> scale {1.0f, 1.0f};
+    JPH::Float2 offset {0.0f, 0.0f};
+    JPH::Float2 scale {1.0f, 1.0f};
     float rotation = 0.0f; // Radians, counter-clockwise in glTF UV space.
     uint32_t texCoord = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
@@ -85,8 +91,8 @@ struct Material {
     TextureHandle       normalMap          = TextureHandle::Invalid;
     TextureHandle       pbrMap             = TextureHandle::Invalid;
     TextureHandle       emissiveMap        = TextureHandle::Invalid;
-    std::array<float, 4> baseColorFactor    = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissiveFactor     = {0.0f, 0.0f, 0.0f, 1.0f};
+    JPH::Float4          baseColorFactor    = {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4          emissiveFactor     = {0.0f, 0.0f, 0.0f, 1.0f};
     float               metallicFactor     = 1.0f;
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
@@ -113,7 +119,7 @@ struct Material {
     float               anisotropyStrength      = 0.0f;
     float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
     TextureHandle       anisotropyMap           = TextureHandle::Invalid;
-    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    JPH::Float3         sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                sheenRoughnessFactor = 0.0f;
     TextureHandle        sheenColorMap = TextureHandle::Invalid;
     TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
@@ -123,9 +129,15 @@ struct Material {
     MaterialTextureTransforms textureTransforms {};
 };
 
+// The lane types are the only spellings a float2/float3/float4 has in this
+// header. A std::array<float, N> here would be a second spelling of the same
+// bytes, and every crossing into the GPU layout -- the one place these values
+// end up -- would need a hand-written conversion for it. The pods are the same
+// size and alignment the arrays had, so this changes no struct's layout.
 static_assert(
-    sizeof(std::array<float, 4>) == sizeof(float[4]) && alignof(std::array<float, 4>) == alignof(float[4]),
-    "material factors must preserve their four-float ABI"
+    sizeof(JPH::Float2) == 8 && alignof(JPH::Float2) == 4 && sizeof(JPH::Float3) == 12 && alignof(JPH::Float3) == 4 &&
+        sizeof(JPH::Float4) == 16 && alignof(JPH::Float4) == 4,
+    "the lane pods are the storage spelling; their geometry is the ABI"
 );
 
 enum class DrawFlags : uint32_t {
@@ -138,11 +150,15 @@ enum class DrawFlags : uint32_t {
     Viewmodel       = 1 << 5,
 };
 
+// Storage, not compute: nothing does vector maths on these; they are handed to
+// the volumetric pass as-is, so they are Float4. (The struct is allocated and
+// never filled today -- RenderInit sizes a buffer for it -- but its spelling is
+// what a fill would write through.)
 struct alignas(16) GPUVolumetricVolume {
-    JPH::Mat44 invTransform;
-    JPH::Vec4  extentsAndType;
-    JPH::Vec4  colorAndDensity;
-    JPH::Vec4  emissiveAndAniso;
+    JPH::Mat44  invTransform;
+    JPH::Float4 extentsAndType;
+    JPH::Float4 colorAndDensity;
+    JPH::Float4 emissiveAndAniso;
 };
 static_assert(sizeof(GPUVolumetricVolume) == 112);
 
@@ -164,8 +180,8 @@ struct MaterialDesc {
     float                alphaCutoff = 0.5f;
     float                metallic    = 1.0f;
     float                roughness   = 1.0f;
-    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+    JPH::Float4          baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4          emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
     float                transmissionFactor = 0.0f;
     TextureHandle        transmissionMap    = TextureHandle::Invalid;
     float                iridescenceFactor  = 0.0f;
@@ -191,7 +207,7 @@ struct MaterialDesc {
     float         anisotropyStrength    = 0.0f;
     float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
     TextureHandle anisotropyMap         = TextureHandle::Invalid;
-    std::array<float, 3> sheenColorFactor {0.0f, 0.0f, 0.0f};
+    JPH::Float3   sheenColorFactor {0.0f, 0.0f, 0.0f};
     float                sheenRoughnessFactor = 0.0f;
     TextureHandle        sheenColorMap = TextureHandle::Invalid;
     TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
@@ -205,11 +221,11 @@ struct DrawParams {
     JPH::Mat44           transform        = JPH::Mat44::sIdentity();
     JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
     float                cullRadius       = 1.0f;
-    std::array<float, 3> localCenter      = {0.0f, 0.0f, 0.0f};
+    JPH::Float3          localCenter      = {0.0f, 0.0f, 0.0f};
     uint32_t             jointOffset      = 0;
     uint32_t             morphOffset      = 0;
     uint32_t             activeMorphCount = 0;
-    std::array<float, 4> morphWeights     = {};
+    JPH::Float4          morphWeights     = {};
     DrawFlags            flags            = DrawFlags::None;
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
@@ -217,8 +233,8 @@ struct DrawParams {
     float roughness = -1.0f;
     float metallic  = -1.0f;
 
-    std::array<float, 4> colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
-    std::array<float, 4> emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+    JPH::Float4          colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
+    JPH::Float4          emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
 };
 
 struct CSGCutterParams {

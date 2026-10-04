@@ -36,11 +36,11 @@ class ZHLN_API AnimationSystem {
     AnimationSystem& operator=(const AnimationSystem&) = delete;
 
     struct SampledTransform {
-        JPH::Vec3 translation        = JPH::Vec3::sZero();
-        JPH::Quat rotation           = JPH::Quat::sIdentity();
-        JPH::Vec3 scale              = JPH::Vec3::sReplicate(1.0f);
-        float     weights[4]         = {0.0f, 0.0f, 0.0f, 0.0f};
-        uint32_t  activeWeightsCount = 0;
+        JPH::Vec3   translation        = JPH::Vec3::sZero();
+        JPH::Quat   rotation           = JPH::Quat::sIdentity();
+        JPH::Vec3   scale              = JPH::Vec3::sReplicate(1.0f);
+        JPH::Float4 weights            = {0.0f, 0.0f, 0.0f, 0.0f};
+        uint32_t    activeWeightsCount = 0;
     };
 
     struct PointerHash {

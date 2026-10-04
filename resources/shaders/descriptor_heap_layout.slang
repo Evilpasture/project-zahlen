@@ -8,7 +8,6 @@ import cxx_abi;
 public struct ScenePassPushConstants {
     public float4x4 invViewProj;
     public float4x4 viewProj;
-    [CxxArray]
     public float4 camPos;
     public int giMode;
     public float aoRadius;

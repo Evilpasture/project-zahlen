@@ -403,8 +403,8 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
     // Virtual lights approximate authored emission, not the presentation
     // boost chosen by the importer. Fidelity captures never opt into them.
     const float invImportScale = 1.0f / emissiveFactorScale;
-    const float* raw = part.defaultMaterial.emissiveFactor.data();
-    const float  ef[3] {raw[0] * invImportScale, raw[1] * invImportScale, raw[2] * invImportScale};
+    const JPH::Float4& raw = part.defaultMaterial.emissiveFactor;
+    const float        ef[3] {raw.x * invImportScale, raw.y * invImportScale, raw.z * invImportScale};
 
     float lum = ef[0] * 0.2126f + ef[1] * 0.7152f + ef[2] * 0.0722f;
     if (lum <= 0.01f) {
@@ -455,10 +455,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     } else {
         auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
-        mat.baseColorFactor[0] = boxColor.GetX();
-        mat.baseColorFactor[1] = boxColor.GetY();
-        mat.baseColorFactor[2] = boxColor.GetZ();
-        mat.baseColorFactor[3] = boxColor.GetW();
+        mat.baseColorFactor    = JPH::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
         mat.roughnessFactor    = 0.3f;
         mat.metallicFactor     = 0.1f;
     }
@@ -525,10 +522,7 @@ auto SpawnPrimitive(
     } else {
         auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
-        mat.baseColorFactor[0] = shapeColor.GetX();
-        mat.baseColorFactor[1] = shapeColor.GetY();
-        mat.baseColorFactor[2] = shapeColor.GetZ();
-        mat.baseColorFactor[3] = shapeColor.GetW();
+        mat.baseColorFactor    = JPH::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
         mat.roughnessFactor    = params.roughness;
         mat.metallicFactor     = params.metallic;
     }
@@ -623,10 +617,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     } else {
         auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
-        mat.baseColorFactor[0] = color.GetX();
-        mat.baseColorFactor[1] = color.GetY();
-        mat.baseColorFactor[2] = color.GetZ();
-        mat.baseColorFactor[3] = color.GetW();
+        mat.baseColorFactor    = JPH::Float4 {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         mat.roughnessFactor    = 0.35f;
         mat.metallicFactor     = 0.15f;
     }

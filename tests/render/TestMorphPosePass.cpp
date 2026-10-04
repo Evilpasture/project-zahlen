@@ -184,8 +184,8 @@ struct MorphPosePassSuite {
         part.boundingRadius         = 2.0f;
         part.morphOffset            = rc.AllocateMorphDeltas(std::span {deltas});
         part.activeMorphCount       = kMorphTargets;
-        part.defaultMorphWeights[0] = kDefaultMorphWeight0;
-        part.defaultMorphWeights[1] = kDefaultMorphWeight1;
+        part.defaultMorphWeights.x  = kDefaultMorphWeight0;
+        part.defaultMorphWeights.y  = kDefaultMorphWeight1;
 
         built.prefab.virtualPath = "zahlen_test_morph_pose_prefab";
         built.prefab.parts.push_back(part);
@@ -277,10 +277,10 @@ struct MorphPosePassSuite {
         std::expected<void, ZHLN::ErrorCode> draw_params_own_morph_weights() {
             ZHLN::Components::MorphTargetComponent morph {.weights = {0.25f, 0.5f, 0.75f, 1.0f}};
             const ZHLN::DrawParams params {.morphWeights = morph.weights};
-            morph.weights.fill(0.0f);
+            morph.weights = JPH::Float4 {};
 
-            if (!ZHLN::Test::ExpectEq(params.morphWeights, (std::array<float, 4> {0.25f, 0.5f, 0.75f, 1.0f})) ||
-                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, (std::array<float, 4> {}))) {
+            if (!ZHLN::Test::ExpectEq(params.morphWeights, JPH::Float4 {0.25f, 0.5f, 0.75f, 1.0f}) ||
+                !ZHLN::Test::ExpectEq(ZHLN::DrawParams {}.morphWeights, JPH::Float4 {})) {
                 return std::unexpected(MorphPosePassTestError::MorphWeightsBorrowed);
             }
             return {};
@@ -319,7 +319,7 @@ struct MorphPosePassSuite {
             if (!ZHLN::Test::ExpectTrue(morph.has_value())) {
                 return std::unexpected(MorphPosePassTestError::MorphComponentMissing);
             }
-            const auto expected = std::array<float, 4> {
+            const auto expected = JPH::Float4 {
                 MorphPosePassSuite::kDefaultMorphWeight0, MorphPosePassSuite::kDefaultMorphWeight1, 0.0f, 0.0f
             };
             if (!ZHLN::Test::ExpectEq(morph->weights, expected)) {

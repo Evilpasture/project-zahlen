@@ -143,9 +143,14 @@ void SubmitParticleEmitters(Engine& engine) {
             continue;
         }
         const BufferHandle buffer = EnsureParticleStorage(rc, emitter, rc.ParticleStride());
-        ParticleEmitterDesc desc  = emitter.params;
+        // The component's params *are* the shader's params; the only thing the
+        // system owns here is the camera attachment, so it is applied on the
+        // renderer's copy rather than by hand-packing a second struct.
+        ParticleEmitterParams desc = emitter.params;
         if (emitter.attachToCamera) {
-            desc.spawnOrigin = cam.position;
+            desc.spawnOrigin.x = cam.position.GetX();
+            desc.spawnOrigin.y = cam.position.GetY();
+            desc.spawnOrigin.z = cam.position.GetZ();
         }
         rc.SubmitParticleEmitter(buffer, emitter.maxParticles, desc);
     }
@@ -217,7 +222,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
         uint32_t                   morphOffset      = morphComp ? morphComp->offset : 0;
         uint32_t                   activeMorphCount = morphComp ? morphComp->activeCount : 0;
-        const std::array<float, 4> morphWeights     = morphComp ? morphComp->weights : std::array<float, 4> {};
+        const JPH::Float4          morphWeights     = morphComp ? morphComp->weights : JPH::Float4 {};
 
         BufferHandle scratchVbo = BufferHandle::Invalid;
         if (isSkinned) {
@@ -454,30 +459,38 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     const AAState& aaState = gfx.antiAliasing;
 
-    FrameViewData viewData {};
+    // The shader's own struct: the engine authors the view, the sun, the sky,
+    // the probe and the jitter, and hands it over. The renderer fills what only
+    // it knows (RenderContext::SetFrameData).
+    const float frameClock = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
+
+    FrameUniforms viewData {};
     viewData.viewProj               = vp;
     viewData.unjitteredViewProj     = unjitteredVp;
     viewData.prevUnjitteredViewProj = prevUnjitteredVp;
     viewData.invViewProj            = unjitteredVp.Inversed();
-    viewData.cameraPosition         = cam.position;
-    viewData.frameClock             = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
-    viewData.sunDirection           = sunDirection;
-    viewData.sunIntensity           = sunIntensity;
-    viewData.sunRadiance            = JPH::Vec4(sunRadiance, 0.0f);
+    // The clock rides camPos.w and the sun's intensity rides lightDir.w because
+    // those are the lanes the shader reads them from.
+    viewData.camPos      = JPH::Float4 {cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(), frameClock};
+    viewData.lightDir    = JPH::Float4 {sunDirection.GetX(), sunDirection.GetY(), sunDirection.GetZ(), sunIntensity};
+    viewData.sunRadiance = JPH::Float4 {sunRadiance.GetX(), sunRadiance.GetY(), sunRadiance.GetZ(), 0.0f};
     viewData.probeMin =
-        JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
-    viewData.probeMax     = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
-    viewData.probePos     = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
-    viewData.jitterParams = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
+        JPH::Float4 {gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f};
+    viewData.probeMax     = JPH::Float4 {gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f};
+    viewData.probePos     = JPH::Float4 {gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f};
+    viewData.jitterParams = JPH::Float4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
     viewData.enableRTR        = gfx.post.enableRTR;
     viewData.fullBright       = gfx.environment.fullBright;
     viewData.shadowWidth      = gfx.shadows.width;
     viewData.shadowResolution = gfx.shadows.resolution;
     viewData.sunSize          = gfx.shadows.sunSize;
     viewData.ambientExposure  = gfx.environment.ambientExposure;
-    viewData.skyZenith  = JPH::Vec4(gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]);
-    viewData.skyHorizon = JPH::Vec4(gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]);
-    viewData.skyGround  = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
+    viewData.skyZenith =
+        JPH::Float4 {gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]};
+    viewData.skyHorizon =
+        JPH::Float4 {gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]};
+    viewData.skyGround =
+        JPH::Float4 {gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]};
 
     rc.SetFrameData(cam, viewData, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);

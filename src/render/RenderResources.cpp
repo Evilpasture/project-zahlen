@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "LayoutConvert.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
@@ -92,11 +91,10 @@ auto RenderContext::ParticleStride() const noexcept -> uint32_t {
     return static_cast<uint32_t>(sizeof(Particle));
 }
 
-void RenderContext::UploadParticles(BufferHandle gpuBuffer, std::span<const ParticleDesc> particles) noexcept {
-    _impl->particleStaging.resize(particles.size());
-    for (size_t i = 0; i < particles.size(); ++i) {
-        _impl->particleStaging[i] = ToGpu(particles[i]);
-    }
+void RenderContext::UploadParticles(BufferHandle gpuBuffer, std::span<const Particle> particles) noexcept {
+    // The same type on both sides of the seam: the staging vector *is* the
+    // storage layout, so this is a copy, not a conversion.
+    _impl->particleStaging.assign(particles.begin(), particles.end());
     UpdateBuffer(gpuBuffer, std::as_bytes(std::span {_impl->particleStaging}));
 }
 
@@ -108,19 +106,19 @@ auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
     return _impl->geometry.CreateStorageBuffer(size, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
 }
 
-void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc) {
-    _impl->queues.ParticleEmitters().push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = ToGpu(desc)});
+void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc) {
+    _impl->queues.ParticleEmitters().push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = desc});
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
     BufferHandle                   gpuBuffer,
     uint32_t                       maxParticles,
-    const MeshParticleEmitterDesc& desc,
+    const MeshParticleEmitterParams& desc,
     AssetID                        mesh,
     MaterialID                     mat
 ) {
     _impl->queues.MeshParticleEmitters().push_back(
-        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = ToGpu(desc), .meshAsset = mesh, .materialAsset = mat}
+        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = desc, .meshAsset = mesh, .materialAsset = mat}
     );
 }
 

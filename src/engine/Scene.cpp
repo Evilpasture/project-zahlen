@@ -285,15 +285,12 @@ namespace {
     if (materials.find != nullptr) {
         gpu = materials.find(materials.userdata, mesh.materialAsset);
     }
-    const float* base = gpu.has_value() ? gpu->baseColorFactor.data() : nullptr;
-    const float* glow = gpu.has_value() ? gpu->emissiveFactor.data() : nullptr;
-
     const SceneMaterial defaults {};
     return SceneMaterial {
-        .baseColor             = (base != nullptr) ? JPH::Float4 {base[0], base[1], base[2], base[3]} : defaults.baseColor,
+        .baseColor             = gpu.has_value() ? gpu->baseColorFactor : defaults.baseColor,
         .roughness             = pbr ? pbr->roughness : defaults.roughness,
         .metallic              = pbr ? pbr->metallic : defaults.metallic,
-        .emissive              = (glow != nullptr) ? JPH::Float3 {glow[0], glow[1], glow[2]} : defaults.emissive,
+        .emissive              = gpu.has_value() ? JPH::Float3 {gpu->emissiveFactor.x, gpu->emissiveFactor.y, gpu->emissiveFactor.z} : defaults.emissive,
         .emissiveVirtualLights = source.emissiveVirtualLights,
     };
 }

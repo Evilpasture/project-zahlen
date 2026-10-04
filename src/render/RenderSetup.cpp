@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "LayoutConvert.hpp"
 #include "RenderInternal.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -30,7 +29,9 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.invProj            = proj.Inversed();
     _impl->currentUniforms.nearZ              = cam.nearZ;
     _impl->currentUniforms.farZ               = cam.farZ;
-    std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
+    _impl->currentUniforms.camPos.x = cam.position.GetX();
+    _impl->currentUniforms.camPos.y = cam.position.GetY();
+    _impl->currentUniforms.camPos.z = cam.position.GetZ();
 
     auto        mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
     auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
@@ -41,7 +42,9 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     gpu->invProj            = proj.Inversed();
     gpu->nearZ              = cam.nearZ;
     gpu->farZ               = cam.farZ;
-    std::memcpy(&gpu->camPos[0], &cam.position, sizeof(float) * 3);
+    gpu->camPos.x = cam.position.GetX();
+    gpu->camPos.y = cam.position.GetY();
+    gpu->camPos.z = cam.position.GetZ();
 }
 
 void RenderContext::ClearDrawQueues() noexcept {
@@ -49,10 +52,12 @@ void RenderContext::ClearDrawQueues() noexcept {
     _impl->queues.CsgDraws().clear();
 }
 
-void RenderContext::SetFrameData(const Camera& cam, const FrameViewData& view, const JPH::Mat44& shadowProjView, float dt) noexcept {
-    const FrameUniforms uniforms = ToGpu(view);
+void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, const JPH::Mat44& shadowProjView, float dt) noexcept {
+    // The engine authored this struct: one type, no packing step. What follows
+    // fills the lanes only the renderer knows -- resolution, light count, the
+    // cascade matrices, the SH payload, the viewmodel matrix.
     _impl->shadowProjView  = shadowProjView;
-    _impl->currentUniforms = uniforms;
+    _impl->currentUniforms = view;
     _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
@@ -66,9 +71,8 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameViewData& view, c
     cascadeSplits[2] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f;
     cascadeSplits[3] = cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f;
 
-    FrameUniforms gpuUniforms       = uniforms;
-    gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
-    gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
+    FrameUniforms gpuUniforms    = view;
+    gpuUniforms.screenResolution = JPH::Float2 {static_cast<float>(res.width), static_cast<float>(res.height)};
 
     gpuUniforms.lightCount = _impl->packedLightCount;
 
@@ -76,11 +80,14 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameViewData& view, c
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
 
-    std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
-    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+    gpuUniforms.cascadeSplits = JPH::Float4 {cascadeSplits[0], cascadeSplits[1], cascadeSplits[2], cascadeSplits[3]};
+    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Float4) * 9);
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
-    JPH::Vec3  sunDir    = view.sunDirection.Normalized();
+    // The sun's direction and intensity ride lightDir's lanes, which is the
+    // shader's own layout: read them where the shader reads them.
+    JPH::Vec3  sunDir    = JPH::Vec3 {view.lightDir.x, view.lightDir.y, view.lightDir.z};
+    if (sunDir.LengthSq() > 1e-6f) sunDir = sunDir.Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
 
     float tanHalfFov = std::tan(JPH::DegreesToRadians(cam.fov * 0.5f));
@@ -115,17 +122,12 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::SetLights(std::span<const LightDesc> lights) noexcept {
+void RenderContext::SetLights(std::span<const Light> lights) noexcept {
     const auto visible = lights.first(std::min(lights.size(), size_t {128}));
     if (!visible.empty()) {
-        // Descriptions in, GPU layout out: the pass below copies the packed
-        // structs straight into the storage buffer and keeps them for the
-        // frame's other consumers.
-        _impl->gpuLights.clear();
-        _impl->gpuLights.reserve(visible.size());
-        for (const auto& desc: visible) {
-            _impl->gpuLights.push_back(ToGpu(desc));
-        }
+        // The engine fills the shader's own struct, so this is a copy:
+        // nothing to keep in sync with anything but the struct itself.
+        _impl->gpuLights.assign(visible.begin(), visible.end());
         auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
         if (mappedLights.data == nullptr) {
             _impl->mappedLights.clear();

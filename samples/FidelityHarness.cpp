@@ -571,12 +571,12 @@ enum class DiagnosticCapture {
             // zero), removing albedo removes diffuse SH but preserves F0=0.04,
             // normals, roughness, AO, and specular IBL. Not a specular-only
             // view of metallic materials: their F0 comes from base color.
-            material->baseColorFactor[0] = 0.0f;
-            material->baseColorFactor[1] = 0.0f;
-            material->baseColorFactor[2] = 0.0f;
-            material->emissiveFactor[0]  = 0.0f;
-            material->emissiveFactor[1]  = 0.0f;
-            material->emissiveFactor[2]  = 0.0f;
+            material->baseColorFactor.x  = 0.0f;
+            material->baseColorFactor.y  = 0.0f;
+            material->baseColorFactor.z  = 0.0f;
+            material->emissiveFactor.x   = 0.0f;
+            material->emissiveFactor.y   = 0.0f;
+            material->emissiveFactor.z   = 0.0f;
             renderer.RegisterGPUMaterial(mesh->materialAsset, *material);
         }
     }

@@ -1396,7 +1396,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
-            if (material.emissiveFactor != std::array<float, 4> {0.0f, 1.0f, 0.0f, 1.0f} ||
+            if (material.emissiveFactor != JPH::Float4 {0.0f, 1.0f, 0.0f, 1.0f} ||
                 material.emissiveMap == ZHLN::TextureHandle::Invalid || material.emissiveMap != material.albedoMap ||
                 material.emissiveMap == material.pbrMap || rc.GetBindlessIndex(material.emissiveMap) <= 2u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
@@ -1580,7 +1580,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
-            if (material.baseColorFactor != std::array<float, 4> {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f ||
+            if (material.baseColorFactor != JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f ||
                 material.roughnessFactor != 1.0f || material.albedoMap != ZHLN::TextureHandle::Invalid ||
                 material.pipeline == ZHLN::PipelineHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
@@ -1726,8 +1726,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto& transform = mat.textureTransforms[transSlot];
-            if (transform.texCoord != 1u || transform.offset != std::array<float, 2> {0.25f, -0.25f} ||
-                transform.scale != std::array<float, 2> {2.0f, 0.5f} || std::abs(transform.rotation - 1.5707963f) > 1e-5f ||
+            if (transform.texCoord != 1u || transform.offset != JPH::Float2 {0.25f, -0.25f} ||
+                transform.scale != JPH::Float2 {2.0f, 0.5f} || std::abs(transform.rotation - 1.5707963f) > 1e-5f ||
                 mat.textureTransforms[albedoSlot].texCoord != 0u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1757,22 +1757,22 @@ struct GLTFImportTestSuite {
             const auto& sheenColor = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
             const auto& sheenRoughness = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenRoughness)];
             const auto& occlusion = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
-            if (albedo.texCoord != 1u || albedo.offset != std::array<float, 2> {0.2f, 0.4f} ||
-                albedo.scale != std::array<float, 2> {2.0f, -3.0f} || std::abs(albedo.rotation - 1.5707963f) > 1e-5f ||
-                pbr.texCoord != 0u || pbr.scale != std::array<float, 2> {30.0f, -30.0f} ||
+            if (albedo.texCoord != 1u || albedo.offset != JPH::Float2 {0.2f, 0.4f} ||
+                albedo.scale != JPH::Float2 {2.0f, -3.0f} || std::abs(albedo.rotation - 1.5707963f) > 1e-5f ||
+                pbr.texCoord != 0u || pbr.scale != JPH::Float2 {30.0f, -30.0f} ||
                 normal != pbr || sheenColor.texCoord != 0u ||
-                sheenColor.scale != std::array<float, 2> {4.0f, -5.0f} ||
-                sheenRoughness.texCoord != 1u || sheenRoughness.scale != std::array<float, 2> {1.0f, 1.0f} ||
-                occlusion.scale != std::array<float, 2> {1.0f, 1.0f}) {
+                sheenColor.scale != JPH::Float2 {4.0f, -5.0f} ||
+                sheenRoughness.texCoord != 1u || sheenRoughness.scale != JPH::Float2 {1.0f, 1.0f} ||
+                occlusion.scale != JPH::Float2 {1.0f, 1.0f}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // A positive rotation in top-left-origin UV space moves +U toward
             // -V. The separate render test checks the actual instance rows and
             // shader against the untransformed Sample column.
             auto apply = [](const ZHLN::MaterialTextureTransform& t, std::array<float, 2> uv) {
-                const float u = uv[0] * t.scale[0], v = uv[1] * t.scale[1];
-                return std::array<float, 2> {t.offset[0] + std::cos(t.rotation) * u + std::sin(t.rotation) * v,
-                                              t.offset[1] - std::sin(t.rotation) * u + std::cos(t.rotation) * v};
+                const float u = uv[0] * t.scale.x, v = uv[1] * t.scale.y;
+                return std::array<float, 2> {t.offset.x + std::cos(t.rotation) * u + std::sin(t.rotation) * v,
+                                              t.offset.y - std::sin(t.rotation) * u + std::cos(t.rotation) * v};
             };
             const auto transformed = apply(albedo, {0.5f, 0.2f}); // TEXCOORD_1, not TEXCOORD_0.
             const auto tiled = apply(pbr, {0.25f, 0.5f});
@@ -1781,7 +1781,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             auto& rc = engine->GetRenderContext();
-            if (material.sheenColorFactor != std::array<float, 3> {0.25f, 0.5f, 0.75f} ||
+            if (material.sheenColorFactor != JPH::Float3 {0.25f, 0.5f, 0.75f} ||
                 std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
                 material.sheenColorMap == ZHLN::TextureHandle::Invalid ||
                 material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
@@ -1794,7 +1794,7 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.sheenColorFactor != std::array<float, 3> {0.0f, 0.0f, 0.0f} ||
+            if (defaults.sheenColorFactor != JPH::Float3 {0.0f, 0.0f, 0.0f} ||
                 defaults.sheenRoughnessFactor != 0.0f || defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }

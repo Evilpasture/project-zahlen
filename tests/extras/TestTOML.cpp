@@ -666,11 +666,8 @@ onClickAction = "editor.save_scene"
             // than a RenderContext, so this supplies one directly -- no device.
             std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
             ZHLN::Material                                       boxMaterial {};
-            boxMaterial.baseColorFactor[0] = 0.1f;
-            boxMaterial.baseColorFactor[1] = 0.6f;
-            boxMaterial.baseColorFactor[2] = 0.95f;
-            boxMaterial.baseColorFactor[3] = 1.0f;
-            boxMaterial.emissiveFactor[0]  = 80.0f;
+            boxMaterial.baseColorFactor    = JPH::Float4 {0.1f, 0.6f, 0.95f, 1.0f};
+            boxMaterial.emissiveFactor.x   = 80.0f;
             materials[2]                   = boxMaterial;
 
             const auto scene = ZHLN::Scene::Extract(
