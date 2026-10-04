@@ -15,81 +15,13 @@
 
 namespace ZHLN::Reflect {
 
-#if !ZHLN_REFLECTION_AVAILABLE
-namespace TemplatedDetail {
-// The project normally requires P2996/P3096. This path is for the explicit
-// ZHLN_ALLOW_REFLECTION_STUBS mode (clangd and isolated non-reflection tests).
-template <typename T>
-struct FunctionParameters;
+#if ZHLN_REFLECTION_AVAILABLE
 
-namespace TemplatedDetail {
-template <std::size_t I, typename... Ts>
-struct NthType;
-
-template <typename T, typename... Ts>
-struct NthType<0, T, Ts...> {
-    using type = T;
-};
-
-template <std::size_t I, typename T, typename... Ts>
-struct NthType<I, T, Ts...>: NthType<I - 1, Ts...> {};
-} // namespace TemplatedDetail
-
-template <typename R, typename... Params>
-struct FunctionParameters<R (*)(Params...)> {
-    template <typename F>
-    static void ForEach(F&& f) {
-        (f.template operator()<Params>(), ...);
-    }
-
-    // The same two things the reflection path exposes, so a compile-time gate
-    // written against them works in stub mode as well.
-    static consteval auto ParameterCount() -> std::size_t {
-        return sizeof...(Params);
-    }
-
-    template <std::size_t I>
-    using ParameterType = typename TemplatedDetail::NthType<I, Params...>::type;
-
-    template <auto Fn, template <typename> class Resolver, typename Context>
-    static void Invoke(Context& ctx) {
-        auto callable = Fn;
-        std::invoke(callable, Resolver<Params>::Resolve(ctx)...);
-    }
-};
-
-template <typename R, typename... Params>
-struct FunctionParameters<R (*)(Params...) noexcept>: FunctionParameters<R (*)(Params...)> {};
-
-template <typename C, typename R, typename... Params>
-struct FunctionParameters<R (C::*)(Params...) const>: FunctionParameters<R (*)(Params...)> {};
-
-template <typename C, typename R, typename... Params>
-struct FunctionParameters<R (C::*)(Params...)>: FunctionParameters<R (*)(Params...)> {};
-
-template <typename C, typename R, typename... Params>
-struct FunctionParameters<R (C::*)(Params...) const noexcept>: FunctionParameters<R (*)(Params...)> {};
-
-template <typename C, typename R, typename... Params>
-struct FunctionParameters<R (C::*)(Params...) noexcept>: FunctionParameters<R (*)(Params...)> {};
-
-template <typename T, typename = void>
-struct CallableParameters: FunctionParameters<T> {};
-
-template <typename T>
-struct CallableParameters<T, std::void_t<decltype(&T::operator())>>: FunctionParameters<decltype(&T::operator())> {};
-} // namespace TemplatedDetail
-#endif
-
-// Reusable callable introspection: names, signature parameters, and invocation
-// with caller-provided argument resolution. Nothing here depends on ECS.
-// The NTTP denotes a free/static function or an invocable function object.
 template <auto Fn>
 struct CallableInspector {
     using Callable = std::remove_cvref_t<decltype(Fn)>;
     static_assert(!std::is_member_function_pointer_v<Callable>, "Unbound member functions need a receiver; use a free/static function or a callable object");
 
-#if ZHLN_REFLECTION_AVAILABLE
   private:
     static consteval auto FunctionEntity() -> std::meta::info {
         if constexpr (std::is_pointer_v<Callable> && std::is_function_v<std::remove_pointer_t<Callable>>) {
@@ -108,9 +40,6 @@ struct CallableInspector {
     static constexpr auto fnEntity = FunctionEntity();
 
   public:
-    // The parameter list as types, for callers that must decide something at
-    // compile time without instantiating a callback (AddSystem's admission
-    // gate). The types themselves never become values; only the aliases do.
     static consteval auto ParameterCount() -> std::size_t {
         return std::meta::parameters_of(fnEntity).size();
     }
@@ -149,17 +78,14 @@ struct CallableInspector {
   public:
     template <typename F>
     static void ForEachParameter(F&& f) {
-        // Only the type aliases above touch reflections; f runs with C++ types.
         ForEachWithIndices(std::forward<F>(f), std::make_index_sequence<ParameterCount()> {});
     }
 
     static consteval auto Name() -> std::string_view {
         constexpr auto parent = std::meta::parent_of(fnEntity);
         if constexpr (std::meta::is_type(parent) && std::meta::has_identifier(parent)) {
-            // An owning type makes a concise name for its member callable.
             return std::meta::identifier_of(parent);
         } else if constexpr (std::is_class_v<Callable>) {
-            // A lambda has no identifier; append its location in NameCString.
             return std::meta::display_string_of(parent);
         } else if constexpr (std::meta::has_identifier(fnEntity)) {
             return std::meta::identifier_of(fnEntity);
@@ -170,10 +96,8 @@ struct CallableInspector {
 
     static auto NameCString() -> const char* {
         static const std::string name = [] {
-            std::string result {Name()}; // identifier_of returns a view, not necessarily a C string
+            std::string result {Name()};
             if constexpr (HasUnnamedOwner()) {
-                // Reflection values stay in consteval helpers; the runtime
-                // string builder receives only an ordinary source_location.
                 constexpr auto loc = UnnamedOwnerLocation();
                 result += "@";
                 result += loc.file_name();
@@ -186,81 +110,39 @@ struct CallableInspector {
 
     template <template <typename> class Resolver, typename Context>
     static void Invoke(Context& ctx) {
-        // A reflection (std::meta::info) is consteval-only in Clang/P2996.
-        // Resolve every parameter type above, during template instantiation;
-        // the runtime thunk must only mention ordinary C++ types and values.
         InvokeWithIndices<Resolver>(ctx, std::make_index_sequence<ParameterCount()> {});
     }
+};
 
-#else
-  private:
-    using Params = TemplatedDetail::CallableParameters<Callable>;
-    static inline char uniqueTag; // fallback identity for same-signature lambdas
+#else // !ZHLN_REFLECTION_AVAILABLE (Stub for stock clangd)
 
-  public:
-    template <typename F>
-    static void ForEachParameter(F&& f) {
-        Params::ForEach(std::forward<F>(f));
-    }
+template <auto Fn>
+struct CallableInspector {
+    using Callable = std::remove_cvref_t<decltype(Fn)>;
 
     static consteval auto ParameterCount() -> std::size_t {
-        return Params::ParameterCount();
+        return 0;
     }
 
     template <std::size_t I>
-    using ParameterType = typename Params::template ParameterType<I>;
+    using ParameterType = void;
 
-    static consteval auto Name() -> std::string_view {
-        // Only for reflection stubs. Native reflection above obtains the
-        // actual entity and its canonical identifier instead of parsing text.
-        std::string_view pretty = __PRETTY_FUNCTION__;
-        auto             start  = pretty.find("Fn = ");
-        if (start == std::string_view::npos)
-            return "AnonymousCallable";
-        pretty.remove_prefix(start + sizeof("Fn = ") - 1);
-        auto end  = pretty.find_first_of(";]");
-        auto name = pretty.substr(0, end);
-        if (name.find("<lambda") != std::string_view::npos)
-            return name; // NameCString adds identity
-        if (name.starts_with('&'))
-            name.remove_prefix(1);
-        if (name.ends_with("()"))
-            name.remove_suffix(2);
-        if (name.ends_with("{}"))
-            name.remove_suffix(2);
-        auto last = name.rfind("::");
-        if (last != std::string_view::npos) {
-            auto suffix = name.substr(last + 2);
-            if (suffix == "Update" || suffix == "GraphUpdate") {
-                name = name.substr(0, last);
-                last = name.rfind("::");
-                return name.substr(last == std::string_view::npos ? 0 : last + 2);
-            }
-            return suffix;
-        }
-        return name;
+    template <typename F>
+    static void ForEachParameter(F&&) noexcept {
     }
 
+    static consteval auto Name() -> std::string_view {
+        return "Callable";
+    }
     static auto NameCString() -> const char* {
-        static const std::string name = [] {
-            std::string result {Name()};
-            if constexpr (std::is_class_v<Callable>) {
-                if (Name().find("<lambda") != std::string_view::npos) {
-                    // GCC's pretty-function text omits the closure location.
-                    // The tag is unique for each NTTP in stub builds.
-                    result += "@" + std::to_string(reinterpret_cast<std::uintptr_t>(&uniqueTag));
-                }
-            }
-            return result;
-        }();
-        return name.c_str();
+        return "Callable";
     }
 
     template <template <typename> class Resolver, typename Context>
-    static void Invoke(Context& ctx) {
-        Params::template Invoke<Fn, Resolver>(ctx);
+    static void Invoke(Context&) noexcept {
     }
-#endif
 };
+
+#endif
 
 } // namespace ZHLN::Reflect
