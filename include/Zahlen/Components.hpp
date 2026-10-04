@@ -11,6 +11,7 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Profiler.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Render/RenderData.hpp>
@@ -202,6 +203,13 @@ struct Components {
         int   shadowResolution   = 2048;
         int   maxPunctualShadows = 0;
         float sunSize            = 0.05f;
+    };
+    // The culling pass's published counters. Its *scratch* -- the derived planes
+    // and the freeze-frame corners -- is node state and lives in CullingScratch on
+    // the pass itself. These counters are read by the debug overlay, the crash
+    // dump and the render tests, so they are world data and live here.
+    struct CullingStatsComponent {
+        CullingStats stats;
     };
     struct PostProcessSettingsComponent {
         int       giMode            = 0;

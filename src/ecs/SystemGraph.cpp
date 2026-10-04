@@ -26,6 +26,14 @@ struct SystemGraphCore::ExecutionContext {
 
 void SystemGraphCore::AddSystem(SystemInfo info) {
     _nodes.push_back({.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    AdoptLocal(_nodes.back());
+}
+
+// The node's state is the graph's to own: it is allocated from the layout the
+// signature produced, and the block keeps the layout so teardown knows what to
+// destroy. A node whose system names no Local<T> allocates nothing.
+void SystemGraphCore::AdoptLocal(Node& node) {
+    node.local.Adopt(node.info.local);
 }
 
 bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSystem) {
@@ -41,7 +49,8 @@ bool SystemGraphCore::AddSystemBefore(SystemInfo info, std::string_view beforeSy
     if (anchor == _nodes.end()) {
         return false;
     }
-    _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    auto inserted = _nodes.insert(anchor, Node {.info = std::move(info), .dependents = {}, .initialDependencyCount = 0});
+    AdoptLocal(*inserted);
     return true;
 }
 
@@ -161,7 +170,15 @@ void SystemGraphCore::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
     const Node& node = _nodes[nodeIdx];
 
     if (node.info.enabled && node.info.update_func != nullptr && ctx.carrier != nullptr) {
-        node.info.update_func(ctx.carrier);
+        // Built here, on this dispatcher's own stack: the carrier is shared by
+        // every node, the state is not.
+        SystemCall call {
+            .carrier   = ctx.carrier,
+            .local     = node.local.Pointer(),
+            .slots     = node.local.Slots(),
+            .slotCount = node.local.SlotCount(),
+        };
+        node.info.update_func(&call);
     }
 
     const size_t depCount = node.dependents.size();
@@ -222,6 +239,8 @@ bool SystemGraphCore::IsEmpty() const noexcept {
 }
 
 void SystemGraphCore::Clear() noexcept {
+    // Clearing the nodes destroys the state each one owned, because the storage
+    // lives in the node rather than beside it.
     _nodes.clear();
     _entryNodes.clear();
 }

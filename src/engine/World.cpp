@@ -3,7 +3,6 @@
 
 #include "ArticulationSystem.hpp"
 #include "Hierarchy.hpp"
-#include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
@@ -29,7 +28,6 @@ struct World::Impl {
     ECS::Registry                   registry;
 
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
-    std::unique_ptr<CullingSystem>            cullingSystem;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
 
     JPH::Array<Entity> visibleEntities;
@@ -54,7 +52,6 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
 
     impl.physicsContext      = std::make_unique<PhysicsContext>(physicsConfig);
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry, deferECBDestroy ? &MarkPendingDestroy : nullptr);
-    impl.cullingSystem       = std::make_unique<CullingSystem>();
     impl.articulationSystem  = std::make_unique<ArticulationSystem>();
 
     return instance;
@@ -68,7 +65,6 @@ World::~World() {
     _impl->visibleShadowEntities.clear();
     _impl->visibleEntities.clear();
     _impl->articulationSystem.reset();
-    _impl->cullingSystem.reset();
     _impl->mainECB.reset();
 
     // A standalone World can still contain physics owners. Release the bulk
@@ -119,15 +115,17 @@ auto World::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }
 
-auto World::GetCullingSystem() -> CullingSystem& {
-    return *_impl->cullingSystem;
-}
 auto World::GetArticulationSystem() -> ArticulationSystem& {
     return *_impl->articulationSystem;
 }
 
 auto World::GetCullingStats() -> CullingStats& {
-    return _impl->cullingSystem->Stats();
+    // The culling pass publishes here: its counters are read by the overlay, the
+    // crash dump and the render tests, so they are world data. The rest of the
+    // culler is the pass's own state and stays on the pass.
+    auto stats = _impl->registry.GetSingleton<Components::CullingStatsComponent>();
+    ZHLN::Assert(stats.has_value(), "the scene has no CullingStatsComponent singleton: InitializeDefaultScene creates it");
+    return stats->stats;
 }
 
 auto World::GetVisibleEntities() -> JPH::Array<Entity>& {

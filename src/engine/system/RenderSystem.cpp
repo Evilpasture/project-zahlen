@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderSystem.hpp"
-#include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
@@ -11,6 +10,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -547,7 +547,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         engine.SetPendingUIData(UIDrawData {});
     }
 
-    auto& cstats = engine.GetCullingSystem().Stats();
+    auto& cstats = engine.GetWorld().GetCullingStats();
     cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
     cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
 
@@ -557,7 +557,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     auto& rc = engine.GetRenderContext();
 
-    engine.GetCullingSystem().DrawDebugFrustum(engine);
+    CullingSystem::DrawDebugFrustum(engine);
 
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");

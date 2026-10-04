@@ -31,7 +31,6 @@ class RenderContext;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
-class CullingSystem;
 class ArticulationSystem;
 struct ModelPrefab;
 
@@ -74,9 +73,8 @@ struct SimServices {
 // What the render graph provides. `render` is here and *only* here: a
 // simulation system cannot name it, which is the point.
 struct RenderServices {
-    RenderContext&  render;
-    AssetManager&   assets;
-    CullingSystem&  culling;
+    RenderContext& render;
+    AssetManager&  assets;
 
     VisibleEntities       visible;
     VisibleShadowEntities shadow;

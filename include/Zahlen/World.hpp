@@ -15,7 +15,6 @@
 namespace ZHLN {
 
 class PhysicsContext;
-class CullingSystem;
 class ArticulationSystem;
 struct CullingStats;
 
@@ -43,7 +42,6 @@ class ZHLN_API World {
 
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
 
-    auto GetCullingSystem() -> CullingSystem&;
     auto GetArticulationSystem() -> ArticulationSystem&;
     auto GetCullingStats() -> CullingStats&;
 

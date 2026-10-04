@@ -104,8 +104,9 @@ void CleanupScene(Engine& engine, float , FrameContext& ) {
 }
 
 void Camera(Engine& engine, float dt, FrameContext& ) {
-    static CameraSystem camSys;
-    camSys.Update(engine, dt, engine.GetCurrentAlpha());
+    // No instance and no function-local static: the pass is stateless, and the
+    // camera it projects is component data.
+    CameraSystem::Update(engine, dt, engine.GetCurrentAlpha());
 }
 
 void LOD(Engine& engine, float , FrameContext& ) {
@@ -203,7 +204,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.Create(
         Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
-        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+        Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
     reg.Create(GUI::UISettingsComponent {});

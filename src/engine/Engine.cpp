@@ -154,8 +154,15 @@ void DumpCameraState(void* context, const SignalEvent& ) noexcept {
         Diagnostics::WriteCrashOutput("  (no main camera entity)\n");
     }
 
-    // The planes belong to the culler that derived them, not to the camera.
-    const Frustum& f = world.GetCullingSystem().GetFrustum();
+    // The planes are derived, not stored: the culling pass keeps its own scratch,
+    // so the dump derives the same planes the pass culled against -- from the
+    // view-projection it used, frozen or not.
+    Frustum      f {};
+    const auto   stats   = world.GetRegistry().GetSingleton<Components::CullingStatsComponent>();
+    const bool   frozen  = stats && stats->stats.FreezeFrustum;
+    if (camComp) {
+        f.Update(frozen ? camComp->frozenViewProj : camComp->unjitteredViewProj);
+    }
     auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
     Diagnostics::WriteCrashOutput(frust_hdr);
     const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
@@ -454,7 +461,6 @@ void Engine::EnsureSystemGraphs() {
         RenderServices {
             .render  = render,
             .assets  = _impl->kernel->GetAssetManager(),
-            .culling = _impl->world->GetCullingSystem(),
             .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
             .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
         }
@@ -553,9 +559,6 @@ void Engine::RunSceneCleanupPasses(bool all) {
 
 auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
-}
-auto Engine::GetCullingSystem() -> CullingSystem& {
-    return _impl->world->GetCullingSystem();
 }
 auto Engine::GetArticulationSystem() -> ArticulationSystem& {
     return _impl->world->GetArticulationSystem();

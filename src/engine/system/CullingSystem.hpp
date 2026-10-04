@@ -19,50 +19,50 @@ namespace ZHLN {
 class Engine;
 class RenderContext;
 
+// The culling pass's working set: the planes it derived this frame, the
+// freeze-frame corners, and whether the last frame was frozen. This is the
+// algorithm's scratch -- the pass writes it and reads it back, and nothing else
+// has any business with it -- so it belongs to the node that owns the pass
+// (ECS::Local<CullingScratch>) rather than to the world.
+//
+// The counters the pass publishes are a different thing: they are read by the
+// overlay, the crash dump and the render tests, so they live in
+// Components::CullingStatsComponent where world data belongs.
+struct CullingScratch {
+    Frustum                  mainFrustum {};
+    Frustum                  shadowFrustum {};
+    std::array<JPH::Vec3, 8> frustumCorners {};
+    bool                     wasFrozen = false;
+};
+
 class ZHLN_API CullingSystem {
   public:
     using CullingQuery = ECS::Query<
         const Components::MeshComponent, const Components::WorldTransformComponent, Components::CameraComponent&,
         const Components::GlobalSettingsTagComponent, const Components::PostProcessSettingsComponent,
         const Components::ShadowSettingsComponent, const Components::LightComponent, const Components::SunTagComponent,
-        const Components::EnvironmentSunTagComponent, const Components::TransformComponent>;
+        const Components::EnvironmentSunTagComponent, const Components::TransformComponent, Components::CullingStatsComponent&>;
 
-    // Reflected graph entry point. The stateful culler and both output lists
-    // are injected by type, not extracted in SystemWiring.cpp.
-    static void GraphUpdate(CullingQuery query, ECS::ResMut<CullingSystem> culling, ECS::Res<RenderContext> render,
-                            VisibleEntities visible, VisibleShadowEntities shadow);
+    // Reflected graph entry point. The pass owns its scratch (ECS::Local), reads
+    // the camera entity's pose from the registry, and writes the counters it
+    // publishes into the stats singleton. There is no culler *object* left to
+    // hand it: the class is a namespace for the pass.
+    static void GraphUpdate(CullingQuery query, ECS::Res<RenderContext> render, VisibleEntities visible, VisibleShadowEntities shadow,
+                            ECS::Local<CullingScratch> scratch);
 
-    template <bool UsePhysicsTransforms = false>
-    void Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
-
-    template <bool UsePhysicsTransforms = false>
-    void Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
-
-    [[nodiscard]] std::array<JPH::Vec3, 8> GetFrustumCorners() const {
-        return m_frustumCorners;
-    }
-
-    // The culling planes are the culler's own state: it derives them from the
-    // camera entity's view-projection each frame. The camera does not own them,
-    // so there is exactly one writer.
-    [[nodiscard]] const Frustum& GetFrustum() const noexcept { return m_mainFrustum; }
-
-    void DrawDebugFrustum(Engine& engine);
-
-    CullingStats&       Stats() noexcept { return m_stats; }
-    const CullingStats& Stats() const noexcept { return m_stats; }
+    // The freeze-frame debug view. The corners are the pass's own state now, so
+    // this derives them from the same view-projection the pass froze instead of
+    // reaching into another node's storage.
+    static void DrawDebugFrustum(Engine& engine);
 
   private:
-    template <bool UsePhysicsTransforms>
-    void UpdateCore(CullingQuery query, const RenderContext& render, Camera& cam, bool engineCam,
-                    JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
-
-    Frustum                  m_mainFrustum {};
-    Frustum                  m_shadowFrustum {};
-
-    std::array<JPH::Vec3, 8> m_frustumCorners {};
-    CullingStats             m_stats {};
-    bool                    m_wasFrozen = false;
+    static void UpdateCore(CullingQuery query, const RenderContext& rc, const Camera& cam, bool engineCam, CullingScratch& scratch,
+                           CullingStats& stats, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
 };
 
-}
+// The eight world-space corners of a view-projection, in the order the debug
+// edges expect. Shared by the freeze path (which stores them) and the debug draw
+// (which draws them).
+[[nodiscard]] ZHLN_API std::array<JPH::Vec3, 8> FrustumCornersFromViewProj(const JPH::Mat44& viewProj) noexcept;
+
+} // namespace ZHLN

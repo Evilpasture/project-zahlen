@@ -53,7 +53,6 @@ class EntityCommandBuffer;
 
 class FrameScheduler;
 
-class CullingSystem;
 class ArticulationSystem;
 
 class ZHLN_API Engine {
@@ -137,7 +136,6 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
     // Simulation-produced skinning poses, drained once per frame by RenderSystem.
     auto               GetPoseUploads() -> PoseUploadQueue&;
-    auto               GetCullingSystem() -> CullingSystem&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
     auto               GetVisibleEntities() -> JPH::Array<Entity>&;
     auto               GetVisibleShadowEntities() -> JPH::Array<Entity>&;
