@@ -428,6 +428,11 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
 
     _impl->destinations.BeginFrame();
     ++_impl->frameSerial;
+    // This frame's billboard batches start again from their first slot. The serial
+    // tells same-key submissions apart within one frame, so it is frame state and is
+    // reset here, with frameSerial -- the emitter queue it counts into is shared with
+    // the particle submits and cleared at EndFrame, so it cannot signal a frame.
+    _impl->billboardSerial = 0;
     _impl->frameState.Reset();
     _impl->sceneTarget.reset();
 

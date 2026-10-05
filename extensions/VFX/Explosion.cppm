@@ -346,10 +346,9 @@ export struct ExplosionComponent {
     Entity debrisEntity  = Entity::Null();
     bool   craterSpawned = false;
 
-    BufferHandle fireBuffer       = BufferHandle::Invalid;
-    BufferHandle smokeBuffer      = BufferHandle::Invalid;
-    BufferHandle shockwaveBuffer  = BufferHandle::Invalid;
-    BufferHandle groundRingBuffer = BufferHandle::Invalid;
+    // No GPU storage: the particles above are the simulation's own state, and
+    // rendering them is RenderBatchGPU describing world-space quads for the
+    // renderer (RenderContext::DrawBillboards), which owns the buffers.
 };
 
 export struct CraterDecalComponent {
@@ -368,33 +367,11 @@ export struct CraterDecalComponent {
 
 export class ExplosionSystem {
   public:
-    static void Release(Engine& engine, ExplosionComponent& exp) {
-        auto& render = engine.GetRenderContext();
-        render.DestroyBuffer(std::exchange(exp.fireBuffer, BufferHandle::Invalid));
-        render.DestroyBuffer(std::exchange(exp.smokeBuffer, BufferHandle::Invalid));
-        render.DestroyBuffer(std::exchange(exp.shockwaveBuffer, BufferHandle::Invalid));
-        render.DestroyBuffer(std::exchange(exp.groundRingBuffer, BufferHandle::Invalid));
-    }
-
+    // No Release and no cleanup pass: the component holds nothing on the GPU, and
+    // the renderer releases what it allocated for described quads on its own
+    // schedule. Detaching is an ECS mutation and nothing else.
     static void Detach(Engine& engine, Entity entity) {
-        if (auto exp = engine.GetRegistry().Get<ExplosionComponent>(entity)) {
-            Release(engine, *exp);
-            engine.GetRegistry().Remove<ExplosionComponent>(entity);
-        }
-    }
-
-    static void Cleanup(Engine& engine, bool all) {
-        auto& reg = engine.GetRegistry();
-        const auto entities = reg.GetEntitiesWith<ExplosionComponent>();
-        if (entities.empty()) {
-            return;
-        }
-        auto explosions = reg.GetRawArray<ExplosionComponent>();
-        for (size_t i = 0; i < entities.size(); ++i) {
-            if (all || reg.Get<Components::PendingDestroy>(entities[i])) {
-                Release(engine, explosions[i]);
-            }
-        }
+        engine.GetRegistry().Remove<ExplosionComponent>(entity);
     }
 
     static void Init(Engine& engine) {
@@ -405,17 +382,10 @@ export class ExplosionSystem {
         reg.RegisterComponent<ExplosionComponent>("ExplosionComponent");
         reg.RegisterComponent<CraterDecalComponent>("CraterDecalComponent");
 
-        if (engine.AddSceneCleanupPass(&Cleanup)) {
-            engine.AddDeviceLostCallback([](Engine& owner) {
-                for (auto& exp: owner.GetRegistry().GetRawArray<ExplosionComponent>()) {
-                    exp.fireBuffer       = BufferHandle::Invalid;
-                    exp.smokeBuffer      = BufferHandle::Invalid;
-                    exp.shockwaveBuffer  = BufferHandle::Invalid;
-                    exp.groundRingBuffer = BufferHandle::Invalid;
-                }
-                s_LastRenderContext = nullptr;
-            });
-        }
+        // No scene-cleanup pass: there is no GPU state of this system's to release.
+        // The one thing that must not survive a device loss is the cached context
+        // pointer, and the renderer is the one that lost the device.
+        engine.AddDeviceLostCallback([](Engine& owner) { s_LastRenderContext = nullptr; });
 
         s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");
         s_DebrisMatAsset  = HashAssetID("artillery_debris_mat");
@@ -843,56 +813,46 @@ export class ExplosionSystem {
     }
 
     static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
-        // Authored particles in the shader's own element: UploadParticles takes
-        // the same type the buffer holds, so there is nothing to pack.
-        thread_local std::vector<Particle> t_gpuScratch;
-
-        // The renderer owns the particle layout, so it owns the stride too: the
-        // author says how many particles it is handing over, nothing about how
-        // one is stored (RenderContext::ParticleStride).
-        const auto ensureBuffer = [&rc](BufferHandle& buffer, size_t count) -> BufferHandle {
-            if (buffer == BufferHandle::Invalid && count != 0) {
-                buffer = rc.CreateStorageBuffer(count * rc.ParticleStride());
-            }
-            return buffer;
-        };
+        // The simulation above is the CPU's; this describes what it produced in
+        // world-space quads and hands them over. The renderer owns the storage,
+        // the stride and the bindless slot, so nothing here allocates, packs a
+        // lane or resolves a texture index -- the effect asks for a texture it
+        // holds and the blend it wants, and that is all it knows.
+        thread_local std::vector<BillboardQuad> t_quads;
 
         // 1. FIREBALL
         if (!exp.fireball.empty()) {
-            t_gpuScratch.resize(exp.fireball.size());
-            for (size_t i = 0; i < exp.fireball.size(); ++i) {
-                const auto& p = exp.fireball[i];
-                float       t = std::min(1.0f, p.life / p.maxLife);
+            t_quads.clear();
+            t_quads.reserve(exp.fireball.size());
+            for (const auto& p: exp.fireball) {
+                const float t = std::min(1.0f, p.life / p.maxLife);
 
-                JPH::Vec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
-                                                p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.52f) / 0.48f);
+                const JPH::Vec3 color = (t < 0.52f) ? p.colorStart + (p.colorMid - p.colorStart) * (t / 0.52f) :
+                                                      p.colorMid + (p.colorEnd - p.colorMid) * ((t - 0.52f) / 0.48f);
 
-                float opacity = (1.0f - t) * 0.98f;
-                float size    = p.startSize * (1.0f + t * 1.15f);
+                const float opacity = (1.0f - t) * 0.98f;
+                const float size    = p.startSize * (1.0f + t * 1.15f);
 
-                Particle& gpu = t_gpuScratch[i];
-                JPH::Vec4(exp.origin + p.position, 1.0f).StoreFloat4(&gpu.position);
-                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
-                JPH::Vec4(color * (opacity * 3.5f), opacity).StoreFloat4(&gpu.color);
-                JPH::Vec4(p.life, p.maxLife, size, 0.0f).StoreFloat4(&gpu.params);
+                t_quads.push_back(
+                    {.position = exp.origin + p.position,
+                     .size     = size,
+                     .rotation = 0.0f,
+                     .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                     .facing   = ParticleAlignment::CameraBillboard}
+                );
             }
 
-            const BufferHandle buf = ensureBuffer(exp.fireBuffer, exp.fireball.size());
-            rc.UploadParticles(buf, std::span {t_gpuScratch});
-            rc.SubmitParticleEmitter(
-                buf, static_cast<uint32_t>(exp.fireball.size()),
-                {.textureIndex = rc.GetBindlessIndex(s_FireTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
-            );
+            rc.DrawBillboards(s_FireTexHandle, std::span {t_quads}, true);
         }
 
         // 2. SOIL SMOKE
         if (!exp.soilSmoke.empty()) {
-            t_gpuScratch.resize(exp.soilSmoke.size());
-            for (size_t i = 0; i < exp.soilSmoke.size(); ++i) {
-                const auto& p       = exp.soilSmoke[i];
-                float       opacity = 0.0f;
-                float       size    = p.startSize;
-                JPH::Vec3   color   = p.colorEnd;
+            t_quads.clear();
+            t_quads.reserve(exp.soilSmoke.size());
+            for (const auto& p: exp.soilSmoke) {
+                float     opacity = 0.0f;
+                float     size    = p.startSize;
+                JPH::Vec3 color   = p.colorEnd;
 
                 if (p.life < p.maxLife) {
                     float t = p.life / p.maxLife;
@@ -901,26 +861,23 @@ export class ExplosionSystem {
                     size    = p.startSize * (1.0f + t * 1.95f);
                 }
 
-                Particle& gpu = t_gpuScratch[i];
-                JPH::Vec4(exp.origin + p.position, 1.0f).StoreFloat4(&gpu.position);
-                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
-                JPH::Vec4(color, opacity).StoreFloat4(&gpu.color);
-                JPH::Vec4(p.life, p.maxLife, size, 0.0f).StoreFloat4(&gpu.params);
+                t_quads.push_back(
+                    {.position = exp.origin + p.position,
+                     .size     = size,
+                     .rotation = 0.0f,
+                     .color    = JPH::Vec4(color, opacity),
+                     .facing   = ParticleAlignment::CameraBillboard}
+                );
             }
 
-            const BufferHandle buf = ensureBuffer(exp.smokeBuffer, exp.soilSmoke.size());
-            rc.UploadParticles(buf, std::span {t_gpuScratch});
-            rc.SubmitParticleEmitter(
-                buf, static_cast<uint32_t>(exp.soilSmoke.size()),
-                {.textureIndex = rc.GetBindlessIndex(s_SoilTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 0}
-            );
+            rc.DrawBillboards(s_SoilTexHandle, std::span {t_quads}, false);
         }
 
         // 3. SHOCKWAVE AIR & GROUND FRONTS
         if (!exp.shockwaves.empty()) {
             // Air Shockwave Billboards (4 Fronts)
             {
-                t_gpuScratch.resize(4);
+                t_quads.clear();
                 for (size_t i = 0; i < 4; ++i) {
                     const auto& sw        = exp.shockwaves[i];
                     float       localTime = exp.age - sw.delay;
@@ -935,23 +892,20 @@ export class ExplosionSystem {
                         opacity = std::pow(1.0f - t, 1.2f) * 0.45f;
                     }
 
-                    Particle& gpu = t_gpuScratch[i];
-                    JPH::Vec4(exp.origin, 1.0f).StoreFloat4(&gpu.position);
-                    JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
-                    JPH::Vec4(color * (opacity * 3.5f), opacity).StoreFloat4(&gpu.color);
-                    JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f).StoreFloat4(&gpu.params);
+                    t_quads.push_back(
+                        {.position = exp.origin,
+                         .size     = radius * 2.0f,
+                         .rotation = 0.0f,
+                         .color    = JPH::Vec4(color * (opacity * 3.5f), opacity),
+                         .facing   = ParticleAlignment::CameraBillboard}
+                    );
                 }
 
-                const BufferHandle buf = ensureBuffer(exp.shockwaveBuffer, 4);
-                rc.UploadParticles(buf, std::span {t_gpuScratch}.first(4));
-                rc.SubmitParticleEmitter(
-                    buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
-                );
+                rc.DrawBillboards(s_ShockwaveTexHandle, std::span {t_quads}, true);
             }
 
             // Ground Dust Flat Front (1 Plane)
             {
-                t_gpuScratch.resize(1);
                 const auto& sw        = exp.shockwaves[4];
                 float       localTime = exp.age - sw.delay;
                 float       opacity   = 0.0f;
@@ -965,17 +919,14 @@ export class ExplosionSystem {
                     opacity = std::pow(1.0f - t, 1.5f) * 0.35f;
                 }
 
-                Particle& gpu = t_gpuScratch[0];
-                JPH::Vec4(exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f), 1.0f).StoreFloat4(&gpu.position);
-                JPH::Vec4::sZero().StoreFloat4(&gpu.velocity);
-                JPH::Vec4(color, opacity).StoreFloat4(&gpu.color);
-                JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f).StoreFloat4(&gpu.params);
-
-                const BufferHandle buf = ensureBuffer(exp.groundRingBuffer, 1);
-                rc.UploadParticles(buf, std::span {t_gpuScratch}.first(1));
-                rc.SubmitParticleEmitter(
-                    buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}
-                );
+                const BillboardQuad quad {
+                    .position = exp.origin + JPH::Vec3(0.0f, 0.05f, 0.0f),
+                    .size     = radius * 2.0f,
+                    .rotation = 0.0f,
+                    .color    = JPH::Vec4(color, opacity),
+                    .facing   = ParticleAlignment::GroundFlat,
+                };
+                rc.DrawBillboards(s_GroundRingHandle, std::span {&quad, 1}, true);
             }
         }
     }

@@ -253,17 +253,18 @@ The generated GPU types are not part of this closure at all. `GeneratedGpuTypes.
 which is renderer implementation: nothing under `include/` includes it, names a
 `GeneratedGpu::` type, or needs the shader tool to have run.
 
-The structs the engine and the shaders share are hand-written, once, in
-`include/Zahlen/Render/RenderData.hpp` -- `Particle`, `ParticleEmitterParams`,
-`MeshParticleEmitterParams`, `Light`, `FrameUniforms` -- with one storage
-spelling per shader concept (`float2`/`float3`/`float4` -> `JPH::Float2/3/4`,
-`float4x4` -> `JPH::Mat44`, `T name[N]` -> `std::array<T, N>`), and the generated
-header aliases them and asserts every offset against Slang. So the two halves are
-the same struct: the engine fills the shader's own layout, the renderer reads it
-back, and there is nothing in between to convert -- no `ToGpu`, no description
-type per concept, no second spelling to keep in sync. A member the shader no
-longer declares breaks the build
-there, in one renderer file, instead of reshaping a public type.
+The structs the engine and the shaders share are *generated*, from the same
+reflection that decides their layout: `tools/zshader` emits every GPU-visible
+struct -- `Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
+`Light`, `FrameUniforms` and the renderer-only ones -- with the members at the
+offsets Slang seated them, the `_padN` between them and the `alignas` each lane
+carries, and asserts each struct against the reflection it came from. There is no
+hand-written half of the ABI to keep in sync, and no second spelling per concept.
+The engine authors its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
+`Zahlen/Render/FrameData.hpp`) and the renderer packs them at the submit boundary
+(`src/render/GpuPack.cpp`): a member the shader no longer declares breaks the
+build in that pack function, where the shader's layout is the only thing being
+spoken -- never in a public type.
 
 ---
 
@@ -369,9 +370,9 @@ ECS settings components (the editing surface)
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
         ▼
-RenderContext state (SetFrameData fills the shader's FrameUniforms from the
-  engine's FrameUniforms struct; scene-pass push block, pipeline-variant
-  selection, reactive GPU target resizes)
+RenderContext state (SetFrameData packs the engine's FrameData into the shader's
+  own FrameUniforms; scene-pass push block, pipeline-variant selection, reactive
+  GPU target resizes)
 ```
 
 * **Single collector**: `system/GraphicsSettingsSync.cpp` folds the ECS
@@ -390,8 +391,9 @@ RenderContext state (SetFrameData fills the shader's FrameUniforms from the
   iterations, roughness cutoff, bounce budget).
 * **GPU ABI safety**: every generated GPU type (the buffers and uniform blocks
   the renderer uploads, generated from the compiled `gpu_abi.slang` by
-  `tools/zshader`) stays inside `src/render/`; the types the engine also touches
-  are hand-written in `RenderData.hpp` and the generated header aliases them. Each
+  `tools/zshader`) stays inside `src/render/`; the types the engine also touches are
+  its own domain structs (`ParticleEmitterDesc`, `LightDesc`, `FrameData`), which
+  the renderer packs into the generated ones at the submit boundary. Each
   generated type is checked against that same module at compile time
   (`src/render/GpuAbi.hpp`, a renderer header beside the types
   it checks). Push blocks are the renderer's, not the engine's -- they live in

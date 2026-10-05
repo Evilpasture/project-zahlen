@@ -9,8 +9,9 @@
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
-#include <Zahlen/Render/RenderData.hpp>
+#include <Zahlen/Render/FrameData.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
@@ -53,6 +54,19 @@ struct EnvironmentRadianceDesc {
     Extent2D               extent {};
     uint64_t               contentHash  = 0;
     bool                   renderSkybox = false;
+};
+
+
+// One immediate-mode quad, in scene terms: where it is, how big it is, how it is
+// turned, what it is coloured, and which way it faces. Everything the renderer's
+// particle vertex shader needs, and nothing about how it is stored.
+struct BillboardQuad {
+    JPH::Vec3         position {};                    // world-space centre
+    float             size     = 1.0f;                // world units, the quad's edge
+    float             rotation = 0.0f;                // radians, in the quad's own plane
+    JPH::Vec4         color {1.0f, 1.0f, 1.0f, 1.0f}; // straight RGBA, multiplied with the texture
+    ParticleAlignment facing = ParticleAlignment::CameraBillboard;
+    JPH::Vec3         velocity {}; // facing == VelocityStretched: the axis it stretches along
 };
 
 class ZHLN_API RenderContext {
@@ -107,23 +121,28 @@ class ZHLN_API RenderContext {
     void                                  ClearGPUCaches() noexcept;
 
     BufferHandle CreateStorageBuffer(size_t size);
-    // Bytes per particle in this renderer's storage buffers: an emitter's
-    // buffer is sized with these, so the engine knows how many particles it
-    // asked for and nothing about how one is laid out.
-    [[nodiscard]] auto ParticleStride() const noexcept -> uint32_t;
-    [[nodiscard]] auto MeshParticleStride() const noexcept -> uint32_t;
 
-    // Descriptions, not GPU layouts: the renderer converts them at the boundary
-    // (one definition, asserted against Slang by the generated header), so they never appear
-    // in a public header.
-    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc);
+    // Storage for a GPU-simulated emitter: the renderer owns what one particle occupies,
+    // so a host asks for a particle count and never for a stride.
+    [[nodiscard]] auto CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle;
+    [[nodiscard]] auto CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle;
 
-    // Author-side particle upload: the caller describes particles, the renderer
-    // packs them into its own storage layout and writes the buffer. Mesh
-    // particles have no author-side path -- they are produced on the GPU by
-    // MeshParticleUpdatePass from their emitter's parameters.
-    void UploadParticles(BufferHandle gpuBuffer, std::span<const Particle> particles) noexcept;
-    void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& desc, AssetID mesh, MaterialID mat);
+    // Descriptions, not GPU layouts: src/render/GpuPack.cpp writes the struct the
+    // update and render passes read. @p texture is the engine's own handle -- the
+    // renderer resolves it -- and @p additive picks the blend, so an emitter's
+    // presentation never rides its physics. Mesh particles have no author-side upload
+    // path: MeshParticleUpdatePass produces them on the GPU from their parameters.
+    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false);
+    void SubmitMeshParticleEmitter(
+        BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
+    );
+
+    // Immediate-mode quads: the host describes billboards in world space for this frame,
+    // and the renderer packs, buffers and draws them. Nothing is retained, so a host
+    // keeps no BufferHandle, resolves no bindless slot and knows no stride -- which is
+    // what a gameplay effect wants when it has positions and colours and no business
+    // with a storage layout.
+    void DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive = false);
 
     // Raw byte streams declare their element stride; typed spans derive it.
     [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
@@ -233,7 +252,10 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
-    void SetFrameData(const Camera& cam, const FrameUniforms& view, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+    // The scene state, and the lights that go with it. Both are the engine's
+    // terms (include/Zahlen/Render/FrameData.hpp); the renderer packs them into
+    // the shader's structs, so neither call makes a caller name a GPU layout.
+    void SetFrameData(const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
     void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
     void ClearDrawQueues() noexcept;
@@ -244,7 +266,7 @@ class ZHLN_API RenderContext {
 
     void SetGISettings(const GISettings& settings) noexcept;
     void SetAAState(const AAState& state);
-    void SetLights(std::span<const Light> lights) noexcept;
+    void SetLights(std::span<const LightDesc> lights) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;

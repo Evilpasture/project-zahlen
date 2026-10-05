@@ -1082,14 +1082,13 @@ add_custom_target(zahlen_shader_catalog
 # header and re-exports the renderer-only structs under the names the renderer
 # uses; it is renderer-internal, and nothing under include/ reaches it.
 #
-# There is one definition per concept, and for the structs the engine authors it
-# is the hand-written one: Particle, ParticleEmitterParams,
-# MeshParticleEmitterParams, Light and FrameUniforms live in
-# Zahlen/Render/RenderData.hpp, and the generated header *aliases* them and
-# asserts their size and every member offset against the reflection. A Slang
-# edit that moves a member therefore fails right here, naming it, instead of
-# compiling against a skewed layout -- or reshaping a public type; and nothing
-# is converted between the two halves, because they are the same struct.
+# One definition per concept, and it is the generated one: the reflection is the
+# ABI, so tools/zshader emits every GPU-visible struct from it -- Particle,
+# ParticleEmitterParams, MeshParticleEmitterParams, Light and FrameUniforms
+# included -- with the members at the offsets Slang seated them and the padding
+# and alignment that implies, then asserts each struct against the reflection it
+# came from. A Slang edit that moves a member re-emits the definition rather than
+# skewing a hand-written one, and no public type is reshaped by it.
 #
 # The header is generated, so every target compiling a translation unit that
 # reaches it -- directly or through src/render/GpuLayout.hpp -- orders itself

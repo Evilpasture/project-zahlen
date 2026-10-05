@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "GpuPack.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
@@ -87,39 +88,117 @@ void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     }
 }
 
-auto RenderContext::ParticleStride() const noexcept -> uint32_t {
-    return static_cast<uint32_t>(sizeof(Particle));
+auto RenderContext::CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle {
+    return CreateStorageBuffer(static_cast<size_t>(maxParticles) * sizeof(Particle));
 }
 
-void RenderContext::UploadParticles(BufferHandle gpuBuffer, std::span<const Particle> particles) noexcept {
-    // The same type on both sides of the seam: the staging vector *is* the
-    // storage layout, so this is a copy, not a conversion.
-    _impl->particleStaging.assign(particles.begin(), particles.end());
-    UpdateBuffer(gpuBuffer, std::as_bytes(std::span {_impl->particleStaging}));
-}
-
-auto RenderContext::MeshParticleStride() const noexcept -> uint32_t {
-    return static_cast<uint32_t>(sizeof(Particle3D));
+auto RenderContext::CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle {
+    return CreateStorageBuffer(static_cast<size_t>(maxParticles) * sizeof(Particle3D));
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
     return _impl->geometry.CreateBuffer({.allocationSize = size}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex).value_or(BufferHandle::Invalid);
 }
 
-void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc) {
-    _impl->queues.ParticleEmitters().push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = desc});
+void RenderContext::SubmitParticleEmitter(
+    BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive
+) {
+    // The manager already answers a default for an unregistered handle
+    // (kFallbackWhiteTextureIndex), so there is nothing to test here: a host that
+    // names no texture gets the white slot the sampler expects.
+    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
+
+    _impl->queues.ParticleEmitters().push_back(
+        {.gpuBuffer    = gpuBuffer,
+         .maxParticles = maxParticles,
+         .params       = GpuPack::PackParticleEmitter(desc, textureIndex, additive ? 1u : 0u)}
+    );
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
-    BufferHandle                   gpuBuffer,
-    uint32_t                       maxParticles,
-    const MeshParticleEmitterParams& desc,
-    AssetID                        mesh,
-    MaterialID                     mat
+    BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
 ) {
     _impl->queues.MeshParticleEmitters().push_back(
-        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = desc, .meshAsset = mesh, .materialAsset = mat}
+        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackMeshParticleEmitter(desc), .meshAsset = mesh, .materialAsset = mat}
     );
+}
+
+void RenderContext::DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive) {
+    if (billboards.empty()) {
+        return;
+    }
+
+    // The frame's batch index: it keeps two submissions of one key in one frame from
+    // sharing a slot, and so a buffer. It restarts at the frame boundary (BeginFrame,
+    // next to frameSerial) -- not from the emitter queue's state: that queue is shared
+    // with the particle submits, so its emptiness says nothing about frames, and reading
+    // it as a frame signal leaves the serial counting up forever in any scene that has
+    // an emitter in it (a new slot, and a new buffer, every frame).
+    const uint32_t serial = _impl->billboardSerial++;
+
+    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture); // Invalid -> the white slot
+    const uint32_t blendMode    = additive ? 1u : 0u;
+
+    // One draw per facing: the pass takes the alignment as a push constant, so a call
+    // that mixes camera-facing and ground-facing quads becomes two draws of one texture.
+    for (uint32_t alignment = 0; alignment < 3; ++alignment) {
+        _impl->billboardStaging.clear();
+        for (const BillboardQuad& quad: billboards) {
+            if (static_cast<uint32_t>(quad.facing) != alignment) {
+                continue;
+            }
+            Particle packed {};
+            JPH::Vec4(quad.position, 1.0f).StoreFloat4(&packed.position);
+            JPH::Vec4(quad.facing == ParticleAlignment::VelocityStretched ? quad.velocity : JPH::Vec3::sZero(), 0.0f)
+                .StoreFloat4(&packed.velocity);
+            quad.color.StoreFloat4(&packed.color);
+            // The render vertex shader reads a quad's size and rotation out of params.z
+            // and params.w. This is the one place that fact is written down for billboards.
+            JPH::Vec4(0.0f, 0.0f, quad.size, quad.rotation).StoreFloat4(&packed.params);
+            _impl->billboardStaging.push_back(packed);
+        }
+
+        const uint32_t count = static_cast<uint32_t>(_impl->billboardStaging.size());
+        if (count == 0) {
+            continue;
+        }
+
+        Impl::BillboardSlot* group = nullptr;
+        for (auto& candidate: _impl->billboardSlots) {
+            if (candidate.textureIndex == textureIndex && candidate.blendMode == blendMode && candidate.alignment == alignment &&
+                candidate.serial == serial) {
+                group = &candidate;
+                break;
+            }
+        }
+        if (group == nullptr) {
+            _impl->billboardSlots.push_back(
+                {.textureIndex = textureIndex, .blendMode = blendMode, .alignment = alignment, .serial = serial}
+            );
+            group = &_impl->billboardSlots.back();
+        }
+
+        if (group->capacity < count) {
+            if (group->buffer != BufferHandle::Invalid) {
+                DestroyBuffer(group->buffer);
+            }
+            group->buffer   = CreateParticleBuffer(count);
+            group->capacity = count;
+        }
+        if (group->buffer == BufferHandle::Invalid) {
+            continue;
+        }
+
+        UpdateBuffer(group->buffer, std::as_bytes(std::span {_impl->billboardStaging}));
+        _impl->queues.ParticleEmitters().push_back(
+            {.gpuBuffer    = group->buffer,
+             .maxParticles = count,
+             // The pass takes the alignment as a push constant (uint); the lane's own
+             // type is the enum, so the crossings between the two are explicit.
+             .params       = {.textureIndex = textureIndex, .alignment = static_cast<ParticleAlignment>(alignment), .blendMode = blendMode},
+             .simulate     = false}
+        );
+    }
 }
 
 auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uint32_t {

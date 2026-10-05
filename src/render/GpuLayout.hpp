@@ -5,23 +5,32 @@
 
 // The renderer's view of the generated ABI.
 //
-// The structs the engine and the shaders share are defined once, by hand, in
-// include/Zahlen/Render/RenderData.hpp -- the generated header aliases those and
-// asserts their layout against Slang reflection. What is left here are the
-// structs only the renderer has a name for, aliased out of GeneratedGpu so a
-// render TU can say `InstanceData` the way it always has.
+// tools/zshader emits every GPU-visible struct from the Slang module -- member
+// order, offsets, alignment, the padding lanes and the packed arrays as the
+// compiler seated them. Nothing here is hand-written, and nothing under include/
+// names a generated type: the engine hands the renderer its own terms
+// (ParticleEmitterDesc, LightDesc, FrameData) and src/render/GpuPack.cpp packs
+// them. That is what lets the engine build without the shader tool having run.
 //
 // This header stays in src/render and not in include/: it names generated code,
 // and the renderer is its only consumer.
 
 #include <GeneratedGpuTypes.hpp>
-#include <Zahlen/Render/RenderData.hpp>
 
 namespace ZHLN {
 
-using InstanceData   = GeneratedGpu::InstanceData;
-using ClusterBounds  = GeneratedGpu::ClusterBounds;
-using ClusterVolume  = GeneratedGpu::ClusterVolume;
-using Particle3D     = GeneratedGpu::Particle3D;
+// Structs only the renderer has a name for.
+using GeneratedGpu::ClusterBounds;
+using GeneratedGpu::ClusterVolume;
+using GeneratedGpu::InstanceData;
+using GeneratedGpu::Particle3D;
+
+// And the ones both halves of the work have a word for: one particle, an
+// emitter's parameters, a light, a frame.
+using GeneratedGpu::FrameUniforms;
+using GeneratedGpu::Light;
+using GeneratedGpu::MeshParticleEmitterParams;
+using GeneratedGpu::Particle;
+using GeneratedGpu::ParticleEmitterParams;
 
 } // namespace ZHLN

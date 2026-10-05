@@ -4,6 +4,7 @@
 
 set(RAW_RENDER_SOURCES
     GpuAbi.cpp
+    GpuPack.cpp
     RenderFrame.cpp
     RenderDestinations.cpp
     PresentationSurface.cpp

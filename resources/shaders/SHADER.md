@@ -53,10 +53,12 @@ pre-filtered specular cube always uses the original, complete panorama.
 `zshader --abi <gpu_abi.spv> --out-gpu-types ...` additionally reflects that
 same module into the generated host structs (`GeneratedGpuTypes.hpp`, re-exported
 by `src/render/GpuLayout.hpp`, which is renderer-internal -- nothing under
-`include/` reaches it). Five of those structs are hand-written instead, in
-`Zahlen/Render/RenderData.hpp`, and the header aliases them and asserts their
-layout against the reflection: one definition per concept, no conversion between
-the engine's copy and the shader's. A field added, removed, reordered
+`include/` reaches it). Every struct is emitted, including the five the engine and
+the shaders share (`Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
+`Light`, `FrameUniforms`): one definition per concept, and it is this one. The
+engine hands the renderer its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
+`Zahlen/Render/FrameData.hpp`) and `src/render/GpuPack.cpp` writes these structs
+field by field. A field added, removed, reordered
 or retyped here re-emits the host side on the next build; a Slang kind without a
 C++ spelling fails that build by name instead. Two exceptions: `GPUMeshlet` is still
 hand-written -- its ABI is the raw word protocol in `fetchMeshlet`, which no

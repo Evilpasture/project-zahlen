@@ -101,6 +101,9 @@ struct ParticleEmitterCommand {
     BufferHandle          gpuBuffer;
     uint32_t              maxParticles;
     ParticleEmitterParams params;
+    // False for quads the host already integrated on the CPU (DrawBillboards): the
+    // update pass must render them, not simulate them a second time.
+    bool simulate = true;
 };
 
 static_assert(std::is_trivially_copyable_v<ParticleEmitterCommand> && std::is_standard_layout_v<ParticleEmitterCommand>);

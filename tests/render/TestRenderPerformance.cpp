@@ -399,10 +399,11 @@ auto RunParticlesTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::e
                                                                                                  .startSize   = {0.2f, 0.2f},
                                                                                                  .endSize     = {0.0f, 0.0f},
                                                                                                  .alignment   = ZHLN::ParticleAlignment::CameraBillboard,
-                                                                                                 .blendMode   = 1},
+                                                                                                 },
                                                                                             .textureAsset = fireTex,
                                                                                             .maxParticles = kMaxParticles,
-                                                                                            .active       = true
+                                                                                            .active       = true,
+                                                                                            .additive     = true
                                                                                         }
     );
 
@@ -807,10 +808,11 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
                                                                                                  .startSize   = {0.25f, 0.25f},
                                                                                                  .endSize     = {0.0f, 0.0f},
                                                                                                  .alignment   = ZHLN::ParticleAlignment::CameraBillboard,
-                                                                                                 .blendMode   = 1},
+                                                                                                 },
                                                                                             .textureAsset = sparkTex,
                                                                                             .maxParticles = 10000,
-                                                                                            .active       = true
+                                                                                            .active       = true,
+                                                                                            .additive     = true
                                                                                         }
     );
 

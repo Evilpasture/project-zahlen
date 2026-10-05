@@ -7,6 +7,7 @@
 #include "FrameDestinations.hpp"
 #include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
+#include "GpuLayout.hpp"
 #include "GpuAbi.hpp"
 #include "PipelineDesc.hpp"
 #include "PipelineRegistry.hpp"
@@ -456,9 +457,22 @@ struct RenderContext::Impl {
 
     DrawQueueManager queues;
 
-    // Authored particles, packed once per UploadParticles call: the caller's
-    // descriptions are not the storage layout, so they are converted here.
-    ZHLN::Array<Particle> particleStaging;
+    // Billboards: renderer-owned storage, one slot per (texture, blend, facing, call) --
+    // a host that draws the same texture twice in a frame gets two slots rather than one
+    // overwritten buffer, and the serial restarts when the emitter queue empties, which
+    // is the frame boundary. Slots are reused frame after frame, so a steady host
+    // allocates nothing after its first frame.
+    struct BillboardSlot {
+        uint32_t     textureIndex = 0;
+        uint32_t     blendMode    = 0;
+        uint32_t     alignment    = 0;
+        uint32_t     serial       = 0;
+        BufferHandle buffer       = BufferHandle::Invalid;
+        uint32_t     capacity     = 0;
+    };
+    ZHLN::Array<BillboardSlot> billboardSlots;
+    ZHLN::Array<Particle>      billboardStaging;
+    uint32_t                   billboardSerial = 0;
 
     ZHLN::Array<Light> mappedLights;
 
@@ -466,6 +480,11 @@ struct RenderContext::Impl {
     // a pass is about to upload, so the conversion happens once per frame
     // instead of per consumer.
     ZHLN::Array<Light> gpuLights;
+    // What SetLights was handed this frame, in the engine's own terms: the pack
+    // needs the frame's view matrix (a light's positionView), and the frame is
+    // handed over after the systems that submit lights have run. So the pack --
+    // with the upload it feeds -- happens in SetFrameData.
+    ZHLN::Array<LightDesc> submittedLights;
 
     uint32_t packedLightCount = 0;
 
@@ -578,6 +597,9 @@ struct RenderContext::Impl {
 
     JPH::Mat44    current_view_proj    = JPH::Mat44::sIdentity();
     JPH::Mat44    unjittered_view_proj = JPH::Mat44::sIdentity();
+    // Kept for the pack boundary: light packing needs a world-to-view matrix, and
+    // nothing else in the renderer holds one separately from the projection.
+    JPH::Mat44    view_matrix = JPH::Mat44::sIdentity();
     JPH::Mat44    shadowProjView       = JPH::Mat44::sIdentity();
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
@@ -806,6 +828,8 @@ struct RenderContext::Impl {
          GpuAbi::ScenePassPayload<ScenePassPushConstants>),
         "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
+
+    void UploadSubmittedLights() noexcept;
 
     void ProvokeDeviceLostInternal() const;
 

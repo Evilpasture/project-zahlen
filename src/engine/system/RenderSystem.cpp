@@ -115,14 +115,16 @@ constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debu
 // stride, rebuilt if the capacity changed. The layout of a particle is the
 // renderer's business; the engine only knows how many it asked for.
 template <typename Emitter>
-[[nodiscard]] auto EnsureParticleStorage(RenderContext& rc, Emitter& emitter, uint32_t stride) -> BufferHandle {
+[[nodiscard]] auto EnsureParticleStorage(RenderContext& rc, Emitter& emitter) -> BufferHandle {
     if (emitter.gpuBuffer != BufferHandle::Invalid && emitter.bufferCapacity != emitter.maxParticles) {
         rc.DestroyBuffer(emitter.gpuBuffer);
         emitter.gpuBuffer      = BufferHandle::Invalid;
         emitter.bufferCapacity = 0;
     }
     if (emitter.gpuBuffer == BufferHandle::Invalid && emitter.maxParticles != 0) {
-        emitter.gpuBuffer = rc.CreateStorageBuffer(static_cast<size_t>(emitter.maxParticles) * stride);
+        // The renderer sizes one particle; the engine only knows how many it asked for.
+        emitter.gpuBuffer = std::is_same_v<Emitter, Components::MeshParticleEmitterComponent> ? rc.CreateMeshParticleBuffer(emitter.maxParticles)
+                                                                                             : rc.CreateParticleBuffer(emitter.maxParticles);
         if (emitter.gpuBuffer != BufferHandle::Invalid) {
             emitter.bufferCapacity = emitter.maxParticles;
         }
@@ -142,24 +144,21 @@ void SubmitParticleEmitters(Engine& engine) {
         if (!emitter.active) {
             continue;
         }
-        const BufferHandle buffer = EnsureParticleStorage(rc, emitter, rc.ParticleStride());
-        // The component's params *are* the shader's params; the only thing the
-        // system owns here is the camera attachment, so it is applied on the
-        // renderer's copy rather than by hand-packing a second struct.
-        ParticleEmitterParams desc = emitter.params;
+        const BufferHandle buffer = EnsureParticleStorage(rc, emitter);
+        // The component's description goes to the renderer as it is; the only thing the
+        // system owns here is the camera attachment, which is a scene decision.
+        ParticleEmitterDesc desc = emitter.params;
         if (emitter.attachToCamera) {
-            desc.spawnOrigin.x = cam.position.GetX();
-            desc.spawnOrigin.y = cam.position.GetY();
-            desc.spawnOrigin.z = cam.position.GetZ();
+            desc.spawnOrigin = cam.position;
         }
-        rc.SubmitParticleEmitter(buffer, emitter.maxParticles, desc);
+        rc.SubmitParticleEmitter(buffer, emitter.maxParticles, desc, emitter.textureAsset, emitter.additive);
     }
 
     for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
         if (!emitter.active) {
             continue;
         }
-        const BufferHandle buffer = EnsureParticleStorage(rc, emitter, rc.MeshParticleStride());
+        const BufferHandle buffer = EnsureParticleStorage(rc, emitter);
         rc.SubmitMeshParticleEmitter(buffer, emitter.maxParticles, emitter.params, emitter.meshAsset, emitter.materialAsset);
     }
 }
@@ -469,40 +468,40 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     const AAState& aaState = gfx.antiAliasing;
 
-    // The shader's own struct: the engine authors the view, the sun, the sky,
-    // the probe and the jitter, and hands it over. The renderer fills what only
-    // it knows (RenderContext::SetFrameData).
+    // The frame's scene state, in the engine's own terms: the view, the sun, the
+    // sky, the probe, the jitter. The shader's struct is not this one -- the
+    // renderer packs it (RenderContext::SetFrameData) and fills the lanes only it
+    // knows, so nothing here is a w-lane of something else.
     const float frameClock = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
 
-    FrameUniforms viewData {};
-    viewData.viewProj               = vp;
-    viewData.unjitteredViewProj     = unjitteredVp;
-    viewData.prevUnjitteredViewProj = prevUnjitteredVp;
-    viewData.invViewProj            = unjitteredVp.Inversed();
-    // The clock rides camPos.w and the sun's intensity rides lightDir.w because
-    // those are the lanes the shader reads them from.
-    viewData.camPos      = JPH::Float4 {cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(), frameClock};
-    viewData.lightDir    = JPH::Float4 {sunDirection.GetX(), sunDirection.GetY(), sunDirection.GetZ(), sunIntensity};
-    viewData.sunRadiance = JPH::Float4 {sunRadiance.GetX(), sunRadiance.GetY(), sunRadiance.GetZ(), 0.0f};
-    viewData.probeMin =
-        JPH::Float4 {gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f};
-    viewData.probeMax     = JPH::Float4 {gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f};
-    viewData.probePos     = JPH::Float4 {gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f};
-    viewData.jitterParams = JPH::Float4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
-    viewData.enableRTR        = gfx.post.enableRTR;
-    viewData.fullBright       = gfx.environment.fullBright;
-    viewData.shadowWidth      = gfx.shadows.width;
-    viewData.shadowResolution = gfx.shadows.resolution;
-    viewData.sunSize          = gfx.shadows.sunSize;
-    viewData.ambientExposure  = gfx.environment.ambientExposure;
-    viewData.skyZenith =
-        JPH::Float4 {gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]};
-    viewData.skyHorizon =
-        JPH::Float4 {gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]};
-    viewData.skyGround =
-        JPH::Float4 {gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]};
+    FrameData frame {};
+    frame.viewProj               = vp;
+    frame.unjitteredViewProj     = unjitteredVp;
+    frame.prevUnjitteredViewProj = prevUnjitteredVp;
+    frame.invViewProj            = unjitteredVp.Inversed();
+    frame.camPosition            = cam.position;
+    frame.frameClock             = frameClock;
+    frame.sunDirection           = sunDirection;
+    frame.sunIntensity           = sunIntensity;
+    frame.sunRadiance            = sunRadiance;
+    frame.probeMin               = JPH::Vec3 {gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2]};
+    frame.probeMax               = JPH::Vec3 {gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2]};
+    frame.probePos               = JPH::Vec3 {gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2]};
+    frame.useLocalProbe          = gfx.environment.useLocalProbe;
+    frame.jitter                 = JPH::Vec4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
+    frame.enableRTR              = gfx.post.enableRTR;
+    frame.fullBright             = gfx.environment.fullBright;
+    frame.shadowWidth            = gfx.shadows.width;
+    frame.shadowResolution       = gfx.shadows.resolution;
+    frame.sunSize                = gfx.shadows.sunSize;
+    frame.ambientExposure        = gfx.environment.ambientExposure;
+    frame.skyZenith = JPH::Vec4 {gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]};
+    frame.skyHorizon =
+        JPH::Vec4 {gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]};
+    frame.skyGround =
+        JPH::Vec4 {gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]};
 
-    rc.SetFrameData(cam, viewData, outShadowProjView, dt);
+    rc.SetFrameData(cam, frame, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);
 
     // Everything the simulation produced for the GPU goes in before the passes

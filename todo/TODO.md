@@ -95,16 +95,27 @@ with draw payloads. (`ShaderStage` / `ShaderStageSource` / `MakeStageSource` wer
 left behind with them; they belong to the Vulkan layer, not to draw payloads,
 and went in the entry below.)
 
-**Update (sixth cut, the type unification):** the two halves are one struct now.
-`ParticleEmitterParams`, `MeshParticleEmitterParams`, `Light`, `FrameUniforms` and
-`Particle` are hand-written in `include/Zahlen/Render/RenderData.hpp` with the pod
-lane types (`JPH::Float2/3/4`, `JPH::Mat44`, `std::array<T, N>`), and
-`GeneratedGpuTypes.hpp` aliases them and asserts every member offset against
-Slang's reflection. `ToGpu`, `LayoutConvert.cpp` and the five `*Desc` description
-types are gone, and `[CxxArray]`/`[CxxCArray]`/`[CxxQuat]`/`[CxxDefault]` went
-with them. The `GpuLayout.hpp` rule below still holds, with one struct fewer:
-`InstanceData`, `Particle3D`, `ClusterBounds`, `ClusterVolume` are the only
-generated types left in it.
+**Update (seventh cut, the ABI leaves the public tree):** the structs are generated
+now, not hand-written. `tools/zshader` emits `Particle`, `ParticleEmitterParams`,
+`MeshParticleEmitterParams`, `Light` and `FrameUniforms` from the reflected layout
+itself -- members at the offsets Slang seated them, the `_padN` between them, the
+`alignas` a lane carries, and the per-member asserts -- and
+`include/Zahlen/Render/RenderData.hpp` is gone with the alias branch that named it.
+Nothing under `include/` names a generated type, so the engine authors its own
+terms: `Zahlen/ParticleEmitterDesc.hpp` for the component parameters and
+`Render/FrameData.hpp` (`FrameData`, `LightDesc`) for the frame, and
+`src/render/GpuPack.cpp` packs all of them at the submit boundary -- emitters, mesh
+emitters, lights (view-space position included) and the frame. `RenderContext` lost
+`ParticleStride`/`MeshParticleStride`/`UploadParticles` and gained
+`CreateParticleBuffer`/`CreateMeshParticleBuffer`/`DrawBillboards`, and the VFX
+`RenderBatchGPU` stopped owning four storage buffers: it describes world-space quads
+and hands over a `TextureHandle` and a blend, so `ExplosionComponent` holds no GPU
+handles and `ExplosionSystem::Release` and its cleanup pass are gone with them (the
+one `TestExplosion` assertion that used a handle to prove the effect was alive now
+holds the simulation's own state instead). The `GpuLayout.hpp` rule below still
+holds, now for every struct: `InstanceData`, `Particle3D`, `ClusterBounds`,
+`ClusterVolume` and the five above are all generated. `GPUMeshlet` is unchanged --
+still hand-written, still the one `[CxxSkip]`, for the reason recorded below.
 
 Two include rules are what make the header compile-checkable on its own:
 - It includes `"GpuLayout.hpp"` (renderer-internal since the public-API

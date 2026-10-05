@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "GpuPack.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include <algorithm>
@@ -52,13 +53,19 @@ void RenderContext::ClearDrawQueues() noexcept {
     _impl->queues.CsgDraws().clear();
 }
 
-void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, const JPH::Mat44& shadowProjView, float dt) noexcept {
-    // The engine authored this struct: one type, no packing step. What follows
-    // fills the lanes only the renderer knows -- resolution, light count, the
-    // cascade matrices, the SH payload, the viewmodel matrix.
+void RenderContext::SetFrameData(const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, float dt) noexcept {
+    // The engine authored scene terms; this is the boundary that packs them into
+    // the shader's struct. What follows fills the lanes only the renderer knows --
+    // resolution, light count, the cascade matrices, the SH payload, the viewmodel
+    // matrix -- into a local copy that is what actually reaches the GPU.
     _impl->shadowProjView  = shadowProjView;
-    _impl->currentUniforms = view;
+    _impl->view_matrix     = cam.GetViewMatrix();
+    _impl->currentUniforms = GpuPack::PackFrameData(frame);
     _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
+
+    // The lights this frame submitted, packed now that the view matrix above is
+    // this frame's -- and before the light count goes into the uniforms below.
+    _impl->UploadSubmittedLights();
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
@@ -71,7 +78,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, c
     cascadeSplits[2] = cam.nearZ + (cam.farZ - cam.nearZ) * 0.55f;
     cascadeSplits[3] = cam.nearZ + (cam.farZ - cam.nearZ) * 1.0f;
 
-    FrameUniforms gpuUniforms    = view;
+    FrameUniforms gpuUniforms    = _impl->currentUniforms;
     gpuUniforms.screenResolution = JPH::Float2 {static_cast<float>(res.width), static_cast<float>(res.height)};
 
     gpuUniforms.lightCount = _impl->packedLightCount;
@@ -86,7 +93,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, c
 
     // The sun's direction and intensity ride lightDir's lanes, which is the
     // shader's own layout: read them where the shader reads them.
-    JPH::Vec3  sunDir    = JPH::Vec3 {view.lightDir.x, view.lightDir.y, view.lightDir.z};
+    JPH::Vec3  sunDir    = frame.sunDirection;
     if (sunDir.LengthSq() > 1e-6f) sunDir = sunDir.Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
 
@@ -98,7 +105,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, c
 
         gpuUniforms.lightSpaceMatrices[i] =
             ShadowRenderer::ComputeCascadeLightSpaceMatrix(
-                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, view.shadowResolution
+                cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, frame.shadowResolution
             );
     }
 
@@ -122,24 +129,39 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::SetLights(std::span<const Light> lights) noexcept {
-    const auto visible = lights.first(std::min(lights.size(), size_t {128}));
-    if (!visible.empty()) {
-        // The engine fills the shader's own struct, so this is a copy:
-        // nothing to keep in sync with anything but the struct itself.
-        _impl->gpuLights.assign(visible.begin(), visible.end());
-        auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-        if (!mappedLights) {
-            _impl->mappedLights.clear();
-            _impl->packedLightCount = 0;
-            return;
-        }
-        std::memcpy(mappedLights->Data(), _impl->gpuLights.data(), _impl->gpuLights.size() * sizeof(Light));
-        _impl->mappedLights.assign(_impl->gpuLights.begin(), _impl->gpuLights.end());
-    } else {
-        _impl->mappedLights.clear();
+void RenderContext::SetLights(std::span<const LightDesc> lights) noexcept {
+    // Delivery, not packing: the scene's lights are described here and packed into
+    // the shader's struct in SetFrameData, where the frame's view matrix is in hand
+    // (a light's view-space position needs it, and the systems that submit lights
+    // run before the frame is handed over).
+    _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {128})).end());
+}
+
+// The lights of the frame SetFrameData just received, packed and uploaded. Called
+// from SetFrameData: this is the point in the frame where every term the pack needs
+// exists -- the world positions from the engine, the view matrix from the camera.
+void RenderContext::Impl::UploadSubmittedLights() noexcept {
+    if (submittedLights.empty()) {
+        mappedLights.clear();
+        packedLightCount = 0;
+        return;
     }
-    _impl->packedLightCount = static_cast<uint32_t>(visible.size());
+
+    gpuLights.clear();
+    gpuLights.reserve(submittedLights.size());
+    for (const LightDesc& desc: submittedLights) {
+        gpuLights.push_back(GpuPack::PackLight(desc, view_matrix));
+    }
+
+    auto mapped = frames.lightStorageBuffers[presenter.frameIndex].Map(allocator);
+    if (!mapped) {
+        mappedLights.clear();
+        packedLightCount = 0;
+        return;
+    }
+    std::memcpy(mapped->Data(), gpuLights.data(), gpuLights.size() * sizeof(Light));
+    mappedLights.assign(gpuLights.begin(), gpuLights.end());
+    packedLightCount = static_cast<uint32_t>(gpuLights.size());
 }
 
 }

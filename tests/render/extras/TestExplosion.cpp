@@ -92,14 +92,16 @@ struct ExplosionTestSuite {
             constexpr float dt = 1.0f / 60.0f;
             ZHLN::ExplosionSystem::Update(*engine, dt);
             const auto active = reg.Get<ZHLN::ExplosionComponent>(expRoot);
-            if (!ZHLN::Test::ExpectTrue(active.has_value() && active->fireBuffer != ZHLN::BufferHandle::Invalid &&
-                                        active->smokeBuffer != ZHLN::BufferHandle::Invalid)) {
+            if (!ZHLN::Test::ExpectTrue(active.has_value() && !active->fireball.empty() && !active->soilSmoke.empty())) {
                 return std::unexpected(ExplosionTestError::ExplosionSpawnFailed);
             }
-            const auto fireBuffer = active->fireBuffer;
+            // The simulation's own state survives a frame that renders it: the
+            // particle buffers are the renderer's now, so what this can hold onto
+            // is the effect's state, not a handle the component no longer owns.
+            const size_t fireCount = active->fireball.size();
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
             ZHLN::ExplosionSystem::Update(*engine, dt);
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(expRoot)->fireBuffer, fireBuffer);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::ExplosionComponent>(expRoot)->fireball.size(), fireCount);
             engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
 
             // Advance past StandardFireball's 2.5s lifetime.
@@ -112,9 +114,11 @@ struct ExplosionTestSuite {
             // Invariant: Root entity and all particles must be destroyed cleanly
             ZHLN::Test::ExpectFalse(reg.IsAlive(expRoot));
             ZHLN::Test::ExpectTrue(reg.GetEntitiesWith<ZHLN::ExplosionComponent>().empty());
-            // The renderer owns the particle layout; the test only asks how big one is.
-            const auto subsequent = engine->GetRenderContext().CreateStorageBuffer(engine->GetRenderContext().ParticleStride());
-            ZHLN::Test::ExpectNe(subsequent, fireBuffer);
+            // The effect's destruction released everything it owned -- which is
+            // now nothing on the GPU: the renderer's own storage is what outlives
+            // it, and it is still usable.
+            const auto subsequent = engine->GetRenderContext().CreateParticleBuffer(1);
+            ZHLN::Test::ExpectTrue(subsequent != ZHLN::BufferHandle::Invalid);
             engine->GetRenderContext().DestroyBuffer(subsequent);
 
             return {};

@@ -24,6 +24,9 @@ void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
     for (const auto& emitter: impl.queues.ParticleEmitters()) {
+        if (!emitter.simulate) {
+            continue; // authored on the CPU this frame: render it, do not integrate it again
+        }
         auto* buffer = impl.geometry.Resolve(emitter.gpuBuffer);
         if (!buffer) {
             continue;

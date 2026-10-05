@@ -119,26 +119,24 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         });
     }
 
-    ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = cameraComp ? cameraComp->camera.GetViewMatrix() : JPH::Mat44::sIdentity();
-    auto               lightEntities = query.GetEntitiesWith<Components::LightComponent>();
+    ZHLN::Array<LightDesc> sceneLights;
+    auto                   lightEntities = query.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 
     for (Entity e: lightEntities) {
         query.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            // The light *is* the shader's struct: elements land where the
-            // shader reads them, and SIMD crosses to the pod lane types
-            // through Jolt's own StoreFloat3/StoreFloat4 -- Vec3/Vec4 are the
-            // compute types, never the storage ones.
-            Light packed {};
-            packed.type        = light.type;
-            packed.intensity   = light.intensity;
-            packed.radius      = light.radius;
-            packed.twoSided    = light.twoSided;
-            packed.range       = (light.range > 0.0f) ? light.range : 1000.0f;
-            packed.shadowLayer = light.shadowLayer;
-            light.direction.StoreFloat3(&packed.direction);
-            light.color.StoreFloat3(&packed.color);
+            // The scene's own terms, world space: position comes from the entity's
+            // transform, and the view-space copy the shader reads is the renderer's
+            // business (it has the view matrix; this system does not need one).
+            LightDesc desc {};
+            desc.type        = light.type;
+            desc.intensity   = light.intensity;
+            desc.radius      = light.radius;
+            desc.twoSided    = light.twoSided;
+            desc.range       = (light.range > 0.0f) ? light.range : 1000.0f;
+            desc.shadowLayer = light.shadowLayer;
+            desc.direction   = light.direction;
+            desc.color       = light.color;
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
@@ -155,31 +153,18 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             }
 
             if (hasTransform) {
-                pos.StoreFloat3(&packed.position);
-                // View-space position, w = 1: the shader reads .xyz, and a
-                // defined w costs nothing (Vec4(Vec3Arg) leaves it unset).
-                JPH::Vec4(viewMatrix * pos, 1.0f).StoreFloat4(&packed.positionView);
+                desc.position = pos;
 
                 if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
-                    JPH::Vec3 dir = JPH::Vec3::sZero();
-                    if (light.direction.LengthSq() > 1e-4f) {
-                        dir = light.direction.Normalized();
-                    } else {
-                        dir = -worldMat.GetColumn3(2).Normalized();
-                    }
-                    dir.StoreFloat3(&packed.direction);
+                    desc.direction = (light.direction.LengthSq() > 1e-4f) ? light.direction.Normalized() : -worldMat.GetColumn3(2).Normalized();
                 }
             }
 
-            if (packed.type == LightType::Area) {
-                // An area light's quad is a matrix in the component and four
-                // 16-byte lanes in the shader: one column, one lane.
-                for (uint32_t c = 0; c < 4; ++c) {
-                    light.points.GetColumn4(c).StoreFloat4(&packed.points[c]);
-                }
+            if (desc.type == LightType::Area) {
+                desc.points = light.points;
             }
 
-            sceneLights.push_back(packed);
+            sceneLights.push_back(desc);
         });
     }
 
