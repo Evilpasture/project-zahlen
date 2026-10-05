@@ -103,7 +103,7 @@ auto RenderContext::MeshParticleStride() const noexcept -> uint32_t {
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(size, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
+    return _impl->geometry.CreateBuffer({.allocationSize = size}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex).value_or(BufferHandle::Invalid);
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& desc) {
@@ -284,15 +284,18 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
 }
 
 auto RenderContext::CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Storage);
+    return _impl->geometry.CreateBuffer({.bytes = bytes, .stride = stride}, Vk::BufferUsage::Storage).value_or(BufferHandle::Invalid);
 }
 
 auto RenderContext::CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateVertexBuffer(bytes.data(), bytes.size(), stride, Vk::BufferUsage::Vertex);
+    return _impl->geometry.CreateBuffer({.bytes = bytes, .stride = stride}, Vk::BufferUsage::Vertex).value_or(BufferHandle::Invalid);
 }
 
 auto RenderContext::CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle {
-    return _impl->geometry.CreateIndexBuffer(indices.data(), indices.size_bytes(), Vk::BufferUsage::Index);
+    // An index buffer's element size is the type of its indices, so the caller does
+    // not state it -- the stride is the pointer's own.
+    return _impl->geometry.CreateBuffer({.bytes = std::as_bytes(indices), .stride = static_cast<uint32_t>(sizeof(uint32_t))}, Vk::BufferUsage::Index)
+        .value_or(BufferHandle::Invalid);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }

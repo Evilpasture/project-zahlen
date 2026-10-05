@@ -269,6 +269,99 @@ stand-ins. `Allocator.cpp` is covered only through its extracted
 definitions: the file as a whole needs `vk_mem_alloc.h` and the engine's
 `Rendering.hpp` graph at link time.
 
+### `GeometryManager`: a `BufferSource`, and one creator instead of five
+
+`GeometryManager` had five ways in, and two of them disagreed about argument
+order:
+
+```cpp
+CreateBuffer(size_t size, const void* data, Vk::BufferUsage usage);              // (size, data, usage)
+CreateVertexBuffer(const void* data, size_t size, uint32_t stride, ...);         // (data, size, stride, ...)
+CreateIndexBuffer(const void* data, size_t size, Vk::BufferUsage usage);
+CreateStorageBuffer(size_t size, Vk::BufferUsage usage);
+CreateStorageBuffer(const void* data, size_t size, uint32_t stride, ...);
+```
+
+They differ in exactly two ways — which usage bits they add, and what they divide
+the byte count by to get an element count — and both of those are things the caller
+knows. So the payload became a named type and the five became one:
+
+```cpp
+struct BufferSource {
+    std::span<const std::byte> bytes          = {};
+    size_t                     allocationSize = 0; // read when `bytes` is empty
+    uint32_t                   stride         = 1; // bytes per element
+    [[nodiscard]] auto TotalSize() const noexcept -> size_t;      // bytes ? size : allocationSize
+    [[nodiscard]] auto ElementCount() const noexcept -> uint32_t; // 0 for an allocation-only source
+};
+
+[[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
+```
+
+`RenderResources.cpp`'s four forwarders pass one designated initializer each
+(`{.bytes = bytes, .stride = stride}`, `{.allocationSize = size}`), and the public
+`RenderContext` API is untouched — its ~40 call sites in `MeshBuilder`, the glTF
+importer, terrain, VFX and the tests still say `CreateVertexBuffer(std::span {…})`,
+because the typed span overloads already carried the stride for them. The one
+internal caller of the raw form was `RenderResources.cpp` itself.
+
+**Strict where it was silently forgiving.** The old creators normalised their way
+past bad input: `stride == 0` became `1`, a byte count that was not a whole number
+of elements floored, and a zero-size request reached `vmaCreateBuffer` (Vulkan
+requires `size > 0`, so the outcome depended on the driver and the validation
+layer). Now a source that contradicts itself is a `BufferSourceError` — one type,
+four reasons, checked in that order so which error wins is not an accident:
+
+| Rejected | Why it is a mistake |
+| --- | --- |
+| `EmptySource` | neither bytes nor an allocation size: there is nothing to create |
+| `ZeroStride` | an element of zero bytes makes the count meaningless (`ElementCount()` would be 0) |
+| `ConflictingSize` | bytes *and* an allocation size; `TotalSize()` prefers the bytes, so the other is dead input |
+| `RaggedElements` | the byte count is not a whole number of elements — the case where flooring used to hide a bad stride |
+
+`BufferSource` is passed by `const&` and the caller keeps ownership of the bytes
+until the copy is recorded, as before.
+
+**The ring's null pointer, folded in.** `GeometryManager.cpp` had the
+`Allocation::mappedData == nullptr` test at both of its `Allocate()` sites — the
+same "null means no room" pattern `Buffer::Map()` used to have. Both now go through
+one `AllocateStaging()` helper in the same TU that turns it into
+`StagingError::StagingSpaceExhausted`, so the call sites read `if (!staging)` like
+every other expected-valued call in the engine, and `MemoryMappingFailed` (which
+described a *mapping* failure and never was one here) is no longer borrowed to mean
+"the ring had no room". The helper lives in this TU rather than in
+`StagingRingBuffer` on purpose: the ring's other consumers — `RenderResources.cpp`
+and `TextureUploader.hpp` (3 sites) — still read `mappedData` directly, and this
+step deliberately did not rewrite them. Moving the check to `Allocate()` itself and
+deleting this helper is the remainder of that follow-up.
+
+**Verified:** the real `GeometryManager.hpp` compiles under GCC 16.2.0
+(`-std=c++26 -freflection`) with the engine's Jolt headers at the pinned SHA and a
+stand-in for the generated GPU ABI header (the cook is not available here; see
+`verify/codegen_stub/`), and 19 running checks pass over it — the accessors on the
+literal shapes the callers pass, and the whole validation table above, including
+which error wins when a source breaks two rules at once. The same 19 checks also
+pass under `-DNDEBUG`: the kit counts checks explicitly instead of using `assert()`,
+because an assert compiled out is a check that silently passes. The one-creator API
+and the absence of the four old call shapes are compile-time claims
+(`static_assert` on the member pointer type, and concepts for each old signature
+that have to stay unsatisfiable), and two negative TUs confirm the diagnostics. The
+ring helper runs against a stand-in `StagingRingBuffer` with the engine's shape: a
+successful allocation comes back untouched, and a null one becomes
+`StagingSpaceExhausted` with nothing dereferencing it. Structurally: one creator in
+the header, four `geometry.CreateBuffer()` call sites (all designated
+initializers), one `mappedData` null test left in `GeometryManager.cpp`. The two
+earlier kits of this series still pass.
+
+**Not verified in the sandbox:** the render translation units still cannot be
+built here — Jolt is only headers, glfw/slang are absent, and `GeneratedGpuTypes.hpp`
+is stubbed — so `GeometryManager.cpp`'s body is checked through its extracted
+helpers, and each call site's expected-handling is checked by inspection of
+`RenderResources.cpp`'s four forwarders against the public header they implement.
+`RenderContext::CreateStorageBuffer(size_t)` now reports Invalid for `size == 0`
+before Vulkan sees it, where it previously depended on the driver rejecting a
+zero-size buffer; nothing in the tree passed zero.
+
 ### 1a. Blue noise, cooked instead of decoded
 
 Done. `src/render` no longer decodes an image format, and `extern/stb` is off the

@@ -4,11 +4,64 @@
 #include "GeometryManager.hpp"
 #include <Zahlen/Vertex.hpp>
 #include <cstring>
+#include <optional>
 
 namespace ZHLN {
 
-auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsage usage) const
-    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
+namespace {
+
+// The ways a BufferSource can contradict itself, all rejected before anything
+// reaches Vulkan. Kept next to its only caller for the same reason
+// BufferCreationError and BufferMapError are: nothing outside this TU names it.
+enum class BufferSourceError : uint8_t {
+    EmptySource     ZHLN_ANNOTATION(ZHLN::Description<"Buffer source has neither bytes nor an allocation size"> {}) = 1,
+    ZeroStride      ZHLN_ANNOTATION(ZHLN::Description<"Buffer source declares a zero-sized element"> {}),
+    ConflictingSize ZHLN_ANNOTATION(ZHLN::Description<"Buffer source sets bytes and an allocation size; the bytes already decide the size"> {}),
+    RaggedElements  ZHLN_ANNOTATION(ZHLN::Description<"Buffer source byte count is not a whole number of its elements"> {}),
+};
+
+// The order is deliberate: a source carrying no payload at all is reported as such
+// before its stride is blamed, and a size stated twice is reported before its
+// divisibility is judged.
+[[nodiscard]] auto SourceError(const GeometryManager::BufferSource& source) noexcept -> std::optional<BufferSourceError> {
+    if (source.bytes.empty() && source.allocationSize == 0) {
+        return BufferSourceError::EmptySource;
+    }
+    if (source.stride == 0) {
+        return BufferSourceError::ZeroStride;
+    }
+    if (!source.bytes.empty() && source.allocationSize != 0) {
+        return BufferSourceError::ConflictingSize;
+    }
+    if (!source.bytes.empty() && (source.bytes.size() % source.stride) != 0) {
+        return BufferSourceError::RaggedElements;
+    }
+    return std::nullopt;
+}
+
+// The ring reports "no room for this upload" by handing back an allocation whose
+// mapped pointer is null, which every caller then has to re-test. Fold that into the
+// error channel once. It lives in this TU rather than in StagingRingBuffer because
+// the ring's other consumers (RenderResources.cpp, TextureUploader.hpp) still read
+// Allocation::mappedData; the follow-up step moves it to the source and deletes this
+// helper. See todo/TODO.md.
+[[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept
+    -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
+    auto allocation = ring.Allocate(size);
+    if (allocation.mappedData == nullptr) {
+        return std::unexpected(Vk::StagingError::StagingSpaceExhausted);
+    }
+    return allocation;
+}
+
+} // namespace
+
+auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode> {
+    if (const auto contradiction = SourceError(source)) {
+        return std::unexpected(*contradiction);
+    }
+
+    const size_t            size       = source.TotalSize();
     const auto&             familyInfo = _ctx.PhysicalInfo();
     const std::array        candidates = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
     std::array<uint32_t, 3> families {};
@@ -30,26 +83,28 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
                _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
                {families.data(), familyCount}
     )
-        .and_then([this, size, data](Vk::Buffer gpu_buf) -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
-            defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
-            auto  stagingAlloc = _transferRing.Allocate(size);
-            if (stagingAlloc.mappedData == nullptr) {
-                return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        .and_then(
+            [this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
+                defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
+                auto staging = AllocateStaging(_transferRing, size);
+                if (!staging) {
+                    return std::unexpected(staging.error());
+                }
+
+                if (bytes.empty()) {
+                    std::memset(staging->mappedData, 0, size);
+                } else {
+                    std::memcpy(staging->mappedData, bytes.data(), size);
+                }
+
+                Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
+                    Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
+                });
+
+                const VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
+                return Adopt(std::move(gpu_buf), elementCount, address);
             }
-
-            if (data != nullptr) {
-                std::memcpy(stagingAlloc.mappedData, data, size);
-            } else {
-                std::memset(stagingAlloc.mappedData, 0, size);
-            }
-
-            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf);
-            });
-
-            VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
-            return std::make_pair(std::move(gpu_buf), address);
-        });
+        );
 }
 
 auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
@@ -58,38 +113,6 @@ auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceA
         _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the rvalue.
     }
     return handle;
-}
-
-auto GeometryManager::CreateVertexBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle {
-    const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return CreateBuffer(size, data, usage)
-        .transform([this, size, safeStride](auto&& pair) -> BufferHandle {
-            return Adopt(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
-}
-
-auto GeometryManager::CreateIndexBuffer(const void* data, size_t size, Vk::BufferUsage usage) -> BufferHandle {
-    return CreateBuffer(size, data, usage)
-        .transform([this, size](auto&& pair) -> BufferHandle {
-            return Adopt(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
-}
-
-auto GeometryManager::CreateStorageBuffer(size_t size, Vk::BufferUsage usage) -> BufferHandle {
-    return CreateBuffer(size, nullptr, usage)
-        .transform([this](auto&& pair) -> BufferHandle { return Adopt(std::move(pair.first), 0, pair.second); })
-        .value_or(BufferHandle::Invalid);
-}
-
-auto GeometryManager::CreateStorageBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle {
-    const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return CreateBuffer(size, data, usage)
-        .transform([this, size, safeStride](auto&& pair) -> BufferHandle {
-            return Adopt(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
 }
 
 void GeometryManager::Update(BufferHandle handle, const void* data, size_t size) noexcept {
@@ -101,14 +124,14 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
         return;
     }
 
-    auto stagingAlloc = _transferRing.Allocate(size);
-    if (stagingAlloc.mappedData == nullptr) {
+    auto staging = AllocateStaging(_transferRing, size);
+    if (!staging) {
         return;
     }
-    std::memcpy(stagingAlloc.mappedData, data, size);
+    std::memcpy(staging->mappedData, data, size);
 
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer);
+        Vk::CopyRingBuffer(cmd, *staging, nativeMesh->buffer);
     });
 }
 

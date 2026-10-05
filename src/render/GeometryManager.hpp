@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <utility>
 
 namespace ZHLN {
@@ -36,13 +37,33 @@ class GeometryManager {
     GeometryManager(GeometryManager&&) noexcept                    = delete;
     auto operator=(GeometryManager&&) noexcept -> GeometryManager& = delete;
 
-    [[nodiscard]] auto
-        CreateBuffer(size_t size, const void* data, Vk::BufferUsage usage) const -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
+    // A buffer's payload, named instead of spread over positional arguments.
+    // Describes either the bytes to upload or an allocation to zero-fill, and binds
+    // the element size to the byte count so the two cannot disagree: a source whose
+    // bytes are not a whole number of its elements is rejected rather than counted
+    // wrong.
+    struct BufferSource {
+        std::span<const std::byte> bytes          = {};
+        size_t                     allocationSize = 0; // read when `bytes` is empty
+        uint32_t                   stride         = 1; // bytes per element
 
-    [[nodiscard]] auto CreateVertexBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle;
-    [[nodiscard]] auto CreateIndexBuffer(const void* data, size_t size, Vk::BufferUsage usage) -> BufferHandle;
-    [[nodiscard]] auto CreateStorageBuffer(size_t size, Vk::BufferUsage usage) -> BufferHandle;
-    [[nodiscard]] auto CreateStorageBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle;
+        [[nodiscard]] auto TotalSize() const noexcept -> size_t {
+            return bytes.empty() ? allocationSize : bytes.size();
+        }
+        // Zero for an allocation-only source: nothing has been uploaded, so there are
+        // no elements to count yet. That is what this pool recorded for its
+        // allocation-only storage buffers before (Adopt(..., 0, ...)), unchanged.
+        [[nodiscard]] auto ElementCount() const noexcept -> uint32_t {
+            return (bytes.empty() || stride == 0) ? 0U : static_cast<uint32_t>(bytes.size() / stride);
+        }
+    };
+
+    // Create, upload and adopt in one step. The named creators this replaces differed
+    // only in the usage bits and in what they divided the byte count by, and both now
+    // ride on the arguments: the usage as a flag, the element size as the source's
+    // stride. A source that contradicts itself is reported as an ErrorCode (see
+    // BufferSourceError in GeometryManager.cpp) instead of reaching Vulkan.
+    [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
 
     [[nodiscard]] auto Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle;
 
