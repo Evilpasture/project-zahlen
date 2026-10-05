@@ -16,7 +16,6 @@
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
-#include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -173,7 +172,6 @@ void BuildSystemGraphs(Engine& engine) {
 
     // Every graph node derives its name, thunk and component hazards from its
     // callable's signature. The camera is modified in the earlier frame phase.
-    updateGraph.AddSystem<&TextureSystem::Update>();
     updateGraph.AddSystem<&VisualInterpolationSystem::Update>();
     updateGraph.AddSystem<&AnimationSystem::Update>();
     updateGraph.AddSystem<&ArticulationSystem::Update>();

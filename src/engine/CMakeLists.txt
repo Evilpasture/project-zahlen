@@ -15,7 +15,6 @@ set(RAW_ENGINE_SOURCES
     SystemWiring.cpp
     Hierarchy.cpp
     PrefabFactory.cpp
-    system/TextureSystem.cpp
     system/AnimationSystem.cpp
     AssetManager.cpp
     Platform.cpp

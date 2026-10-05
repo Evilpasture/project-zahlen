@@ -471,9 +471,9 @@ struct RenderPipelinesTestSuite {
         // InitializeDefaultScene is called again every time the pool hands a
         // reused engine to the next test. BuildSystemGraphs used to push its
         // systems onto whatever was already in the graphs, so a thirty-test
-        // binary ended up with thirty TextureSystems, thirty CullingSystems and
-        // thirty DecalSystems. Compile() only orders nodes whose access
-        // patterns conflict, and those three declare nothing or reads only --
+        // binary ended up with thirty CullingSystems and thirty DecalSystems.
+        // Compile() only orders nodes whose access patterns conflict, and
+        // those two declare nothing or reads only --
         // so the duplicates had no edges between them and were dispatched to
         // run concurrently over the same engine state. It surfaced as a
         // SIGSEGV deep inside the allocator, in whatever unlucky call site

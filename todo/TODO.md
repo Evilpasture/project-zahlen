@@ -374,6 +374,52 @@ helpers, and each call site's expected-handling is checked by inspection of
 before Vulkan sees it, where it previously depended on the driver rejecting a
 zero-size buffer; nothing in the tree passed zero.
 
+### TextureSystem: removed, not left as a husk
+
+`TextureSystem` was two files, two members and no work. `Update()` had an empty
+body, and `ResolveIndex(Engine&, TextureHandle)` forwarded one line to
+`RenderContext::GetBindlessIndex` — which has thirty-odd call sites across the
+renderer and the tests, none of them through this. The forwarder had no callers at
+all.
+
+It was registered in the update graph (`updateGraph.AddSystem<&TextureSystem::Update>()`)
+anyway, so every frame scheduled a node that declared no component access and did
+nothing. The history says why it looked that way: `Update()` was a placeholder for
+async texture streaming and mip fading, and the comment that said so — the one that
+would have explained the empty body — was deleted in the #91 renderer refactor, which
+left `Update(SystemContext&, float)` empty with unnamed parameters; #92 then dropped
+the parameters entirely. What survived was a registration whose only remaining claim,
+"this system exists", stopped being true several refactors ago.
+
+Removed: both files, the `system/TextureSystem.cpp` entry in
+`src/engine/CMakeLists.txt`, the include and the `AddSystem` line in
+`SystemWiring.cpp`, and the two test comments that still named it as one of the
+examples of a system declaring no conflicting access (`HeadlessEngineFixture.hpp`,
+`TestRenderPipelines.cpp` — the incident they describe is real and `CullingSystem` /
+`DecalSystem` still carry it). The engine's `Engine.hpp` exposes no texture API, so
+nothing was left declaring something that had been implemented; texture lookups go
+through `RenderContext::GetBindlessIndex` directly. The update graph now registers
+five systems, all of which do work.
+
+**Verified:** `src/engine/SystemWiring.cpp`, `tests/helpers/HeadlessEngineFixture.hpp`
+and `tests/render/TestRenderPipelines.cpp` all compile under GCC 16.2.0
+(`-std=c++26 -freflection`, the engine's Jolt defines), so the deleted include was not
+load-bearing in the TU that used it; naming `ZHLN::TextureSystem` anywhere is now a
+compile error (`'TextureSystem' is not a member of 'ZHLN'`); nothing in the tree, of
+any file type, still contains the string. A new check, `verify/check_system_husks.py`,
+judges every system the graphs register — each `AddSystem<&X::Y>()` must resolve to a
+definition with a non-empty body, both engine build lists must match the files on disk,
+and the registration count must be the expected one. That check is control-tested by
+planting an empty-bodied system in a scratch copy of `src/engine`, where it fails and
+names it; the tree as shipped passes it with all nine systems judged. The three earlier
+kits of this series still pass.
+
+**Not verified in the sandbox:** that the engine links and runs — `zahlen_engine` is
+not buildable here for the same reasons as every other entry. Removing a graph node
+cannot reorder the remaining ones in a way this checked (a system that declares no
+component access has no edges to reorder), but the update graph's compiled shape is
+something only a real build can confirm.
+
 ### 1a. Blue noise, cooked instead of decoded
 
 Done. `src/render` no longer decodes an image format, and `extern/stb` is off the
