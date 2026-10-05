@@ -118,25 +118,25 @@ class IBLProcessor {
 
         if (!hasPreparedSH) {
             auto shGpu = Buffer::Create(
-                impl.allocator.Get(), kSHBytes,
+                impl.allocator, kSHBytes,
                 BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst | BufferUsage::ShaderDeviceAddress,
                 MemoryUsage::GPUOnly
             );
             if (!shGpu) return std::unexpected(shGpu.error());
             state.shGpu = std::move(*shGpu);
-            auto shCpu = Buffer::Create(impl.allocator.Get(), kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
+            auto shCpu = Buffer::Create(impl.allocator, kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
             if (!shCpu) return std::unexpected(shCpu.error());
             state.shCpu = std::move(*shCpu);
         }
 
         auto lutImg = ImageBuilder {}
             .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, 1)
-            .Build(impl.allocator.Get());
+            .Build(impl.allocator);
         if (!lutImg) return std::unexpected(lutImg.error());
         state.payload.brdfLutImage = std::move(*lutImg);
         auto specImg = ImageBuilder {}
             .TextureCube(kBaseSize, cubeFormat, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels)
-            .Build(impl.allocator.Get());
+            .Build(impl.allocator);
         if (!specImg) return std::unexpected(specImg.error());
         state.payload.prefilteredImage  = std::move(*specImg);
         state.payload.prefilteredFormat = cubeFormat;
@@ -145,7 +145,7 @@ class IBLProcessor {
             auto skyImg = ImageBuilder {}
                 .Texture2D(radiance.width, radiance.height, VK_FORMAT_R32G32B32A32_SFLOAT,
                            ImageUsage::TransferDst | ImageUsage::Sampled, 1)
-                .Build(impl.allocator.Get());
+                .Build(impl.allocator);
             if (!skyImg) return std::unexpected(skyImg.error());
             state.payload.visualSkyImage = std::move(*skyImg);
         }
@@ -188,14 +188,14 @@ class IBLProcessor {
             .Texture2D(uploadWidth, uploadHeight, VK_FORMAT_R32G32B32A32_SFLOAT,
                        ImageUsage::TransferDst | ImageUsage::Sampled | (gpuSourceMips ? ImageUsage::TransferSrc : ImageUsage::None),
                        sourceMipLevels)
-            .Build(impl.allocator.Get());
+            .Build(impl.allocator);
         if (!radianceImage) return std::unexpected(radianceImage.error());
         ZHLN::defer _([&] { impl.allocator.DestroyImage(*radianceImage); });
-        auto staging = Buffer::Create(impl.allocator.Get(), stagedFloats * sizeof(float), BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
+        auto staging = Buffer::Create(impl.allocator, stagedFloats * sizeof(float), BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
         if (!staging) return std::unexpected(staging.error());
         ZHLN::defer _([&] { impl.allocator.DestroyBuffer(*staging); });
         {
-            auto mapped = staging->Map(impl.allocator.Get());
+            auto mapped = staging->Map(impl.allocator);
             if (mapped.data == nullptr) return std::unexpected(EnvironmentBakeError::RadianceUploadFailed);
             std::memcpy(mapped.data, pixels, uploadBytes);
             if (cpuSourceMips) {
@@ -360,7 +360,7 @@ class IBLProcessor {
         });
 
         if (!hasPreparedSH) {
-            auto mappedSH = state.shCpu.Map(impl.allocator.Get());
+            auto mappedSH = state.shCpu.Map(impl.allocator);
             if (mappedSH.data == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
             std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
         } else {

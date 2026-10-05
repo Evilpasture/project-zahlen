@@ -52,7 +52,7 @@ inline auto
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    auto img_res = Image::Create(allocator.Get(), info, MemoryUsage::GPUOnly);
+    auto img_res = Image::Create(allocator, info, MemoryUsage::GPUOnly);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }
@@ -103,7 +103,7 @@ inline auto
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    auto img_res = Image::Create(allocator.Get(), info, MemoryUsage::GPUOnly);
+    auto img_res = Image::Create(allocator, info, MemoryUsage::GPUOnly);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }

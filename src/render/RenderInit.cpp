@@ -111,14 +111,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
 
     return allocator.Init(ctx)
         .and_then([&]() {
-            deletionQueue.Init(allocator.Get());
+            deletionQueue.Init(allocator);
             return stagingRingBuffer.Init(
-                allocator.Get(), ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+                allocator, ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() {
             return transferRingBuffer.Init(
-                allocator.Get(), ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+                allocator, ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() { return InitDiagnosticsAndProfiling(); })

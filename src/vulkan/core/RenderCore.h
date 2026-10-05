@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-
 #pragma once
 #include <stdbool.h>
 #include <volk.h>
@@ -15,7 +14,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 static constexpr auto maxInstanceExtensions = 128;
 
@@ -35,7 +33,7 @@ typedef struct ZHLN_InstanceDesc {
     const VkDebugUtilsMessageSeverityFlagsEXT severity_flags;
     const char* const*                        extensions;
     const ZHLN_ValidationMode                 validation_mode;
-    ZHLN_DebugForwarding* debug;
+    ZHLN_DebugForwarding*                     debug;
 } ZHLN_InstanceDesc;
 
 static constexpr ZHLN_InstanceDesc ZHLN_DEFAULT_INSTANCE_DESC = {
@@ -64,7 +62,6 @@ VkResult ZHLN_EnsureVulkanLoader(void);
 [[nodiscard]]
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* ZHLN_RESTRICT desc);
 
-
 typedef struct ZHLN_PhysicalDeviceInfo {
     VkPhysicalDevice                  handle;
     VkPhysicalDeviceProperties2       properties;
@@ -92,7 +89,6 @@ typedef struct ZHLN_DeviceSelectDesc {
 [[nodiscard]]
 ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* ZHLN_RESTRICT desc);
 
-
 typedef struct ZHLN_DeviceDesc {
     const ZHLN_PhysicalDeviceInfo* const ZHLN_RESTRICT physical;
     const char* const* const                           extensions;
@@ -108,14 +104,12 @@ typedef struct ZHLN_Device {
     VkQueue  transfer_queue;
     VkQueue  compute_queue;
 
-
     bool descriptor_heap_enabled;
 
     bool mesh_shader_enabled;
 
     bool ray_tracing_enabled;
 } ZHLN_Device;
-
 
 typedef struct ZHLN_MeshShaderLimits {
     uint32_t max_mesh_output_vertices;
@@ -127,7 +121,6 @@ typedef struct ZHLN_MeshShaderLimits {
     bool     prefers_compact_vertex_output;
     bool     supported;
 } ZHLN_MeshShaderLimits;
-
 
 [[nodiscard]]
 VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug);
@@ -142,8 +135,6 @@ bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* ZHLN_RESTRICT 
 
 [[nodiscard]]
 VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc, ZHLN_Device* ZHLN_RESTRICT out);
-
-
 
 typedef struct ZHLN_SwapchainSupport {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -165,18 +156,18 @@ typedef struct ZHLN_SwapchainDesc {
     const uint32_t                                     width;
     const uint32_t                                     height;
     const bool                                         vsync;
-    const VkPresentModeKHR present_mode;
-    const bool         enable_present_timing;
-    const VkSwapchainKHR old_swapchain;
+    const VkPresentModeKHR                             present_mode;
+    const bool                                         enable_present_timing;
+    const VkSwapchainKHR                               old_swapchain;
 } ZHLN_SwapchainDesc;
 
 typedef struct ZHLN_Swapchain {
-    VkSwapchainKHR handle;
-    VkImage        images[8];
-    VkImageView    views[8];
-    uint32_t       image_count;
-    VkFormat       format;
-    VkExtent2D     extent;
+    VkSwapchainKHR   handle;
+    VkImage          images[8];
+    VkImageView      views[8];
+    uint32_t         image_count;
+    VkFormat         format;
+    VkExtent2D       extent;
     VkPresentModeKHR present_mode;
 } ZHLN_Swapchain;
 
@@ -187,7 +178,6 @@ ZHLN_SwapchainSupport ZHLN_QuerySwapchainSupport(const ZHLN_SwapchainSupportDesc
 ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* ZHLN_RESTRICT desc);
 
 void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* ZHLN_RESTRICT swapchain);
-
 
 typedef struct ZHLN_FrameSync {
     VkSemaphore image_available;
@@ -206,7 +196,6 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* ZHLN_R
 
 void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync, uint32_t frameCount);
 
-
 typedef struct ZHLN_CommandPool {
     VkCommandPool   pool;
     uint32_t        count;
@@ -222,8 +211,6 @@ VkResult ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RES
 void ZHLN_ResetCommandPool(VkDevice device, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
-
-
 typedef struct ZHLN_AcquireDesc {
     const VkSwapchainKHR swapchain;
     const VkSemaphore    image_available;
@@ -231,10 +218,10 @@ typedef struct ZHLN_AcquireDesc {
 } ZHLN_AcquireDesc;
 
 typedef struct ZHLN_PresentDesc {
-    const VkQueue        present_queue;
-    const VkSwapchainKHR swapchain;
-    const VkSemaphore    render_finished;
-    const uint32_t       image_index;
+    const VkQueue          present_queue;
+    const VkSwapchainKHR   swapchain;
+    const VkSemaphore      render_finished;
+    const uint32_t         image_index;
     const VkPresentId2KHR* present_id;
 } ZHLN_PresentDesc;
 
@@ -259,7 +246,6 @@ void ZHLN_SubmitFrame(VkQueue graphicsQueue, const ZHLN_FrameSync* ZHLN_RESTRICT
 
 [[nodiscard]]
 VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
-
 
 typedef struct ZHLN_ShaderDesc {
     const uint32_t*              code;
@@ -313,7 +299,6 @@ static constexpr auto ZHLN_MAX_COLOR_ATTACHMENTS = 8;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
 );
 
-
 typedef struct ZHLN_PipelineLayoutDesc {
     const VkDescriptorSetLayout* const ZHLN_RESTRICT set_layouts;
     const uint32_t                                   set_layout_count;
@@ -326,7 +311,6 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineL
 
 void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 
-
 typedef struct ZHLN_StencilState {
     VkStencilOpState front;
     VkStencilOpState back;
@@ -335,7 +319,7 @@ typedef struct ZHLN_StencilState {
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
     const VkPipelineLayout                       layout;
-    const VkPipelineCache pipeline_cache;
+    const VkPipelineCache                        pipeline_cache;
 
     const bool                                                 descriptor_heap;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vs_mapping;
@@ -373,7 +357,6 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 
 void ZHLN_DestroyPipelineCache(VkDevice device, VkPipelineCache cache);
-
 
 typedef struct ZHLN_RenderPassDesc {
     const VkImageView target_views[4];
@@ -420,7 +403,6 @@ typedef struct ZHLN_FrameSubmitDesc {
 [[nodiscard]]
 VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 
-
 typedef struct ZHLN_SecondaryCmdDesc {
     const VkFormat color_format;
     const VkFormat depth_format;
@@ -438,7 +420,6 @@ VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence inFlightFence, const ZH
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
 void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
 
-
 [[nodiscard]]
 VkResult ZHLN_WaitAndAcquireImage(
     VkDevice                              device,
@@ -448,16 +429,13 @@ VkResult ZHLN_WaitAndAcquireImage(
     uint32_t*                             outImageIndex
 );
 
-
 void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages, const void* ZHLN_RESTRICT data, uint32_t size);
 
 #ifndef __cplusplus
 #define ZHLN_Push(cmd, layout, stages, value) ZHLN_PushConstants(cmd, layout, stages, &(value), sizeof(value))
 #endif
 
-
 const char* ZHLN_VkResultString(VkResult result);
-
 
 typedef struct ZHLN_BufferCopyDesc {
     const VkBuffer     src;
@@ -494,11 +472,9 @@ typedef struct ZHLN_BufferImageCopyDesc {
 
 void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* ZHLN_RESTRICT desc);
 
-
 [[nodiscard]]
 VkSemaphore ZHLN_CreateSemaphore(VkDevice device);
 void        ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore);
-
 
 typedef struct ZHLN_ImageViewDesc {
     const VkImage            image;
@@ -520,10 +496,9 @@ void ZHLN_DestroyImageView(VkDevice device, VkImageView view);
 VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc);
 void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
 
-
 typedef struct ZHLN_ComputePipelineDesc {
-    const ZHLN_ShaderDesc  shader;
-    const VkPipelineLayout layout;
+    const ZHLN_ShaderDesc       shader;
+    const VkPipelineLayout      layout;
     const VkPipelineCache       pipeline_cache;
     const VkSpecializationInfo* specialization_info;
 
@@ -537,11 +512,8 @@ VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelin
 
 void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
-
 // Leaves every mip shader-readable; shader_read_stage must include the first consumer's stage.
-void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height, uint32_t mip_levels,
-                          VkPipelineStageFlags2 shader_read_stage);
-
+void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_t height, uint32_t mip_levels, VkPipelineStageFlags2 shader_read_stage);
 
 typedef struct ZHLN_MemoryBarrierDesc {
     const VkPipelineStageFlags2 src_stage;
@@ -551,7 +523,6 @@ typedef struct ZHLN_MemoryBarrierDesc {
 } ZHLN_MemoryBarrierDesc;
 
 void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
-
 
 VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer);
 
@@ -577,9 +548,9 @@ typedef struct ZHLN_TlasGeometryDesc {
 } ZHLN_TlasGeometryDesc;
 
 void ZHLN_GetBlasSizes(
-    VkDevice                                     device,
-    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT   desc,
-    uint32_t                                     primitiveCount,
+    VkDevice                                       device,
+    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT     desc,
+    uint32_t                                       primitiveCount,
     ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes
 );
 void ZHLN_GetTlasSizes(VkDevice device, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes);

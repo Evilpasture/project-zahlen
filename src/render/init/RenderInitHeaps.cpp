@@ -90,7 +90,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
             for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                 auto gpu_buf_res =
-                    Vk::Buffer::Create(allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
+                    Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
                 if (!gpu_buf_res) {
                     return std::unexpected(ErrorCode(gpu_buf_res.error()));
                 }
@@ -266,14 +266,14 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto jb_res = Vk::Buffer::Create(
-            allocator.Get(), sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+            allocator, sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
             return std::unexpected(ErrorCode(jb_res.error()));
         }
         frames.jointBuffers[i] = std::move(*jb_res);
 
-        auto mapped = frames.jointBuffers[i].Map(allocator.Get());
+        auto mapped = frames.jointBuffers[i].Map(allocator);
         if (mapped.data == nullptr) {
             return std::unexpected(Vk::StagingError::MemoryMappingFailed);
         }
@@ -281,7 +281,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
     }
 
     auto mdb_res = Vk::Buffer::Create(
-        allocator.Get(), sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+        allocator, sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
     );
     if (!mdb_res) {
         return std::unexpected(ErrorCode(mdb_res.error()));
@@ -309,14 +309,14 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     constexpr size_t kDdsHeaderBytes = 128;
     const size_t     matRawSize      = ltc_mat.size() - kDdsHeaderBytes;
     const size_t     ampRawSize      = ltc_amp.size() - kDdsHeaderBytes;
-    auto             stagingRes      = Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly);
+    auto             stagingRes      = Vk::Buffer::Create(allocator, matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly);
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }
     auto  ltcStaging = std::move(*stagingRes);
     defer _([&] { allocator.DestroyBuffer(ltcStaging); });
     {
-        auto mapped = ltcStaging.Map(allocator.Get());
+        auto mapped = ltcStaging.Map(allocator);
         if (mapped.data == nullptr) {
             return std::unexpected(Vk::StagingError::MemoryMappingFailed);
         }
@@ -325,7 +325,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-    auto           makeLtc   = [&] { return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get()); };
+    auto           makeLtc   = [&] { return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator); };
     bool           submitted = false;
     auto           matImg    = makeLtc();
     if (!matImg) {

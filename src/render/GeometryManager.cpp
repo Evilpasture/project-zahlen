@@ -30,7 +30,7 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
         _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
 
     return Vk::Buffer::Create(
-               _allocator.Get(), size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
+               _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
                sharingMode, {families, familyCount}
     )
         .and_then([this, size, data](Vk::Buffer gpu_buf) -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
@@ -121,7 +121,7 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
         usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
-    return Vk::Buffer::Create(_allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
+    return Vk::Buffer::Create(_allocator, size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> BufferHandle {
             const VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
             return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);

@@ -56,7 +56,7 @@ class TextureUploader {
 
         auto imgRes = ImageBuilder {}
                           .Texture2D(desc.width, desc.height, desc.format, usage, mips)
-                          .Build(_allocator.Get());
+                          .Build(_allocator);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
@@ -112,7 +112,7 @@ class TextureUploader {
                           .Format(desc.format)
                           .Dimensions(desc.width, desc.height, desc.depth)
                           .Usage(ImageUsage::Sampled | ImageUsage::TransferDst)
-                          .Build(_allocator.Get());
+                          .Build(_allocator);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
@@ -160,7 +160,7 @@ class TextureUploader {
 
         auto imgRes = ImageBuilder {}
                           .TextureCube(desc.size, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
-                          .Build(_allocator.Get());
+                          .Build(_allocator);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 

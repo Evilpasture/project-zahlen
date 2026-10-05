@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "DescriptorHeap.hpp"
-#include "memory/Allocator.hpp"
 #include "Rendering.hpp"
+#include "memory/Allocator.hpp"
 #include <Zahlen/Core/Defer.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Log.hpp>
@@ -27,8 +26,7 @@ namespace {
     return false;
 }
 
-}
-
+} // namespace
 
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::~DescriptorHeap() noexcept {
@@ -38,23 +36,24 @@ DescriptorHeap<Type>::~DescriptorHeap() noexcept {
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _capacity(std::exchange(other._capacity, 0)), _stride(std::exchange(other._stride, 0)),
-    _reservedSize(std::exchange(other._reservedSize, 0)), _allocator(std::exchange(other._allocator, nullptr)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
-    _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})) {
+    _reservedSize(std::exchange(other._reservedSize, 0)), _allocator(std::exchange(other._allocator, nullptr)), _buffer(std::move(other._buffer)),
+    _mappedRegion(std::move(other._mappedRegion)), _mappedPtr(std::exchange(other._mappedPtr, nullptr)),
+    _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})) {
 }
 
 template <DescriptorHeapType Type>
 auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap& {
     if (this != &other) {
         Cleanup();
-        _device                = std::exchange(other._device, VK_NULL_HANDLE);
-        _capacity              = std::exchange(other._capacity, 0);
-        _stride                = std::exchange(other._stride, 0);
-        _reservedSize          = std::exchange(other._reservedSize, 0);
-        _allocator             = std::exchange(other._allocator, nullptr);
-        _buffer                = std::move(other._buffer);
-        _mappedRegion          = std::move(other._mappedRegion);
-        _mappedPtr = std::exchange(other._mappedPtr, nullptr);
-        _bindInfo  = std::exchange(other._bindInfo, VkBindHeapInfoEXT {});
+        _device       = std::exchange(other._device, VK_NULL_HANDLE);
+        _capacity     = std::exchange(other._capacity, 0);
+        _stride       = std::exchange(other._stride, 0);
+        _reservedSize = std::exchange(other._reservedSize, 0);
+        _allocator    = std::exchange(other._allocator, nullptr);
+        _buffer       = std::move(other._buffer);
+        _mappedRegion = std::move(other._mappedRegion);
+        _mappedPtr    = std::exchange(other._mappedPtr, nullptr);
+        _bindInfo     = std::exchange(other._bindInfo, VkBindHeapInfoEXT {});
     }
     return *this;
 }
@@ -62,7 +61,9 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Cleanup() noexcept {
     _mappedRegion = {};
-    Allocator::DestroyBuffer(_allocator, _buffer);
+    if (_allocator != nullptr) {
+        _allocator->DestroyBuffer(_buffer);
+    }
     _allocator    = nullptr;
     _mappedPtr    = nullptr;
     _capacity     = 0;
@@ -75,7 +76,7 @@ template <DescriptorHeapType Type>
 auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode> {
     Cleanup();
     _device    = ctx.Device();
-    _allocator = allocator.Get();
+    _allocator = &allocator;
     _capacity  = capacity;
     ZHLN::defer rollback([this] { Cleanup(); });
 
@@ -137,8 +138,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     auto buffer_res = Buffer::Create(
-        allocator.Get(), total_bytes, BufferUsage::DescriptorHeap | BufferUsage::ShaderDeviceAddress, MemoryUsage::CPUToGPU,
-        std::max<VkDeviceSize>(heap_alignment, 1)
+        allocator, total_bytes, BufferUsage::DescriptorHeap | BufferUsage::ShaderDeviceAddress, MemoryUsage::CPUToGPU, std::max<VkDeviceSize>(heap_alignment, 1)
     );
 
     if (!buffer_res.has_value()) [[unlikely]] {
@@ -146,7 +146,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
     _buffer = std::move(*buffer_res);
 
-    _mappedRegion = _buffer.Map(_allocator);
+    _mappedRegion = _buffer.Map(*_allocator);
     _mappedPtr    = _mappedRegion.data;
     if (_mappedPtr == nullptr) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::MappingFailed);
@@ -175,7 +175,9 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::FlushHostCache(VkDeviceSize offset, VkDeviceSize size) noexcept {
-    _buffer.Flush(_allocator, offset, size);
+    if (_allocator != nullptr) {
+        _buffer.Flush(*_allocator, offset, size);
+    }
 }
 
 template <DescriptorHeapType Type>
@@ -195,7 +197,7 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resources)
 {
     if (Valid() && vkWriteResourceDescriptorsEXT != nullptr) {
-        const auto count = batch.SlotCount();
+        const auto   count       = batch.SlotCount();
         VkDeviceSize flushOffset = 0;
         VkDeviceSize flushSize   = 0;
         if (count > 0 && _stride > 0) {
@@ -203,8 +205,8 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
             if (!BatchFitsHeap(maxSlot, _capacity, count, "Resource")) {
                 return;
             }
-            flushOffset               = static_cast<VkDeviceSize>(minSlot) * _stride;
-            flushSize                 = (static_cast<VkDeviceSize>(maxSlot) + 1U) * _stride - flushOffset;
+            flushOffset = static_cast<VkDeviceSize>(minSlot) * _stride;
+            flushSize   = (static_cast<VkDeviceSize>(maxSlot) + 1U) * _stride - flushOffset;
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
@@ -220,8 +222,8 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Samplers)
 {
     if (Valid() && vkWriteSamplerDescriptorsEXT != nullptr) {
-        const auto  count = batch.SlotCount();
-        const auto* slots = batch.SlotsData();
+        const auto   count       = batch.SlotCount();
+        const auto*  slots       = batch.SlotsData();
         VkDeviceSize flushOffset = 0;
         VkDeviceSize flushSize   = 0;
         if (count > 0 && slots != nullptr && _stride > 0) {
@@ -229,8 +231,8 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
             if (!BatchFitsHeap(*maxIt, _capacity, count, "Sampler")) {
                 return;
             }
-            flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
-            flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
+            flushOffset = static_cast<VkDeviceSize>(*minIt) * _stride;
+            flushSize   = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
@@ -241,21 +243,20 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     }
 }
 
-
 struct ResourceWriteBatch::Impl {
     // pView points into this payload, which lives at a fixed address in the
     // batch arena until the synchronous vkWriteResourceDescriptorsEXT call.
     struct ImagePayload {
-        VkImageViewCreateInfo   viewInfo {};
+        VkImageViewCreateInfo    viewInfo {};
         VkImageDescriptorInfoEXT descriptor {};
 
         ImagePayload(const VkImageViewCreateInfo& info, VkImageLayout layout) noexcept:
             viewInfo(info), descriptor {.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .pView = &viewInfo, .layout = layout} {
         }
-        ImagePayload(const ImagePayload&) = delete;
+        ImagePayload(const ImagePayload&)                    = delete;
         auto operator=(const ImagePayload&) -> ImagePayload& = delete;
-        ImagePayload(ImagePayload&&) = delete;
-        auto operator=(ImagePayload&&) -> ImagePayload& = delete;
+        ImagePayload(ImagePayload&&)                         = delete;
+        auto operator=(ImagePayload&&) -> ImagePayload&      = delete;
     };
 
     struct Write {
@@ -265,26 +266,22 @@ struct ResourceWriteBatch::Impl {
 
     alignas(std::max_align_t) std::array<std::byte, 1024> storage {};
     std::pmr::monotonic_buffer_resource arena {storage.data(), storage.size()};
-    std::vector<Write> writes;
+    std::vector<Write>                  writes;
 
     void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
         std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
-        auto* image = alloc.new_object<ImagePayload>(viewInfo, layout);
+        auto*                                         image = alloc.new_object<ImagePayload>(viewInfo, layout);
 
-        VkResourceDescriptorInfoEXT descriptor {
-            .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}
-        };
+        VkResourceDescriptorInfoEXT descriptor {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}};
         descriptor.data.pImage = &image->descriptor;
         writes.push_back({.slot = slot, .descriptor = descriptor});
     }
 
     void AddAddress(uint32_t slot, VkDescriptorType type, VkDeviceAddressRangeEXT range) {
         std::pmr::polymorphic_allocator<VkDeviceAddressRangeEXT> alloc {&arena};
-        auto* address = alloc.new_object<VkDeviceAddressRangeEXT>(range);
+        auto*                                                    address = alloc.new_object<VkDeviceAddressRangeEXT>(range);
 
-        VkResourceDescriptorInfoEXT descriptor {
-            .sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}
-        };
+        VkResourceDescriptorInfoEXT descriptor {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}};
         descriptor.data.pAddressRange = address;
         writes.push_back({.slot = slot, .descriptor = descriptor});
     }
@@ -362,7 +359,6 @@ void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize st
     _impl->arena.release();
 }
 
-
 struct SamplerWriteBatch::Impl {
     std::vector<VkSamplerCreateInfo> createInfos;
     std::vector<uint32_t>            slots;
@@ -408,7 +404,6 @@ void SamplerWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize str
     _impl->createInfos.clear();
     _impl->slots.clear();
 }
-
 
 struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
@@ -462,7 +457,6 @@ void SlotAllocator::Clear() noexcept {
     _impl->freeSlots.clear();
 }
 
-
 auto HeapManager::Init(
     const Context& ctx,
     Allocator&     allocator,
@@ -471,18 +465,17 @@ auto HeapManager::Init(
     uint32_t       frameTransientResourceCount,
     uint32_t       immediateTransientResourceCount
 ) noexcept -> std::expected<void, ErrorCode> {
-    _staticResourceCount              = staticResourceCount;
-    _staticSamplerCount               = staticSamplerCount;
-    _frameTransientResourceCount      = frameTransientResourceCount;
-    _immediateTransientResourceCount  = immediateTransientResourceCount;
-    _currentFrameIndex                = 0;
+    _staticResourceCount             = staticResourceCount;
+    _staticSamplerCount              = staticSamplerCount;
+    _frameTransientResourceCount     = frameTransientResourceCount;
+    _immediateTransientResourceCount = immediateTransientResourceCount;
+    _currentFrameIndex               = 0;
 
     _staticResourceAlloc.Init(staticResourceCount, DescriptorHeapError::ResourceSlotsExhausted);
     _staticSamplerAlloc.Init(staticSamplerCount, DescriptorHeapError::SamplerSlotsExhausted);
 
-    const uint32_t total_resource_count =
-        staticResourceCount + (kFramesInFlight * frameTransientResourceCount) + immediateTransientResourceCount;
-    const uint32_t total_sampler_count = staticSamplerCount;
+    const uint32_t total_resource_count = staticResourceCount + (kFramesInFlight * frameTransientResourceCount) + immediateTransientResourceCount;
+    const uint32_t total_sampler_count  = staticSamplerCount;
 
     auto res_heap_init = _resourceHeap.Init(ctx, allocator, total_resource_count);
     if (!res_heap_init.has_value()) [[unlikely]] {
@@ -652,4 +645,4 @@ void HeapManager::WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& 
 template class DescriptorHeap<DescriptorHeapType::Resources>;
 template class DescriptorHeap<DescriptorHeapType::Samplers>;
 
-}
+} // namespace ZHLN::Vk

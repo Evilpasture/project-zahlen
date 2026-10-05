@@ -33,7 +33,7 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.camPos.y = cam.position.GetY();
     _impl->currentUniforms.camPos.z = cam.position.GetZ();
 
-    auto        mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
+    auto        mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
     auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu == nullptr) return;
     gpu->viewProj           = unjittered;
@@ -105,7 +105,7 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, c
     gpuUniforms.nearZ = cam.nearZ;
     gpuUniforms.farZ  = cam.farZ;
 
-    auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
+    auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
     if (mappedUniforms.data == nullptr) return;
     std::memcpy(mappedUniforms.data, &gpuUniforms, sizeof(FrameUniforms));
 
@@ -128,7 +128,7 @@ void RenderContext::SetLights(std::span<const Light> lights) noexcept {
         // The engine fills the shader's own struct, so this is a copy:
         // nothing to keep in sync with anything but the struct itself.
         _impl->gpuLights.assign(visible.begin(), visible.end());
-        auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator.Get());
+        auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
         if (mappedLights.data == nullptr) {
             _impl->mappedLights.clear();
             _impl->packedLightCount = 0;

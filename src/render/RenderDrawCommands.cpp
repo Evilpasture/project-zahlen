@@ -349,7 +349,7 @@ void RenderContext::Impl::FlushLineQueue() {
     constexpr uint32_t maxLineVerts   = kMaxLineVertices;
     uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.Lines().size() * 2), maxLineVerts);
 
-    auto  mappedRegion = frames.lineVbos[presenter.frameIndex].Map(allocator.Get());
+    auto  mappedRegion = frames.lineVbos[presenter.frameIndex].Map(allocator);
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
     if (basePosPtr == nullptr) return;
     auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(basePosPtr + maxLineVerts);
@@ -389,7 +389,7 @@ void RenderContext::Impl::FlushLineQueue() {
     const VkDeviceAddress posAddr     = positions.Address();
     const VkDeviceAddress surfaceAddr = surfaces.Address();
 
-    auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator.Get());
+    auto  mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator);
     auto* dst        = static_cast<InstanceData*>(mappedInst.data);
     if (dst == nullptr) {
         activeLineVertexCount = 0;

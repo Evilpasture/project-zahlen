@@ -482,7 +482,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t w = static_cast<uint32_t>(side);
     const uint32_t h = static_cast<uint32_t>(side);
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator.Get());
+    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator);
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
@@ -565,7 +565,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     const bool creatingBlas = !scratchMesh->blas;
     if (creatingBlas) {
         auto blasBufOpt = Vk::Buffer::Create(
-            allocator.Get(), sizes.acceleration_structure_size,
+            allocator, sizes.acceleration_structure_size,
             Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
         );
         if (!blasBufOpt) {
@@ -584,7 +584,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
-        allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+        allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!scratchBufOpt) {
         // No build was recorded: do not leave an uninitialized AS for the
@@ -613,7 +613,7 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
 
     constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
-    auto  mapped  = nativeMesh->buffer.Map(_impl->allocator.Get());
+    auto  mapped  = nativeMesh->buffer.Map(_impl->allocator);
     char* basePtr = static_cast<char*>(mapped.data);
     if (basePtr == nullptr) return 0;
 
@@ -639,7 +639,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
         ZHLN::Assert(false, "joint palette exceeds the current frame's buffer");
         return;
     }
-    auto mapped = buffer.Map(_impl->allocator.Get());
+    auto mapped = buffer.Map(_impl->allocator);
     auto* gpuJoints = mapped.As<JPH::Mat44>();
     if (gpuJoints != nullptr) {
         std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
@@ -654,7 +654,7 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
         return offset;
     }
     if (!deltas.empty()) {
-        auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator.Get());
+        auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator);
         if (auto* gpuDeltas = mapped.As<float>()) {
             std::memcpy(gpuDeltas + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
         }
@@ -738,7 +738,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount, sizes);
 
     auto bufferRes = Vk::Buffer::Create(
-        impl.allocator.Get(), sizes.acceleration_structure_size,
+        impl.allocator, sizes.acceleration_structure_size,
         Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!bufferRes) return std::unexpected(bufferRes.error());
@@ -749,7 +749,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     if (!blas.Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
 
     auto scratchRes = Vk::Buffer::Create(
-        impl.allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+        impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
         Vk::MemoryUsage::GPUOnly
     );
     if (!scratchRes) return std::unexpected(scratchRes.error());
@@ -831,7 +831,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
-        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+        auto stagingRes = Vk::Buffer::Create(impl->allocator, imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
         if (!stagingRes) {
             return std::unexpected(stagingRes.error());
         }
@@ -870,7 +870,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
         });
 
-        auto mapped = stagingBuffer.Map(impl->allocator.Get());
+        auto mapped = stagingBuffer.Map(impl->allocator);
         if (mapped.data == nullptr) {
             return std::unexpected(ScreenshotError::ReadbackFailed);
         }
@@ -940,7 +940,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
-    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+    auto stagingRes = Vk::Buffer::Create(impl->allocator, imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }
@@ -955,7 +955,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
     });
 
-    auto mapped = stagingBuffer.Map(impl->allocator.Get());
+    auto mapped = stagingBuffer.Map(impl->allocator);
     if (mapped.data == nullptr) {
         return std::unexpected(ScreenshotError::ReadbackFailed);
     }

@@ -14,8 +14,8 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
     auto   pb_res             = Vk::Buffer::Create(
-        allocator.Get(), particleBufferSize,
-        Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex, Vk::MemoryUsage::GPUOnly
+        allocator, particleBufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex,
+        Vk::MemoryUsage::GPUOnly
     );
     if (!pb_res) {
         return std::unexpected(pb_res.error());
@@ -118,9 +118,8 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     size_t                     maxVertices,
     PerFrame<Vk::Buffer>&      bufs,
     PerFrame<VkDeviceAddress>& addrs,
-    const char*                label,
     Vk::BufferUsage            extraFlags
-) const noexcept -> std::expected<void, ErrorCode> {
+) noexcept -> std::expected<void, ErrorCode> {
     const size_t              bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
     PerFrame<Vk::Buffer>      created;
     PerFrame<VkDeviceAddress> createdAddresses;
@@ -130,9 +129,8 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
         }
     });
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-        auto res = Vk::Buffer::Create(
-            allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags, Vk::MemoryUsage::CPUToGPU
-        );
+        auto res =
+            Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -145,12 +143,11 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     }
     bufs  = std::move(created);
     addrs = createdAddresses;
-    ZHLN::Log("Allocated per-frame dynamic {} VBOs ({} bytes).", label, bufferSize);
     return {};
 }
 
 auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, ErrorCode> {
-    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, "line", Vk::BufferUsage::Vertex);
+    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, Vk::BufferUsage::Vertex);
 }
 
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
@@ -428,9 +425,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             std::span<const uint32_t> clusterFamilySpan {uniqFamilies.data(), uniqCount};
 
             auto bounds = Vk::Buffer::Create(
-                allocator.Get(), sizeof(ClusterBounds) * numClusters,
-                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, clusterSharing,
-                clusterFamilySpan
+                allocator, sizeof(ClusterBounds) * numClusters, Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
             );
             if (!bounds) {
                 return std::unexpected(bounds.error());

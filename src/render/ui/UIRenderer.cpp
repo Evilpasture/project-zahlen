@@ -179,7 +179,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     const size_t bufferSize = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexSurface));
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res =
-            Vk::Buffer::Create(ctx.allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
+            Vk::Buffer::Create(ctx.allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -238,7 +238,7 @@ void UIRenderer::RecordBatches(
         return;
     }
 
-    auto  mapped    = vbo.Map(impl.allocator->Get());
+    auto  mapped    = vbo.Map(*impl.allocator);
     auto* positions = static_cast<VertexPosition*>(mapped.data);
     if (positions == nullptr)
         return;

@@ -73,10 +73,10 @@ struct TaskSystemScheduler {
 namespace ZHLN::Vk {
 
 struct IBLPayload {
-    Image                    brdfLutImage;
-    ImageView                brdfLutView;
-    Image                    prefilteredImage;
-    ImageView                prefilteredView;
+    Image     brdfLutImage;
+    ImageView brdfLutView;
+    Image     prefilteredImage;
+    ImageView prefilteredView;
     // Original RGBA32F sky, only retained when the lighting cube was cooked
     // from a different (sunless) panorama and the skybox is visible.
     Image                    visualSkyImage;
@@ -446,9 +446,8 @@ struct RenderContext::Impl {
         size_t                     maxVertices,
         PerFrame<Vk::Buffer>&      bufs,
         PerFrame<VkDeviceAddress>& addrs,
-        const char*                label,
         Vk::BufferUsage            extraFlags = Vk::BufferUsage::None
-    ) const noexcept;
+    ) noexcept;
     void FlushLineQueue();
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
@@ -487,7 +486,7 @@ struct RenderContext::Impl {
 
     GeometryManager geometry;
 
-    DrawQueueManager   queues;
+    DrawQueueManager queues;
 
     // Authored particles, packed once per UploadParticles call: the caller's
     // descriptions are not the storage layout, so they are converted here.
@@ -754,13 +753,13 @@ struct RenderContext::Impl {
     };
 
     struct MeshParticleRenderPush {
-        VkDeviceAddress      particleBufferAddr;
-        VkDeviceAddress      posAddress;
-        JPH::Float4          baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Float4          emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
-        VkDeviceAddress      tangentFrameAddress;
-        VkDeviceAddress      surfaceAddress;
-        VkDeviceAddress      iboAddress;
+        VkDeviceAddress particleBufferAddr;
+        VkDeviceAddress posAddress;
+        JPH::Float4     baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+        JPH::Float4     emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
+        VkDeviceAddress tangentFrameAddress;
+        VkDeviceAddress surfaceAddress;
+        VkDeviceAddress iboAddress;
 
         uint32_t indexCount;
         uint32_t albedoIdx;
@@ -906,7 +905,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
-        .Build(allocator.Get())
+        .Build(allocator)
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             defer _([&] { allocator.DestroyImage(image); });
             auto  viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
@@ -1007,7 +1006,7 @@ template <typename T = Vk::Buffer, typename... Args>
             alloc.DestroyBuffer(resource);
     });
     for (auto& resource: resources) {
-        auto created = T::Create(alloc.Get(), args...);
+        auto created = T::Create(alloc, args...);
         if (!created) {
             return std::unexpected(created.error());
         }

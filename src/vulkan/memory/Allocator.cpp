@@ -1,40 +1,55 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
-#include "execution/RenderQueue.hpp"
 #include "Rendering.hpp"
+#include "execution/RenderQueue.hpp"
 #include <cstring>
 #include <sys/types.h>
 #include <vector>
-
+#include <vk_mem_alloc.h>
 
 namespace ZHLN::Vk {
 
 enum class BufferCreationError : uint8_t {
-    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
-    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
-    InvalidCaptureAddress ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address">{}),
-    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure">{}),
+    OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory"> {}) = 1,
+    OutOfDeviceMemory      ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory"> {}),
+    InvalidCaptureAddress  ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address"> {}),
+    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure"> {}),
 };
 
 enum class ImageCreationError : uint8_t {
-    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
-    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
-    InvalidCaptureAddress ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address">{}),
-    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure">{}),
+    OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory"> {}) = 1,
+    OutOfDeviceMemory      ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory"> {}),
+    InvalidCaptureAddress  ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address"> {}),
+    VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure"> {}),
 };
 
 enum class AllocatorError : uint8_t {
-    InitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan memory allocator initialization failed">{}) = 1,
+    InitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan memory allocator initialization failed"> {}) = 1,
 };
 
 enum class StagingRingBufferError : uint8_t {
-    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
-    StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed">{}),
+    OutOfHostMemory             ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory"> {}) = 1,
+    StagingBufferCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Staging ring buffer allocation failed"> {}),
 };
 
-
+namespace {
+// Engine-owned MemoryUsage -> VMA. Exhaustive switch so adding an enumerator
+// to MemoryUsage forces a compiler error here; we never hard-code VMA numeric
+// values in headers.
+[[nodiscard]] auto ToVmaUsage(MemoryUsage usage) noexcept -> VmaMemoryUsage {
+    switch (usage) {
+        case MemoryUsage::GPUOnly:
+            return VMA_MEMORY_USAGE_GPU_ONLY;
+        case MemoryUsage::CPUOnly:
+            return VMA_MEMORY_USAGE_CPU_ONLY;
+        case MemoryUsage::CPUToGPU:
+            return VMA_MEMORY_USAGE_CPU_TO_GPU;
+        case MemoryUsage::GPUToCPU:
+            return VMA_MEMORY_USAGE_GPU_TO_CPU;
+    }
+}
+} // namespace
 
 Allocator::~Allocator() noexcept {
     if (_handle != nullptr) {
@@ -57,32 +72,32 @@ auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
 
 std::expected<void, ZHLN::ErrorCode> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
     const VmaVulkanFunctions vfuncs = {
-        .vkGetInstanceProcAddr                    = vkGetInstanceProcAddr,
-        .vkGetDeviceProcAddr                      = vkGetDeviceProcAddr,
-        .vkGetPhysicalDeviceProperties            = vkGetPhysicalDeviceProperties,
-        .vkGetPhysicalDeviceMemoryProperties      = vkGetPhysicalDeviceMemoryProperties,
-        .vkAllocateMemory                         = vkAllocateMemory,
-        .vkFreeMemory                             = vkFreeMemory,
-        .vkMapMemory                              = vkMapMemory,
-        .vkUnmapMemory                            = vkUnmapMemory,
-        .vkFlushMappedMemoryRanges                = vkFlushMappedMemoryRanges,
-        .vkInvalidateMappedMemoryRanges           = vkInvalidateMappedMemoryRanges,
-        .vkBindBufferMemory                       = vkBindBufferMemory,
-        .vkBindImageMemory                        = vkBindImageMemory,
-        .vkGetBufferMemoryRequirements            = vkGetBufferMemoryRequirements,
-        .vkGetImageMemoryRequirements             = vkGetImageMemoryRequirements,
-        .vkCreateBuffer                           = vkCreateBuffer,
-        .vkDestroyBuffer                          = vkDestroyBuffer,
-        .vkCreateImage                            = vkCreateImage,
-        .vkDestroyImage                           = vkDestroyImage,
-        .vkCmdCopyBuffer                          = vkCmdCopyBuffer,
-        .vkGetBufferMemoryRequirements2KHR        = vkGetBufferMemoryRequirements2,
-        .vkGetImageMemoryRequirements2KHR         = vkGetImageMemoryRequirements2,
-        .vkBindBufferMemory2KHR                   = vkBindBufferMemory2,
-        .vkBindImageMemory2KHR                    = vkBindImageMemory2,
-        .vkGetPhysicalDeviceMemoryProperties2KHR  = vkGetPhysicalDeviceMemoryProperties2,
-        .vkGetDeviceBufferMemoryRequirements      = vkGetDeviceBufferMemoryRequirements,
-        .vkGetDeviceImageMemoryRequirements       = vkGetDeviceImageMemoryRequirements,
+        .vkGetInstanceProcAddr                   = vkGetInstanceProcAddr,
+        .vkGetDeviceProcAddr                     = vkGetDeviceProcAddr,
+        .vkGetPhysicalDeviceProperties           = vkGetPhysicalDeviceProperties,
+        .vkGetPhysicalDeviceMemoryProperties     = vkGetPhysicalDeviceMemoryProperties,
+        .vkAllocateMemory                        = vkAllocateMemory,
+        .vkFreeMemory                            = vkFreeMemory,
+        .vkMapMemory                             = vkMapMemory,
+        .vkUnmapMemory                           = vkUnmapMemory,
+        .vkFlushMappedMemoryRanges               = vkFlushMappedMemoryRanges,
+        .vkInvalidateMappedMemoryRanges          = vkInvalidateMappedMemoryRanges,
+        .vkBindBufferMemory                      = vkBindBufferMemory,
+        .vkBindImageMemory                       = vkBindImageMemory,
+        .vkGetBufferMemoryRequirements           = vkGetBufferMemoryRequirements,
+        .vkGetImageMemoryRequirements            = vkGetImageMemoryRequirements,
+        .vkCreateBuffer                          = vkCreateBuffer,
+        .vkDestroyBuffer                         = vkDestroyBuffer,
+        .vkCreateImage                           = vkCreateImage,
+        .vkDestroyImage                          = vkDestroyImage,
+        .vkCmdCopyBuffer                         = vkCmdCopyBuffer,
+        .vkGetBufferMemoryRequirements2KHR       = vkGetBufferMemoryRequirements2,
+        .vkGetImageMemoryRequirements2KHR        = vkGetImageMemoryRequirements2,
+        .vkBindBufferMemory2KHR                  = vkBindBufferMemory2,
+        .vkBindImageMemory2KHR                   = vkBindImageMemory2,
+        .vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2,
+        .vkGetDeviceBufferMemoryRequirements     = vkGetDeviceBufferMemoryRequirements,
+        .vkGetDeviceImageMemoryRequirements      = vkGetDeviceImageMemoryRequirements,
         .vkGetMemoryWin32HandleKHR               = nullptr,
 #if VMA_GET_PHYSICAL_DEVICE_PROPERTIES2
         .vkGetPhysicalDeviceProperties2KHR = nullptr,
@@ -114,8 +129,12 @@ std::expected<void, ZHLN::ErrorCode> Allocator::Init(const Context& ctx) noexcep
     return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
-void Allocator::DestroyBuffer(Buffer& buffer) const noexcept { DestroyBuffer(_handle, buffer); }
-void Allocator::DestroyImage(Image& image) const noexcept { DestroyImage(_handle, image); }
+void Allocator::DestroyBuffer(Buffer& buffer) const noexcept {
+    DestroyBuffer(_handle, buffer);
+}
+void Allocator::DestroyImage(Image& image) const noexcept {
+    DestroyImage(_handle, image);
+}
 
 void Allocator::DestroyBuffer(VmaAllocator allocator, Buffer& buffer) noexcept {
     if (buffer.Valid()) {
@@ -133,27 +152,28 @@ void Allocator::DestroyImage(VmaAllocator allocator, Image& image) noexcept {
 
 Buffer::Buffer(Buffer&& other) noexcept:
     _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _allocation(std::exchange(other._allocation, nullptr)),
-    _info(std::exchange(other._info, VmaAllocationInfo {})), _requestedSize(std::exchange(other._requestedSize, 0)) {}
+    _mappedData(std::exchange(other._mappedData, nullptr)), _requestedSize(std::exchange(other._requestedSize, 0)) {
+}
 
 auto Buffer::operator=(Buffer&& other) noexcept -> Buffer& {
     if (this != &other) {
         ZHLN::Assert(!Valid(), "Buffer move assignment requires the previous allocation to be explicitly retired");
         _handle        = std::exchange(other._handle, VK_NULL_HANDLE);
         _allocation    = std::exchange(other._allocation, nullptr);
-        _info          = std::exchange(other._info, VmaAllocationInfo {});
+        _mappedData    = std::exchange(other._mappedData, nullptr);
         _requestedSize = std::exchange(other._requestedSize, 0);
     }
     return *this;
 }
 
 auto Buffer::Release() noexcept -> std::pair<VkBuffer, VmaAllocation> {
-    _info = {};
+    _mappedData    = nullptr;
     _requestedSize = 0;
     return {std::exchange(_handle, VK_NULL_HANDLE), std::exchange(_allocation, nullptr)};
 }
 
-Image::Image(Image&& other) noexcept:
-    _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _allocation(std::exchange(other._allocation, nullptr)) {}
+Image::Image(Image&& other) noexcept: _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _allocation(std::exchange(other._allocation, nullptr)) {
+}
 
 auto Image::operator=(Image&& other) noexcept -> Image& {
     if (this != &other) {
@@ -168,17 +188,17 @@ auto Image::Release() noexcept -> std::pair<VkImage, VmaAllocation> {
     return {std::exchange(_handle, VK_NULL_HANDLE), std::exchange(_allocation, nullptr)};
 }
 
-auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
+auto Buffer::Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, 0);
 }
 
-auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+auto Buffer::Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
     -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, minAlignment, VK_SHARING_MODE_EXCLUSIVE, {});
 }
 
 auto Buffer::Create(
-    VmaAllocator              allocator,
+    Allocator&                allocatorRef,
     size_t                    size,
     BufferUsage               usage,
     MemoryUsage               memUsage,
@@ -186,9 +206,10 @@ auto Buffer::Create(
     VkSharingMode             sharingMode,
     std::span<const uint32_t> queueFamilyIndices
 ) noexcept -> std::expected<Buffer, ErrorCode> {
-    VkBuffer          buffer = VK_NULL_HANDLE;
-    VmaAllocation     alloc  = nullptr;
-    VmaAllocationInfo info   = {};
+    VmaAllocator      allocator = allocatorRef.Handle();
+    VkBuffer          buffer    = VK_NULL_HANDLE;
+    VmaAllocation     alloc     = nullptr;
+    VmaAllocationInfo info      = {};
 
     VkDeviceSize effectiveAlignment = minAlignment;
     if (Has(usage, BufferUsage::AccelerationStructureStorage | BufferUsage::AccelerationStructureBuildInput)) {
@@ -208,7 +229,7 @@ auto Buffer::Create(
 
     VmaAllocationCreateInfo alloc_info = {
         .flags          = 0,
-        .usage          = ToVma(memUsage),
+        .usage          = ToVmaUsage(memUsage),
         .requiredFlags  = 0,
         .preferredFlags = 0,
         .memoryTypeBits = 0,
@@ -246,35 +267,39 @@ auto Buffer::Create(
     Buffer b;
     b._handle        = buffer;
     b._allocation    = alloc;
-    b._info          = info;
+    b._mappedData    = info.pMappedData;
     b._requestedSize = size;
     return b;
 }
 
-void Buffer::Flush(VmaAllocator allocator, VkDeviceSize offset, VkDeviceSize size) noexcept {
+void Buffer::Flush(Allocator& allocatorRef, VkDeviceSize offset, VkDeviceSize size) noexcept {
+    VmaAllocator allocator = allocatorRef.Handle();
     if (Valid()) {
         vmaFlushAllocation(allocator, _allocation, offset, size);
     }
 }
 
-Buffer::MappedRegion::MappedRegion(VmaAllocator alloc, VmaAllocation allocation, void* ptr) noexcept:
-    data(ptr), _allocator(alloc), _allocation(allocation) {}
+Buffer::MappedRegion::MappedRegion(Allocator& alloc, VmaAllocation allocation, void* ptr) noexcept:
+    data(ptr), _allocator(alloc.Handle()), _allocation(allocation) {
+}
 
-Buffer::MappedRegion::~MappedRegion() noexcept { Cleanup(); }
+Buffer::MappedRegion::~MappedRegion() noexcept {
+    Cleanup();
+}
 
 void Buffer::MappedRegion::Cleanup() noexcept {
     if (_allocator != nullptr && _allocation != nullptr) {
         vmaFlushAllocation(_allocator, _allocation, 0, VK_WHOLE_SIZE);
         vmaUnmapMemory(_allocator, _allocation);
     }
-    _allocator = nullptr;
+    _allocator  = nullptr;
     _allocation = nullptr;
-    data = nullptr;
+    data        = nullptr;
 }
 
 Buffer::MappedRegion::MappedRegion(MappedRegion&& other) noexcept:
-    data(std::exchange(other.data, nullptr)), _allocator(std::exchange(other._allocator, nullptr)),
-    _allocation(std::exchange(other._allocation, nullptr)) {}
+    data(std::exchange(other.data, nullptr)), _allocator(std::exchange(other._allocator, nullptr)), _allocation(std::exchange(other._allocation, nullptr)) {
+}
 
 auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedRegion& {
     if (this != &other) {
@@ -286,51 +311,53 @@ auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedReg
     return *this;
 }
 
-auto Buffer::Map(VmaAllocator allocator) noexcept -> MappedRegion {
+auto Buffer::Map(Allocator& allocatorRef) noexcept -> MappedRegion {
+    VmaAllocator allocator = allocatorRef.Handle();
     if (!Valid()) {
         return {};
     }
-    if (_info.pMappedData != nullptr) {
-        return {nullptr, nullptr, _info.pMappedData};
+    if (_mappedData != nullptr) {
+        return {allocatorRef, _allocation, _mappedData};
     }
     void* ptr = nullptr;
     if (vmaMapMemory(allocator, _allocation, &ptr) != VK_SUCCESS) {
         return {};
     }
-    return {allocator, _allocation, ptr};
+    return {allocatorRef, _allocation, ptr};
 }
 
-auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
-    auto staging_res = Buffer::Create(allocator, size, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
-    if (!staging_res.has_value()) {
+auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
+    if (data == nullptr || size == 0 || !dst.Valid() || cmd == VK_NULL_HANDLE) {
         return {};
     }
-    Buffer staging = std::move(staging_res.value());
 
-    bool mappedOK = false;
-    {
-        auto mapped = staging.Map(allocator);
-        if (mapped.data != nullptr) {
-            std::memcpy(mapped.data, data, size);
-            mappedOK = true;
-        }
-    }
-    if (!mappedOK) {
-        Allocator::DestroyBuffer(allocator, staging);
+    auto staging_res = Buffer::Create(allocatorRef, size, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
+    if (!staging_res) {
         return {};
     }
+
+    Buffer staging = std::move(*staging_res);
+
+    {
+        auto mapped = staging.Map(allocatorRef);
+        if (!mapped.data) {
+            allocatorRef.DestroyBuffer(staging);
+            return {};
+        }
+        std::memcpy(mapped.data, data, size);
+    } // `mapped` destructs here, flushing and unmapping VMA memory immediately
 
     CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
 }
 
-
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
+auto Image::Create(Allocator& allocatorRef, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
+    VmaAllocator                  allocator  = allocatorRef.Handle();
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
         .flags          = {},
-        .usage          = ToVma(memUsage),
+        .usage          = ToVmaUsage(memUsage),
         .requiredFlags  = {},
         .preferredFlags = {},
         .memoryTypeBits = {},
@@ -358,7 +385,7 @@ auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, Memory
     }
 
     Image r;
-    r._handle = img;
+    r._handle     = img;
     r._allocation = alloc;
     return r;
 }
@@ -454,10 +481,9 @@ auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, ImageUsage usage,
     return *this;
 }
 
-auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, ErrorCode> {
+auto ImageBuilder::Build(Allocator& allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, ErrorCode> {
     return Image::Create(allocator, _info, memUsage);
 }
-
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:
     _allocator(std::exchange(other._allocator, nullptr)), _device(std::exchange(other._device, VK_NULL_HANDLE)),
@@ -489,10 +515,10 @@ auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> Staging
     return *this;
 }
 
-auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
+auto StagingRingBuffer::Init(Allocator& allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
     -> std::expected<void, ZHLN::ErrorCode> {
     Cleanup();
-    _allocator   = allocator;
+    _allocator   = &allocator;
     _device      = device;
     _queue       = queue;
     _queueFamily = queueFamily;
@@ -510,14 +536,14 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     }
     _timelineSemaphore = Semaphore(_device, raw_sem);
 
-    auto staging_res = Buffer::Create(_allocator, _capacity, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
+    auto staging_res = Buffer::Create(*_allocator, _capacity, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
     if (!staging_res.has_value()) {
         _timelineSemaphore = {};
         return std::unexpected(StagingRingBufferError::StagingBufferCreationFailed);
     }
     _stagingBuffer = std::move(*staging_res);
 
-    _mappedRegion = _stagingBuffer.Map(_allocator);
+    _mappedRegion = _stagingBuffer.Map(*_allocator);
     _mappedPtr    = _mappedRegion.data;
     if (_mappedPtr == nullptr) {
         Cleanup();
@@ -532,7 +558,9 @@ void StagingRingBuffer::Cleanup() noexcept {
             vkDeviceWaitIdle(_device);
         }
         _mappedRegion = {};
-        Allocator::DestroyBuffer(_allocator, _stagingBuffer);
+        if (_allocator != nullptr) {
+            Allocator::DestroyBuffer(_allocator->Handle(), _stagingBuffer);
+        }
         for (auto& rp: _retiredPools) {
             vkDestroyCommandPool(_device, rp.pool, nullptr);
         }
@@ -540,11 +568,11 @@ void StagingRingBuffer::Cleanup() noexcept {
         _timelineSemaphore = {};
         _activeAllocations.clear();
         _mappedPtr = nullptr;
-        _device = VK_NULL_HANDLE;
+        _device    = VK_NULL_HANDLE;
         _allocator = nullptr;
-        _queue = VK_NULL_HANDLE;
-        _capacity = 0;
-        _head = _tail = 0;
+        _queue     = VK_NULL_HANDLE;
+        _capacity  = 0;
+        _head = _tail  = 0;
         _timelineValue = 0;
     }
 }
@@ -630,8 +658,9 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
     _head = aligned_head + size;
     _activeAllocations.push_back({.offset = aligned_head, .size = size, .timelineValue = 0});
 
-    return {.slice = BufferSlice {_stagingBuffer.Handle(), 0, aligned_head, size},
-            .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0};
+    return {
+        .slice = BufferSlice {_stagingBuffer.Handle(), 0, aligned_head, size}, .mappedData = static_cast<char*>(_mappedPtr) + aligned_head, .timelineValue = 0
+    };
 }
 
 auto StagingRingBuffer::Submit(ExecutableCommands cmds, VkFence fence) noexcept -> uint64_t {
@@ -652,7 +681,9 @@ auto StagingRingBuffer::Submit(ExecutableCommands cmds, VkFence fence) noexcept 
     return _timelineValue;
 }
 
-DeletionQueue::~DeletionQueue() { Drain(); }
+DeletionQueue::~DeletionQueue() {
+    Drain();
+}
 
 void DeletionQueue::Drain() noexcept {
     Lock(_mutex, [&] {
@@ -663,7 +694,8 @@ void DeletionQueue::Drain() noexcept {
 }
 
 void DeletionQueue::Enqueue(Buffer&& buffer) noexcept {
-    if (!buffer.Valid()) return;
+    if (!buffer.Valid())
+        return;
     Lock(_mutex, [&] {
         const auto [handle, allocation] = buffer.Release();
         _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Buffer, .allocation = allocation, .buffer = handle});
@@ -671,7 +703,8 @@ void DeletionQueue::Enqueue(Buffer&& buffer) noexcept {
 }
 
 void DeletionQueue::Enqueue(Image&& image) noexcept {
-    if (!image.Valid()) return;
+    if (!image.Valid())
+        return;
     Lock(_mutex, [&] {
         const auto [handle, allocation] = image.Release();
         _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Image, .allocation = allocation, .image = handle});
@@ -679,18 +712,19 @@ void DeletionQueue::Enqueue(Image&& image) noexcept {
 }
 
 void DeletionQueue::EnqueueAccelerationStructure(VkDevice device, AccelerationStructure&& handle) noexcept {
-    if (!handle.Valid()) return;
+    if (!handle.Valid())
+        return;
     Lock(_mutex, [&] {
-        _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::AccelerationStructure, .device = device,
-                                               .accelerationStructure = handle.Release()});
+        _queues[_currentFrameIndex].push_back(
+            {.type = DeferredDeletionEntry::Type::AccelerationStructure, .device = device, .accelerationStructure = handle.Release()}
+        );
     });
 }
 
 void DeletionQueue::EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept {
-    if (pipeline == VK_NULL_HANDLE) return;
-    Lock(_mutex, [&] {
-        _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Pipeline, .device = device, .pipeline = pipeline});
-    });
+    if (pipeline == VK_NULL_HANDLE)
+        return;
+    Lock(_mutex, [&] { _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::Pipeline, .device = device, .pipeline = pipeline}); });
 }
 
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
@@ -704,10 +738,10 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
     for (const auto& entry: queue) {
         switch (entry.type) {
             case DeferredDeletionEntry::Type::Buffer:
-                vmaDestroyBuffer(_allocator, entry.buffer, entry.allocation);
+                vmaDestroyBuffer(_allocator != nullptr ? _allocator->Handle() : nullptr, entry.buffer, entry.allocation);
                 break;
             case DeferredDeletionEntry::Type::Image:
-                vmaDestroyImage(_allocator, entry.image, entry.allocation);
+                vmaDestroyImage(_allocator != nullptr ? _allocator->Handle() : nullptr, entry.image, entry.allocation);
                 break;
             case DeferredDeletionEntry::Type::AccelerationStructure:
                 ZHLN_DestroyAS(entry.device, entry.accelerationStructure);
@@ -720,4 +754,4 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
     queue.clear();
 }
 
-}
+} // namespace ZHLN::Vk
