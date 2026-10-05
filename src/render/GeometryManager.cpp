@@ -1,9 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "GeometryManager.hpp"
-
 #include <Zahlen/Vertex.hpp>
 #include <cstring>
 
@@ -11,10 +9,10 @@ namespace ZHLN {
 
 auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsage usage) const
     -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
-    const auto&    familyInfo    = _ctx.PhysicalInfo();
-    const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
-    uint32_t       families[3];
-    uint32_t       familyCount = 0;
+    const auto&             familyInfo = _ctx.PhysicalInfo();
+    const std::array        candidates = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
+    std::array<uint32_t, 3> families {};
+    uint32_t                familyCount = 0;
     for (const uint32_t candidate: candidates) {
         bool seen = false;
         for (uint32_t i = 0; i < familyCount; ++i) {
@@ -24,19 +22,20 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
             families[familyCount++] = candidate;
         }
     }
-    const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+    const auto sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 
-    const Vk::BufferUsage rtBit =
-        _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
+    const auto rtBit = _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
 
     return Vk::Buffer::Create(
-               _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
-               sharingMode, {families, familyCount}
+               _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
+               {families.data(), familyCount}
     )
         .and_then([this, size, data](Vk::Buffer gpu_buf) -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
             defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
-            auto stagingAlloc = _transferRing.Allocate(size);
-            if (stagingAlloc.mappedData == nullptr) return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+            auto  stagingAlloc = _transferRing.Allocate(size);
+            if (stagingAlloc.mappedData == nullptr) {
+                return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+            }
 
             if (data != nullptr) {
                 std::memcpy(stagingAlloc.mappedData, data, size);
@@ -103,7 +102,9 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     }
 
     auto stagingAlloc = _transferRing.Allocate(size);
-    if (stagingAlloc.mappedData == nullptr) return;
+    if (stagingAlloc.mappedData == nullptr) {
+        return;
+    }
     std::memcpy(stagingAlloc.mappedData, data, size);
 
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
@@ -148,4 +149,4 @@ void GeometryManager::RetireAll() noexcept {
     _buffers.ForEachLive([this](NativeMesh& mesh) { Retire(mesh); });
 }
 
-}
+} // namespace ZHLN
