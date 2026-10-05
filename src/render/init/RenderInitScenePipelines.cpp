@@ -31,8 +31,8 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     particleRenderLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ParticleRenderVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ParticleRenderPS>()
+               Vk::MakeStageSource<Shaders::Modules::ParticleRenderVS>(),
+               Vk::MakeStageSource<Shaders::Modules::ParticleRenderPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
@@ -62,8 +62,8 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
     meshParticleRenderLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleRenderVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MeshParticleRenderPS>()
+               Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderVS>(),
+               Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
@@ -81,8 +81,8 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return LoadAndCreateShaders(
-                       MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MeshParticleShadowVS>(),
-                       MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MeshParticleShadowPS>()
+                       Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowVS>(),
+                       Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowPS>()
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
@@ -108,7 +108,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
         .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
-                       MakeStageSource<ShaderStage::Compute, Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
+                       Vk::MakeStageSource<Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
             )
                 .transform([&](auto&& pipeline) -> auto { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -154,7 +154,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
     linePipelineLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVSForward>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ForwardPS>()
+               Vk::MakeStageSource<Shaders::Modules::BasicVSForward>(), Vk::MakeStageSource<Shaders::Modules::ForwardPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
@@ -228,7 +228,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     };
 
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::DecalVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::DecalPS>()
+               Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>()
     )
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
@@ -249,7 +249,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 
 auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     auto shaders = LoadAndCreateShaders(
-        MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
+        Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>()
     );
     if (!shaders) {
         return std::unexpected(shaders.error());
@@ -327,7 +327,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
                      .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
                          hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
                          return LoadAndCreateComputeShader(
-                                    MakeStageSource<ShaderStage::Compute, Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
+                                    Vk::MakeStageSource<Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
                          )
                              .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
                      });

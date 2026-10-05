@@ -222,9 +222,18 @@ class Buffer {
 
     void Flush(Allocator& allocator, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
+    // A window onto host-visible buffer memory. CPU-writable buffers are created with
+    // VMA_ALLOCATION_CREATE_MAPPED_BIT, so VMA maps them once and holds that mapping for
+    // the allocation's lifetime: this type never needs vmaMapMemory() or vmaUnmapMemory(),
+    // it only flushes what was written when it leaves scope, which is all non-coherent
+    // memory asks for.
+    //
+    // The default-constructed region is empty -- "nothing mapped" -- which is what the
+    // long-lived holders reset to. A region handed to a caller by Map() is never empty: a
+    // buffer with no persistent mapping is reported as an ErrorCode instead, so Data() is
+    // never null where a caller uses it.
     struct MappedRegion {
         MappedRegion() = default;
-        MappedRegion(Allocator& alloc, VmaAllocation allocation, void* ptr) noexcept;
         ~MappedRegion() noexcept;
 
         MappedRegion(const MappedRegion&)                    = delete;
@@ -233,20 +242,39 @@ class Buffer {
         MappedRegion(MappedRegion&& other) noexcept;
         auto operator=(MappedRegion&& other) noexcept -> MappedRegion&;
 
+        [[nodiscard]] auto Data() const noexcept -> void* {
+            return _ptr;
+        }
+        // The size the buffer was created with, in bytes: what AsSpan() clamps to.
+        [[nodiscard]] auto Size() const noexcept -> size_t {
+            return _size;
+        }
         template <typename T>
-        auto As() noexcept -> T* {
-            return static_cast<T*>(data);
+        [[nodiscard]] auto As() const noexcept -> T* {
+            return static_cast<T*>(_ptr);
+        }
+        // count == 0 means "all of it".
+        template <typename T>
+        [[nodiscard]] auto AsSpan(size_t count = 0) const noexcept -> std::span<T> {
+            const size_t available = _size / sizeof(T);
+            return std::span<T>(static_cast<T*>(_ptr), count == 0 ? available : std::min(count, available));
         }
 
-        void* data = nullptr;
-
       private:
+        friend class Buffer;
+        MappedRegion(Allocator& alloc, VmaAllocation allocation, void* ptr, size_t size) noexcept;
         void          Cleanup() noexcept;
+        void*         _ptr        = nullptr;
+        size_t        _size       = 0;
         VmaAllocator  _allocator  = nullptr;
         VmaAllocation _allocation = nullptr;
     };
 
-    [[nodiscard]] auto Map(Allocator& allocator) noexcept -> MappedRegion;
+    // A buffer only has memory to map once Create() succeeded, and only host-visible
+    // memory carries a persistent mapping: those are the two ways Map() fails. Both
+    // travel as an ErrorCode instead of a null pointer a caller could take for a valid
+    // empty read.
+    [[nodiscard]] auto Map(Allocator& allocator) noexcept -> std::expected<MappedRegion, ErrorCode>;
     [[nodiscard]] auto Handle() const noexcept -> VkBuffer {
         return _handle;
     }

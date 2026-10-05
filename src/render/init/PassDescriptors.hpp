@@ -12,23 +12,23 @@ namespace ZHLN {
 
 template <typename PassT>
 struct GraphicsPassDesc {
-    PassT&              pass;
-    const char*         name {};
-    VertexStageSource   vs;
-    FragmentStageSource ps;
-    VkFormat            colorFormat;
-    bool                additive = false;
+    PassT&                  pass;
+    const char*             name {};
+    Vk::VertexStageSource   vs;
+    Vk::FragmentStageSource ps;
+    VkFormat                colorFormat;
+    bool                    additive = false;
 };
 
 template <typename PassT>
-GraphicsPassDesc(PassT&, const char*, VertexStageSource, FragmentStageSource, VkFormat, bool = false) -> GraphicsPassDesc<PassT>;
+GraphicsPassDesc(PassT&, const char*, Vk::VertexStageSource, Vk::FragmentStageSource, VkFormat, bool = false) -> GraphicsPassDesc<PassT>;
 
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
     RenderContext::Impl*            self,
     Vk::FullscreenPass<LayoutT>&   pass,
-    VertexStageSource               vs,
-    FragmentStageSource             ps,
+    Vk::VertexStageSource           vs,
+    Vk::FragmentStageSource         ps,
     std::initializer_list<VkFormat> colorFormats,
     bool                            additive = false
 ) noexcept -> std::expected<void, ErrorCode> {
@@ -44,8 +44,8 @@ template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
     RenderContext::Impl*                  self,
     Vk::FullscreenPass<LayoutT>&         pass,
-    VertexStageSource                     vs,
-    FragmentStageSource                   ps,
+    Vk::VertexStageSource                 vs,
+    Vk::FragmentStageSource               ps,
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive = false

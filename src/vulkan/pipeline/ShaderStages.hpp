@@ -34,6 +34,33 @@ template <typename T, size_t Extent>
     return ZHLN_ShaderDesc {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
 }
 
+// A stage source names the module one pipeline stage is built from: where the
+// cooked bytes live for a hot reload, the generated fallback that stands in for
+// them, and the entry point the module declares. The stage travels in the type
+// and is a Vulkan stage flag, so a source cannot name a module compiled for a
+// different stage, and task, mesh and ray-tracing stages fit without a table.
+template <VkShaderStageFlagBits Stage>
+struct ShaderStageSource {
+    static constexpr VkShaderStageFlagBits stage = Stage;
+    const char*                            path = nullptr;
+    std::span<const uint8_t>               fallback {};
+    const char*                            entryPoint = nullptr;
+};
+
+using VertexStageSource   = ShaderStageSource<VK_SHADER_STAGE_VERTEX_BIT>;
+using FragmentStageSource = ShaderStageSource<VK_SHADER_STAGE_FRAGMENT_BIT>;
+using ComputeStageSource  = ShaderStageSource<VK_SHADER_STAGE_COMPUTE_BIT>;
+using TaskStageSource     = ShaderStageSource<VK_SHADER_STAGE_TASK_BIT_EXT>;
+using MeshStageSource     = ShaderStageSource<VK_SHADER_STAGE_MESH_BIT_EXT>;
+
+// The module already knows the stage it was compiled for (ShaderProgram.hpp),
+// so naming the module names the stage: one template argument, nothing to keep
+// in step, and no assert needed to catch a caller who got it wrong.
+template <ShaderProgram Module>
+[[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Module::Stage> {
+    return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
+}
+
 // Validated stage metadata and borrowed SPIR-V. Copying this view copies no
 // bytecode. The supplied code must remain alive and unchanged through
 // reflection and the synchronous vkCreateGraphicsPipelines call. Entry-point

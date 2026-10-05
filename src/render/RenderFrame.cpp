@@ -197,8 +197,8 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
     auto mappedInstances = instanceBuf.Map(allocator);
-    if (mappedInstances.data == nullptr) return;
-    std::memcpy(mappedInstances.data, tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
+    if (!mappedInstances) return;
+    std::memcpy(mappedInstances->Data(), tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
@@ -224,15 +224,16 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.invViewProj        = unjittered.Inversed();
     currentUniforms.camPos = JPH::Float4 {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time};
 
-    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator);
-    auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
-    if (gpu != nullptr) {
-        gpu->viewProj           = view.viewProjMatrix;
-        gpu->unjitteredViewProj = unjittered;
-        gpu->invViewProj        = unjittered.Inversed();
-        gpu->invProj            = view.projMatrix.Inversed();
-        gpu->camPos = currentUniforms.camPos;
+    auto mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator);
+    if (!mapped) {
+        return;
     }
+    auto* gpu               = mapped->As<FrameUniforms>();
+    gpu->viewProj           = view.viewProjMatrix;
+    gpu->unjitteredViewProj = unjittered;
+    gpu->invViewProj        = unjittered.Inversed();
+    gpu->invProj            = view.projMatrix.Inversed();
+    gpu->camPos             = currentUniforms.camPos;
 }
 
 
@@ -252,14 +253,14 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     auto csgCount  = queues.CsgDraws().size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator);
-        auto* dst    = static_cast<InstanceData*>(mapped.data);
-        if (dst == nullptr) {
+        auto mapped = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator);
+        if (!mapped) {
             activeLineVertexCount = 0;
             queues.Draws().clear();
             queues.CsgDraws().clear();
             return;
         }
+        auto* dst = mapped->As<InstanceData>();
 
         for (size_t i = 0; i < drawCount; ++i) {
             dst[i] = queues.Draws()[i].instanceData;

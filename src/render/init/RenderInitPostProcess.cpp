@@ -15,40 +15,40 @@ namespace ZHLN {
 
 auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, taaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(),
+        this, taaPass, Vk::MakeStageSource<Shaders::Modules::TaaVS>(), Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, fxaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(),
+        this, fxaaPass, Vk::MakeStageSource<Shaders::Modules::FxaaVS>(), Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, mlaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(),
+        this, mlaaPass, Vk::MakeStageSource<Shaders::Modules::MlaaVS>(), Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-               this, smaaEdgePass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaEdgeVS>(),
-               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
+               this, smaaEdgePass, Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
+               Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaWeightPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
-                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
+                this, smaaWeightPass, Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
+                Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaBlendPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
-                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
+                this, smaaBlendPass, Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
+                Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
 }
@@ -66,13 +66,13 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
-            this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingVS>(),
-            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, lightingPass, Vk::MakeStageSource<Shaders::Modules::LightingVS>(),
+            Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
     }
     return BuildPassVariants(
-        this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingNortVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, lightingPass, Vk::MakeStageSource<Shaders::Modules::LightingNortVS>(),
+        Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
@@ -93,33 +93,33 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
 
     if (ctx.RayTracingSupported()) {
         auto res = BuildPassVariants(
-            this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(),
-            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, reflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
+            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
         if (!res) {
             return res;
         }
         return BuildPassVariants(
-            this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(),
-            MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            this, translucentReflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
+            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
     }
     auto res = BuildPassVariants(
-        this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, reflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
+        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
     if (!res) {
         return res;
     }
     return BuildPassVariants(
-        this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, translucentReflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
+        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
+        this, blitPass, Vk::MakeStageSource<Shaders::Modules::BlitVS>(), Vk::MakeStageSource<Shaders::Modules::BlitPS>(),
         {presenter.GetPresentFormat()}
     );
 }
@@ -153,50 +153,50 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                 GraphicsPassDesc {
                     .pass        = taaPass,
                     .name        = "TAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::TaaVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = fxaaPass,
                     .name        = "FXAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::FxaaVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = mlaaPass,
                     .name        = "MLAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::MlaaVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = smaaEdgePass,
                     .name        = "SMAA Edge Detection",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaEdgeVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaEdgePS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(),
                     .colorFormat = VK_FORMAT_R8G8_UNORM
                 },
                 GraphicsPassDesc {
                     .pass        = smaaWeightPass,
                     .name        = "SMAA Blending Weight",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaWeightPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(),
                     .colorFormat = VK_FORMAT_R8G8B8A8_UNORM
                 },
                 GraphicsPassDesc {
                     .pass        = smaaBlendPass,
                     .name        = "SMAA Neighborhood Blend",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaBlendPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = blitPass,
                     .name        = "Blit",
-                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
-                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
+                    .vs          = Vk::MakeStageSource<Shaders::Modules::BlitVS>(),
+                    .ps          = Vk::MakeStageSource<Shaders::Modules::BlitPS>(),
                     .colorFormat = presenter.GetPresentFormat()
                 }
             );

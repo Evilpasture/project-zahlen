@@ -26,7 +26,6 @@ inline constexpr uint32_t kMaxEnvironmentRadianceExtent = 8192;
 
 enum class EnvironmentBakeError : uint8_t {
     RadianceTooLarge ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect exceeds the bake size limit"> {}) = 1,
-    RadianceUploadFailed ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect could not be staged for the IBL bake"> {}),
     InvalidRadianceData ZHLN_ANNOTATION(ZHLN::Description<"radiance float4 data does not match its extent"> {}),
     RadianceFilteringUnsupported ZHLN_ANNOTATION(ZHLN::Description<"radiance float format does not support linear sampling"> {}),
 };
@@ -196,10 +195,10 @@ class IBLProcessor {
         ZHLN::defer _([&] { impl.allocator.DestroyBuffer(*staging); });
         {
             auto mapped = staging->Map(impl.allocator);
-            if (mapped.data == nullptr) return std::unexpected(EnvironmentBakeError::RadianceUploadFailed);
-            std::memcpy(mapped.data, pixels, uploadBytes);
+            if (!mapped) return std::unexpected(mapped.error());
+            std::memcpy(mapped->Data(), pixels, uploadBytes);
             if (cpuSourceMips) {
-                auto* mipPixels = static_cast<float*>(mapped.data);
+                auto* mipPixels = mapped->As<float>();
                 for (uint32_t mip = 1; mip < sourceMipLevels; ++mip) {
                     DownsampleEquirect(mipPixels + sourceMipOffsets[mip - 1], mipPixels + sourceMipOffsets[mip],
                                        std::max(1u, uploadWidth >> (mip - 1)), std::max(1u, uploadHeight >> (mip - 1)),
@@ -207,7 +206,7 @@ class IBLProcessor {
                 }
             }
             if (useVisualSky) {
-                std::memcpy(static_cast<float*>(mapped.data) + visualOffsetFloats, radiance.visualRgba, uploadBytes);
+                std::memcpy(mapped->As<float>() + visualOffsetFloats, radiance.visualRgba, uploadBytes);
             }
         }
 
@@ -361,8 +360,8 @@ class IBLProcessor {
 
         if (!hasPreparedSH) {
             auto mappedSH = state.shCpu.Map(impl.allocator);
-            if (mappedSH.data == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
-            std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
+            if (!mappedSH) return std::unexpected(mappedSH.error());
+            std::memcpy(state.payload.shCoeffs.data(), mappedSH->Data(), kSHBytes);
         } else {
             // The conditioned map has no tiny emitter for either bake path.
             // Preserve the cooker's exact SH integration of the smooth sky;

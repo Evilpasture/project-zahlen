@@ -33,9 +33,9 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.camPos.y = cam.position.GetY();
     _impl->currentUniforms.camPos.z = cam.position.GetZ();
 
-    auto        mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-    auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
-    if (gpu == nullptr) return;
+    auto mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
+    if (!mapped) return;
+    auto* const gpu = mapped->As<FrameUniforms>();
     gpu->viewProj           = unjittered;
     gpu->unjitteredViewProj = unjittered;
     gpu->invViewProj        = unjittered.Inversed();
@@ -106,8 +106,8 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& view, c
     gpuUniforms.farZ  = cam.farZ;
 
     auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-    if (mappedUniforms.data == nullptr) return;
-    std::memcpy(mappedUniforms.data, &gpuUniforms, sizeof(FrameUniforms));
+    if (!mappedUniforms) return;
+    std::memcpy(mappedUniforms->Data(), &gpuUniforms, sizeof(FrameUniforms));
 
     if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov || cam.nearZ != _impl->lastNearZ || cam.farZ != _impl->lastFarZ) {
         _impl->lastAspectRatio               = vpAspect;
@@ -129,12 +129,12 @@ void RenderContext::SetLights(std::span<const Light> lights) noexcept {
         // nothing to keep in sync with anything but the struct itself.
         _impl->gpuLights.assign(visible.begin(), visible.end());
         auto mappedLights = _impl->frames.lightStorageBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-        if (mappedLights.data == nullptr) {
+        if (!mappedLights) {
             _impl->mappedLights.clear();
             _impl->packedLightCount = 0;
             return;
         }
-        std::memcpy(mappedLights.data, _impl->gpuLights.data(), _impl->gpuLights.size() * sizeof(Light));
+        std::memcpy(mappedLights->Data(), _impl->gpuLights.data(), _impl->gpuLights.size() * sizeof(Light));
         _impl->mappedLights.assign(_impl->gpuLights.begin(), _impl->gpuLights.end());
     } else {
         _impl->mappedLights.clear();

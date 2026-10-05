@@ -80,12 +80,11 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
     return Buffer::Create(*_allocator, bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
         .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
             defer _([&] { _allocator->DestroyBuffer(staging); });
-            auto  mapped = staging.Map(*_allocator);
-            if (mapped.data != nullptr) {
-                std::memcpy(mapped.data, data, bytes);
-            } else {
-                return std::unexpected(StagingError::MemoryMappingFailed);
+            auto mapped = staging.Map(*_allocator);
+            if (!mapped) {
+                return std::unexpected(mapped.error());
             }
+            std::memcpy(mapped->Data(), data, bytes);
 
             UploadImage2DBuffer(dstImage, w, h, mipLevels, staging.Handle(), 0);
             _stagingBuffers.push_back(std::forward<decltype(staging)>(staging));

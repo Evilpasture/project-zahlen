@@ -17,6 +17,11 @@ enum class BufferCreationError : uint8_t {
     VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure"> {}),
 };
 
+enum class BufferMapError : uint8_t {
+    NotAllocated ZHLN_ANNOTATION(ZHLN::Description<"Buffer owns no allocation to map"> {}) = 1,
+    NotPersistentlyMapped ZHLN_ANNOTATION(ZHLN::Description<"Buffer was not created host-visible, so it has no persistent mapping"> {}),
+};
+
 enum class ImageCreationError : uint8_t {
     OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory"> {}) = 1,
     OutOfDeviceMemory      ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory"> {}),
@@ -279,51 +284,51 @@ void Buffer::Flush(Allocator& allocatorRef, VkDeviceSize offset, VkDeviceSize si
     }
 }
 
-Buffer::MappedRegion::MappedRegion(Allocator& alloc, VmaAllocation allocation, void* ptr) noexcept:
-    data(ptr), _allocator(alloc.Handle()), _allocation(allocation) {
+Buffer::MappedRegion::MappedRegion(Allocator& alloc, VmaAllocation allocation, void* ptr, size_t size) noexcept:
+    _ptr(ptr), _size(size), _allocator(alloc.Handle()), _allocation(allocation) {
 }
 
 Buffer::MappedRegion::~MappedRegion() noexcept {
     Cleanup();
 }
 
+// The mapping itself belongs to the allocation (it was created with
+// VMA_ALLOCATION_CREATE_MAPPED_BIT) and lives until the buffer is destroyed, so only
+// the write-back is ours to do here.
 void Buffer::MappedRegion::Cleanup() noexcept {
     if (_allocator != nullptr && _allocation != nullptr) {
         vmaFlushAllocation(_allocator, _allocation, 0, VK_WHOLE_SIZE);
-        vmaUnmapMemory(_allocator, _allocation);
     }
     _allocator  = nullptr;
     _allocation = nullptr;
-    data        = nullptr;
+    _ptr        = nullptr;
+    _size       = 0;
 }
 
 Buffer::MappedRegion::MappedRegion(MappedRegion&& other) noexcept:
-    data(std::exchange(other.data, nullptr)), _allocator(std::exchange(other._allocator, nullptr)), _allocation(std::exchange(other._allocation, nullptr)) {
+    _ptr(std::exchange(other._ptr, nullptr)), _size(std::exchange(other._size, 0)), _allocator(std::exchange(other._allocator, nullptr)),
+    _allocation(std::exchange(other._allocation, nullptr)) {
 }
 
 auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedRegion& {
     if (this != &other) {
         Cleanup();
-        data        = std::exchange(other.data, nullptr);
+        _ptr        = std::exchange(other._ptr, nullptr);
+        _size       = std::exchange(other._size, 0);
         _allocator  = std::exchange(other._allocator, nullptr);
         _allocation = std::exchange(other._allocation, nullptr);
     }
     return *this;
 }
 
-auto Buffer::Map(Allocator& allocatorRef) noexcept -> MappedRegion {
-    VmaAllocator allocator = allocatorRef.Handle();
+auto Buffer::Map(Allocator& allocatorRef) noexcept -> std::expected<MappedRegion, ErrorCode> {
     if (!Valid()) {
-        return {};
+        return std::unexpected(BufferMapError::NotAllocated);
     }
-    if (_mappedData != nullptr) {
-        return {allocatorRef, _allocation, _mappedData};
+    if (_mappedData == nullptr) {
+        return std::unexpected(BufferMapError::NotPersistentlyMapped);
     }
-    void* ptr = nullptr;
-    if (vmaMapMemory(allocator, _allocation, &ptr) != VK_SUCCESS) {
-        return {};
-    }
-    return {allocatorRef, _allocation, ptr};
+    return MappedRegion {allocatorRef, _allocation, _mappedData, _requestedSize};
 }
 
 auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
@@ -340,12 +345,12 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
 
     {
         auto mapped = staging.Map(allocatorRef);
-        if (!mapped.data) {
+        if (!mapped) {
             allocatorRef.DestroyBuffer(staging);
             return {};
         }
-        std::memcpy(mapped.data, data, size);
-    } // `mapped` destructs here, flushing and unmapping VMA memory immediately
+        std::memcpy(mapped->Data(), data, size);
+    } // `mapped` destructs here, flushing the staging writes before the copy is recorded
 
     CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
@@ -543,12 +548,13 @@ auto StagingRingBuffer::Init(Allocator& allocator, VkDevice device, VkQueue queu
     }
     _stagingBuffer = std::move(*staging_res);
 
-    _mappedRegion = _stagingBuffer.Map(*_allocator);
-    _mappedPtr    = _mappedRegion.data;
-    if (_mappedPtr == nullptr) {
+    auto mapped = _stagingBuffer.Map(*_allocator);
+    if (!mapped) {
         Cleanup();
-        return std::unexpected(StagingRingBufferError::StagingBufferCreationFailed);
+        return std::unexpected(mapped.error());
     }
+    _mappedRegion = std::move(*mapped);
+    _mappedPtr    = _mappedRegion.Data();
     return {};
 }
 

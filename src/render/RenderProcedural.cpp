@@ -17,7 +17,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    const auto source = MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>();
+    const auto source = Vk::MakeStageSource<Shaders::Modules::ProceduralBakeCS>();
     const auto loaded = LoadShaderData(source);
     const ZHLN_ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
 

@@ -87,12 +87,13 @@ Moved: `NativeMesh`, `NativeMaterial`, `DrawCommand`, `CSGDrawCommand`,
 `MeshParticleEmitterCommand`, `RenderQueues`. `RenderInternal.hpp` is 115 lines
 shorter and includes the new header at line 20.
 
-Left behind deliberately: `ShaderStage` / `ShaderStageSource` /
-`MakeStageSource` (shader plumbing, interleaved between the payload structs),
-the `kGpuCullingMax*` budgets, `WorkerCmdContext` (parallel-recorder plumbing),
-`SceneResources`, and the one `ClearColorOf<Res_TransLighting>` specialization
-— the primary template lives in `src/vulkan/graph/RenderGraph.hpp:749`, so that
-pair belongs with step 4, not with draw payloads.
+Left behind deliberately: the `kGpuCullingMax*` budgets, `WorkerCmdContext`
+(parallel-recorder plumbing), `SceneResources`, and the one
+`ClearColorOf<Res_TransLighting>` specialization — the primary template lives in
+`src/vulkan/graph/RenderGraph.hpp:749`, so that pair belongs with step 4, not
+with draw payloads. (`ShaderStage` / `ShaderStageSource` / `MakeStageSource` were
+left behind with them; they belong to the Vulkan layer, not to draw payloads,
+and went in the entry below.)
 
 **Update (sixth cut, the type unification):** the two halves are one struct now.
 `ParticleEmitterParams`, `MeshParticleEmitterParams`, `Light`, `FrameUniforms` and
@@ -139,6 +140,134 @@ the generated `ShaderBindings.hpp` directly still need the zshader cook.
 **Not verified:** `RenderInternal.hpp` itself, which still needs the cook.
 Braces balance (166/166) and nothing that should have stayed went missing, but
 that is a static check, not a compile.
+
+### The shader stage sources — out of `RenderInternal.hpp`, into `src/vulkan`
+
+The other half of what was left behind with the payloads, and it turns out to be
+the part that never belonged in `src/render` at all: `VkShaderStageFlagBits` and
+`Vk::ShaderProgram` are both Vulkan-layer types, and the rest of the struct is a
+path, a byte span and an entry point — nothing about scene rendering, materials
+or render passes. `ShaderStageSource` now lives in
+`src/vulkan/pipeline/ShaderStages.hpp`, beside the `ShaderStagesView` /
+`OwnedShaderStages` pair it feeds.
+
+Three things went with it:
+
+* `enum class ShaderStage` and `StageFlagOf()` are gone. The enum duplicated
+  `VkShaderStageFlagBits` and stopped at vertex/fragment/compute, so a task or
+  mesh module could not be named through it at all. `ShaderStageSource` is
+  templated on the Vulkan flag itself, and `TaskStageSource` / `MeshStageSource`
+  are the same template — the seam the mesh pipeline path can be re-routed onto
+  later, if the cascade path wants the dev-mode disk override too.
+* `MakeStageSource<Stage, Module>()` is `MakeStageSource<Module>()`. The module
+  already carries its stage in `Module::Stage`, so the caller was restating what
+  the compiler had, and the `static_assert` that caught the two disagreeing
+  existed only to defend that redundancy. The stage is part of the source's type
+  now, so a mismatch is a type error rather than an assertion.
+* `LoadShaderData` still takes the source by const reference and still deduces
+  the stage; only the parameter type changed, to the Vulkan flag.
+
+`RenderInternal.hpp` is 32 lines shorter (1035 -> 1003). 57 call sites in
+`RenderProcedural.cpp`, `RenderInitHeaps.cpp`, `RenderInitPostProcess.cpp` and
+`RenderInitScenePipelines.cpp`, plus the two `LoadAndCreate*` declarations,
+`RenderInit.cpp` and `init/PassDescriptors.hpp`'s `GraphicsPassDesc`. Paths,
+entry points and fallbacks are untouched, so the dev-mode disk override and the
+hot reload behave exactly as before.
+
+**Verified:** `ShaderStages.hpp` compiles clean, links and runs under GCC 16.2.0
+(`-std=c++26 -freflection`; the chain refuses to compile without the reflection
+flag — `include/Zahlen/Core/Reflection/Core.hpp:101`) with `Vulkan-Headers` and
+`volk` on the include path and stand-ins for what `tools/zshader` emits. Checked
+in that harness: all five stages deduce; `MakeStageSource()`'s fields match the
+module's own, member by member; the source stays a trivially copyable aggregate,
+which is what the hot-reload lambda capture in `PassDescriptors.hpp` needs;
+assigning a compute module to a `VertexStageSource` is a compile error; and
+`MakeStageSource<ShaderStage::Vertex, M>()` no longer parses, because the enum is
+gone.
+
+**Not verified in the sandbox:** the render translation units that instantiate
+it — they include `<ShaderBindings.hpp>` and need the zshader cook, the same wall
+as everything else in `src/render`. Every call site was rewritten mechanically
+and counted before and after (57 per file set, equal), and a repo-wide grep
+confirms nothing still names the removed enum or the old two-argument form.
+
+### `Buffer::Map()` — a `std::expected`, and a mapping nothing unmaps
+
+`Buffer::Map()` now returns `std::expected<MappedRegion, ErrorCode>` instead of a
+`MappedRegion` whose public `void* data` a caller could forget to test, and
+`MappedRegion` exposes `Data()` / `Size()` / `As<T>()` / `AsSpan<T>()`. Every call
+site reads
+
+```cpp
+auto mapped = buffer.Map(alloc);
+if (!mapped) return std::unexpected(mapped.error());
+std::memcpy(mapped->Data(), data, bytes);
+```
+
+so a failed map travels in the caller's own error channel — `ErrorCode` is
+type-erased, so it propagates unchanged out of any `std::expected<..., ErrorCode>`
+return — instead of as a null pointer that each of the 23 sites had to remember to
+check. Nineteen of them are in `src/render`; the rest are `UploadToBuffer()`,
+`StagingRingBuffer::Init()`, `StagingContext::UploadImage2D()` and
+`DescriptorHeap::Init()`, the last two of which now hand the buffer's map error to
+their caller rather than folding it into their own mapping enumerator.
+
+The other half is what `MappedRegion` no longer pretends to do. Every buffer the
+engine maps is created `CPUOnly`, `CPUToGPU` or `GPUToCPU`, and `Buffer::Create()`
+sets `VMA_ALLOCATION_CREATE_MAPPED_BIT` for all three: the allocation is
+persistently mapped and `Map()` was already returning VMA's own pointer. The old
+destructor called `vmaUnmapMemory()` on it anyway. VMA's contract for the flag is
+that the mapping it creates — the "0-th" one — must not be released, and
+internally a persistently mapped allocation keeps its own map count at 0 while
+the memory block's count was bumped once when VMA made the mapping. So each
+region that went out of scope tripped VMA's `Unmapping allocation not previously
+mapped` assertion wherever assertions are on, and in a release build decremented
+the block's count behind VMA's back — one unbalanced unmap away from an actual
+`vkUnmapMemory()` on memory `Buffer::_mappedData` still hands out. The
+persistent-only API drops the pretence: `Map()` never calls
+`vmaMapMemory()`, the destructor only flushes (all non-coherent memory asks for),
+the mapping constructor is private under `friend class Buffer`, and a buffer with
+no persistent mapping is `BufferMapError::NotPersistentlyMapped` rather than a
+second, unexercised code path. A dynamic-map/owned-region split was considered
+and deliberately left until something needs it.
+
+`EnvironmentBakeError::RadianceUploadFailed` and `ScreenshotError::ReadbackFailed`
+described nothing but a failed map; both are gone and their sites propagate the
+`BufferMapError`. `src/vulkan/RENDER.md`'s Rule 3 was updated to match. Left for
+its own step: `StagingRingBuffer::Allocation::mappedData`, the same
+raw-pointer-and-null-check pattern at the four sites that consume it.
+
+The call sites were then checked again the hard way: the engine's first build of this
+patch rejected `RenderResources.cpp`'s `mapped.As<const uint8_t>()` — one read that had
+kept the old dot, past its own `if (!mapped)` guard, because `.data` was what every sweep
+had been written to find and `As()` was not. `verify/check_map_sites.py` now resolves each
+`.Map()` call to the variable that receives it and rejects any member reached through `.`
+that `std::expected` does not have, which is the whole class rather than the one spelling.
+
+**Verified:** the real headers compile, link and run under GCC 16.2.0
+(`-std=c++26 -freflection`, `Vulkan-Headers` + `volk` on the include path)
+together with the `MappedRegion` definitions lifted verbatim out of
+`Allocator.cpp`: `Map()`'s return type, every accessor's type, move-only-ness,
+and both call-site spellings (`if (!mapped) return std::unexpected(mapped.error());`
+and `.and_then`). A second program runs a live region at 25 points: the
+destructor flushes exactly once with `VK_WHOLE_SIZE` and never unmaps,
+`AsSpan<T>(n)` floors to whole elements and clamps to the buffer's size, moves
+transfer without double-flushing, a zero-sized region spans nothing, and an empty
+region (what the two long-lived holders reset to) is harmless. Negative checks:
+forging a region outside `Buffer::Map()` is "is private within this context", and
+`region.data` is "has no member named 'data'". Repo-wide: 23 `.Map(` call sites in
+11 files, every use of every result is `!region`, `region.error()` or `region->…`, no
+`vmaMapMemory(`/`vmaUnmapMemory(` call left, no reference to either removed enumerator,
+and the patch applies clean on the tree it is cut against — `src/`'s hunks also apply to the pristine base on their
+own, the `todo/TODO.md` hunk layers onto the shader-stage entry above.
+
+**Not verified in the sandbox:** the render translation units themselves. They
+need the Jolt/glfw/slang submodules, the Vulkan SDK and the generated
+`ShaderBindings.hpp`, none of which are vendored here — the same wall as every
+other entry, and the reason the checks above compile the real headers with
+stand-ins. `Allocator.cpp` is covered only through its extracted
+definitions: the file as a whole needs `vk_mem_alloc.h` and the engine's
+`Rendering.hpp` graph at link time.
 
 ### 1a. Blue noise, cooked instead of decoded
 

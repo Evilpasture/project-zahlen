@@ -13,7 +13,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept
+auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept
     -> std::expected<Vk::OwnedShaderStages, ErrorCode> {
     auto vertex   = LoadShaderData(vs);
     auto fragment = LoadShaderData(ps);
@@ -25,7 +25,7 @@ auto RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentSta
 }
 
 std::expected<Vk::Pipeline, ErrorCode>
-    RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
+    RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
     const auto loaded = LoadShaderData(cs);
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");

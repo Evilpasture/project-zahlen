@@ -613,9 +613,9 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
 
     constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
-    auto  mapped  = nativeMesh->buffer.Map(_impl->allocator);
-    char* basePtr = static_cast<char*>(mapped.data);
-    if (basePtr == nullptr) return 0;
+    auto mapped = nativeMesh->buffer.Map(_impl->allocator);
+    if (!mapped) return 0;
+    char* basePtr = mapped->As<char>();
 
     const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
     if (count > 0) {
@@ -640,10 +640,10 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
         return;
     }
     auto mapped = buffer.Map(_impl->allocator);
-    auto* gpuJoints = mapped.As<JPH::Mat44>();
-    if (gpuJoints != nullptr) {
-        std::memcpy(gpuJoints + offset, matrices.data(), matrices.size_bytes());
+    if (!mapped) {
+        return;
     }
+    std::memcpy(mapped->As<JPH::Mat44>() + offset, matrices.data(), matrices.size_bytes());
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
@@ -655,8 +655,8 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
     }
     if (!deltas.empty()) {
         auto mapped = _impl->morphDeltasBuffer.Map(_impl->allocator);
-        if (auto* gpuDeltas = mapped.As<float>()) {
-            std::memcpy(gpuDeltas + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
+        if (mapped) {
+            std::memcpy(mapped->As<float>() + static_cast<size_t>(offset) * 4, deltas.data(), deltas.size_bytes());
         }
     }
     _impl->nextMorphDeltaIndex += static_cast<uint32_t>(deltas.size() / 4);
@@ -807,7 +807,6 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
 
 enum class ScreenshotError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
-    ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
     DestinationNotRecorded
         ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
 };
@@ -871,8 +870,8 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         });
 
         auto mapped = stagingBuffer.Map(impl->allocator);
-        if (mapped.data == nullptr) {
-            return std::unexpected(ScreenshotError::ReadbackFailed);
+        if (!mapped) {
+            return std::unexpected(mapped.error());
         }
 
         std::ofstream ofs(std::string(outputPath), std::ios::binary);
@@ -887,7 +886,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
         }
 
-        const auto*  rgba   = mapped.As<const uint8_t>();
+        const auto*  rgba   = mapped->As<const uint8_t>();
         const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
         uint64_t     lumaSum = 0;
         uint64_t     lit     = 0;
@@ -956,10 +955,10 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     });
 
     auto mapped = stagingBuffer.Map(impl->allocator);
-    if (mapped.data == nullptr) {
-        return std::unexpected(ScreenshotError::ReadbackFailed);
+    if (!mapped) {
+        return std::unexpected(mapped.error());
     }
-    const auto* const halfFloats = mapped.As<const uint16_t>();
+    const auto* const halfFloats = mapped->As<const uint16_t>();
 
     std::ofstream ofs(std::string(outputPath), std::ios::binary);
     if (!ofs.is_open()) {

@@ -238,10 +238,10 @@ void UIRenderer::RecordBatches(
         return;
     }
 
-    auto  mapped    = vbo.Map(*impl.allocator);
-    auto* positions = static_cast<VertexPosition*>(mapped.data);
-    if (positions == nullptr)
+    auto mapped = vbo.Map(*impl.allocator);
+    if (!mapped)
         return;
+    auto* positions = mapped->As<VertexPosition>();
     auto* basePosPtr     = positions + vertexOffset;
     auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(positions + maxVertices) + vertexOffset;
     std::memcpy(basePosPtr, uiData.positions.data(), safeCount * sizeof(VertexPosition));

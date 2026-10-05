@@ -38,7 +38,7 @@ enum class BindlessSetupError : uint8_t {
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
     return LoadAndCreateShaders(
-               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
+               Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>()
     )
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
             // The descriptors' entry-point pointers refer to this view's
@@ -274,10 +274,10 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         frames.jointBuffers[i] = std::move(*jb_res);
 
         auto mapped = frames.jointBuffers[i].Map(allocator);
-        if (mapped.data == nullptr) {
-            return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        if (!mapped) {
+            return std::unexpected(mapped.error());
         }
-        std::memcpy(mapped.data, identities.data(), identities.size() * sizeof(JPH::Mat44));
+        std::memcpy(mapped->Data(), identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
     auto mdb_res = Vk::Buffer::Create(
@@ -317,11 +317,11 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     defer _([&] { allocator.DestroyBuffer(ltcStaging); });
     {
         auto mapped = ltcStaging.Map(allocator);
-        if (mapped.data == nullptr) {
-            return std::unexpected(Vk::StagingError::MemoryMappingFailed);
+        if (!mapped) {
+            return std::unexpected(mapped.error());
         }
-        std::memcpy(mapped.data, ltc_mat.data() + kDdsHeaderBytes, matRawSize);
-        std::memcpy(static_cast<std::byte*>(mapped.data) + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
+        std::memcpy(mapped->Data(), ltc_mat.data() + kDdsHeaderBytes, matRawSize);
+        std::memcpy(mapped->As<std::byte>() + matRawSize, ltc_amp.data() + kDdsHeaderBytes, ampRawSize);
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;

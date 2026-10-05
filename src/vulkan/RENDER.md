@@ -84,7 +84,7 @@ Vk::Buffer illegalCopy = gpuBuffer;
 Physical resources (vertex buffers, uniform buffers, textures) require both a Vulkan handle and a Vulkan Memory Allocator (`VmaAllocation`) handle.
 * The `Buffer` and `Image` classes manage **both** handles simultaneously.
 * Destroying a `Buffer` or `Image` automatically frees its allocated GPU memory via `vmaDestroyBuffer` or `vmaDestroyImage`.
-* Mapped CPU-visible memory is managed via `Buffer::Map()`, which returns a scoped `MappedRegion` that automatically flushes the cache-lines and unmaps the memory when it goes out of scope.
+* Mapped CPU-visible memory is managed via `Buffer::Map()`, which returns a scoped `MappedRegion` that flushes the written cache-lines when it goes out of scope. CPU-visible buffers are created persistently mapped (`VMA_ALLOCATION_CREATE_MAPPED_BIT`), so no `vmaMapMemory()` / `vmaUnmapMemory()` pair is involved; a buffer that has no persistent mapping to hand out is reported as an `ErrorCode` rather than as a null `data` pointer.
 
 ---
 

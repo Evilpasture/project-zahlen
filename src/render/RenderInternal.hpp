@@ -177,38 +177,6 @@ enum class Stage : uint8_t {
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
 
-enum class ShaderStage : std::uint8_t { Vertex, Fragment, Compute };
-
-template <ShaderStage Stage>
-struct ShaderStageSource {
-    static constexpr ShaderStage  stage = Stage;
-    const char*                   path;
-    std::span<const std::uint8_t> fallback;
-    const char*                   entryPoint = nullptr;
-};
-
-using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
-using FragmentStageSource = ShaderStageSource<ShaderStage::Fragment>;
-using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
-
-[[nodiscard]] consteval auto StageFlagOf(ShaderStage stage) noexcept -> VkShaderStageFlagBits {
-    switch (stage) {
-        case ShaderStage::Vertex:
-            return VK_SHADER_STAGE_VERTEX_BIT;
-        case ShaderStage::Fragment:
-            return VK_SHADER_STAGE_FRAGMENT_BIT;
-        case ShaderStage::Compute:
-            return VK_SHADER_STAGE_COMPUTE_BIT;
-    }
-    return VK_SHADER_STAGE_ALL;
-}
-
-template <ShaderStage Stage, Vk::ShaderProgram Module>
-[[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Stage> {
-    static_assert(Vk::StageOf<Module>() == StageFlagOf(Stage), "a stage source names a module compiled for that stage (<ShaderBindings.hpp>)");
-    return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
-}
-
 static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
 static constexpr uint32_t kGpuCullingMaxBatches          = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
@@ -890,9 +858,9 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept;
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
-        LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
+        LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
@@ -974,8 +942,8 @@ inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
 
 // Embedded shaders are byte arrays, not uint32_t objects. ShaderBytecode
 // keeps a byte span until CreateShaderDesc crosses the C ABI boundary.
-template <ShaderStage Stage>
-[[nodiscard]] inline auto LoadShaderData(const ShaderStageSource<Stage>& src) -> Vk::ShaderBytecode {
+template <VkShaderStageFlagBits Stage>
+[[nodiscard]] inline auto LoadShaderData(const Vk::ShaderStageSource<Stage>& src) -> Vk::ShaderBytecode {
     if constexpr (isDev) {
         auto disk = LoadShaderSpv(src.path);
         if (!disk.empty()) {
