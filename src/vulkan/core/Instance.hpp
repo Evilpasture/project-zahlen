@@ -49,7 +49,9 @@ class Instance {
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle != VK_NULL_HANDLE;
     }
-
+    [[nodiscard]] auto HasAddressBindingMessenger() const noexcept -> bool {
+        return _addressBindingMessenger != VK_NULL_HANDLE;
+    }
 
     [[nodiscard]] static auto ValidationErrorCount() noexcept -> uint32_t;
     [[nodiscard]] static auto DeviceLostCount() noexcept -> uint32_t;
@@ -62,9 +64,15 @@ class Instance {
 
   private:
     static void DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity) noexcept;
+    static void DeviceAddressBindingHookTrampoline(
+        void* userdata,
+        const VkDeviceAddressBindingCallbackDataEXT* binding,
+        const VkDebugUtilsMessengerCallbackDataEXT* callbackData
+    ) noexcept;
 
-    VkInstance               _handle    = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT _messenger = VK_NULL_HANDLE;
+    VkInstance               _handle                  = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT _messenger               = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT _addressBindingMessenger = VK_NULL_HANDLE;
     std::unique_ptr<ZHLN_DebugForwarding> _debugForwarding;
 
     std::atomic<uint32_t>  _validationErrors {0};

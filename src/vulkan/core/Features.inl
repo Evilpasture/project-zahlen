@@ -34,6 +34,8 @@ template <typename T>
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMeshShaderFeaturesEXT>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceAddressBindingReportFeaturesEXT>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesKHR>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_KHR;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesEXT>) {
@@ -128,6 +130,8 @@ template <typename T>
         return offsetof(VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT, dynamicRenderingUnusedAttachments) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMeshShaderFeaturesEXT>) {
         return offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, meshShaderQueries) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceAddressBindingReportFeaturesEXT>) {
+        return offsetof(VkPhysicalDeviceAddressBindingReportFeaturesEXT, reportAddressBinding) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesKHR>) {
         return offsetof(VkPhysicalDeviceFaultFeaturesKHR, deviceFaultDeviceLostOnMasked) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesEXT>) {

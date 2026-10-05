@@ -6,6 +6,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <format>
 #include <span>
 #include <vector>
 
@@ -385,6 +386,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             return CreatePerFrame(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
                 .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
+                    for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
+                        Vk::Debug::SetBufferName(ctx, frames.instanceDataBuffers[i].Handle(), std::format("InstanceData.Frame{}", i));
+                    }
                     return CreatePerFrame(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb1) {

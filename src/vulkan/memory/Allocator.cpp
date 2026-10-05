@@ -4,6 +4,7 @@
 #include "Rendering.hpp"
 #include "execution/RenderQueue.hpp"
 #include <cstring>
+#include <format>
 #include <sys/types.h>
 #include <vector>
 #include <vk_mem_alloc.h>
@@ -39,6 +40,34 @@ enum class StagingRingBufferError : uint8_t {
 };
 
 namespace {
+
+void SetGeneratedBufferName(VmaAllocator allocator, VkBuffer buffer, BufferUsage usage, size_t size) noexcept {
+    if (!GPUAddressTracker::Get().Enabled()) {
+        return;
+    }
+
+    VmaAllocatorInfo allocatorInfo {};
+    vmaGetAllocatorInfo(allocator, &allocatorInfo);
+    const uint64_t objectHandle = reinterpret_cast<uint64_t>(buffer);
+    const std::string name = std::format("Buffer[0x{:016X},usage=0x{:08X},size={}]", objectHandle, ToVk(usage), size);
+    Debug::SetObjectName(allocatorInfo.instance, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_BUFFER, name);
+}
+
+void SetGeneratedImageName(VmaAllocator allocator, VkImage image, const VkImageCreateInfo& createInfo) noexcept {
+    if (!GPUAddressTracker::Get().Enabled()) {
+        return;
+    }
+
+    VmaAllocatorInfo allocatorInfo {};
+    vmaGetAllocatorInfo(allocator, &allocatorInfo);
+    const uint64_t objectHandle = reinterpret_cast<uint64_t>(image);
+    const std::string name = std::format(
+        "Image[0x{:016X},fmt={},{}x{}x{},mips={},layers={}]", objectHandle, static_cast<uint32_t>(createInfo.format), createInfo.extent.width,
+        createInfo.extent.height, createInfo.extent.depth, createInfo.mipLevels, createInfo.arrayLayers
+    );
+    Debug::SetObjectName(allocatorInfo.instance, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_IMAGE, name);
+}
+
 // Engine-owned MemoryUsage -> VMA. Exhaustive switch so adding an enumerator
 // to MemoryUsage forces a compiler error here; we never hard-code VMA numeric
 // values in headers.
@@ -269,6 +298,8 @@ auto Buffer::Create(
         }
     }
 
+    SetGeneratedBufferName(allocator, buffer, usage, size);
+
     Buffer b;
     b._handle        = buffer;
     b._allocation    = alloc;
@@ -388,6 +419,8 @@ auto Image::Create(Allocator& allocatorRef, const VkImageCreateInfo& info, Memor
                 return std::unexpected(ImageCreationError::VulkanSubsystemFailure);
         }
     }
+
+    SetGeneratedImageName(allocator, img, info);
 
     Image r;
     r._handle     = img;

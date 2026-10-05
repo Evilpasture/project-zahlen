@@ -145,6 +145,11 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         return std::unexpected(DescriptorHeapError::AllocationFailed);
     }
     _buffer = std::move(*buffer_res);
+    if constexpr (Type == DescriptorHeapType::Samplers) {
+        Debug::SetBufferName(ctx, _buffer.Handle(), "DescriptorHeap.Samplers");
+    } else {
+        Debug::SetBufferName(ctx, _buffer.Handle(), "DescriptorHeap.Resources");
+    }
 
     auto mapped = _buffer.Map(*_allocator);
     if (!mapped) [[unlikely]] {

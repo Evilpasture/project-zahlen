@@ -5,6 +5,7 @@
 #include "Instance.hpp"
 #include "RenderCore.h"
 #include "RenderCore.hpp"
+#include "../diagnostics/GPUAddressTracker.hpp"
 #include <Zahlen/Core/Math.hpp>
 #include <cstring>
 #include <utility>
@@ -29,12 +30,26 @@ void Instance::DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFl
     }
 }
 
+void Instance::DeviceAddressBindingHookTrampoline(
+    [[maybe_unused]] void* userdata,
+    const VkDeviceAddressBindingCallbackDataEXT* binding,
+    const VkDebugUtilsMessengerCallbackDataEXT* callbackData
+) noexcept {
+    if (binding != nullptr) {
+        GPUAddressTracker::Get().OnBindingEvent(*binding, callbackData);
+    }
+}
+
 Instance::~Instance() noexcept {
     if (_handle == nullptr) {
         return;
     }
 
 
+    if (_addressBindingMessenger != nullptr) {
+        ZHLN_DestroyDebugMessenger(_handle, _addressBindingMessenger);
+        _addressBindingMessenger = nullptr;
+    }
     if (_messenger != nullptr) {
         ZHLN_DestroyDebugMessenger(_handle, _messenger);
         _messenger = nullptr;
@@ -48,7 +63,8 @@ Instance::~Instance() noexcept {
 }
 
 Instance::Instance(Instance&& other) noexcept:
-    _handle(std::exchange(other._handle, nullptr)), _messenger(std::exchange(other._messenger, nullptr)), _debugForwarding(std::move(other._debugForwarding)),
+    _handle(std::exchange(other._handle, nullptr)), _messenger(std::exchange(other._messenger, nullptr)),
+    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, nullptr)), _debugForwarding(std::move(other._debugForwarding)),
     _validationErrors(other._validationErrors.load(std::memory_order::relaxed)), _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
     _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
     _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
@@ -67,6 +83,9 @@ Instance::Instance(Instance&& other) noexcept:
 auto Instance::operator=(Instance&& other) noexcept -> Instance& {
     if (this != &other) {
         if (_handle != nullptr) {
+            if (_addressBindingMessenger != nullptr) {
+                ZHLN_DestroyDebugMessenger(_handle, _addressBindingMessenger);
+            }
             if (_messenger != nullptr) {
                 ZHLN_DestroyDebugMessenger(_handle, _messenger);
             }
@@ -75,9 +94,10 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
             _active.compare_exchange_strong(expected, &other, std::memory_order::release, std::memory_order::relaxed);
         }
 
-        _handle           = std::exchange(other._handle, nullptr);
-        _messenger        = std::exchange(other._messenger, nullptr);
-        _debugForwarding  = std::move(other._debugForwarding);
+        _handle                  = std::exchange(other._handle, nullptr);
+        _messenger               = std::exchange(other._messenger, nullptr);
+        _addressBindingMessenger = std::exchange(other._addressBindingMessenger, nullptr);
+        _debugForwarding         = std::move(other._debugForwarding);
         _validationErrors = other._validationErrors.load(std::memory_order::relaxed);
         _deviceLost       = other._deviceLost.load(std::memory_order::relaxed);
         _validationTarget = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
@@ -130,7 +150,11 @@ auto Instance::Create(std::string_view appName, uint32_t appVersion, std::span<c
     if (result._debugForwarding == nullptr) {
         return result;
     }
-    *result._debugForwarding = {.hook = &Instance::DebugHookTrampoline, .userdata = &result};
+    *result._debugForwarding = {
+        .hook                        = &Instance::DebugHookTrampoline,
+        .device_address_binding_hook = &Instance::DeviceAddressBindingHookTrampoline,
+        .userdata                    = &result,
+    };
 
     result._handle = ZHLN_CreateInstance(&desc);
     if (result._handle == nullptr) {
@@ -138,20 +162,25 @@ auto Instance::Create(std::string_view appName, uint32_t appVersion, std::span<c
         return result;
     }
 
-    if (validation != ZHLN_VALIDATION_OFF) {
+    if (validation != ZHLN_VALIDATION_OFF && result._debugForwarding->debug_utils_enabled) {
         result._messenger = ZHLN_CreateDebugMessenger(
             result._handle, VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, result._debugForwarding.get()
         );
+        result._addressBindingMessenger = ZHLN_CreateDeviceAddressBindingMessenger(result._handle, result._debugForwarding.get());
     }
 
     Instance* claimed = nullptr;
     if (!_active.compare_exchange_strong(claimed, &result, std::memory_order::release, std::memory_order::relaxed)) {
+        if (result._addressBindingMessenger != nullptr) {
+            ZHLN_DestroyDebugMessenger(result._handle, result._addressBindingMessenger);
+        }
         if (result._messenger != nullptr) {
             ZHLN_DestroyDebugMessenger(result._handle, result._messenger);
         }
         vkDestroyInstance(result._handle, nullptr);
-        result._handle           = nullptr;
-        result._messenger        = nullptr;
+        result._handle                  = nullptr;
+        result._messenger               = nullptr;
+        result._addressBindingMessenger = nullptr;
         result._validationTarget = &result._validationErrors;
         result._deviceLostTarget = &result._deviceLost;
         *result._debugForwarding = {};

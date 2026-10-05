@@ -18,10 +18,17 @@ extern "C" {
 static constexpr auto maxInstanceExtensions = 128;
 
 typedef void (*ZHLN_DebugHookFn)(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity);
+typedef void (*ZHLN_DeviceAddressBindingHookFn)(
+    void* userdata,
+    const VkDeviceAddressBindingCallbackDataEXT* binding,
+    const VkDebugUtilsMessengerCallbackDataEXT* callback_data
+);
 
 typedef struct ZHLN_DebugForwarding {
-    ZHLN_DebugHookFn hook;
-    void*            userdata;
+    ZHLN_DebugHookFn                 hook;
+    ZHLN_DeviceAddressBindingHookFn  device_address_binding_hook;
+    void*                            userdata;
+    bool                             debug_utils_enabled;
 } ZHLN_DebugForwarding;
 
 typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
@@ -124,6 +131,8 @@ typedef struct ZHLN_MeshShaderLimits {
 
 [[nodiscard]]
 VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug);
+
+VkDebugUtilsMessengerEXT ZHLN_CreateDeviceAddressBindingMessenger(VkInstance instance, ZHLN_DebugForwarding* debug);
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
 

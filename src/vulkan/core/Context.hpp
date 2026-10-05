@@ -86,6 +86,10 @@ class Context {
         return _device.ray_tracing_enabled;
     }
 
+    [[nodiscard]] auto DeviceAddressBindingReportEnabled() const noexcept -> bool {
+        return _addressBindingReportEnabled;
+    }
+
     [[nodiscard]] auto PresentSupport() const noexcept -> const DevicePresentSupport& {
         return _present;
     }
@@ -115,7 +119,8 @@ class Context {
     ZHLN_PhysicalDeviceInfo _physical       = {};
     ZHLN_Device             _device         = {};
     DevicePresentSupport    _present        = {};
-    EnabledFeatureSet _enabledFeatures;
+    EnabledFeatureSet       _enabledFeatures;
+    bool                    _addressBindingReportEnabled = false;
 };
 
 using ValidationMode = ZHLN_ValidationMode;

@@ -10,6 +10,7 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstring>
+#include <format>
 
 namespace ZHLN {
 
@@ -272,6 +273,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
             return std::unexpected(ErrorCode(jb_res.error()));
         }
         frames.jointBuffers[i] = std::move(*jb_res);
+        Vk::Debug::SetBufferName(ctx, frames.jointBuffers[i].Handle(), std::format("JointPalette.Frame{}", i));
 
         auto mapped = frames.jointBuffers[i].Map(allocator);
         if (!mapped) {
@@ -287,6 +289,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         return std::unexpected(ErrorCode(mdb_res.error()));
     }
     morphDeltasBuffer = std::move(*mdb_res);
+    Vk::Debug::SetBufferName(ctx, morphDeltasBuffer.Handle(), "MorphDeltas");
     rollback.Dismiss();
     return {};
 }

@@ -43,11 +43,11 @@ This keeps tools and executables runnable on machines without a loader installed
 
 ### Diagnostics Ownership (Vk::Instance)
 
-The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/vulkan/core/Instance.hpp) owns the Vulkan instance and the persistent debug messenger, and routes diagnostics into **caller-owned storage**; the library keeps no post-mortem state:
+The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/vulkan/core/Instance.hpp) owns the Vulkan instance and its persistent debug messengers, and routes validation diagnostics into **caller-owned storage**. The optional GPU address tracker is separate C++ state: it holds only live bindings while the device feature is enabled and is cleared after device teardown:
 
 * An observer that needs values to outlive an engine (the test framework) registers a sink — `RenderContext::UseDiagnostics(&validationErrors, &deviceLost)` — before creating engines. Every instance created afterwards increments those atomics **directly**, including teardown-time events fired while the instance is being destroyed, so per-test before/after snapshots bracketing a whole engine lifecycle are exact. There is no retirement fold and none is needed: the storage is the single source of truth and it already outlives the engine.
 * `RenderContext::ValidationErrorCount()` / `RenderContext::DeviceLostCount()` are **live views**: the active instance's counters, zero while no engine exists. Workload-scoped snapshots inside a running engine (RenderPerformance, RTR, mesh shaders, …) use these. Unregistered engines count into per-instance members, and those counts die with the instance.
-* The instance descriptor carries a `ZHLN_DebugForwarding` (hook + owner pointer); both the pNext messenger (instance create/destroy) and the persistent messenger (runtime) forward error severities into the counting target. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
+* The instance descriptor carries a `ZHLN_DebugForwarding` (hooks + owner pointer); the pNext messenger (instance create/destroy) and persistent validation messenger forward error severities into the counting target. A separate INFO-only messenger subscribes to device-address-binding events and forwards the binding payload plus callback `pObjects` to the C++ tracker. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
 * `Vk::Instance::IncrementNumericalDeviceLoss()` is the diagnostics increment for `VK_ERROR_DEVICE_LOST` observed on void paths; it bumps the active instance's counter and is unobservable when no engine is live. Nothing reads the counter for control flow -- recovery rides the monadic frame-result chain.
 * `Vk::Instance` is move-aware: the C-side forwarding pointer is re-pointed on every move, so builder-to-context transfers keep the hook valid.
 * The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `Instance::Create()` claims the slot with a compare-and-swap and refuses (returning an invalid instance) while another is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
@@ -165,6 +165,25 @@ The built-in path uses allocation-free `VK_EXT_debug_utils` labels. It creates
 no marker buffers and consumes no VRAM. No proprietary diagnostics SDK is
 included or linked, and none of this native machinery is exposed through
 `Render.hpp` or gameplay code.
+
+When a validation mode is requested (not `Off`), the Vulkan device builder also opts into
+`VK_EXT_device_address_binding_report` only when the instance's debug-utils
+binding messenger is available and the device supports both the extension and
+the `reportAddressBinding` feature. This is a **device** extension; the instance
+enables `VK_EXT_debug_utils` and creates a separate INFO-only messenger for its
+binding events. The callback's outer `pObjects` array supplies the
+object type, handle, and optional debug name (the extension payload itself only
+contains address, size, flags, and bind/unbind type). The thread-safe
+`GPUAddressTracker` records live ranges, preserves aliases/split unbinds, and
+resolves KHR/EXT device-fault addresses to object-relative offsets. While
+tracking is active, VMA-created buffers and images receive fallback debug names
+with their usage/size or format/extent; semantic names such as geometry buffers,
+joint palettes, instance-data buffers, and descriptor heaps replace those where
+available.
+Additional resources can use `Vk::Debug::SetObjectName` or `SetBufferName` to
+associate names with live ranges. If validation is off or the extension/feature
+is unavailable, the engine continues without address tracking or generated
+names.
 
 A renderer integrator can provide a native backend at build time with
 `ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE`; optional SDK binaries are supplied via

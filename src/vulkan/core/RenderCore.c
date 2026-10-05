@@ -216,6 +216,27 @@ static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* data,
     void*                                       userdata
 ) {
+    if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT) != 0) {
+        if (data != nullptr && userdata != nullptr) {
+            const ZHLN_DebugForwarding* const debug = (const ZHLN_DebugForwarding*) userdata;
+            if (debug->device_address_binding_hook != nullptr) {
+                const VkBaseInStructure* chain = (const VkBaseInStructure*) data->pNext;
+                while (chain != nullptr) {
+                    if (chain->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) {
+                        debug->device_address_binding_hook(
+                            debug->userdata,
+                            (const VkDeviceAddressBindingCallbackDataEXT*) chain,
+                            data
+                        );
+                        break;
+                    }
+                    chain = chain->pNext;
+                }
+            }
+        }
+        return VK_FALSE;
+    }
+
     const char* prefix = "VULKAN";
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         prefix = "VULKAN ERROR";
@@ -271,6 +292,26 @@ VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(const VkInstance instance, co
     return messenger;
 }
 
+VkDebugUtilsMessengerEXT ZHLN_CreateDeviceAddressBindingMessenger(const VkInstance instance, ZHLN_DebugForwarding* debug) {
+    if (instance == nullptr || debug == nullptr || debug->device_address_binding_hook == nullptr || vkCreateDebugUtilsMessengerEXT == nullptr) {
+        return nullptr;
+    }
+
+    const VkDebugUtilsMessengerCreateInfoEXT info = {
+        .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
+        .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT,
+        .pfnUserCallback = ZHLN_Internal_DebugCallback,
+        .pUserData       = debug,
+    };
+
+    VkDebugUtilsMessengerEXT messenger = nullptr;
+    if (vkCreateDebugUtilsMessengerEXT(instance, &info, nullptr, &messenger) != VK_SUCCESS) {
+        return nullptr;
+    }
+    return messenger;
+}
+
 void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMessengerEXT messenger) {
     if (instance == nullptr || messenger == nullptr) {
         return;
@@ -304,8 +345,9 @@ static bool ZHLN_CopySpirvEntryPoint(const void* code, size_t sizeInBytes, char*
 }
 
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
-    bool enable_validation = (desc->validation_mode != ZHLN_VALIDATION_OFF);
-    bool gpu_validation    = (desc->validation_mode == ZHLN_VALIDATION_GPU);
+    const bool request_debug_utils = (desc->validation_mode != ZHLN_VALIDATION_OFF);
+    bool       enable_validation  = request_debug_utils;
+    bool       gpu_validation     = (desc->validation_mode == ZHLN_VALIDATION_GPU);
 
     if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
         fprintf(stderr, "Zahlen: [VULKAN] No Vulkan loader available; volkInitialize() failed.\n");
@@ -323,9 +365,9 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     // validation-layers package, either one with no VK_LAYER_PATH -- fails the
     // whole vkCreateInstance call with VK_ERROR_LAYER_NOT_PRESENT, and the engine
     // does not start at all. Validation is a debugging aid, not a requirement:
-    // drop the layer (and with it the validation-only extensions and layer
-    // settings further down) with a line saying so, the same way an unsupported
-    // extension is dropped.
+    // drop the layer and its validation-only features/settings with a line
+    // saying so. Debug utils is retained separately when available because it
+    // also carries device-address-binding reports.
     uint32_t           available_layer_count = 0;
     VkLayerProperties* available_layers      = ZHLN_EnumerateInstanceLayers(&available_layer_count);
 
@@ -354,11 +396,13 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
         "Zahlen: [VULKAN] Skipping unsupported instance extension: "
     );
 
-    if (enable_validation) {
-        // Optional for the same reason the layer is: a driver without
-        // VK_EXT_debug_utils must not fail instance creation over it.
-        // ZHLN_CreateDebugMessenger already tolerates the null entry point.
+    if (request_debug_utils) {
+        // Debug utils is useful even when the validation layer is absent: it
+        // also carries VK_EXT_device_address_binding_report messages. Both
+        // extensions remain optional so unsupported loaders still initialize.
         ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
+    if (enable_validation) {
         ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
         if (gpu_validation) {
             ZHLN_AppendIfAvailable(final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME);
@@ -432,11 +476,15 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     };
 
     VkDebugUtilsMessengerCreateInfoEXT debug_info = {};
+    const bool debug_utils_enabled = ZHLN_NameListed(final_extensions, final_count, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (desc->debug != nullptr) {
+        desc->debug->debug_utils_enabled = debug_utils_enabled;
+    }
 
-    if (enable_validation) {
+    if (request_debug_utils && debug_utils_enabled) {
         debug_info = (VkDebugUtilsMessengerCreateInfoEXT) {
             .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-            .pNext           = &layer_settings_ci,
+            .pNext           = enable_validation ? &layer_settings_ci : nullptr,
             .messageSeverity = desc->severity_flags,
             .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,

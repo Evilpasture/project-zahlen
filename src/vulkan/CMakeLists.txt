@@ -41,6 +41,7 @@ add_library(
   pipeline/ReflectedLayout.cpp
   pipeline/ComputePass.cpp
   diagnostics/Raytracing.cpp
+  diagnostics/GPUAddressTracker.cpp
   diagnostics/GPUDiagnostics.cpp)
 set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

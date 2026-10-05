@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "GPUAddressTracker.hpp"
+
 namespace ZHLN::Vk::Debug {
 
 inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle, VkObjectType type, const char* name) noexcept {
@@ -26,7 +28,9 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
         .objectHandle = handle,
         .pObjectName  = name,
     };
-    vkSetDebugUtilsObjectNameEXT(device, &info);
+    if (vkSetDebugUtilsObjectNameEXT(device, &info) == VK_SUCCESS) {
+        GPUAddressTracker::Get().SetObjectName(type, handle, name);
+    }
 }
 
 inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle, VkObjectType type, std::string_view name) noexcept {
@@ -49,6 +53,11 @@ inline void SetImageName(const CtxT& ctx, VkImage image, std::string_view name) 
 template <typename CtxT>
 inline void SetImageViewName(const CtxT& ctx, VkImageView view, std::string_view name) noexcept {
     SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name);
+}
+
+template <typename CtxT>
+inline void SetBufferName(const CtxT& ctx, VkBuffer buffer, std::string_view name) noexcept {
+    SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(buffer), VK_OBJECT_TYPE_BUFFER, name);
 }
 
 }

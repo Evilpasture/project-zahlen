@@ -4,6 +4,7 @@
 #include "Context.hpp"
 #include "RenderCore.h"
 #include "RenderCore.hpp"
+#include "../diagnostics/GPUAddressTracker.hpp"
 #include <cstddef>
 #include <cstring>
 #include <vector>
@@ -20,11 +21,15 @@ Context::~Context() noexcept {
     if (_device.handle != VK_NULL_HANDLE) {
         vkDestroyDevice(_device.handle, nullptr);
     }
+    if (_addressBindingReportEnabled) {
+        GPUAddressTracker::Get().SetEnabled(false);
+    }
 }
 
 Context::Context(Context&& other) noexcept:
     _instanceObject(std::move(other._instanceObject)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)), _physical(std::exchange(other._physical, {})),
-    _device(std::exchange(other._device, {})), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)) {
+    _device(std::exchange(other._device, {})), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)),
+    _addressBindingReportEnabled(std::exchange(other._addressBindingReportEnabled, false)) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
@@ -32,12 +37,16 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         if (_device.handle != VK_NULL_HANDLE) {
             vkDestroyDevice(_device.handle, nullptr);
         }
+        if (_addressBindingReportEnabled) {
+            GPUAddressTracker::Get().SetEnabled(false);
+        }
         _instanceObject = std::move(other._instanceObject);
         _surface        = std::exchange(other._surface, VK_NULL_HANDLE);
         _physical       = std::exchange(other._physical, {});
-        _device         = std::exchange(other._device, {});
-        _present         = other._present;
-        _enabledFeatures = std::move(other._enabledFeatures);
+        _device                      = std::exchange(other._device, {});
+        _present                     = other._present;
+        _enabledFeatures             = std::move(other._enabledFeatures);
+        _addressBindingReportEnabled = std::exchange(other._addressBindingReportEnabled, false);
     }
     return *this;
 }
@@ -155,6 +164,12 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
             f.deviceFault             = VK_TRUE;
             f.deviceFaultVendorBinary = VK_TRUE;
         }, [](VkPhysicalDevice, const auto& enabled) { return enabled.deviceFault == VK_TRUE; })
+        .OptionalExtension<VkPhysicalDeviceAddressBindingReportFeaturesEXT>(
+            VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME,
+            [](auto& f) { f.reportAddressBinding = VK_TRUE; },
+            [](VkPhysicalDevice, const auto& enabled) { return enabled.reportAddressBinding == VK_TRUE; },
+            _validationMode != ZHLN_VALIDATION_OFF && _instanceObject.HasAddressBindingMessenger() && vkCreateDebugUtilsMessengerEXT != nullptr
+        )
         .OptionalExtension<VkPhysicalDeviceShaderConstantDataFeaturesKHR>(
             VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, [](auto& f) { f.shaderConstantData = VK_TRUE; }
         )
@@ -172,6 +187,13 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
 
     const VkPhysicalDeviceFeatures2* backendRoot = backend->features.GetRoot(_features);
     const VkPhysicalDeviceFeatures2* root        = backendRoot != nullptr ? backendRoot : _features;
+    const bool addressBindingReportEnabled =
+        _validationMode != ZHLN_VALIDATION_OFF && _instanceObject.HasAddressBindingMessenger() && vkCreateDebugUtilsMessengerEXT != nullptr &&
+        ExtensionEnabled(extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME) &&
+        FeatureBitEnabled(
+            root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT,
+            offsetof(VkPhysicalDeviceAddressBindingReportFeaturesEXT, reportAddressBinding)
+        );
 
     const ZHLN_DeviceDesc device_desc = {
         .physical          = &ctx._physical,
@@ -181,9 +203,12 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
         .enable_validation = (_validationMode != ZHLN_VALIDATION_OFF),
     };
 
+    GPUAddressTracker::Get().SetEnabled(addressBindingReportEnabled);
     if (const VkResult res = ZHLN_CreateDevice(&device_desc, &ctx._device); res != VK_SUCCESS) {
+        GPUAddressTracker::Get().SetEnabled(false);
         return std::unexpected(ToFrameError(res));
     }
+    ctx._addressBindingReportEnabled = addressBindingReportEnabled;
     // The C ABI checks entry points/limits. Only advertise paths whose whole
     // feature+extension bundle was actually negotiated into this device.
     ctx._device.mesh_shader_enabled = ctx._device.mesh_shader_enabled &&

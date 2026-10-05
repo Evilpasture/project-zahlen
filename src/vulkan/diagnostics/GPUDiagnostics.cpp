@@ -3,6 +3,7 @@
 
 #include "Rendering.hpp"
 #include "GPUDiagnostics.hpp"
+#include "GPUAddressTracker.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstring>
 #include <filesystem>
@@ -57,9 +58,33 @@ void LogFaultAddress(std::string_view label, const VkDeviceFaultAddressInfoKHR& 
     if (address.addressType == VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR) {
         return;
     }
+
     ZHLN::Log(
         "  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType)
     );
+
+    const GPUAddressTracker& tracker = GPUAddressTracker::Get();
+    if (!tracker.Enabled()) {
+        return;
+    }
+
+    const auto symbols = tracker.Resolve(address.reportedAddress);
+    if (symbols.empty()) {
+        ZHLN::Log("    -> No live device-address binding covers this address (possibly already unbound).");
+        return;
+    }
+
+    for (const GpuAllocationSymbol& symbol: symbols) {
+        const std::string_view name = symbol.name.empty()
+            ? (symbol.isDriverInternal ? "[Driver-Internal Object]" : "[Unnamed Vulkan Object]")
+            : std::string_view(symbol.name);
+        const std::string_view origin = symbol.isDriverInternal ? "driver-internal" : "application";
+        ZHLN::Log(
+            "    -> {} ({}, type={}, handle=0x{:016X}, base=0x{:016X}, size={} bytes, offset=+0x{:X})",
+            name, origin, ZHLN::Reflect::EnumToString(symbol.objectType), symbol.objectHandle, symbol.baseAddress, symbol.size,
+            address.reportedAddress - symbol.baseAddress
+        );
+    }
 }
 
 void LogVendorInfo(std::string_view label, const VkDeviceFaultVendorInfoKHR& vendor) noexcept {
