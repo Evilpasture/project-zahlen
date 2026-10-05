@@ -87,7 +87,11 @@ struct ReflectionsTestSuite {
                     }
                 );
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = -22.0f;
@@ -260,7 +264,11 @@ struct ReflectionsTestSuite {
                     ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(4.5, 3.0, 0.0), .createPhysics = false, .materialOverride = *matEmissiveYel}
                 );
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 5.0f, 14.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = -22.0f;
@@ -451,7 +459,11 @@ struct ReflectionsTestSuite {
                     );
                 }
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 8.0f, -18.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -22.0f;

@@ -30,10 +30,13 @@ inline void InstallTargetCameraRig(ZHLN::Engine& engine) {
     engine.ClearScene();
     engine.InitializeDefaultScene();
 
-    // The camera is engine state, not an entity, so Clear does not touch it;
-    // reset it the way ResetScene does so the rig starts from the authored
-    // framing regardless of what an earlier suite left behind.
-    engine.GetCamera() = ZHLN::Camera {};
+    // The camera lives in an entity, so the reset has to follow the rebuild above:
+    // before it there is no camera entity to write, and Patch reports that rather
+    // than panicking. Reset it the way ResetScene does so the rig starts from the
+    // authored framing regardless of what an earlier suite left behind.
+    auto&      camReg    = engine.GetRegistry();
+    const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 }
 
 } // namespace ZHLN::Test::Headless

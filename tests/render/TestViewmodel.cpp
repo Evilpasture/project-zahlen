@@ -64,7 +64,11 @@ struct ViewmodelTestSuite {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
             }
 
-            auto&       cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             const float aspect = 1280.0f / 720.0f;
 
             // Compute expected fixed 58-degree viewmodel projection
@@ -160,13 +164,17 @@ struct ViewmodelTestSuite {
             }
 
             // 1. Setup Camera looking along standard forward direction (-Z)
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
             cam.yaw      = -90.0f; // Look directly along -Z
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
 
-            // The test drives engine.GetCamera() directly. If the extras
+            // The test drives the main camera through the registry. If the extras
             // target camera rig is present on this pooled engine (a sibling
             // suite may have installed it), it is inert without input: the
             // boot camera keeps its free-cam tag, which the rig branch reads

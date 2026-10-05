@@ -864,7 +864,13 @@ void RegisterPhysicsCommands() {
                         return 0;
 
                     float       aspect    = static_cast<float>(winSize.width) / static_cast<float>(winSize.height);
-                    const auto& cam       = engine->GetCamera();
+                    // A world with no camera has no view to unproject through; the
+                    // command answers 0, as it does for a zero-sized window.
+                    const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                    if (!camComp) {
+                        return 0;
+                    }
+                    const auto& cam       = camComp->camera;
                     JPH::Mat44  invVP     = (cam.GetProjectionMatrix(aspect) * cam.GetViewMatrix()).Inversed();
                     JPH::Vec4   nearWorld = invVP * JPH::Vec4(a.ndcX, a.ndcY, 0.0f, 1.0f);
                     JPH::Vec4   farWorld  = invVP * JPH::Vec4(a.ndcX, a.ndcY, 1.0f, 1.0f);
@@ -898,17 +904,23 @@ void RegisterInputAndCameraCommands() {
                 }));
 
     RegisterCmd("GetCameraYaw", MakeCmd<CameraFloatArgs>([](ZHLN::Engine* engine, const CameraFloatArgs& a) -> uint64_t {
-                    *a.outVal = engine->GetCamera().yaw;
+                    const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                    *a.outVal         = camComp ? camComp->camera.yaw : 0.0f;
                     return 0;
                 }));
 
     RegisterCmd("GetCameraFOV", MakeCmd<CameraFloatArgs>([](ZHLN::Engine* engine, const CameraFloatArgs& a) -> uint64_t {
-                    *a.outVal = engine->GetCamera().fov;
+                    const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                    *a.outVal         = camComp ? camComp->camera.fov : 0.0f;
                     return 0;
                 }));
 
     RegisterCmd("SetCameraFOV", MakeCmd<SetCameraFOVArgs>([](ZHLN::Engine* engine, const SetCameraFOVArgs& a) -> uint64_t {
-                    engine->GetCamera().fov = a.fov;
+                    auto&      setFovReg    = engine->GetRegistry();
+                    const auto setFovEntity = setFovReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+                    setFovReg.Patch<ZHLN::Components::CameraComponent>(setFovEntity, [&](ZHLN::Components::CameraComponent& c) {
+                        c.camera.fov = a.fov;
+                    });
                     return 0;
                 }));
 

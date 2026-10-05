@@ -238,8 +238,12 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         if (!targetCamera) {
             return;
         }
+        auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>();
+        if (!cameraComp) {
+            return; // Nothing to save and nothing to pose for third person.
+        }
         state.thirdPersonCamera = *targetCamera;
-        state.thirdPersonNearZ  = engine.GetCamera().nearZ;
+        state.thirdPersonNearZ  = cameraComp->camera.nearZ;
         state.thirdPersonSaved  = true;
         state.lookYawOffset     = 0.0f;
         state.lookPitchOffset   = 0.0f;
@@ -250,8 +254,8 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
             state.lookAtWeightSaved       = true;
             lookAt->weight                = 0.0f;
         }
-        engine.GetCamera().fov   = 75.0f;
-        engine.GetCamera().nearZ = 0.03f;
+        cameraComp->camera.fov   = 75.0f;
+        cameraComp->camera.nearZ = 0.03f;
     } else if (state.thirdPersonSaved) {
         ZHLN::CameraRig::TargetCameraComponent restored = state.thirdPersonCamera;
         restored.hasInitSmoothTarget                     = 0;
@@ -260,10 +264,12 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         } else {
             registry.Add(state.cameraEntity, std::move(restored));
         }
-        engine.GetCamera().yaw   = state.thirdPersonCamera.yaw;
-        engine.GetCamera().pitch = state.thirdPersonCamera.pitch;
-        engine.GetCamera().fov   = state.thirdPersonCamera.fov;
-        engine.GetCamera().nearZ = state.thirdPersonNearZ;
+        if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
+            cameraComp->camera.yaw   = state.thirdPersonCamera.yaw;
+            cameraComp->camera.pitch = state.thirdPersonCamera.pitch;
+            cameraComp->camera.fov   = state.thirdPersonCamera.fov;
+            cameraComp->camera.nearZ = state.thirdPersonNearZ;
+        }
         if (state.lookAtWeightSaved) {
             if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
                 lookAt->weight = state.thirdPersonLookAtWeight;
@@ -794,9 +800,9 @@ auto main(int argc, char* argv[]) -> int {
                     if (viewState.enabled) {
                         viewState.lookYawOffset   = std::clamp(viewState.lookYawOffset + st.GetMouseDeltaX() * 0.15f, -80.0f, 80.0f);
                         viewState.lookPitchOffset = std::clamp(viewState.lookPitchOffset - st.GetMouseDeltaY() * 0.15f, -70.0f, 70.0f);
-                    } else {
-                        engine->GetCamera().yaw += st.GetMouseDeltaX() * 0.15f;
-                        engine->GetCamera().pitch = std::clamp(engine->GetCamera().pitch - (st.GetMouseDeltaY() * 0.15f), -85.0f, 85.0f);
+                    } else if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
+                        cameraComp->camera.yaw += st.GetMouseDeltaX() * 0.15f;
+                        cameraComp->camera.pitch = std::clamp(cameraComp->camera.pitch - (st.GetMouseDeltaY() * 0.15f), -85.0f, 85.0f);
                     }
                 }
             });

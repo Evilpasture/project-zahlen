@@ -392,7 +392,13 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
 
 int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {
     ZHLN::Clock clock;
-    auto&       cam = engine.GetCamera();
+    // The editor poses the world's camera: a world with no main camera entity has
+    // none to pose.
+    auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!cameraComp) {
+        return EXIT_FAILURE;
+    }
+    ZHLN::Camera& cam = cameraComp->camera;
 
     cam.position = {0.0f, 20.0f, 40.0f};
     cam.yaw      = -90.0f;

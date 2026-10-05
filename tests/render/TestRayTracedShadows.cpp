@@ -79,7 +79,11 @@ struct RayTracedShadowsTestSuite {
                     }
                 );
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(-10.0f, 6.0f, -8.0f);
                 cam.yaw      = 0.0f;
                 cam.pitch    = -20.0f;

@@ -722,11 +722,15 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         state.distance = std::clamp(state.distance, 0.05f, 5000.0f);
     }
 
-    const JPH::Vec3 dir = OrbitDirection(state.yaw, state.pitch);
-    auto&           cam = engine.GetCamera();
-    cam.position        = state.target - dir * state.distance;
-    cam.yaw             = state.yaw;
-    cam.pitch           = state.pitch;
+    const JPH::Vec3 dir        = OrbitDirection(state.yaw, state.pitch);
+    auto            cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!cameraComp) {
+        return;
+    }
+    ZHLN::Camera& cam = cameraComp->camera;
+    cam.position      = state.target - dir * state.distance;
+    cam.yaw           = state.yaw;
+    cam.pitch         = state.pitch;
 }
 
 void DrawDropPrompt(ZHLN::GUI::Context& ui) {

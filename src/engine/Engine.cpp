@@ -499,9 +499,6 @@ auto Engine::GetPhysicsContext() -> PhysicsContext& {
 auto Engine::GetRenderContext() -> RenderContext& {
     return _impl->kernel->GetRenderContext();
 }
-auto Engine::GetCamera() -> Camera& {
-    return _impl->world->GetCamera();
-}
 auto Engine::GetAssetManager() -> AssetManager& {
     return _impl->kernel->GetAssetManager();
 }

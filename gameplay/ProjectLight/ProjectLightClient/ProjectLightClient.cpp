@@ -2052,7 +2052,10 @@ void ClientSession::SendRealtimeFrame(Engine& engine) {
     auto& registry = engine.GetRegistry();
     auto input = registry.GetSingleton<Components::InputStateComponent>();
     m_lastControls = {};
-    m_lastControls.yaw = engine.GetCamera().yaw;
+    // No main camera entity means no view to report; the zeroed controls above stand.
+    if (const auto cameraComp = registry.GetSingleton<Components::CameraComponent>()) {
+        m_lastControls.yaw = cameraComp->camera.yaw;
+    }
     if (input) {
         m_lastControls.forward  = input->IsKeyDown(static_cast<uint8_t>(KeyCode::W));
         m_lastControls.backward = input->IsKeyDown(static_cast<uint8_t>(KeyCode::S));

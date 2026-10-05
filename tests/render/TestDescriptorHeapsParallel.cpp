@@ -84,7 +84,11 @@ struct DescriptorHeapsParallelSuite {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 6.0f, 13.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;

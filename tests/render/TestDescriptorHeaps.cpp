@@ -153,7 +153,11 @@ struct DescriptorHeapsSuite {
             }
 
             // Camera centered on the 8x8 grid, looking down -Z.
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 4.45f, 11.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
@@ -434,7 +438,11 @@ struct DescriptorHeapsSuite {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
             }
 
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 1.5f, 6.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
@@ -445,7 +453,9 @@ struct DescriptorHeapsSuite {
             // extras component (extensions/Camera), authored here rather than
             // patched: the frame step only re-seeds it when missing.
             const auto applyCameraPose = [&](float yaw) {
-                cam.yaw      = yaw;
+                cam.yaw = yaw;
+                // The engine renders from the registry's copy: the pan is written back
+                // every time the pose changes, not once at setup.
                 auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                 if (!camEnts.empty()) {
                     reg.Add(

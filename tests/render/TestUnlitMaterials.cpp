@@ -87,7 +87,11 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
             pp.bloomStrength     = 0.0f;
         });
     }
-    auto& camera    = engine.GetCamera();
+    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+        return;
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     camera.position = JPH::Vec3(0.0f, 0.0f, 7.0f); // Same orbit the retired Khronos sample used, so the face windows below hold.
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
@@ -307,7 +311,11 @@ struct UnlitMaterialsTestSuite {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless unlit texture coverage");
             if (engine == nullptr) return std::unexpected(UnlitMaterialError::EngineInitFailed);
             ConfigureUnlitCapture(*engine);
-            auto& camera = engine->GetCamera();
+            const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& camera = cameraComp->camera;
             camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
             camera.fov = 60.0f;
             auto& rc = engine->GetRenderContext();

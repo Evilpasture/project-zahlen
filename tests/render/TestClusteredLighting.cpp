@@ -105,7 +105,11 @@ struct ClusteredLightingTestSuite {
                 addPointLight(JPH::Vec3(-4.0f, 3.0f, 2.0f), JPH::Vec3(1.0f, 0.55f, 0.3f), 800.0f);
                 addPointLight(JPH::Vec3(4.0f, 3.0f, -3.0f), JPH::Vec3(0.3f, 0.5f, 1.0f), 800.0f);
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 2.5f, 8.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = -12.0f;
@@ -274,7 +278,11 @@ struct ClusteredLightingTestSuite {
                     }
                 );
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 2.6f, -4.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -8.0f;
@@ -470,7 +478,11 @@ struct ClusteredLightingTestSuite {
                         .type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.06f, 0.03f), .intensity = 1600.0f, .range = 40.0f
                     }
                 );
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 2.6f, -4.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -8.0f;
@@ -635,7 +647,11 @@ struct ClusteredLightingTestSuite {
                     }
                 }
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 22.0f, -24.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -42.0f;
@@ -837,7 +853,11 @@ struct ClusteredLightingTestSuite {
                     );
                 }
 
-                auto& cam    = engine->GetCamera();
+                const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 4.0f, -8.0f);
                 cam.yaw      = 90.0f;
                 cam.pitch    = -20.0f;

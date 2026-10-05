@@ -272,7 +272,11 @@ struct RayTracedNoiseStabilityTestSuite {
             }
         );
 
-        auto& cam    = engine.GetCamera();
+        const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+        if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            return false;
+        }
+        ZHLN::Camera& cam = camComp->camera;
         cam.position = JPH::Vec3(0.0f, 10.0f, 34.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = -17.0f;

@@ -107,21 +107,6 @@ auto World::GetRegistry() const -> const ECS::Registry& {
 auto World::GetPhysics() -> PhysicsContext& {
     return *_impl->physicsContext;
 }
-auto World::GetCamera() -> Camera& {
-    // The camera is world data: the main camera entity carries it. Same contract
-    // the bundle used to state -- a world asked for a camera has one -- but
-    // resolved from the registry instead of being bound into a service slot.
-    //
-    // Unlike the culling counters, this one keeps its assertion: "a scene with no
-    // main camera yet" is a state a caller can be in legitimately, and RenderSystem
-    // reports it as NoMainCamera before it gets here -- so asking for a Camera& is
-    // an opt-in to the contract, not an assumption about someone else's timing.
-    const Entity cameraEntity = _impl->registry.SingletonEntity<Components::MainCameraTagComponent>();
-    auto         camera       = _impl->registry.Get<Components::CameraComponent>(cameraEntity);
-    ZHLN::Assert(camera.has_value(), "World::GetCamera(): no main camera entity carrying a CameraComponent");
-    return camera->camera;
-}
-
 auto World::GetMainECB() -> ECS::EntityCommandBuffer& {
     return *_impl->mainECB;
 }

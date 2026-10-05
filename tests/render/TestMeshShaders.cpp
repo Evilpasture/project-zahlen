@@ -517,7 +517,11 @@ struct MeshShaderTestSuite {
                 }
                 rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
-                auto& cam    = engine.GetCamera();
+                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
                 cam.yaw      = -90.0f;
                 cam.pitch    = 0.0f;
@@ -729,7 +733,11 @@ struct MeshShaderTestSuite {
 
                 // Camera 0.1-0.2m off the surface it is aimed at, the regime
                 // where the apex formulation used to cull what it was facing.
-                auto& cam = engine.GetCamera();
+                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.yaw = -90.0f;
                 cam.pitch = 0.0f;
                 cam.fov = 30.0f;
@@ -746,6 +754,8 @@ struct MeshShaderTestSuite {
                     cam.position = JPH::Vec3(0.0f, 0.0f, 0.60f);
                     ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3(0.5f, 0.5f, 0.5f), atOrigin);
                 }
+                // The closeup pose is chosen by the branch above: the write-back belongs
+                // after it, or the engine renders the pre-branch framing.
             };
 
             constexpr float dt = 1.0f / 60.0f;
@@ -896,7 +906,11 @@ struct MeshShaderTestSuite {
                     return false;
                 }
 
-                auto& cam = engine.GetCamera();
+                const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                    return false;
+                }
+                ZHLN::Camera& cam = camComp->camera;
                 cam.position = JPH::Vec3(0.0f, 0.0f, 4.0f);
                 cam.yaw = -90.0f;
                 cam.pitch = 0.0f;

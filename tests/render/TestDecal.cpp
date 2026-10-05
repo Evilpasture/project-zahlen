@@ -145,7 +145,11 @@ struct DecalTestSuite {
             }
 
             // 1. Camera looking along standard forward direction (-Z) from Z = 2.0m
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
             cam.yaw      = -90.0f; // Look directly along -Z
             cam.pitch    = 0.0f;
@@ -264,7 +268,11 @@ struct DecalTestSuite {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, 1.5f, 2.0f);
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;

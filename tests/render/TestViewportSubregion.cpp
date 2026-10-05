@@ -145,7 +145,7 @@ struct BBox {
 
 void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        // The test drives engine.GetCamera() directly; the target-orbit lerp
+        // The test drives the main camera through the registry; the target-orbit lerp
         // would fight it. AA off so the static scene is actually static. The
         // rig component is an extras component (extensions/Camera); removing it
         // is inert when no sibling suite installed the rig, and when the rig
@@ -202,7 +202,11 @@ struct ViewportSubregionTestSuite {
                 return std::unexpected(ViewportSubregionError::NoCameraFound);
             }
 
-            auto& cam  = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = {0.0f, 0.0f, 4.0f};
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;

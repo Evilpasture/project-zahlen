@@ -728,7 +728,11 @@ struct DistanceStabilitySuite {
             addPointLight(JPH::Vec3(rings[3].x, 4.0f, rings[3].distance - 6.0f), JPH::Vec3(1.0f, 0.9f, 0.7f), 1200.0f, 60.0f);
             addPointLight(JPH::Vec3(rings[5].x, 5.0f, rings[5].distance - 6.0f), JPH::Vec3(0.7f, 0.85f, 1.0f), 2000.0f, 80.0f);
 
-            auto& cam    = engine->GetCamera();
+            const auto camComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& cam = camComp->camera;
             cam.position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
             cam.yaw      = 90.0f; // forward = +Z
             cam.pitch    = 0.0f;
@@ -745,7 +749,10 @@ struct DistanceStabilitySuite {
                 const float tanH = HorizontalHalfTan();
                 // A device-loss retry can start from the middle of a sweep.
                 // Re-establish the camera pose used to calibrate the coverage.
-                eng.GetCamera().position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
+                const auto camComp = eng.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (camComp) {
+                    camComp->camera.position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
+                }
 
                 // ---------------- Phase A: coverage at every distance -------
                 failedPhase = "coverage";
@@ -986,10 +993,17 @@ struct DistanceStabilitySuite {
                 constexpr float    kSweepAmplitude = 30.0f;
                 constexpr uint32_t kSweepSample   = 8;
 
-                auto& cam = eng.GetCamera();
-                bool  popped = false;
+                const auto sweepCamComp = eng.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+                if (!ZHLN::Test::ExpectTrue(sweepCamComp.has_value())) {
+                    return false;
+                }
+                ZHLN::Camera& cam = sweepCamComp->camera;
+                bool         popped = false;
                 for (uint32_t f = 0; f < kSweepFrames; ++f) {
                     cam.position = JPH::Vec3(kSweepAmplitude * std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(f) / static_cast<float>(kSweepFrames)), kEyeHeight, 0.0f);
+                    // The sweep moves the camera every frame, and the borrow is the
+                    // registry's component: the pose written here is the pose the
+                    // engine renders from.
                     TickFrames(eng, 1);
 
                     if (f % kSweepSample != 0) {
@@ -1101,8 +1115,9 @@ struct DistanceStabilitySuite {
                 }
 
                 // The loop's last sample is f=79, not f=80: sin(79*2pi/80)
-                // leaves the camera about 2.35 m from home. Return to the
-                // baseline position before measuring post-sweep parity.
+                // leaves the camera about 2.35 m from home. Return to the baseline
+                // position before measuring post-sweep parity: cam borrows the
+                // registry's camera, so this is the pose Phase D measures from.
                 cam.position = JPH::Vec3(0.0f, kEyeHeight, 0.0f);
 
                 // ---------------- Phase D: post-sweep parity ---------------

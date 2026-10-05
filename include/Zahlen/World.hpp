@@ -5,6 +5,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Zahlen/Camera.hpp>
+#include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
@@ -38,7 +39,11 @@ class ZHLN_API World {
     auto GetRegistry() -> ECS::Registry&;
     [[nodiscard]] auto GetRegistry() const -> const ECS::Registry&;
     auto GetPhysics() -> PhysicsContext&;
-    auto GetCamera() -> Camera&;
+    // No camera accessor here. The main camera is a component on the entity
+    // carrying MainCameraTagComponent, and callers resolve it the way they resolve
+    // any other component: through the registry. A helper that hid that lookup was
+    // what made "no camera yet" look like a fatal state instead of an empty
+    // GetSingleton, and it could not answer the world it described.
 
     auto GetMainECB() -> ECS::EntityCommandBuffer&;
 

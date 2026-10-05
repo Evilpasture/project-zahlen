@@ -175,11 +175,15 @@ inline void ResetScene(ZHLN::Engine& engine) {
     engine.ClearScene();
     engine.InitializeDefaultScene();
 
-    // The camera is engine state, not an entity, so Clear does not touch it.
-    // Tests routinely set only the fields they care about (position and yaw but
-    // not fov, say), and inheriting the previous test's framing is exactly the
-    // kind of order-dependent difference a pooled engine must not introduce.
-    engine.GetCamera() = ZHLN::Camera {};
+    // The camera lives in an entity, so the reset has to follow the rebuild above:
+    // before it there is no camera entity to write, and Patch reports that rather
+    // than panicking. Tests routinely set only the fields they care about
+    // (position and yaw but not fov, say), and inheriting the previous test's
+    // framing is exactly the kind of order-dependent difference a pooled engine
+    // must not introduce.
+    auto&      camReg    = engine.GetRegistry();
+    const auto camEntity = camReg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    camReg.Patch<ZHLN::Components::CameraComponent>(camEntity, [](ZHLN::Components::CameraComponent& c) { c.camera = ZHLN::Camera {}; });
 
     // The host UI callback is engine state too, and a test's callback closes
     // over that test's stack: without this, the next test's ticks invoke the

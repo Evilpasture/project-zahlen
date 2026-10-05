@@ -244,8 +244,10 @@ auto main(int argc, char* argv[]) -> int {
                     st.needsResize = false;
                 }
                 if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
-                    engine->GetCamera().yaw += st.GetMouseDeltaX() * 0.15f;
-                    engine->GetCamera().pitch = std::clamp(engine->GetCamera().pitch - (st.GetMouseDeltaY() * 0.15f), -85.0f, 85.0f);
+                    if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
+                        cameraComp->camera.yaw += st.GetMouseDeltaX() * 0.15f;
+                        cameraComp->camera.pitch = std::clamp(cameraComp->camera.pitch - (st.GetMouseDeltaY() * 0.15f), -85.0f, 85.0f);
+                    }
                 }
             });
         }

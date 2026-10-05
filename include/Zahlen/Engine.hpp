@@ -115,7 +115,6 @@ class ZHLN_API Engine {
 
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;
-    auto               GetCamera() -> Camera&;
     auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
     auto               GetScriptRunner() -> ScriptRunner&;

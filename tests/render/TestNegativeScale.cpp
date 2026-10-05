@@ -129,7 +129,11 @@ const std::array<JPH::Vec3, 5> kCenters {
             pp.skyGround = JPH::Vec4(0, 0, 0, 1);
         });
     }
-    auto& camera    = engine->GetCamera();
+    const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+        return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     camera.position = JPH::Vec3(0.0f, 0.0f, kCameraDistance);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;

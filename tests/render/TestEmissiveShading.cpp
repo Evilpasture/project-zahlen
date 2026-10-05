@@ -144,7 +144,11 @@ const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f
         ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *material}
     );
 
-    auto& camera    = engine.GetCamera();
+    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+        return false;
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     camera.position = JPH::Vec3(0.0f, 0.0f, 6.0f);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;

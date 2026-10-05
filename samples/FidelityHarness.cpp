@@ -798,7 +798,12 @@ auto main(int argc, char* argv[]) -> int {
         registry.Add(settingsEnt, std::move(env));
     }
 
-    ZHLN::Camera& camera = engine->GetCamera();
+    auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!cameraComp) {
+        ZHLN::Log("[Fidelity] No main camera entity for '{}'; refusing an empty capture.", scenario.name);
+        return EXIT_FAILURE;
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     SetFidelityCamera(camera, scenario);
     if (!std::isfinite(camera.position.GetX()) || !std::isfinite(camera.position.GetY()) || !std::isfinite(camera.position.GetZ()) ||
         !std::isfinite(camera.yaw) || !std::isfinite(camera.pitch)) {
@@ -840,7 +845,9 @@ auto main(int argc, char* argv[]) -> int {
         engine->ProcessEvents();
         // The camera is authored once; a re-apply keeps it pinned through the
         // settle ticks in case a system resets the view on the first frames.
-        SetFidelityCamera(engine->GetCamera(), scenario);
+        if (auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>()) {
+            SetFidelityCamera(cameraComp->camera, scenario);
+        }
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
         if (status != ZHLN::GameplayStatus::OK) {
             ZHLN::Log("[Fidelity] Render tick stopped with status {}; refusing an incomplete capture.", static_cast<int>(status));

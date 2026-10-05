@@ -360,7 +360,19 @@ struct PerformanceTestSuite {
                                 .Samples(3)
                                 .Items(15000)
                                 .Run([&] {
-                                    ZHLN::ECS::EntityCommandBuffer ecb(reg);
+                                    // The buffer's default arena is 256 KiB -- a frame's worth of
+                                    // spawned entities, per its own contract. This benchmark
+                                    // records 15,000 entities with three payloads each as fast as
+                                    // it can, so it states the capacity its workload needs rather
+                                    // than raising a default every frame pays for. The + alignof
+                                    // per payload is the alignment slack the arena may waste
+                                    // between payloads; a payload that still does not fit panics by
+                                    // design, which is what the 256 KiB default did here.
+                                    constexpr size_t kEcbArenaBytes =
+                                        15000 * ((sizeof(ZHLN::Components::TransformComponent) + alignof(ZHLN::Components::TransformComponent)) +
+                                                 (sizeof(AgentHealthComponent) + alignof(AgentHealthComponent)) +
+                                                 (sizeof(ZHLN::Character::MovementComponent) + alignof(ZHLN::Character::MovementComponent)));
+                                    ZHLN::ECS::EntityCommandBuffer ecb(reg, nullptr, kEcbArenaBytes);
                                     for (size_t i = 0; i < 15000; ++i) {
                                         ZHLN::Entity tempE = ecb.CreateEntity(
                                             ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)},

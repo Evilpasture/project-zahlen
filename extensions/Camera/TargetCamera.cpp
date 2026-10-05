@@ -216,7 +216,12 @@ void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
     }
 
     static CameraRig::TargetCameraSystem sys;
-    sys.Update(reg, engine.GetCamera(), dt, engine.GetCurrentAlpha(), engine.GetFreeCamSpeedQuery());
+    // The rig drives the world's camera; a world without one has nothing to drive.
+    // The borrow is the component itself, so the system's updates land in the
+    // registry without a copy to hand back.
+    if (const auto camera = reg.GetSingleton<Components::CameraComponent>()) {
+        sys.Update(reg, camera->camera, dt, engine.GetCurrentAlpha(), engine.GetFreeCamSpeedQuery());
+    }
 }
 
 void AddFrameStep(FrameScheduler& scheduler) {

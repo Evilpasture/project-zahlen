@@ -156,8 +156,9 @@ struct Components {
     static_assert(std::is_trivially_copyable_v<PhysicsComponent> && std::is_trivially_copyable_v<RagdollComponent>);
 
     // The camera -- pose, optics, and the entity that carries them -- is world
-    // data. The engine owns no camera of its own: a camera entity carries this,
-    // and Engine::GetCamera()/World::GetCamera() resolve it from the registry.
+    // data. The engine owns no camera of its own and hands out no accessor for
+    // this one: a camera entity carries it, and callers resolve it from the
+    // registry like any other component.
     struct CameraComponent {
         Camera camera {};
 

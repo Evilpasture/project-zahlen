@@ -1,21 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Scene.hpp>
-#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/Types.hpp>
-
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
@@ -28,7 +26,6 @@
 namespace ZHLN::Scene {
 
 namespace {
-
 
 template <typename Dst, typename Src>
 void AssignConverted(Dst& dst, const Src& src) {
@@ -132,7 +129,7 @@ void StampSource(ECS::Registry& registry, Entity entity, const SceneEntity& desc
     );
 }
 
-}
+} // namespace
 
 auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode> {
     Instance instance;
@@ -141,11 +138,18 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     auto& registry = engine.GetRegistry();
 
-    auto& camera    = engine.GetCamera();
-    camera.position = JPH::Vec3 {description.camera.position};
-    camera.yaw      = description.camera.yaw;
-    camera.pitch    = description.camera.pitch;
-    camera.fov      = description.camera.fov;
+    // The description's camera applies when the world has a main camera entity to
+    // keep it. A world without one still instantiates its entities, lights and
+    // environment: the camera block is one field of the description, not the scene,
+    // and a caller that wants it applied builds the scene first.
+    auto&      sceneReg     = engine.GetRegistry();
+    const auto cameraEntity = sceneReg.SingletonEntity<Components::MainCameraTagComponent>();
+    sceneReg.Patch<Components::CameraComponent>(cameraEntity, [&](Components::CameraComponent& c) {
+        c.camera.position = JPH::Vec3 {description.camera.position};
+        c.camera.yaw      = description.camera.yaw;
+        c.camera.pitch    = description.camera.pitch;
+        c.camera.fov      = description.camera.fov;
+    });
 
     const SceneEnvironment& environment = description.environment;
     for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
@@ -181,8 +185,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
             }
             case ShapeKind::Prefab: {
                 std::array<Entity, 256> parts {};
-                const uint32_t          count =
-                    PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                const uint32_t count = PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
                 if (count == 0) {
                     ZHLN::Log("[Scene] entity '{}': prefab '{}' produced nothing", entity.name, entity.source);
                     return std::unexpected(SceneError::PrefabNotFound);
@@ -238,13 +241,11 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
     }
 
     ZHLN::Log(
-        "[Scene] '{}' instantiated: {} entities, {} lights", description.name.empty() ? std::string {"untitled"} : description.name,
-        instance.entities.size(), instance.lights.size()
+        "[Scene] '{}' instantiated: {} entities, {} lights", description.name.empty() ? std::string {"untitled"} : description.name, instance.entities.size(),
+        instance.lights.size()
     );
     return instance;
 }
-
-
 
 namespace {
 
@@ -276,8 +277,11 @@ namespace {
 }
 
 [[nodiscard]] auto ExtractMaterial(
-    const ECS::Registry& registry, Entity entity, const Components::MeshComponent& mesh, const Components::SceneSourceComponent& source,
-    MaterialLookup materials
+    const ECS::Registry&                    registry,
+    Entity                                  entity,
+    const Components::MeshComponent&        mesh,
+    const Components::SceneSourceComponent& source,
+    MaterialLookup                          materials
 ) -> SceneMaterial {
     const auto pbr = registry.Get<Components::PBRComponent>(entity);
 
@@ -318,22 +322,23 @@ namespace {
         const auto name      = registry.Get<Components::NameComponent>(entity);
         const auto transform = registry.Get<Components::TransformComponent>(entity);
 
-        entities.push_back(SceneEntity {
-            .name        = name ? std::string {std::string_view {name->name}} : std::string {},
-            .shape       = source->shape,
-            .halfExtents = source->halfExtents,
-            .extent      = source->extent,
-            .source      = std::string {std::string_view {source->source}},
-            .transform   = transform ? ToDescriptionTransform(*transform) : Transform {},
-            .body        = ExtractBodyKind(registry, entity),
-            .material    = ExtractMaterial(registry, entity, mesh, *source, materials),
-        });
+        entities.push_back(
+            SceneEntity {
+                .name        = name ? std::string {std::string_view {name->name}} : std::string {},
+                .shape       = source->shape,
+                .halfExtents = source->halfExtents,
+                .extent      = source->extent,
+                .source      = std::string {std::string_view {source->source}},
+                .transform   = transform ? ToDescriptionTransform(*transform) : Transform {},
+                .body        = ExtractBodyKind(registry, entity),
+                .material    = ExtractMaterial(registry, entity, mesh, *source, materials),
+            }
+        );
     }
 
     if (unattributed > 0) {
         ZHLN::Log(
-            "[Scene] extract: {} mesh {} left out -- not scene content (no SceneSourceComponent)", unattributed,
-            unattributed == 1 ? "entity" : "entities"
+            "[Scene] extract: {} mesh {} left out -- not scene content (no SceneSourceComponent)", unattributed, unattributed == 1 ? "entity" : "entities"
         );
     }
     return entities;
@@ -355,30 +360,31 @@ namespace {
 
         const SceneLight defaults {};
 
-        lights.push_back(SceneLight {
-            .name        = name ? std::string {std::string_view {name->name}} : std::string {},
-            .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
-            .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
-            .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
-            .direction   = ToDescriptionFloat3(light.direction),
-            .color       = ToDescriptionFloat3(light.color),
-            .intensity   = light.intensity,
-            .radius      = light.radius,
-            .range       = light.range,
-            .shadowLayer = light.shadowLayer,
-        });
+        lights.push_back(
+            SceneLight {
+                .name        = name ? std::string {std::string_view {name->name}} : std::string {},
+                .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
+                .position    = transform ? ToDescriptionFloat3(transform->position) : defaults.position,
+                .rotation    = transform ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+                .direction   = ToDescriptionFloat3(light.direction),
+                .color       = ToDescriptionFloat3(light.color),
+                .intensity   = light.intensity,
+                .radius      = light.radius,
+                .range       = light.range,
+                .shadowLayer = light.shadowLayer,
+            }
+        );
     }
 
     if (unattributed > 0) {
         ZHLN::Log(
-            "[Scene] extract: {} light {} left out -- not scene content (no SceneLightTagComponent)", unattributed,
-            unattributed == 1 ? "entity" : "entities"
+            "[Scene] extract: {} light {} left out -- not scene content (no SceneLightTagComponent)", unattributed, unattributed == 1 ? "entity" : "entities"
         );
     }
     return lights;
 }
 
-}
+} // namespace
 
 auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
     return Scene {
@@ -390,14 +396,17 @@ auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup
 }
 
 auto Extract(Engine& engine) -> Scene {
+    // The description's camera block is the world's main camera when there is one;
+    // a world without one describes the engine's default framing, since there is
+    // nothing else to write into that field.
+    const auto camComp = engine.GetRegistry().GetSingleton<Components::CameraComponent>();
+    const auto camera  = camComp ? camComp->camera : Camera {};
     return Extract(
-        engine.GetCamera(), engine.GetRegistry(), MaterialLookup {
-                                                      .userdata = &engine.GetRenderContext(),
-                                                      .find     = [](const void* userdata, MaterialID id) -> std::optional<Material> {
-                                                          return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
-                                                      }
-                                                  }
+        camera, engine.GetRegistry(),
+        MaterialLookup {.userdata = &engine.GetRenderContext(), .find = [](const void* userdata, MaterialID id) -> std::optional<Material> {
+                            return static_cast<const RenderContext*>(userdata)->GetGPUMaterial(id);
+                        }}
     );
 }
 
-}
+} // namespace ZHLN::Scene

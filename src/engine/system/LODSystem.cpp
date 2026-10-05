@@ -12,7 +12,13 @@ namespace ZHLN {
 
 void LODSystem::Update(Engine& engine) {
     auto& reg = engine.GetRegistry();
-    auto& cam = engine.GetCamera();
+    // LOD is picked from the camera's distance, so a world without one has no view
+    // to quantify against and nothing to choose.
+    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    const auto& cam = camera->camera;
 
     auto entities = reg.GetEntitiesWith<Components::LODComponent>();
     if (entities.empty()) {

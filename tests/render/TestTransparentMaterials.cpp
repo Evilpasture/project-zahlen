@@ -38,6 +38,7 @@
 enum class TransparentMaterialError : uint8_t {
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine for the transparent-material scene.">{}) = 1,
     MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreateMaterial rejected the glass, the opaque twin, or the wall.">{}),
+    CameraMissing ZHLN_ANNOTATION(ZHLN::Description<"The default scene left no main camera entity to pose the wall-and-pane shot from.">{}),
     CaptureFailed ZHLN_ANNOTATION(ZHLN::Description<"The rendered frame could not be read back.">{}),
     GlassHidTheWall ZHLN_ANNOTATION(ZHLN::Description<"A blended pane occluded the opaque surface behind it -- it is not compositing in ForwardPass.">{}),
     GlassDidNotTint ZHLN_ANNOTATION(ZHLN::Description<"The wall shows through the pane but the pane contributed no colour of its own.">{}),
@@ -64,7 +65,7 @@ const JPH::Float4 kPaneOpaqueCyan {0.05f, 0.85f, 0.95f, 1.0f};
 
 enum class PaneKind : uint8_t { None, Glass, Opaque };
 
-enum class SceneBuild : uint8_t { Ok, Material };
+enum class SceneBuild : uint8_t { Ok, Material, Camera };
 
 [[nodiscard]] auto SpawnWallAndPane(ZHLN::Engine& engine, PaneKind pane) -> SceneBuild {
     auto& registry  = engine.GetRegistry();
@@ -133,7 +134,11 @@ enum class SceneBuild : uint8_t { Ok, Material };
         }
     }
 
-    auto& camera    = engine.GetCamera();
+    const auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+        return SceneBuild::Camera;
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
     camera.yaw      = -90.0f;
     camera.pitch    = 0.0f;
@@ -159,8 +164,8 @@ struct PaneMeasurement {
         return out;
     }
     ZHLN::Test::Headless::DisableTAA(*engine);
-    if (SpawnWallAndPane(*engine, pane) != SceneBuild::Ok) {
-        out.error = TransparentMaterialError::MaterialCreationFailed;
+    if (const SceneBuild built = SpawnWallAndPane(*engine, pane); built != SceneBuild::Ok) {
+        out.error = built == SceneBuild::Camera ? TransparentMaterialError::CameraMissing : TransparentMaterialError::MaterialCreationFailed;
         return out;
     }
     ZHLN::Test::Headless::TickFrames(*engine, 6);
@@ -281,7 +286,11 @@ struct TransparentMaterialsTestSuite {
                     pp.tonemapper = 3;
                 });
             }
-            auto& camera = engine->GetCamera();
+            const auto cameraComp = engine->GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+            if (!ZHLN::Test::ExpectTrue(cameraComp.has_value())) {
+                return std::unexpected(ZHLN::ErrorCode(ZHLN::Test::TestFrameworkError::AssertionFailed));
+            }
+            ZHLN::Camera& camera = cameraComp->camera;
             camera.position = JPH::Vec3(0.0f, 0.0f, 5.0f);
             camera.yaw = -90.0f;
             camera.pitch = 0.0f;

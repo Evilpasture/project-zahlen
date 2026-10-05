@@ -1017,7 +1017,11 @@ void UpdateOrbit(OrbitCamera& orbit, const ZHLN::Components::InputStateComponent
 }
 
 void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& subject) {
-    ZHLN::Camera& camera = engine.GetCamera();
+    auto cameraComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+    if (!cameraComp) {
+        return;
+    }
+    ZHLN::Camera& camera = cameraComp->camera;
     camera.position      = orbit.target - (OrbitDirection(orbit.yaw, orbit.pitch) * orbit.distance);
     camera.yaw           = orbit.yaw;
     camera.pitch         = orbit.pitch;

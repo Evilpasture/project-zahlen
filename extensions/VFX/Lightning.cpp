@@ -272,8 +272,19 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const JPH::Vec3 cloudOrigin(groundPos.GetX(), static_cast<float>(cloudPos.GetY()), groundPos.GetZ());
     const JPH::Vec3 groundTarget(groundPos);
 
+    // The ribbon faces the view, and the flash is placed relative to it: a world
+    // with no main camera has no view to face and nothing to flash, so there is no
+    // bolt to spawn. The null entity says that -- the alternative was fabricating a
+    // camera at the engine's default framing, then aiming the ribbon and the flash
+    // at a point no observer occupies.
+    const auto camComp = reg.GetSingleton<Components::CameraComponent>();
+    if (!camComp) {
+        return Entity::Null();
+    }
+
     const auto segments = GenerateFractalSegments(cloudOrigin, groundTarget, cfg.ribbonWidth, cfg, s_rng);
-    const auto ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
+    const JPH::Vec3 cameraPosition = camComp->camera.position;
+    const auto      ribbon         = BuildCameraFacingRibbon(segments, cameraPosition);
 
     const BufferHandle vboPos     = rc.CreateVertexBuffer(std::span {ribbon.positions});
     const BufferHandle vboFrame   = rc.CreateVertexBuffer(std::span {ribbon.frames});
@@ -292,7 +303,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
         rc.RegisterGPUMaterial(matAssetId, *matRes);
     }
 
-    const JPH::Vec3 flashPos  = engine.GetCamera().position + JPH::Vec3(0.0f, 25.0f, 0.0f);
+    const JPH::Vec3 flashPos  = cameraPosition + JPH::Vec3(0.0f, 25.0f, 0.0f);
     const JPH::Vec3 impactPos = groundTarget + JPH::Vec3(0.0f, 20.0f, 0.0f);
 
     const Entity flashLight = reg.Create(
@@ -373,9 +384,17 @@ auto Update(Engine& engine, float dt) -> void {
         // component data, never from an entity-keyed buffer table.
         bool needsMeshRegistration = !rc.GetGPUMesh(bolt.meshAssetId).has_value();
         if (bolt.vboPos == BufferHandle::Invalid || bolt.vboFrame == BufferHandle::Invalid || bolt.vboSurface == BufferHandle::Invalid) {
+            const auto camComp = reg.GetSingleton<Components::CameraComponent>();
+            if (!camComp) {
+                // No view to face: the ribbon cannot be rebuilt, and the handles stay
+                // invalid so the first frame that has a camera retries them. Building
+                // it against a fabricated pose would bake the wrong geometry in.
+                continue;
+            }
             static thread_local std::mt19937 rng(std::random_device {}());
             const auto                       segments = GenerateFractalSegments(bolt.cloudOrigin, bolt.groundTarget, bolt.config.ribbonWidth, bolt.config, rng);
-            const auto                       ribbon   = BuildCameraFacingRibbon(segments, engine.GetCamera().position);
+            const JPH::Vec3                  cameraPosition = camComp->camera.position;
+            const auto                       ribbon   = BuildCameraFacingRibbon(segments, cameraPosition);
             if (bolt.vboPos == BufferHandle::Invalid) {
                 bolt.vboPos = rc.CreateVertexBuffer(std::span {ribbon.positions});
             }

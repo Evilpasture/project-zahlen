@@ -246,7 +246,11 @@ struct RTRPBRReflectionTestSuite {
             }
         );
 
-        auto& cam    = engine.GetCamera();
+        const auto camComp = engine.GetRegistry().GetSingleton<ZHLN::Components::CameraComponent>();
+        if (!ZHLN::Test::ExpectTrue(camComp.has_value())) {
+            return;
+        }
+        ZHLN::Camera& cam = camComp->camera;
         cam.position = JPH::Vec3(0.0f, 5.5f, 11.0f);
         cam.yaw      = -90.0f;
         cam.pitch    = -28.0f;

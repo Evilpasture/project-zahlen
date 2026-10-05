@@ -138,7 +138,14 @@ template <typename Emitter>
 void SubmitParticleEmitters(Engine& engine) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
-    const auto& cam = engine.GetCamera();
+    // The frame's camera, when the world has one: an attachment is a scene decision
+    // made against the view, so a world without a camera has none to submit and the
+    // render path reports NoMainCamera on its own.
+    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return;
+    }
+    const auto& cam = camera->camera;
 
     for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
         if (!emitter.active) {
@@ -316,8 +323,14 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     }
 }
 
-[[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> Camera {
-    Camera extra = engine.GetCamera();
+[[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> std::optional<Camera> {
+    // A viewport camera is built from the main camera's optics: a world without a
+    // main camera has no optics to build from, and says so by returning nothing.
+    const auto main = engine.GetRegistry().GetSingleton<Components::CameraComponent>();
+    if (!main) {
+        return std::nullopt;
+    }
+    Camera extra = main->camera;
     auto&  reg   = engine.GetRegistry();
     if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
         return extra;
@@ -328,13 +341,22 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     return extra;
 }
 
-SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport) {
+[[nodiscard]] auto MakeViewFor(Engine& engine, Entity cameraEnt, const FrameTarget& target, const ViewportRect& viewport)
+    -> std::optional<SceneView> {
     auto cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
     // The view's camera is the entity's own component when it has one; a bare
-    // transform entity gets a viewport camera built from the main camera's
-    // optics at that entity's position.
-    Camera           cam    = cComp ? cComp->camera : MakeViewportCamera(engine, cameraEnt);
+    // transform entity gets a viewport camera built from the main camera's optics
+    // at that entity's position. An entity with neither has no view to build, and
+    // the caller skips it rather than rendering from a camera nobody asked for.
+    Camera     cam {};
+    if (cComp) {
+        cam = cComp->camera;
+    } else if (auto fallback = MakeViewportCamera(engine, cameraEnt)) {
+        cam = *fallback;
+    } else {
+        return std::nullopt;
+    }
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();
     const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
@@ -388,20 +410,26 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
+    // The frame's pose, and where "there is nothing to render from" is decided:
+    // the component lookup answers emptiness, so the caller checks it before
+    // anything is recorded rather than after a dereference.
+    const auto camera = reg.GetSingleton<Components::CameraComponent>();
+    if (!camera) {
+        return std::unexpected(RenderSystemError::NoMainCamera);
+    }
     // A copy: the pose this frame renders with. Holding a reference into the
     // registry across the whole submit would dangle if that component's storage
     // ever moved.
-    const Camera cam            = engine.GetCamera();
+    const Camera cam            = camera->camera;
     const auto& visibleEntities = engine.GetVisibleEntities();
 
     JPH::Mat44 vp {};
     JPH::Mat44 unjitteredVp {};
     JPH::Mat44 prevUnjitteredVp {};
 
+    // The getter above already proved a main camera entity exists; this is the
+    // entity itself, for the viewport views built below.
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
-    if (cameraEntities.empty()) {
-        return std::unexpected(RenderSystemError::NoMainCamera);
-    }
 
     const GraphicsSettings gfx = SyncGraphicsSettings(engine);
 
@@ -526,8 +554,11 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return {};
     }
     const FrameTarget attachment = **target;
-    const SceneView sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
-    if (auto scene_res = rc.RenderScene(sceneView, gfx); !scene_res) {
+    const auto       sceneView   = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    if (!sceneView) {
+        return std::unexpected(RenderSystemError::NoMainCamera);
+    }
+    if (auto scene_res = rc.RenderScene(*sceneView, gfx); !scene_res) {
         return std::unexpected(scene_res.error());
     }
 

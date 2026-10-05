@@ -39,7 +39,11 @@ void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static PlayerInputSystem inputSystem;
     engine.PollLateInput();
     inputSystem.Update(engine);
-    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
+    // Translation is relative to the view; a world with no camera has none, and the
+    // raw intents stay latched for the frame that does.
+    if (const auto camera = engine.GetRegistry().GetSingleton<Components::CameraComponent>()) {
+        inputSystem.PlayerInputTranslate(engine, camera->camera);
+    }
 }
 
 void AddFrameSteps(FrameScheduler& scheduler) {
