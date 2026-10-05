@@ -508,6 +508,101 @@ built. What CI settles: that a freshly created World already carries the counter
 that the crash dump's direct registry read finds them without the getter having been
 called first.
 
+### `EventBus`: the queues own themselves
+
+```cpp
+struct Queue {
+    uint32_t hash     = 0;
+    void*    storage  = nullptr;
+    void (*destroy)(void*) = nullptr;   // ~IEventQueue(), written out by hand
+};
+
+template <typename T>
+void Push(T event) {
+    auto* q = static_cast<std::vector<T>*>(Ensure<T>().storage);
+    q->push_back(std::move(event));
+}
+```
+
+The bus erased its queues by hand: the entry was a `void*` to a separately allocated
+`std::vector<T>` plus a function pointer that deleted it. Every part of that is a `virtual`
+destructor written out in a place the compiler cannot check, and it is why the class deleted
+all four copy/move operations -- a defaulted move would have left two buses holding the same
+pointers.
+
+The allocation story is worth stating plainly, because the obvious reading of that code is
+wrong: the hand-written erase does **not** cost an extra allocation. Measured on the same
+scenario (a counting `operator new`), the old header and the new one both allocate three
+times for a first `Push<T>` -- an entry, the queue object, the vector's buffer -- and the same
+number of bytes. `Find()`'s linear scan is also unchanged: one entry per event type a host
+uses, so it is four integer compares here either way. What the refactor buys is not
+throughput:
+
+* ownership stated in the type system -- `std::unique_ptr` to a private `Queue` base with a
+  `virtual ~Queue()`, instead of `void*` plus a `delete`-shaped function pointer -- so the
+  destructor, the deleted copy and the *restored* move operations are the compiler's;
+* a bus can be moved again (the old one could not be, by construction);
+* entries are 16 bytes instead of 24 (the hash no longer pads against two pointers);
+* a `Drain` bug the old shape made easy to miss. It walked the queue and cleared it
+  afterwards, so an event a callback pushed during the walk was cleared with it -- silently
+  lost when the vector had spare capacity, undefined behaviour when it did not. `Drain` now
+  takes the queue's buffer (moving a `std::vector` leaves the source empty), so the walk
+  covers exactly what was pending when it started and in-drain pushes are handed to the next
+  drain.
+
+The boundary question this raised, and the answer: the engine never names `EventBus` --
+`grep -rn EventBus src/ modules/` is empty; its consumers are `app/UIEditor.cpp`,
+`extensions/UI/` (whose `ActionRegistry` holds an `EventBus*` and pushes on `Invoke`) and
+`tests/extras/TestUITree.cpp`, two of them through `UI/UITree.hpp`'s include of it. So should
+it live in `extensions/` instead of `include/Zahlen/ecs/`? It stays in Core:
+`ARCHITECTURE.md`'s rule is directional (optional layers may consume Core; Core must never
+consume them) and says nothing about Core being *used* by Core, and a Core header consumed
+only by the optional layers is established -- `Core/EnumFlags.hpp`, `Audio/AudioTypes.hpp`,
+`physics/PhysicsHandles.hpp`, `gui/TextBuffer.hpp`, `Threading/Channel.hpp` are all named
+zero times in `src/`. Moving it would also mean inventing a home: `extensions/` is one
+directory per capability target, so a one-header utility would need a new `extensions/Common`
++ `zahlen_common`, a new include root, and link changes in the app, the UI schema and the
+extras tests -- and would put an event bus out of Core's reach for good. Nothing includes it
+on a caller's behalf (not even `ecs/ECS.hpp`), so it was already opt-in; the header now says
+why it lives where it does.
+
+`Clear<T>()` is gone (zero callers anywhere; `Drain<T>` is how a type is consumed) and the
+bus-wide `Clear()` stays. One consequence of the restored move worth knowing about: a host
+that keeps an observer of its bus -- `ActionRegistry` does -- must call `SetEventBus` again if
+it moves the struct the bus lives in. In-tree nothing moves one (`Session session;` is built
+in place and passed by reference), and the same caveat applies to any observer holding a
+pointer.
+
+**Verified:** the header compiles standalone under the repo's own flags
+(`-std=c++26 -freflection -fno-exceptions -fno-rtti`, plus `-Wall -Wextra -Werror`), which is
+also what shows the new `virtual` destructor needs nothing from RTTI. The surface the
+consumers are built against is pinned by `static_assert`s: `Push(T)` by value (including the
+`bus.Push(*static_cast<const T*>(p))` an `ActionRegistry` emits), `View<T>()` returning
+`std::span<const T>`, `Drain<T>(fn)` handing the callback a `T&`, the bus-wide `Clear()`, copy
+still deleted, move now available -- and a caller of the dropped `Clear<T>()` no longer
+compiles. The promises run against the real `GetTypeHash` under AddressSanitizer and
+UndefinedBehaviorSanitizer, and again under `-DNDEBUG`: 42 checks -- an untouched bus
+allocates nothing (including `View`/`Drain` of a type never pushed), order is preserved,
+`Drain` visits and drops exactly what was pending and *takes* the buffer rather than copying
+it, in-drain pushes survive to the next drain, queue addresses survive sibling pushes, moving
+transfers and empties, and every allocation is freed. Controls: with `Drain` patched to copy
+instead of take -- the first draft of this refactor, which copied because the finder it went
+through returned a const queue -- 8 checks fail, caught by both the emptiness and the
+allocation assertions; the old header, extracted from git, loses the event pushed during its
+own drain; and the naive fix for *that* (defaulting the old header's moves) is measured
+leaking 3 allocations on move assignment. One correction to the analysis that prompted this:
+it is not a double free. Moving a `std::vector` empties the source, so a defaulted move
+*construction* is accidentally safe and the old destructor then frees nothing; move
+*assignment* overwrites entries that own their storage through a `void*` and have no
+destructor, so the destination's queues leak. Either way the class rested on a property of
+`std::vector` it never stated -- the refactored one states it, because a moved-from
+`unique_ptr` is null by construction.
+
+**Not verified in the sandbox:** that the consumers still build -- `extensions/UI/UITree.hpp`
+reaches Clay and the GUI context, which are not available here, so `app/UIEditor.cpp` and the
+extras test cannot be compiled; every call shape they use is pinned in
+`verify/eventbus_api_pin.cpp` instead, and CI is the arbiter.
+
 ### 1a. Blue noise, cooked instead of decoded
 
 Done. `src/render` no longer decodes an image format, and `extern/stb` is off the

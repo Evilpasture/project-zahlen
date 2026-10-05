@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <ranges>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -47,9 +48,9 @@ template <typename ServicesT>
 struct Carrier {
     using Services = ServicesT;
 
-    ECS::Registry& registry;
-    ServicesT&     services;
-    const ZHLN::Frame& frame;
+    ECS::Registry&                  registry;
+    ServicesT&                      services;
+    const ZHLN::Frame&              frame;
     TemplatedDetail::LocalStateView local {};
 };
 
@@ -61,12 +62,11 @@ struct Carrier {
 // The erased function pointer still takes a single `void*`, and a hand-built
 // SystemInfo whose function ignores its argument is unaffected.
 struct SystemCall {
-    void*                             carrier   = nullptr;
-    void*                             local     = nullptr;
-    const TemplatedDetail::LocalSlotDesc* slots = nullptr;
-    size_t                            slotCount = 0;
+    void*                                 carrier   = nullptr;
+    void*                                 local     = nullptr;
+    const TemplatedDetail::LocalSlotDesc* slots     = nullptr;
+    size_t                                slotCount = 0;
 };
-
 
 // Parameters are deliberately matched by *exact* type. In particular a plain
 // float cannot accidentally select dt instead of alpha, and a Res/Query
@@ -246,8 +246,8 @@ using LocalParameterType = typename std::remove_cvref_t<typename Inspector::temp
 // How many Local<T> the signature names. The slot table is sized by this.
 template <auto SystemFn>
 consteval auto LocalSlotCount() -> std::size_t {
-    using Inspector         = Reflect::CallableInspector<SystemFn>;
-    std::size_t slotCount   = 0;
+    using Inspector       = Reflect::CallableInspector<SystemFn>;
+    std::size_t slotCount = 0;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         ((IsLocalParameter<Inspector, Is> ? ++slotCount : slotCount), ...);
     }(std::make_index_sequence<Inspector::ParameterCount()> {});
@@ -257,8 +257,8 @@ consteval auto LocalSlotCount() -> std::size_t {
 template <auto SystemFn>
 struct LocalLayoutDesc {
     std::array<LocalSlotMeta, LocalSlotCount<SystemFn>()> slots {};
-    std::size_t                                          size  = 0;
-    std::size_t                                          align = 1;
+    std::size_t                                           size  = 0;
+    std::size_t                                           align = 1;
 };
 
 // The signature's state, laid out once: aligned offsets in declaration order,
@@ -273,22 +273,24 @@ consteval auto DescribeLocalSlots() -> LocalLayoutDesc<SystemFn> {
     std::size_t               offset = 0;
 
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        ([&] {
-            if constexpr (IsLocalParameter<Inspector, Is>) {
-                using T     = LocalParameterType<Inspector, Is>;
-                offset      = Math::AlignUp(offset, alignof(T));
-                desc.slots[index++] = LocalSlotMeta {
-                    .offset    = static_cast<uint32_t>(offset),
-                    .size      = static_cast<uint32_t>(sizeof(T)),
-                    .align     = static_cast<uint32_t>(alignof(T)),
-                    .familyId  = +[]() -> uint32_t { return ComponentFamily::GetTypeID<LocalToken<T>>(); },
-                    .construct = +[](void* slot) { ::new (slot) T {}; },
-                    .destroy   = +[](void* slot) { std::destroy_at(static_cast<T*>(slot)); },
-                };
-                offset += sizeof(T);
-                desc.align = alignof(T) > desc.align ? alignof(T) : desc.align;
-            }
-        }(), ...);
+        (
+            [&] {
+                if constexpr (IsLocalParameter<Inspector, Is>) {
+                    using T             = LocalParameterType<Inspector, Is>;
+                    offset              = Math::AlignUp(offset, alignof(T));
+                    desc.slots[index++] = LocalSlotMeta {
+                        .offset    = static_cast<uint32_t>(offset),
+                        .size      = static_cast<uint32_t>(sizeof(T)),
+                        .align     = static_cast<uint32_t>(alignof(T)),
+                        .familyId  = +[]() -> uint32_t { return ComponentFamily::GetTypeID<LocalToken<T>>(); },
+                        .construct = +[](void* slot) { ::new (slot) T {}; },
+                        .destroy   = +[](void* slot) { std::destroy_at(static_cast<T*>(slot)); },
+                    };
+                    offset += sizeof(T);
+                    desc.align = alignof(T) > desc.align ? alignof(T) : desc.align;
+                }
+            }(),
+            ...);
     }(std::make_index_sequence<Inspector::ParameterCount()> {});
     desc.size = offset;
     return desc;
@@ -305,9 +307,7 @@ inline auto MakeLocalLayout() -> LocalLayout {
     layout.align = desc.align;
     layout.slots.reserve(desc.slots.size());
     for (const LocalSlotMeta& meta: desc.slots) {
-        layout.slots.push_back(
-            LocalSlotDesc {.familyId = meta.familyId(), .offset = meta.offset, .construct = meta.construct, .destroy = meta.destroy}
-        );
+        layout.slots.push_back(LocalSlotDesc {.familyId = meta.familyId(), .offset = meta.offset, .construct = meta.construct, .destroy = meta.destroy});
     }
     return layout;
 }
@@ -425,7 +425,7 @@ concept ResolvableFrom = requires(CarrierT& carrier) {
 // them (ForEachParameter deliberately runs after the types are known, which is
 // not a constant expression).
 template <typename CarrierT, auto Fn, std::size_t... Is>
-consteval auto EveryParameterResolvable(std::index_sequence<Is...>) -> bool {
+consteval auto EveryParameterResolvable(std::index_sequence<Is...> /*unused*/) -> bool {
     return (ResolvableFrom<CarrierT, typename Reflect::CallableInspector<Fn>::template ParameterType<Is>> && ...);
 }
 
@@ -476,8 +476,10 @@ struct SystemInfo {
 // hand-written loop at each site.
 class LocalBlock {
   public:
-    LocalBlock() noexcept  = default;
-    ~LocalBlock() noexcept { Reset(); }
+    LocalBlock() noexcept = default;
+    ~LocalBlock() noexcept {
+        Reset();
+    }
 
     LocalBlock(const LocalBlock&)                    = delete;
     auto operator=(const LocalBlock&) -> LocalBlock& = delete;
@@ -509,8 +511,8 @@ class LocalBlock {
     // Take the state down, in reverse order, and hand the bytes back.
     void Reset() noexcept {
         if (_block != nullptr) {
-            for (auto it = _layout.slots.rbegin(); it != _layout.slots.rend(); ++it) {
-                it->destroy(static_cast<std::byte*>(_block) + it->offset);
+            for (auto& slot: std::ranges::reverse_view(_layout.slots)) {
+                slot.destroy(static_cast<std::byte*>(_block) + slot.offset);
             }
             ::operator delete(_block, std::align_val_t(_layout.align));
             _block = nullptr;
@@ -534,8 +536,8 @@ class LocalBlock {
         _layout = std::move(other._layout);
     }
 
-    void*                          _block = nullptr;
-    TemplatedDetail::LocalLayout   _layout {};
+    void*                        _block = nullptr;
+    TemplatedDetail::LocalLayout _layout {};
 };
 
 // The mechanism of a graph: nodes, conflict analysis, parallel dispatch. It
@@ -614,9 +616,11 @@ class SystemGraph: public SystemGraphCore {
     }
 
     SystemGraph(ECS::Registry& registry, Services& services) noexcept: _registry(registry), _services(services) {
-        static_assert(Reflect::TemplatedDetail::BundleTypesAreUnique<Services>(),
-                      "Two members of this graph's service bundle have the same type, so by-type resolution would silently pick one of "
-                      "them: give the services distinct types.");
+        static_assert(
+            Reflect::TemplatedDetail::BundleTypesAreUnique<Services>(),
+            "Two members of this graph's service bundle have the same type, so by-type resolution would silently pick one of "
+            "them: give the services distinct types."
+        );
     }
 
     SystemGraph(const SystemGraph&)                        = delete;
