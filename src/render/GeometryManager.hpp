@@ -65,7 +65,7 @@ class GeometryManager {
     // BufferSourceError in GeometryManager.cpp) instead of reaching Vulkan.
     [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
 
-    [[nodiscard]] auto Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle;
+    [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle;
 
     void Update(BufferHandle handle, const void* data, size_t size) noexcept;
 

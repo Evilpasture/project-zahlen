@@ -107,10 +107,11 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
         );
 }
 
-auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
+auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
     const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
     if (handle == BufferHandle::Invalid) {
-        _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the rvalue.
+        _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the buffer, so this frame's copy is all there is. The caller's
+                                           // buffer was moved-from on the way in (Buffer is move-only), so its own DestroyBuffer is a no-op.
     }
     return handle;
 }

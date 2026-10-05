@@ -27,13 +27,16 @@ struct NativeMesh {
     Vk::Buffer                 blasBuffer;
 
     NativeMesh() = default;
+    // Both buffers are taken by value: they are move-only handles, so this is the same
+    // single move with the ownership stated in the signature, as TextureManager::Adopt
+    // does with its image and view.
     NativeMesh(
-        Vk::Buffer&&              buf,
+        Vk::Buffer                buf,
         uint32_t                  count,
         VkDeviceAddress           vboAddr,
         Vk::AccelerationStructure b    = {},
         VkDeviceAddress           addr = 0,
-        Vk::Buffer&&              bBuf = {}
+        Vk::Buffer                bBuf = {}
     ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(std::move(b)), blasAddress(addr), blasBuffer(std::move(bBuf)) {
     }
 };

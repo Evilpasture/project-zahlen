@@ -322,6 +322,18 @@ four reasons, checked in that order so which error wins is not an accident:
 `BufferSource` is passed by `const&` and the caller keeps ownership of the bytes
 until the copy is recorded, as before.
 
+**Ownership stated, not implied.** `Adopt()` and the `NativeMesh` constructor it hands
+off to take the buffer by value rather than by `Vk::Buffer&&`. `Vk::Buffer` is move-only
+(copy construction and copy assignment are deleted), so this is still exactly one move
+and cannot silently become a copy — what changes is that the signature says who owns the
+buffer after the call. It also brings the two in line with the renderer's other adopt
+path, `TextureManager::Adopt(Vk::Image, Vk::ImageView)`, which has always taken its
+resources by value, and it makes `NativeMesh`'s constructor consistent with its own
+`Vk::AccelerationStructure` parameter. The failure path is unchanged in effect: when the
+pool is full, `Create` never touched the argument, so `Adopt` still destroys the buffer
+it was given — and because the caller's object was moved-from on the way in, the caller's
+own `DestroyBuffer` is the no-op it already was.
+
 **The ring's null pointer, folded in.** `GeometryManager.cpp` had the
 `Allocation::mappedData == nullptr` test at both of its `Allocate()` sites — the
 same "null means no room" pattern `Buffer::Map()` used to have. Both now go through
