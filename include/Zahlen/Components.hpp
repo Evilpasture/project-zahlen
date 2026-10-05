@@ -208,6 +208,10 @@ struct Components {
     // and the freeze-frame corners -- is node state and lives in CullingScratch on
     // the pass itself. These counters are read by the debug overlay, the crash
     // dump and the render tests, so they are world data and live here.
+    //
+    // World::Create() creates the singleton, so a world has culling counters from
+    // the moment it exists; a scene reset re-seeds it in InitializeDefaultScene, and
+    // World::GetCullingStats() creates it if neither has happened.
     struct CullingStatsComponent {
         CullingStats stats;
     };

@@ -119,10 +119,13 @@ void CullingSystem::GraphUpdate(CullingQuery query, ECS::Res<RenderContext> rend
     }
 
     // The counters are world data, so they live in the registry rather than on
-    // the pass. A scene without the singleton cannot cull: it has nowhere to
-    // report what it did (InitializeDefaultScene creates it).
+    // the pass. World::Create() creates the singleton and a scene reset re-seeds it
+    // in InitializeDefaultScene, so this is unreachable on those paths -- it marks the
+    // one that is left: a graph run against a registry that was cleared and never
+    // re-seeded. (World::GetCullingStats() would create it, but the culler reaches the
+    // component through its declared query, which by design cannot emplace.)
     auto stats = query.GetSingleton<Components::CullingStatsComponent>();
-    ZHLN::Assert(stats.has_value(), "CullingStatsComponent singleton is missing: InitializeDefaultScene creates it with the other settings");
+    ZHLN::Assert(stats.has_value(), "CullingStatsComponent singleton is missing: World::Create() creates it and InitializeDefaultScene re-seeds it after a scene clear");
 
     UpdateCore(query, *render, camComp->camera, true, *scratch, stats->stats, visible.values, shadow.values);
 }

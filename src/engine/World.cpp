@@ -47,6 +47,12 @@ auto World::Create(const PhysicsConfig& physicsConfig, bool deferECBDestroy) -> 
 
     impl.registry.Create(Components::InputStateComponent {});
 
+    // The culling counters are world data (see Components::CullingStatsComponent), so
+    // the world owns them from the moment it exists rather than from whenever a scene
+    // happens to be initialized. Scene resets clear the registry and re-seed them in
+    // InitializeDefaultScene; GetCullingStats() is total either way.
+    impl.registry.Create(Components::CullingStatsComponent {});
+
     AcquireJoltRegistration();
     impl.joltAcquired = true;
 
@@ -105,6 +111,11 @@ auto World::GetCamera() -> Camera& {
     // The camera is world data: the main camera entity carries it. Same contract
     // the bundle used to state -- a world asked for a camera has one -- but
     // resolved from the registry instead of being bound into a service slot.
+    //
+    // Unlike the culling counters, this one keeps its assertion: "a scene with no
+    // main camera yet" is a state a caller can be in legitimately, and RenderSystem
+    // reports it as NoMainCamera before it gets here -- so asking for a Camera& is
+    // an opt-in to the contract, not an assumption about someone else's timing.
     const Entity cameraEntity = _impl->registry.SingletonEntity<Components::MainCameraTagComponent>();
     auto         camera       = _impl->registry.Get<Components::CameraComponent>(cameraEntity);
     ZHLN::Assert(camera.has_value(), "World::GetCamera(): no main camera entity carrying a CameraComponent");
@@ -123,9 +134,16 @@ auto World::GetCullingStats() -> CullingStats& {
     // The culling pass publishes here: its counters are read by the overlay, the
     // crash dump and the render tests, so they are world data. The rest of the
     // culler is the pass's own state and stays on the pass.
-    auto stats = _impl->registry.GetSingleton<Components::CullingStatsComponent>();
-    ZHLN::Assert(stats.has_value(), "the scene has no CullingStatsComponent singleton: InitializeDefaultScene creates it");
-    return stats->stats;
+    //
+    // Total on purpose. World::Create() creates the singleton and a scene reset
+    // re-seeds it in InitializeDefaultScene, but neither is a precondition a caller
+    // can check: this used to assert on the missing singleton, and ZHLN::Assert is
+    // only a panic in dev builds -- in a ship build it is [[assume(false)]] and the
+    // dereference below it is undefined behaviour. Creating it on first access keeps
+    // the promise the return type makes. A zeroed CullingStats is the honest value
+    // for "no cull has run yet"; it is the same value the render tests assign to
+    // reset the counters.
+    return _impl->registry.GetOrEmplaceSingleton<Components::CullingStatsComponent>().stats;
 }
 
 auto World::GetVisibleEntities() -> JPH::Array<Entity>& {

@@ -200,6 +200,8 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
         Components::AASettingsComponent {}, Components::FreeCamTagComponent {}
     );
 
+    // A scene reset clears the registry, so the engine-level singletons World::Create()
+    // seeds are re-seeded here alongside the rest of the scene's settings.
     reg.Create(
         Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
         Components::CullingStatsComponent {}, Components::DebugSettingsComponent {.physicsDrawMode = 0}

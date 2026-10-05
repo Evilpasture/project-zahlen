@@ -420,6 +420,94 @@ cannot reorder the remaining ones in a way this checked (a system that declares 
 component access has no edges to reorder), but the update graph's compiled shape is
 something only a real build can confirm.
 
+### `World::GetCullingStats()`: an invariant instead of an assertion
+
+```cpp
+auto World::GetCullingStats() -> CullingStats& {
+    auto stats = _impl->registry.GetSingleton<Components::CullingStatsComponent>();
+    ZHLN::Assert(stats.has_value(), "the scene has no CullingStatsComponent singleton: InitializeDefaultScene creates it");
+    return stats->stats;
+}
+```
+
+A reference-returning getter whose value is guarded by a runtime assertion, and the
+assertion names a function the caller may never have called: ask for the counters
+after `World::Create()` but before `InitializeDefaultScene`, and the assert fires. It
+was worse than it looks. `ZHLN::Assert` is `InternalPanic` only when `isDev`;
+otherwise it is `[[assume(false)]]` and the line below it dereferences an empty
+`Optional` — so a ship build does not abort, it has undefined behaviour. The engine
+uses static reflection elsewhere to make this class of mistake a compile error (a
+system declaring `Res<T>` against a graph that cannot provide `T` does not compile),
+but a singleton in a sparse set is a runtime property, so this one had been left to
+an assertion.
+
+The second half of the problem only shows up a minute later: `Engine::ClearScene()`
+reaches `SceneCleanupSystem::ClearAll`, which calls `Registry::Clear()` — every
+component pool is cleared and every entity recycled. So even creating the singleton in
+`World::Create()` would not have made the invariant true for the life of a World; the
+first scene reset would take it away again. The registry already has the idiom for
+this: `GetOrEmplaceSingleton`, which the input state has used since it was created in
+`World::Create` (Engine.cpp:258-285).
+
+What changed:
+
+* `World::Create()` now creates `CullingStatsComponent` next to `InputStateComponent`,
+  so the counters exist from construction — for the crash dump, which reads the
+  registry directly (Engine.cpp:161, `Optional`-safe today), not just for callers of
+  the getter.
+* `World::GetCullingStats()` is `registry.GetOrEmplaceSingleton<Components::CullingStatsComponent>().stats`:
+  total, no assertion, and self-healing after a scene reset. A zeroed `CullingStats` is
+  the honest value for "no cull has run yet" — it is the same value the render tests
+  assign when they reset the counters.
+* `InitializeDefaultScene` keeps creating it, now with a comment saying why: it is the
+  re-seed after a clear, not the original source.
+* The culler's own assertion stays, reworded: `World::Create()` creates it and
+  InitializeDefaultScene re-seeds it, so it is a tripwire for the one path left — a
+  graph run against a registry that was cleared and never re-seeded. It cannot create
+  the component itself: the culler reaches it through its declared query
+  (`Components::CullingStatsComponent&` in the query signature, which is what gives the
+  graph its hazard edge), and structural changes have to be declared, which would
+  serialise the culler against every other component access.
+* `Components::CullingStatsComponent`'s comment gained the invariant.
+
+Two paths were rejected deliberately. A plain `World::Impl` member (like
+`visibleEntities`) would break the graph-declared write access and the crash dump's
+registry read. Returning `ZHLN::Optional<CullingStats&>` would be honest about
+fallibility, but the culler's contract is that a scene without counters cannot cull —
+it has nowhere to report what it did — so the optional would only move the same
+decision one call deeper, at the cost of `*` at six sites, one of which writes
+(`RenderSystem.cpp:550` builds the totals).
+
+`World::GetCamera()` keeps its assertion, and that difference is now written down in
+both places. A world with no main camera yet is a state the renderer reports as
+`NoMainCamera` before it calls this, so asking for `Camera&` is opting into a
+contract; the culling counters were not a contract, they were the engine's own timing.
+
+**Verified:** the three changed translation units compile under GCC 16.2.0
+(`-std=c++26 -freflection`, the engine's Jolt defines) — `World.cpp` itself among them.
+The accessors' signatures are pinned by `static_assert` (`GetCullingStats()` returns
+`CullingStats&`, not `Optional`; `GetCamera()` returns `Camera&`). The behaviour the
+total accessor rests on is checked at run time against the **real** `ECS::Registry`
+with the **real** `Components::CullingStatsComponent` (ECS.cpp, Mutex.cpp and Log.cpp
+built and linked, with the fiber scheduler stubbed to abort if a single-threaded check
+ever reaches it): `GetSingleton()` is empty on an unseeded world — the state the old
+code asserted on and then dereferenced — `GetOrEmplaceSingleton()` returns a valid
+zeroed component, is idempotent (same component, no second entity), is where writes
+land, and after `Registry::Clear()` re-creates a *fresh* zeroed component rather than
+resurrecting the previous scene's counters. 13 checks, run twice: normally and under
+`-DNDEBUG`. Structurally: the accessor creates on demand and does not assert,
+`World::Create()` seeds the singleton, `World.cpp` has exactly one assertion left and
+it is `GetCamera()`'s, `InitializeDefaultScene` still re-seeds, and the culler's
+tripwire names the real creator. Control: with the accessor reverted to the
+assert-guarded version in a scratch copy, that check fails on both counts. The four
+earlier kits of this series still pass.
+
+**Not verified in the sandbox:** the seeding itself cannot be exercised — `World::Create`
+constructs a `PhysicsContext`, and Jolt is headers-only here, so no `World` is ever
+built. What CI settles: that a freshly created World already carries the counters, and
+that the crash dump's direct registry read finds them without the getter having been
+called first.
+
 ### 1a. Blue noise, cooked instead of decoded
 
 Done. `src/render` no longer decodes an image format, and `extern/stb` is off the
