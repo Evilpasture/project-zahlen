@@ -259,7 +259,7 @@ auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags as
     } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
         src_image = TypedImage<src_layout> {resource};
     } else {
-        src_image = TypedImage<src_layout> {ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Info().format}};
+        src_image = TypedImage<src_layout> {ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Format()}};
     }
 
     return std::make_pair(transitioned_image, ScopedBarrierGuard<SrcState, DstState>(cmd, src_image, aspectOverride));
@@ -277,8 +277,8 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
         slice = resource.AsSlice();
     } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
         slice = resource;
-    } else if constexpr (requires { resource.image.Handle(); resource.view.Info(); }) {
-        slice = ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Info().format};
+    } else if constexpr (requires { resource.image.Handle(); resource.view.Format(); }) {
+        slice = ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Format()};
     } else {
         static_assert(sizeof(T) == 0, "IssueBarrier requires an image slice or an owning image resource");
     }

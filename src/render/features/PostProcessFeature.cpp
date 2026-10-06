@@ -94,17 +94,16 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
 #endif
 
 void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
-    const VkSamplerCreateInfo defaultInfo = impl.defaultSamplerInfo;
-    const VkSamplerCreateInfo pointInfo   = impl.pointSamplerInfo;
+    const Vk::SamplerConfig defaultConfig = impl.defaultSamplerConfig;
+    const Vk::SamplerConfig pointConfig = impl.pointSamplerConfig;
+    const Vk::SamplerConfig blueNoiseConfig = impl.blueNoiseSamplerConfig;
 
-    Vk::InitHeapPassSamplers<Shaders::Gtao>(impl.heapManager, _gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomDown>(impl.heapManager, _bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomUp>(impl.heapManager, _bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-
-    const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
+    Vk::InitHeapPassSamplers<Shaders::Gtao>(impl.heapManager, _gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomDown>(impl.heapManager, _bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomUp>(impl.heapManager, _bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-        impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
 }
 

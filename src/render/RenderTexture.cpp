@@ -15,14 +15,15 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     const VkFormat format = hdr ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
     const Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc;
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(width, height, format, usage, 1).Build(allocator);
+    const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, usage);
+    auto imageRes = Vk::Image::Create(allocator, imageConfig);
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
     auto image = std::move(*imageRes);
     defer _([&] { allocator.DestroyImage(image); });
 
-    auto viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }

@@ -275,8 +275,18 @@ struct ResourceWriteBatch::Impl {
     std::vector<Write>                  writes;
 
     void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
+        VkImageViewCreateInfo descriptorViewInfo = viewInfo;
+        constexpr VkImageAspectFlags depthStencilAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        // Descriptor-heap image views must select exactly one depth/stencil
+        // aspect. Attachment views may contain both; use depth for sampling by
+        // default, while an explicitly stencil-only view remains unchanged.
+        if (GetFormatAspect(descriptorViewInfo.format) == depthStencilAspects &&
+            (descriptorViewInfo.subresourceRange.aspectMask & depthStencilAspects) == depthStencilAspects) {
+            descriptorViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+
         std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
-        auto*                                         image = alloc.new_object<ImagePayload>(viewInfo, layout);
+        auto*                                         image = alloc.new_object<ImagePayload>(descriptorViewInfo, layout);
 
         VkResourceDescriptorInfoEXT descriptor {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}};
         descriptor.data.pImage = &image->descriptor;
@@ -321,12 +331,16 @@ auto ResourceWriteBatch::SlotBounds() const noexcept -> std::pair<uint32_t, uint
     return {minSlot, maxSlot};
 }
 
-void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, viewInfo, layout);
+void ResourceWriteBatch::AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (handle.Valid() && view.Valid()) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view.CreateInfo(), layout);
+    }
 }
 
-void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, viewInfo, layout);
+void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (handle.Valid() && view.Valid()) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view.CreateInfo(), layout);
+    }
 }
 
 void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
@@ -363,52 +377,6 @@ void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize st
 
     _impl->writes.clear();
     _impl->arena.release();
-}
-
-struct SamplerWriteBatch::Impl {
-    std::vector<VkSamplerCreateInfo> createInfos;
-    std::vector<uint32_t>            slots;
-};
-
-SamplerWriteBatch::SamplerWriteBatch() noexcept: _impl(std::make_unique<Impl>()) {
-}
-SamplerWriteBatch::~SamplerWriteBatch() noexcept = default;
-
-SamplerWriteBatch::SamplerWriteBatch(SamplerWriteBatch&& other) noexcept                    = default;
-auto SamplerWriteBatch::operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch& = default;
-
-auto SamplerWriteBatch::Empty() const noexcept -> bool {
-    return _impl->slots.empty();
-}
-
-auto SamplerWriteBatch::SlotCount() const noexcept -> uint32_t {
-    return static_cast<uint32_t>(_impl->slots.size());
-}
-
-auto SamplerWriteBatch::SlotsData() const noexcept -> const uint32_t* {
-    return _impl->slots.data();
-}
-
-void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {
-    _impl->createInfos.push_back(createInfo);
-    _impl->slots.push_back(handle.index);
-}
-
-void SamplerWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept {
-    const auto total_count = static_cast<uint32_t>(_impl->slots.size());
-    if (total_count == 0) {
-        return;
-    }
-
-    std::vector<VkHostAddressRangeEXT> ranges(total_count);
-    for (uint32_t i = 0; i < total_count; ++i) {
-        ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
-    }
-
-    vkWriteSamplerDescriptorsEXT(device, total_count, _impl->createInfos.data(), ranges.data());
-
-    _impl->createInfos.clear();
-    _impl->slots.clear();
 }
 
 struct SlotAllocator::Impl {
@@ -594,21 +562,21 @@ auto HeapManager::ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -
     return base;
 }
 
-void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (!handle.Valid()) {
+void HeapManager::WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || !view.Valid()) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddImage(handle, viewInfo, layout);
+    batch.AddImage(handle, view, layout);
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
-    if (!handle.Valid()) {
+void HeapManager::WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || !view.Valid()) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddStorageImage(handle, viewInfo, layout);
+    batch.AddStorageImage(handle, view, layout);
     FlushResourceBatch(batch);
 }
 
@@ -639,12 +607,12 @@ void HeapManager::WriteAccelerationStructure(AccelerationStructureHandle handle,
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept {
+void HeapManager::WriteSampler(SamplerHandle handle, const SamplerConfig& config) noexcept {
     if (!handle.Valid()) {
         return;
     }
     SamplerWriteBatch batch;
-    batch.AddSampler(handle, createInfo);
+    batch.AddSampler(handle, config);
     FlushSamplerBatch(batch);
 }
 

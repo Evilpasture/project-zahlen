@@ -176,14 +176,13 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
-    auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
+    shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    return shadowSamplerBuilder.Build(ctx.Device())
+    return shadowSamplerConfig.Create(ctx.Device())
         .transform_error([](auto err) -> ErrorCode { return err; })
 
         .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
-            shadowSampler     = std::forward<decltype(sampler)>(sampler);
-            shadowSamplerInfo = shadowSamplerBuilder.Info();
+            shadowSampler = std::forward<decltype(sampler)>(sampler);
             return {};
         })
 

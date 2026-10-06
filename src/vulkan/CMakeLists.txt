@@ -39,7 +39,7 @@ add_library(
   pipeline/PipelineBuilder.cpp
   pipeline/PipelineCache.cpp
   pipeline/DescriptorHeap.cpp
-  pipeline/SamplerBuilder.cpp
+  pipeline/SamplerConfig.cpp
   pipeline/ShaderStages.cpp
   pipeline/ReflectedLayout.cpp
   pipeline/ComputePass.cpp

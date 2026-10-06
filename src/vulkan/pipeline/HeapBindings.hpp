@@ -277,17 +277,19 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] auto ViewInfoOf(const T& img) noexcept -> VkImageViewCreateInfo {
-    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
-        const ImageSlice& slice = BorrowedSliceOf(img);
-        return slice.info != nullptr ? *slice.info : VkImageViewCreateInfo {};
-    } else if constexpr (std::is_same_v<T, ImageWrite>) {
-        return img.info;
+[[nodiscard]] auto ViewResourceOf(const T& image) noexcept -> const ImageView* {
+    if constexpr (std::is_same_v<T, ImageWrite>) {
+        return image.viewResource;
     } else if constexpr (std::is_same_v<T, ImageView>) {
-        return img.Info();
-    } else if constexpr (requires(const T& resource) { resource.view.Info(); }) {
-        return img.view.Info();
+        return &image;
+    } else if constexpr (std::is_same_v<T, ImageSlice>) {
+        return image.viewResource;
+    } else if constexpr (IsTypedImage<T>::value) {
+        return image.Raw().viewResource;
+    } else if constexpr (requires(const T& resource) { resource.view.Valid(); }) {
+        return &image.view;
     }
+    return nullptr;
 }
 
 enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
@@ -296,7 +298,7 @@ template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
     if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
                   std::is_same_v<T, ImageView> ||
-                  requires(const T& image) { image.view.Info(); }) {
+                  requires(const T& image) { image.view.Valid(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -352,23 +354,35 @@ template <typename Arg>
         } else {
             if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
                 const ImageSlice& slice = BorrowedSliceOf(arg);
-                // A live slice needs its owner's exact create info. Reject
-                // missing or mismatched metadata rather than invent a 2D view;
-                // callers still must not retain slices across owner replacement.
-                if (slice.info == nullptr) {
-                    if (slice.image != VK_NULL_HANDLE) {
-                        return false;
-                    }
-                } else if (slice.info->image != slice.image || slice.info->format != slice.format) {
+                if (slice.viewResource == nullptr) {
+                    return slice.image == VK_NULL_HANDLE;
+                }
+                if (slice.viewResource->Get() != slice.view || slice.viewResource->Format() != slice.format) {
                     return false;
                 }
+            } else if constexpr (std::is_same_v<T, ImageWrite>) {
+                if (arg.viewResource == nullptr) {
+                    if (arg.slice.image != VK_NULL_HANDLE || arg.slice.view != VK_NULL_HANDLE) {
+                        return false;
+                    }
+                } else if (arg.slice.image != VK_NULL_HANDLE || arg.slice.view != VK_NULL_HANDLE) {
+                    if (!arg.slice.Valid() || arg.slice.viewResource != arg.viewResource || arg.slice.view != arg.viewResource->Get() ||
+                        arg.slice.format != arg.viewResource->Format()) {
+                        return false;
+                    }
+                }
             }
-            const VkImageViewCreateInfo info = ViewInfoOf(arg);
-            if (info.image == VK_NULL_HANDLE) {
-                return true;
+            const ImageView* view = ViewResourceOf(arg);
+            if (view == nullptr || !view->Valid()) {
+                if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
+                    return BorrowedSliceOf(arg).image == VK_NULL_HANDLE;
+                } else if constexpr (std::is_same_v<T, ImageWrite>) {
+                    return arg.slice.image == VK_NULL_HANDLE && arg.slice.view == VK_NULL_HANDLE;
+                }
+                return false;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, info, VK_IMAGE_LAYOUT_GENERAL);
+                heap.WriteStorageImage(StorageImageHandle {slot}, *view, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -378,7 +392,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                heap.WriteImage(TextureHandle {slot}, info, layout);
+                heap.WriteImage(TextureHandle {slot}, *view, layout);
             }
             return true;
         }

@@ -557,7 +557,8 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t w = static_cast<uint32_t>(side);
     const uint32_t h = static_cast<uint32_t>(side);
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator);
+    const auto imageConfig = Vk::ImageConfig::Texture2D({w, h}, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled);
+    auto imageRes = Vk::Image::Create(allocator, imageConfig);
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
@@ -587,7 +588,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
-    auto viewRes = Vk::ImageView::Create<kFormat>(ctx.Device(), image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
@@ -595,14 +596,13 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    auto samplerBuilder = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F);
-    auto samplerRes     = samplerBuilder.Build(ctx.Device());
+    blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
+    auto samplerRes = blueNoiseSamplerConfig.Create(ctx.Device());
     if (!samplerRes) {
         return std::unexpected(samplerRes.error());
     }
 
-    blueNoiseSampler     = std::move(*samplerRes);
-    blueNoiseSamplerInfo = samplerBuilder.Info();
+    blueNoiseSampler = std::move(*samplerRes);
     auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());

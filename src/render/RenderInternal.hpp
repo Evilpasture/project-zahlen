@@ -339,10 +339,12 @@ struct RenderContext::Impl {
     Vk::HeapPassBindings volumetricIntegrationHeapBindings;
     Vk::HeapPassBindings volumetricTemporalHeapBindings;
 
-    VkSamplerCreateInfo shadowSamplerInfo {};
-    VkSamplerCreateInfo defaultSamplerInfo {};
-    VkSamplerCreateInfo pointSamplerInfo {};
-    VkSamplerCreateInfo blueNoiseSamplerInfo {};
+    Vk::SamplerConfig globalSamplerConfig {};
+    Vk::SamplerConfig clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
+    Vk::SamplerConfig shadowSamplerConfig {};
+    Vk::SamplerConfig defaultSamplerConfig {};
+    Vk::SamplerConfig pointSamplerConfig {};
+    Vk::SamplerConfig blueNoiseSamplerConfig {};
 
     Vk::SamplerHandle globalSamplerSlot;
     Vk::SamplerHandle materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
@@ -422,11 +424,11 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     void               BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
-    std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
+    std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
     void                           BuildSceneHeapMappings() noexcept;
     void                           BuildDecalHeapMappings() noexcept;
     void                           WriteSceneStaticImageDescriptors() noexcept;
-    void                           WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
+    void                           WritePointSamplerToHeap(const Vk::SamplerConfig& config) noexcept;
     void                           WriteTransLightingToHeap() noexcept;
     void                           InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
@@ -896,12 +898,13 @@ template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
-    return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
-        .Build(allocator)
+    const auto imageConfig = Vk::ImageConfig::Texture2D(
+        {width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled
+    );
+    return Vk::Image::Create(allocator, imageConfig)
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             defer _([&] { allocator.DestroyImage(image); });
-            auto  viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }

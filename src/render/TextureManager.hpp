@@ -82,7 +82,7 @@ class TextureManager {
     // slot release/replacement, device loss, or manager destruction ends the borrow.
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
         const Vk::ImageView& view = _slotViews[slot];
-        return Vk::ImageSlice {_slotImages[slot].Handle(), view, extent, view.Info().format};
+        return Vk::ImageSlice {_slotImages[slot].Handle(), view, extent, view.Format()};
     }
     void NameSlots() noexcept;
 

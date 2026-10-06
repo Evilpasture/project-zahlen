@@ -912,9 +912,9 @@ constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice {
         return resource.Raw();
     } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
         return resource;
-    } else if constexpr (requires { resource.image.Handle(); resource.fullView.Info(); }) {
+    } else if constexpr (requires { resource.image.Handle(); resource.fullView.Format(); }) {
         return ImageSlice {resource.image.Handle(), resource.fullView, resource.extent, Tag::format};
-    } else if constexpr (requires { resource.image.Handle(); resource.view.Info(); }) {
+    } else if constexpr (requires { resource.image.Handle(); resource.view.Format(); }) {
         return ImageSlice {resource.image.Handle(), resource.view, resource.extent, Tag::format};
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");

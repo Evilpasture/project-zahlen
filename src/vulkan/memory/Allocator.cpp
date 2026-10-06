@@ -28,6 +28,7 @@ enum class ImageCreationError : uint8_t {
     OutOfDeviceMemory      ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory"> {}),
     InvalidCaptureAddress  ZHLN_ANNOTATION(ZHLN::Description<"Invalid capture address"> {}),
     VulkanSubsystemFailure ZHLN_ANNOTATION(ZHLN::Description<"Vulkan subsystem failure"> {}),
+    InvalidConfiguration   ZHLN_ANNOTATION(ZHLN::Description<"Invalid image configuration"> {}),
 };
 
 enum class AllocatorError : uint8_t {
@@ -82,6 +83,7 @@ void SetGeneratedImageName(VmaAllocator allocator, VkImage image, const VkImageC
         case MemoryUsage::GPUToCPU:
             return VMA_MEMORY_USAGE_GPU_TO_CPU;
     }
+    std::unreachable();
 }
 } // namespace
 
@@ -206,7 +208,9 @@ auto Buffer::Release() noexcept -> std::pair<VkBuffer, VmaAllocation> {
     return {std::exchange(_handle, VK_NULL_HANDLE), std::exchange(_allocation, nullptr)};
 }
 
-Image::Image(Image&& other) noexcept: _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _allocation(std::exchange(other._allocation, nullptr)) {
+Image::Image(Image&& other) noexcept:
+    _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _allocation(std::exchange(other._allocation, nullptr)),
+    _config(std::exchange(other._config, ImageConfig {})) {
 }
 
 auto Image::operator=(Image&& other) noexcept -> Image& {
@@ -214,11 +218,13 @@ auto Image::operator=(Image&& other) noexcept -> Image& {
         ZHLN::Assert(!Valid(), "Image move assignment requires the previous allocation to be explicitly retired");
         _handle     = std::exchange(other._handle, VK_NULL_HANDLE);
         _allocation = std::exchange(other._allocation, nullptr);
+        _config     = std::exchange(other._config, ImageConfig {});
     }
     return *this;
 }
 
 auto Image::Release() noexcept -> std::pair<VkImage, VmaAllocation> {
+    _config = {};
     return {std::exchange(_handle, VK_NULL_HANDLE), std::exchange(_allocation, nullptr)};
 }
 
@@ -387,140 +393,202 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
     return staging;
 }
 
-auto Image::Create(Allocator& allocatorRef, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
+auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode> {
+    using enum ImageCreationError;
+    if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 ||
+        config.extent.depth == 0 || config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    VkImageType imageType = VK_IMAGE_TYPE_2D;
+    switch (config.dimension) {
+        case ImageDimension::Texture2D:
+            if (config.extent.depth != 1) {
+                return std::unexpected(InvalidConfiguration);
+            }
+            imageType = VK_IMAGE_TYPE_2D;
+            break;
+        case ImageDimension::Texture3D:
+            if (config.arrayLayers != 1 || config.cubeCompatible || config.samples != VK_SAMPLE_COUNT_1_BIT) {
+                return std::unexpected(InvalidConfiguration);
+            }
+            imageType = VK_IMAGE_TYPE_3D;
+            break;
+        default:
+            return std::unexpected(InvalidConfiguration);
+    }
+
+    if (config.cubeCompatible &&
+        (config.dimension != ImageDimension::Texture2D || config.extent.width != config.extent.height || config.arrayLayers < 6 || config.arrayLayers % 6 != 0)) {
+        return std::unexpected(InvalidConfiguration);
+    }
+    if (config.samples != VK_SAMPLE_COUNT_1_BIT && config.mipLevels != 1) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    const VkImageCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = config.cubeCompatible ? static_cast<VkImageCreateFlags>(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) : VkImageCreateFlags {},
+        .imageType = imageType,
+        .format = config.format,
+        .extent = config.extent,
+        .mipLevels = config.mipLevels,
+        .arrayLayers = config.arrayLayers,
+        .samples = config.samples,
+        .tiling = config.tiling,
+        .usage = ToVk(config.usage),
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
     VmaAllocator                  allocator  = allocatorRef.Handle();
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
-        .flags          = {},
-        .usage          = ToVmaUsage(memUsage),
-        .requiredFlags  = {},
+        .flags = {},
+        .usage = ToVmaUsage(config.memory),
+        .requiredFlags = {},
         .preferredFlags = {},
         .memoryTypeBits = {},
-        .pool           = {},
-        .pUserData      = {},
-        .priority       = {},
-        .minAlignment   = {}
+        .pool = {},
+        .pUserData = {},
+        .priority = {},
+        .minAlignment = {},
     };
 
-    VkResult res = vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr);
+    const VkResult res = vmaCreateImage(allocator, &info, &alloc_info, &img, &alloc, nullptr);
     if (res != VK_SUCCESS) [[unlikely]] {
         switch (res) {
-            case VK_ERROR_OUT_OF_HOST_MEMORY:
-                return std::unexpected(ImageCreationError::OutOfHostMemory);
-
-            case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-                return std::unexpected(ImageCreationError::OutOfDeviceMemory);
-
-            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
-                return std::unexpected(ImageCreationError::InvalidCaptureAddress);
-
-            default:
-                return std::unexpected(ImageCreationError::VulkanSubsystemFailure);
+            case VK_ERROR_OUT_OF_HOST_MEMORY: return std::unexpected(OutOfHostMemory);
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY: return std::unexpected(OutOfDeviceMemory);
+            case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: return std::unexpected(InvalidCaptureAddress);
+            default: return std::unexpected(VulkanSubsystemFailure);
         }
     }
 
     SetGeneratedImageName(allocator, img, info);
-
-    Image r;
-    r._handle     = img;
-    r._allocation = alloc;
-    return r;
+    Image result;
+    result._handle = img;
+    result._allocation = alloc;
+    result._config = config;
+    return result;
 }
 
-ImageBuilder::ImageBuilder() noexcept {
-    _info = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = VK_FORMAT_UNDEFINED,
-        .extent                = {.width = 0, .height = 0, .depth = 0},
-        .mipLevels             = 1,
-        .arrayLayers           = 1,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = 0,
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED
+auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode> {
+    using enum ImageViewCreationError;
+    if (device == VK_NULL_HANDLE || info.sType != VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO || info.image == VK_NULL_HANDLE ||
+        info.format == VK_FORMAT_UNDEFINED || info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_NONE || info.subresourceRange.levelCount == 0 ||
+        info.subresourceRange.layerCount == 0) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    VkImageView view = VK_NULL_HANDLE;
+    const VkResult result = vkCreateImageView(device, &info, nullptr, &view);
+    if (result != VK_SUCCESS) {
+        switch (result) {
+            case VK_ERROR_OUT_OF_HOST_MEMORY: return std::unexpected(OutOfHostMemory);
+            case VK_ERROR_OUT_OF_DEVICE_MEMORY: return std::unexpected(OutOfDeviceMemory);
+            default: return std::unexpected(CreationFailed);
+        }
+    }
+    return ImageView {device, view, info};
+}
+
+auto Image::CreateView(VkDevice device, const ImageViewConfig& config) const -> std::expected<ImageView, ErrorCode> {
+    using enum ImageViewCreationError;
+    const ImageConfig& image = _config;
+    if (!Valid() || device == VK_NULL_HANDLE) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    const uint32_t layerCount = config.layerCount == 0 ? image.arrayLayers - std::min(config.baseLayer, image.arrayLayers) : config.layerCount;
+    const uint32_t mipCount = config.mipCount == 0 ? image.mipLevels - std::min(config.baseMip, image.mipLevels) : config.mipCount;
+    if (config.baseLayer >= image.arrayLayers || config.baseMip >= image.mipLevels || layerCount == 0 || mipCount == 0 ||
+        layerCount > image.arrayLayers - config.baseLayer || mipCount > image.mipLevels - config.baseMip) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    ImageViewKind kind = config.kind;
+    if (kind == ImageViewKind::Inferred) {
+        if (image.dimension == ImageDimension::Texture3D) {
+            kind = ImageViewKind::Texture3D;
+        } else if (image.cubeCompatible && layerCount == 6) {
+            kind = ImageViewKind::Cube;
+        } else if (image.cubeCompatible && layerCount > 6) {
+            kind = ImageViewKind::CubeArray;
+        } else if (layerCount > 1) {
+            kind = ImageViewKind::Texture2DArray;
+        } else {
+            kind = ImageViewKind::Texture2D;
+        }
+    }
+
+    VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D;
+    switch (kind) {
+        case ImageViewKind::Texture2D:
+            if (image.dimension != ImageDimension::Texture2D || layerCount != 1) return std::unexpected(InvalidConfiguration);
+            viewType = VK_IMAGE_VIEW_TYPE_2D;
+            break;
+        case ImageViewKind::Texture2DArray:
+            if (image.dimension != ImageDimension::Texture2D) return std::unexpected(InvalidConfiguration);
+            viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            break;
+        case ImageViewKind::Texture3D:
+            if (image.dimension != ImageDimension::Texture3D || config.baseLayer != 0 || layerCount != 1) return std::unexpected(InvalidConfiguration);
+            viewType = VK_IMAGE_VIEW_TYPE_3D;
+            break;
+        case ImageViewKind::Cube:
+            if (!image.cubeCompatible || config.baseLayer % 6 != 0 || layerCount != 6) return std::unexpected(InvalidConfiguration);
+            viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+            break;
+        case ImageViewKind::CubeArray:
+            if (!image.cubeCompatible || config.baseLayer % 6 != 0 || layerCount < 6 || layerCount % 6 != 0) return std::unexpected(InvalidConfiguration);
+            viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+            break;
+        case ImageViewKind::Inferred:
+        default:
+            return std::unexpected(InvalidConfiguration);
+    }
+
+    VkImageAspectFlags aspect = GetFormatAspect(image.format);
+    switch (config.aspect) {
+        case ImageAspect::Inferred: break;
+        case ImageAspect::Color: aspect = VK_IMAGE_ASPECT_COLOR_BIT; break;
+        case ImageAspect::Depth: aspect = VK_IMAGE_ASPECT_DEPTH_BIT; break;
+        case ImageAspect::Stencil: aspect = VK_IMAGE_ASPECT_STENCIL_BIT; break;
+        case ImageAspect::DepthStencil: aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; break;
+        default: return std::unexpected(InvalidConfiguration);
+    }
+    const VkImageAspectFlags formatAspect = GetFormatAspect(image.format);
+    if (aspect == VK_IMAGE_ASPECT_NONE || (aspect & formatAspect) != aspect) {
+        return std::unexpected(InvalidConfiguration);
+    }
+
+    const VkImageViewCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .image = _handle,
+        .viewType = viewType,
+        .format = image.format,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        },
+        .subresourceRange = {
+            .aspectMask = aspect,
+            .baseMipLevel = config.baseMip,
+            .levelCount = mipCount,
+            .baseArrayLayer = config.baseLayer,
+            .layerCount = layerCount,
+        },
     };
-}
-
-auto ImageBuilder::Type(VkImageType type) noexcept -> ImageBuilder& {
-    _info.imageType = type;
-    return *this;
-}
-
-auto ImageBuilder::Format(VkFormat format) noexcept -> ImageBuilder& {
-    _info.format = format;
-    return *this;
-}
-
-auto ImageBuilder::Dimensions(uint32_t width, uint32_t height, uint32_t depth) noexcept -> ImageBuilder& {
-    _info.extent = {.width = width, .height = height, .depth = depth};
-    return *this;
-}
-
-auto ImageBuilder::Mips(uint32_t levels) noexcept -> ImageBuilder& {
-    _info.mipLevels = levels;
-    return *this;
-}
-
-auto ImageBuilder::Layers(uint32_t layers) noexcept -> ImageBuilder& {
-    _info.arrayLayers = layers;
-    return *this;
-}
-
-auto ImageBuilder::Samples(VkSampleCountFlagBits samples) noexcept -> ImageBuilder& {
-    _info.samples = samples;
-    return *this;
-}
-
-auto ImageBuilder::Tiling(VkImageTiling tiling) noexcept -> ImageBuilder& {
-    _info.tiling = tiling;
-    return *this;
-}
-
-auto ImageBuilder::Usage(ImageUsage usage) noexcept -> ImageBuilder& {
-    _info.usage = ToVk(usage);
-    return *this;
-}
-
-auto ImageBuilder::SharingMode(VkSharingMode mode) noexcept -> ImageBuilder& {
-    _info.sharingMode = mode;
-    return *this;
-}
-
-auto ImageBuilder::Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder& {
-    _info.flags = flags;
-    return *this;
-}
-
-auto ImageBuilder::Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips) noexcept -> ImageBuilder& {
-    _info.imageType   = VK_IMAGE_TYPE_2D;
-    _info.format      = format;
-    _info.extent      = {.width = width, .height = height, .depth = 1};
-    _info.mipLevels   = mips;
-    _info.arrayLayers = 1;
-    _info.usage       = ToVk(usage);
-    return *this;
-}
-
-auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips) noexcept -> ImageBuilder& {
-    _info.flags       = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    _info.imageType   = VK_IMAGE_TYPE_2D;
-    _info.format      = format;
-    _info.extent      = {.width = size, .height = size, .depth = 1};
-    _info.mipLevels   = mips;
-    _info.arrayLayers = 6;
-    _info.usage       = ToVk(usage);
-    return *this;
-}
-
-auto ImageBuilder::Build(Allocator& allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, ErrorCode> {
-    return Image::Create(allocator, _info, memUsage);
+    return ImageView::Create(device, info);
 }
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:

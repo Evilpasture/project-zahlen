@@ -61,19 +61,18 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            auto globalBuilder =
-                Vk::SamplerBuilder {}.Linear().Repeat().Anisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).LodRange(0.0f, 0.0f);
-            auto clampBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
+            globalSamplerConfig = Vk::SamplerConfig::LinearRepeat()
+                .WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                .WithLodRange(0.0F, 0.0F);
+            clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
-            return globalBuilder.Build(ctx.Device())
-                .transform_error([](auto err) -> ErrorCode { return err; })
+            return globalSamplerConfig.Create(ctx.Device())
                 .and_then([&](auto&& globalRes) -> std::expected<void, ErrorCode> {
                     globalSampler = std::forward<decltype(globalRes)>(globalRes);
-                    return clampBuilder.Build(ctx.Device())
-                        .transform_error([](auto err) -> ErrorCode { return err; })
+                    return clampSamplerConfig.Create(ctx.Device())
                         .and_then([&](auto&& clampRes) -> std::expected<void, ErrorCode> {
                             clampSampler = std::forward<decltype(clampRes)>(clampRes);
-                            return InitSceneHeaps(globalBuilder.Info(), clampBuilder.Info());
+                            return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
                         });
                 });
         })
@@ -104,8 +103,10 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
         });
 }
 
-auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
+auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept
     -> std::expected<void, ErrorCode> {
+    globalSamplerConfig = globalSamplerValue;
+    clampSamplerConfig = clampSamplerValue;
     auto init_res = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kFrameTransientResourceSlots,
         kImmediateTransientResourceSlots
@@ -149,18 +150,19 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
         return std::unexpected(reserved.error());
     }
 
-    heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
-    heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
+    heapManager.WriteSampler(globalSamplerSlot, globalSamplerConfig);
+    heapManager.WriteSampler(clampSamplerSlot, clampSamplerConfig);
 
-    constexpr std::array modes = {VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT};
+    constexpr std::array modes = {
+        Vk::SamplerAddressMode::Repeat,
+        Vk::SamplerAddressMode::ClampToEdge,
+        Vk::SamplerAddressMode::MirroredRepeat,
+    };
     static_assert(kMaterialSamplerVariantCount == modes.size() * modes.size());
     for (uint32_t s = 0; s < modes.size(); ++s) {
         for (uint32_t t = 0; t < modes.size(); ++t) {
-            auto info         = globalSamplerInfo; // Keep filtering/aniso; let glTF materials use generated mips.
-            info.maxLod       = VK_LOD_CLAMP_NONE;
-            info.addressModeU = modes[s];
-            info.addressModeV = modes[t];
-            heapManager.WriteSampler({*materialBase + s * 3u + t}, info);
+            const auto config = globalSamplerConfig.WithLodRange(0.0F, VK_LOD_CLAMP_NONE).WithAddressModes(modes[s], modes[t], modes[0]);
+            heapManager.WriteSampler({*materialBase + s * 3u + t}, config);
         }
     }
 
@@ -209,8 +211,8 @@ void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     }
 }
 
-void RenderContext::Impl::WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept {
-    heapManager.WriteSampler(pointSamplerSlot, info);
+void RenderContext::Impl::WritePointSamplerToHeap(const Vk::SamplerConfig& config) noexcept {
+    heapManager.WriteSampler(pointSamplerSlot, config);
 }
 
 void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
@@ -221,36 +223,39 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
-    const VkSamplerCreateInfo defaultInfo = defaultSamplerInfo;
-    const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
-    const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
-    const VkSamplerCreateInfo clampInfo   = [&]() -> VkSamplerCreateInfo { return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info(); }();
-    VkSamplerCreateInfo skyInfo = Vk::SamplerBuilder {}.Linear().Repeat().Info();
-    skyInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    skyInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    const Vk::SamplerConfig defaultConfig = defaultSamplerConfig;
+    const Vk::SamplerConfig pointConfig = pointSamplerConfig;
+    const Vk::SamplerConfig shadowConfig = shadowSamplerConfig;
+    const Vk::SamplerConfig clampConfig = clampSamplerConfig;
+    const Vk::SamplerConfig skyConfig = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
+        Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
+    );
+    const Vk::SamplerConfig blueNoiseConfig = blueNoiseSamplerConfig;
 
-    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
-    const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
+    Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointConfig));
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
-        heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"shadowSampler">(shadowInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig),
+        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
-        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"skySampler">(skyInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig),
+        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
-    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     // The passes below own their own pipelines and heap bindings, so they
     // write the sampler descriptors those bindings declare.
     postProcess.InitSamplers(*this);
@@ -328,7 +333,11 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-    auto           makeLtc   = [&] { return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator); };
+    auto makeLtc = [&] {
+        return Vk::Image::Create(
+            allocator, Vk::ImageConfig::Texture2D({64, 64}, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage)
+        );
+    };
     bool           submitted = false;
     auto           matImg    = makeLtc();
     if (!matImg) {
@@ -364,11 +373,11 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
     submitted        = true;
 
-    auto matView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), matImg->Handle());
+    auto matView = matImg->CreateView(ctx.Device());
     if (!matView) {
         return std::unexpected(matView.error());
     }
-    auto ampView = Vk::ImageView::Create<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ampImg->Handle());
+    auto ampView = ampImg->CreateView(ctx.Device());
     if (!ampView) {
         return std::unexpected(ampView.error());
     }
@@ -403,10 +412,12 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         !built) {
         return std::unexpected(built.error());
     }
-    VkSamplerCreateInfo equirectInfo = Vk::SamplerBuilder {}.Linear().Info();
-    equirectInfo.addressModeV        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    equirectInfo.addressModeW        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    Vk::InitHeapPassSamplers<Shaders::IblBake>(heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectInfo));
+    const Vk::SamplerConfig equirectSampler = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
+        Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
+    );
+    Vk::InitHeapPassSamplers<Shaders::IblBake>(
+        heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectSampler)
+    );
     return {};
 }
 

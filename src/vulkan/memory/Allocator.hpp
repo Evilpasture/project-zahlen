@@ -99,12 +99,10 @@ class Allocator {
     }
 
   private:
-    // Only Buffer/Image/ImageBuilder/StagingRingBuffer/DeletionQueue are
-    // permitted to reach the raw VMA handle. Public APIs accept Allocator& so
-    // callers in src/render never see VmaAllocator.
+    // Only resource implementations may reach the raw VMA handle. Public APIs
+    // accept Allocator& so callers in src/render never see VmaAllocator.
     friend class Buffer;
     friend class Image;
-    friend class ImageBuilder;
     friend class StagingRingBuffer;
     friend class DeletionQueue;
 
@@ -157,6 +155,65 @@ enum class ImageUsage : VkImageUsageFlags {
     DepthStencilAttachment = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
     TransientAttachment    = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
     InputAttachment        = VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+};
+
+enum class ImageDimension : uint8_t {
+    Texture2D,
+    Texture3D,
+};
+
+// Describes immutable image properties and capabilities. It deliberately has
+// no layout field: render-graph uses and transfer operations own transitions.
+struct ImageConfig {
+    ImageDimension          dimension = ImageDimension::Texture2D;
+    VkFormat                format = VK_FORMAT_UNDEFINED;
+    VkExtent3D              extent {};
+    uint32_t                mipLevels = 1;
+    uint32_t                arrayLayers = 1;
+    VkSampleCountFlagBits   samples = VK_SAMPLE_COUNT_1_BIT;
+    VkImageTiling           tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageUsage              usage = ImageUsage::None;
+    MemoryUsage             memory = MemoryUsage::GPUOnly;
+    bool                    cubeCompatible = false;
+
+    [[nodiscard]] static constexpr auto Texture2D(
+        VkExtent2D extent, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t arrayLayers = 1
+    ) noexcept -> ImageConfig {
+        return {
+            .dimension = ImageDimension::Texture2D,
+            .format = format,
+            .extent = {extent.width, extent.height, 1},
+            .mipLevels = mipLevels,
+            .arrayLayers = arrayLayers,
+            .usage = usage,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto Texture3D(VkExtent3D extent, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1) noexcept
+        -> ImageConfig {
+        return {
+            .dimension = ImageDimension::Texture3D,
+            .format = format,
+            .extent = extent,
+            .mipLevels = mipLevels,
+            .arrayLayers = 1,
+            .usage = usage,
+        };
+    }
+
+    [[nodiscard]] static constexpr auto Cube(
+        uint32_t size, VkFormat format, ImageUsage usage, uint32_t mipLevels = 1, uint32_t cubeCount = 1
+    ) noexcept -> ImageConfig {
+        return {
+            .dimension = ImageDimension::Texture2D,
+            .format = format,
+            .extent = {size, size, 1},
+            .mipLevels = mipLevels,
+            .arrayLayers = cubeCount * 6,
+            .usage = usage,
+            .cubeCompatible = true,
+        };
+    }
 };
 
 [[nodiscard]] constexpr auto ToVk(BufferUsage usage) noexcept -> VkBufferUsageFlags {
@@ -314,7 +371,19 @@ class Image {
     Image(Image&& other) noexcept;
     auto operator=(Image&& other) noexcept -> Image&;
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
+
+    [[nodiscard]] auto CreateView(VkDevice device, const ImageViewConfig& config = {}) const -> std::expected<ImageView, ErrorCode>;
+
+    [[nodiscard]] auto Format() const noexcept -> VkFormat {
+        return _config.format;
+    }
+    [[nodiscard]] auto Extent() const noexcept -> VkExtent3D {
+        return _config.extent;
+    }
+    [[nodiscard]] auto Config() const noexcept -> const ImageConfig& {
+        return _config;
+    }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle != VK_NULL_HANDLE;
@@ -330,30 +399,7 @@ class Image {
   private:
     VkImage       _handle     = VK_NULL_HANDLE;
     VmaAllocation _allocation = nullptr;
-};
-
-class ImageBuilder {
-  public:
-    ImageBuilder() noexcept;
-
-    auto Type(VkImageType type) noexcept -> ImageBuilder&;
-    auto Format(VkFormat format) noexcept -> ImageBuilder&;
-    auto Dimensions(uint32_t width, uint32_t height, uint32_t depth = 1) noexcept -> ImageBuilder&;
-    auto Mips(uint32_t levels) noexcept -> ImageBuilder&;
-    auto Layers(uint32_t layers) noexcept -> ImageBuilder&;
-    auto Samples(VkSampleCountFlagBits samples) noexcept -> ImageBuilder&;
-    auto Tiling(VkImageTiling tiling) noexcept -> ImageBuilder&;
-    auto Usage(ImageUsage usage) noexcept -> ImageBuilder&;
-    auto SharingMode(VkSharingMode mode) noexcept -> ImageBuilder&;
-    auto Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder&;
-
-    auto Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
-    auto TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
-
-    [[nodiscard]] auto Build(Allocator& allocator, MemoryUsage memUsage = MemoryUsage::GPUOnly) const noexcept -> std::expected<Image, ErrorCode>;
-
-  private:
-    VkImageCreateInfo _info {};
+    ImageConfig   _config {};
 };
 
 template <typename T = uint32_t>
