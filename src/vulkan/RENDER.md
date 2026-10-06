@@ -394,9 +394,10 @@ Here is a typical usage pattern for allocating a mesh, configuring a material, a
 std::vector<Vertex> vertices = { ... };
 BufferHandle vbo = renderContext.CreateVertexBuffer(std::span {vertices});
 
-// 2. Create a material (raw shader-blob compilation is the internal
-//    ZHLN::PipelineDesc / RenderContext::Impl::CreatePipelineMaterial pair in
-//    src/render/RenderInternal.hpp, reserved for the engine's own shaders)
+// 2. Create a material. Built-in scene pipelines are compile-time
+//    GraphicsPipeline<ShaderModules, PassContract, MaterialFlags> variants;
+//    five blend/depth variants are cached, while sidedness is dynamic cull
+//    state. Per-material factors and texture indices remain runtime data.
 MaterialDesc materialDesc = {
     .doubleSided = false,
     .alphaBlend = false,

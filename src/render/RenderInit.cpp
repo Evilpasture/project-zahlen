@@ -24,21 +24,6 @@ auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::Fra
     return Vk::OwnedShaderStages::Create(std::move(vertex), std::move(fragment), vs.entryPoint, ps.entryPoint);
 }
 
-std::expected<Vk::Pipeline, ErrorCode>
-    RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
-    const auto loaded = LoadShaderData(cs);
-    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
-    gpuDiagnostics.RegisterShader(shader, "CSMain");
-    if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    if (!pass.ReflectDispatchLayout(shader)) {
-        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
-    }
-
-    return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Cache(pipelineCache.Get()).Build(ctx.Device());
-}
-
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!ctx.RayTracingSupported()) {
         ZHLN::LogWarning("Ray tracing not enabled on this device. RTR will be disabled.");

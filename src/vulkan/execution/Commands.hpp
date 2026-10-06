@@ -248,6 +248,8 @@ class CommandEncoder {
     VkPipeline       lastPipeline      = VK_NULL_HANDLE;
     VkPipelineLayout lastLayout        = VK_NULL_HANDLE;
     VkDescriptorSet  lastDescriptorSet = VK_NULL_HANDLE;
+    VkCullModeFlags  lastCullMode      = VK_CULL_MODE_BACK_BIT;
+    bool             hasCullMode       = false;
 
     CommandEncoder() = default;
     explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
@@ -273,6 +275,15 @@ class CommandEncoder {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, firstSet, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
         if (!sets.empty()) {
             lastDescriptorSet = sets[0];
+        }
+    }
+
+    // Vulkan 1.3 core dynamic cull state; redundant updates are skipped per encoder.
+    void SetCullMode(VkCullModeFlags mode) noexcept {
+        if (!hasCullMode || lastCullMode != mode) {
+            vkCmdSetCullMode(cmd, mode);
+            lastCullMode = mode;
+            hasCullMode = true;
         }
     }
 

@@ -22,18 +22,18 @@
 namespace ZHLN::Vk {
 
 enum class ShaderStageCreationError : uint8_t {
-    FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader file open failed">{}) = 1,
-    InvalidSpirvSize ZHLN_ANNOTATION(ZHLN::Description<"Invalid SPIR-V size">{}),
-    ShaderLoadingFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader loading failed">{}),
-    VertexShaderEmpty ZHLN_ANNOTATION(ZHLN::Description<"Vertex or mesh shader is empty">{}),
+    FileOpenFailed      ZHLN_ANNOTATION(ZHLN::Description<"Shader file open failed"> {}) = 1,
+    InvalidSpirvSize    ZHLN_ANNOTATION(ZHLN::Description<"Invalid SPIR-V size"> {}),
+    ShaderLoadingFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader loading failed"> {}),
+    VertexShaderEmpty   ZHLN_ANNOTATION(ZHLN::Description<"Vertex or mesh shader is empty"> {}),
 };
 
 struct ShaderStageData {
     const uint32_t*       code = nullptr;
     size_t                size = 0;
     VkShaderStageFlagBits stage {};
-    char                  entry_point[64] {};
-    uint32_t              view_mask = 0;
+    char                  entryPoint[64] {};
+    uint32_t              viewMask = 0;
 };
 
 struct ShaderStages {
@@ -58,7 +58,7 @@ template <typename T, size_t Extent>
 template <VkShaderStageFlagBits Stage>
 struct ShaderStageSource {
     static constexpr VkShaderStageFlagBits stage = Stage;
-    const char*                            path = nullptr;
+    const char*                            path  = nullptr;
     std::span<const uint8_t>               fallback {};
     const char*                            entryPoint = nullptr;
 };
@@ -90,8 +90,7 @@ class ShaderStagesView {
     }
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag)
-        -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
+    static auto CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
 
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
@@ -106,10 +105,10 @@ class ShaderStagesView {
         return &_raw;
     }
     [[nodiscard]] auto Vertex() const noexcept -> ShaderDesc {
-        return {.code = _raw.vert.code, .size = _raw.vert.size, .entry_point = _raw.vert.code != nullptr ? _raw.vert.entry_point : nullptr};
+        return {.code = _raw.vert.code, .size = _raw.vert.size, .entry_point = _raw.vert.code != nullptr ? _raw.vert.entryPoint : nullptr};
     }
     [[nodiscard]] auto Fragment() const noexcept -> ShaderDesc {
-        return {.code = _raw.frag.code, .size = _raw.frag.size, .entry_point = _raw.frag.code != nullptr ? _raw.frag.entry_point : nullptr};
+        return {.code = _raw.frag.code, .size = _raw.frag.size, .entry_point = _raw.frag.code != nullptr ? _raw.frag.entryPoint : nullptr};
     }
     [[nodiscard]] auto IsMeshPipeline() const noexcept -> bool {
         return _raw.mesh.code != nullptr;
@@ -121,7 +120,8 @@ class ShaderStagesView {
 
   private:
     friend class OwnedShaderStages;
-    explicit ShaderStagesView(ShaderStages stages) noexcept: _raw(stages) {}
+    explicit ShaderStagesView(ShaderStages stages) noexcept: _raw(stages) {
+    }
 
     ShaderStages _raw {};
 };
@@ -129,8 +129,8 @@ class ShaderStagesView {
 static_assert(std::is_trivially_copyable_v<ShaderStagesView>);
 
 struct ShaderBytecode {
-    std::span<const std::byte> fallback {};
-    std::vector<uint32_t>      storage {};
+    std::span<const std::byte> fallback;
+    std::vector<uint32_t>      storage;
 
     [[nodiscard]] auto Code() const noexcept -> std::span<const std::byte> {
         return storage.empty() ? fallback : std::as_bytes(std::span {storage});
@@ -139,9 +139,9 @@ struct ShaderBytecode {
 
 class OwnedShaderStages {
   public:
-    OwnedShaderStages(const OwnedShaderStages&) = delete;
-    auto operator=(const OwnedShaderStages&) -> OwnedShaderStages& = delete;
-    OwnedShaderStages(OwnedShaderStages&&) noexcept = default;
+    OwnedShaderStages(const OwnedShaderStages&)                        = delete;
+    auto operator=(const OwnedShaderStages&) -> OwnedShaderStages&     = delete;
+    OwnedShaderStages(OwnedShaderStages&&) noexcept                    = default;
     auto operator=(OwnedShaderStages&&) noexcept -> OwnedShaderStages& = default;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
@@ -150,8 +150,12 @@ class OwnedShaderStages {
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(
-        ShaderBytecode task, ShaderBytecode mesh, ShaderBytecode frag,
-        const char* taskEntry = nullptr, const char* meshEntry = nullptr, const char* fragEntry = nullptr
+        ShaderBytecode task,
+        ShaderBytecode mesh,
+        ShaderBytecode frag,
+        const char*    taskEntry = nullptr,
+        const char*    meshEntry = nullptr,
+        const char*    fragEntry = nullptr
     ) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
 
     [[nodiscard]] auto View() const noexcept -> ShaderStagesView;
@@ -159,8 +163,8 @@ class OwnedShaderStages {
   private:
     struct StageMetadata {
         VkShaderStageFlagBits stage {};
-        std::array<char, 64> entryPoint {};
-        uint32_t viewMask = 0;
+        std::array<char, 64>  entryPoint {};
+        uint32_t              viewMask = 0;
     };
 
     OwnedShaderStages(ShaderBytecode vert, ShaderBytecode frag, ShaderBytecode task, ShaderBytecode mesh, const ShaderStagesView& validated) noexcept;

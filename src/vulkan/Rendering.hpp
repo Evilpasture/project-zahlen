@@ -70,6 +70,7 @@
 #include "pipeline/Specialization.hpp"
 #include "pipeline/ShaderProgram.hpp"
 #include "pipeline/PipelineBuilder.hpp"
+#include "pipeline/GraphicsPipeline.hpp"
 #include "pipeline/PipelineCache.hpp"
 #include "pipeline/HeapBindings.hpp"
 #include "pipeline/SamplerBuilder.hpp"

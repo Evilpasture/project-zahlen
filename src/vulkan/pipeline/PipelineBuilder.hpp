@@ -1,30 +1,25 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Error.hpp>
-
-#include <optional>
-
 #include "PipelineTypes.hpp"
+#include <Zahlen/Error.hpp>
+#include <optional>
 
 namespace ZHLN::Vk {
 
-
 enum class PipelineBuilderError : uint8_t {
-    MissingShaders ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages.">{})        = 1,
-    MissingLayout ZHLN_ANNOTATION(ZHLN::Description<"Missing pipeline layout.">{})       = 2,
-    LayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline layout creation failed.">{}),
-    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed.">{}),
-    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
+    MissingShaders         ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages."> {}) = 1,
+    MissingLayout          ZHLN_ANNOTATION(ZHLN::Description<"Missing pipeline layout."> {}),
+    LayoutCreationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Pipeline layout creation failed."> {}),
+    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed."> {}),
+    OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory."> {}),
 };
-
 
 struct StencilState {
     VkStencilOpState front {};
@@ -37,63 +32,63 @@ struct PipelineConfig {
     std::optional<ShaderStagesView> stages;
     VkPipelineLayout                layout = VK_NULL_HANDLE;
 
-    VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+    VkPipelineCache pipelineCache = VK_NULL_HANDLE;
 
-    bool                                                 descriptor_heap = false;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping      = nullptr;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping      = nullptr;
+    bool                                                 descriptorHeap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping      = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping      = nullptr;
 
     const VkVertexInputBindingDescription*   bindings       = nullptr;
     const VkVertexInputAttributeDescription* attributes     = nullptr;
     uint32_t                                 bindingCount   = 0;
     uint32_t                                 attributeCount = 0;
 
-    std::vector<VkFormat> color_formats = {VK_FORMAT_B8G8R8A8_SRGB};
-    VkFormat              depth_format  = VK_FORMAT_D32_SFLOAT;
+    std::vector<VkFormat> colorFormats = {VK_FORMAT_B8G8R8A8_SRGB};
+    VkFormat              depthFormat  = VK_FORMAT_D32_SFLOAT;
 
-    VkPrimitiveTopology topology     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPolygonMode       polygon_mode = VK_POLYGON_MODE_FILL;
-    VkCullModeFlags     cull_mode    = VK_CULL_MODE_BACK_BIT;
-    VkFrontFace         front_face   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    VkPrimitiveTopology topology        = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPolygonMode       polygonMode     = VK_POLYGON_MODE_FILL;
+    VkCullModeFlags     cullMode        = VK_CULL_MODE_BACK_BIT;
+    bool                dynamicCullMode = false;
+    VkFrontFace         frontFace       = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
-    bool depth_test  = true;
-    bool depth_write = true;
+    bool depthTest  = true;
+    bool depthWrite = true;
 
-    bool blend_enable   = false;
-    bool additive_blend = false;
+    bool blendEnable   = false;
+    bool additiveBlend = false;
 
-    uint32_t view_mask = 0;
+    uint32_t viewMask = 0;
 
-    const VkSpecializationInfo* specialization_info = nullptr;
+    const VkSpecializationInfo* specializationInfo = nullptr;
 
-    std::optional<StencilState> stencil {};
-    bool                        color_write_enable = true;
+    std::optional<StencilState> stencil;
+    bool                        colorWriteEnable = true;
 };
 
 struct ComputePipelineConfig {
-    ShaderDesc shader {};
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkPipelineCache cache = VK_NULL_HANDLE;
-    const VkSpecializationInfo* specialization = nullptr;
-    bool descriptor_heap = false;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping = nullptr;
+    ShaderDesc                                           shader {};
+    VkPipelineLayout                                     layout         = VK_NULL_HANDLE;
+    VkPipelineCache                                      cache          = VK_NULL_HANDLE;
+    const VkSpecializationInfo*                          specialization = nullptr;
+    bool                                                 descriptorHeap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping        = nullptr;
 };
 
-[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept
-    -> std::expected<VkPipeline, VkResult>;
-[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept
-    -> std::expected<VkPipeline, VkResult>;
-
+[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
+[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
 
 template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
 class PipelineBuilder {
   public:
-    PipelineBuilder() requires std::same_as<Formats, RuntimeAttachmentFormats> = default;
+    PipelineBuilder()
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    = default;
 
     auto Shaders(ShaderStagesView stages) noexcept -> PipelineBuilder& {
-        const bool meshPipeline = stages.IsMeshPipeline();
-        _cfg.stages = stages;
-        if (meshPipeline) {
+        const bool mesh_pipeline = stages.IsMeshPipeline();
+        _cfg.stages              = stages;
+        if (mesh_pipeline) {
             _cfg.bindings       = nullptr;
             _cfg.attributes     = nullptr;
             _cfg.bindingCount   = 0;
@@ -108,20 +103,20 @@ class PipelineBuilder {
     }
 
     auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
-        _cfg.pipeline_cache = cache;
+        _cfg.pipelineCache = cache;
         return *this;
     }
 
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
         -> PipelineBuilder& {
-        _cfg.descriptor_heap = true;
-        _cfg.vs_mapping      = vsMapping;
-        _cfg.ps_mapping      = psMapping;
+        _cfg.descriptorHeap = true;
+        _cfg.vsMapping      = vsMapping;
+        _cfg.psMapping      = psMapping;
         return *this;
     }
 
     auto HeapPipeline() noexcept -> PipelineBuilder& {
-        _cfg.descriptor_heap = true;
+        _cfg.descriptorHeap = true;
         return *this;
     }
 
@@ -142,84 +137,92 @@ class PipelineBuilder {
     }
 
     auto Wireframe() noexcept -> PipelineBuilder& {
-        _cfg.polygon_mode = VK_POLYGON_MODE_LINE;
+        _cfg.polygonMode = VK_POLYGON_MODE_LINE;
         return *this;
     }
 
     auto CullNone() noexcept -> PipelineBuilder& {
-        _cfg.cull_mode = VK_CULL_MODE_NONE;
+        _cfg.cullMode = VK_CULL_MODE_NONE;
         return *this;
     }
 
     auto CullFront() noexcept -> PipelineBuilder& {
-        _cfg.cull_mode = VK_CULL_MODE_FRONT_BIT;
+        _cfg.cullMode = VK_CULL_MODE_FRONT_BIT;
         return *this;
     }
 
     auto CullBack() noexcept -> PipelineBuilder& {
-        _cfg.cull_mode = VK_CULL_MODE_BACK_BIT;
+        _cfg.cullMode = VK_CULL_MODE_BACK_BIT;
         return *this;
     }
 
     auto ViewMask(uint32_t mask) noexcept -> PipelineBuilder& {
-        _cfg.view_mask = mask;
+        _cfg.viewMask = mask;
         return *this;
     }
 
     auto DepthTest(bool v) noexcept -> PipelineBuilder& {
-        _cfg.depth_test = v;
+        _cfg.depthTest = v;
         return *this;
     }
 
     auto DepthWrite(bool v) noexcept -> PipelineBuilder& {
-        _cfg.depth_write = v;
+        _cfg.depthWrite = v;
         return *this;
     }
 
     auto AlphaBlend() noexcept -> PipelineBuilder& {
-        _cfg.blend_enable = true;
+        _cfg.blendEnable = true;
         return *this;
     }
 
     auto AdditiveBlend() noexcept -> PipelineBuilder& {
-        _cfg.blend_enable   = true;
-        _cfg.additive_blend = true;
+        _cfg.blendEnable   = true;
+        _cfg.additiveBlend = true;
         return *this;
     }
 
     auto Specialization(const VkSpecializationInfo* info) noexcept -> PipelineBuilder& {
-        _cfg.specialization_info = info;
+        _cfg.specializationInfo = info;
         return *this;
     }
 
     auto ColorFormats(std::initializer_list<VkFormat> formats) & noexcept -> PipelineBuilder&
-        requires std::same_as<Formats, RuntimeAttachmentFormats> {
-        _cfg.color_formats = formats;
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    {
+        _cfg.colorFormats = formats;
         return *this;
     }
 
     auto ColorFormats(std::span<const VkFormat> formats) & noexcept -> PipelineBuilder&
-        requires std::same_as<Formats, RuntimeAttachmentFormats> {
-        _cfg.color_formats.assign(formats.begin(), formats.end());
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    {
+        _cfg.colorFormats.assign(formats.begin(), formats.end());
         return *this;
     }
 
-    auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
-        _cfg.depth_format = f;
+    auto DepthFormat(VkFormat f) & noexcept -> PipelineBuilder&
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    {
+        _cfg.depthFormat = f;
         return *this;
     }
 
-    auto DepthOnly() & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
-        _cfg.color_formats.clear();
-        _cfg.depth_test  = true;
-        _cfg.depth_write = true;
+    auto DepthOnly() & noexcept -> PipelineBuilder&
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    {
+        _cfg.colorFormats.clear();
+        _cfg.depthTest  = true;
+        _cfg.depthWrite = true;
         return *this;
     }
 
-    auto NoDepth() & noexcept -> PipelineBuilder& requires std::same_as<Formats, RuntimeAttachmentFormats> {
-        _cfg.depth_test   = false;
-        _cfg.depth_write  = false;
-        _cfg.depth_format = VK_FORMAT_UNDEFINED;
+    auto NoDepth() & noexcept -> PipelineBuilder&
+        requires std::same_as<Formats, RuntimeAttachmentFormats>
+    {
+        _cfg.depthTest   = false;
+        _cfg.depthWrite  = false;
+        _cfg.depthFormat = VK_FORMAT_UNDEFINED;
         return *this;
     }
 
@@ -235,23 +238,23 @@ class PipelineBuilder {
     }
 
     [[nodiscard]] auto DepthOnly() && noexcept -> PipelineBuilder<0, true, typename ClearAttachmentColors<Formats>::type> {
-        _cfg.color_formats.clear();
-        _cfg.depth_test  = true;
-        _cfg.depth_write = true;
+        _cfg.colorFormats.clear();
+        _cfg.depthTest  = true;
+        _cfg.depthWrite = true;
         return PipelineBuilder<0, true, typename ClearAttachmentColors<Formats>::type> {std::move(_cfg)};
     }
 
     [[nodiscard]] auto NoDepth() && noexcept -> PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {
-        _cfg.depth_test   = false;
-        _cfg.depth_write  = false;
-        _cfg.depth_format = VK_FORMAT_UNDEFINED;
+        _cfg.depthTest   = false;
+        _cfg.depthWrite  = false;
+        _cfg.depthFormat = VK_FORMAT_UNDEFINED;
         return PipelineBuilder<ColorCount, false, typename WithoutAttachmentDepth<Formats>::type> {std::move(_cfg)};
     }
 
     template <VkFormat Depth>
     [[nodiscard]] auto DepthFormat() && noexcept -> PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {
         static_assert(Depth != VK_FORMAT_UNDEFINED, "A depth attachment needs a concrete format.");
-        _cfg.depth_format = Depth;
+        _cfg.depthFormat = Depth;
         return PipelineBuilder<ColorCount, true, typename SetAttachmentDepth<Formats, Depth>::type> {std::move(_cfg)};
     }
 
@@ -287,13 +290,13 @@ class PipelineBuilder {
     }
 
     auto ColorWriteEnable(bool enable) noexcept -> PipelineBuilder& {
-        _cfg.color_write_enable = enable;
+        _cfg.colorWriteEnable = enable;
         return *this;
     }
 
     template <size_t N>
     [[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
-        _cfg.color_formats.assign(formats.begin(), formats.end());
+        _cfg.colorFormats.assign(formats.begin(), formats.end());
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
     }
 
@@ -303,7 +306,7 @@ class PipelineBuilder {
     template <VkFormat... Colors>
     [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {
         static_assert(((Colors != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete formats.");
-        _cfg.color_formats = {Colors...};
+        _cfg.colorFormats = {Colors...};
         return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {std::move(_cfg)};
     }
 
@@ -342,7 +345,7 @@ class PipelineBuilder {
                 return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
             }
         }
-        if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
+        if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptorHeap) {
             return std::unexpected(MissingLayout);
         }
         return {};
@@ -350,7 +353,6 @@ class PipelineBuilder {
 
     PipelineConfig _cfg;
 };
-
 
 class ComputePipelineBuilder {
   public:
@@ -371,7 +373,7 @@ class ComputePipelineBuilder {
   private:
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
 
-    ShaderDesc                                          _shader {};
+    ShaderDesc                                           _shader {};
     VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
     VkPipelineCache                                      _cache               = VK_NULL_HANDLE;
     const VkSpecializationInfo*                          _specialization_info = nullptr;
@@ -392,4 +394,4 @@ class PipelineLayoutBuilder {
     std::vector<VkPushConstantRange> _pushConstants;
 };
 
-}
+} // namespace ZHLN::Vk

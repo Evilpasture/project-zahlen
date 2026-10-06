@@ -108,7 +108,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
         .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader(
+            return LoadAndCreateComputeShader<Shaders::Modules::SkinningCS, SkinningConstants>(
                        Vk::MakeStageSource<Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
             )
                 .transform([&](auto&& pipeline) -> auto { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -327,7 +327,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
                      .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
                      .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
                          hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-                         return LoadAndCreateComputeShader(
+                         return LoadAndCreateComputeShader<Shaders::Modules::HangGpuCS>(
                                     Vk::MakeStageSource<Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
                          )
                              .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });

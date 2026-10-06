@@ -4,6 +4,8 @@
 #include "GpuPack.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "passes/forward/ForwardPass.hpp"
+#include "passes/gbuffer/GBufferBasePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Geometry2D.hpp"
@@ -384,51 +386,42 @@ void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
 }
 
 
-namespace {
-
-template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
-[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh, bool depthWrite) -> PipelineDesc {
-    if (withMesh) {
-        return PipelineDesc {
-            .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
-            .fragShader    = Vk::CreateShaderDesc<Fragment>(),
-            .taskShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicTask>(),
-            .meshShader    = Vk::CreateShaderDesc<Mesh>(),
-            .doubleSided   = doubleSided,
-            .alphaBlend    = alphaBlend,
-            .additiveBlend = additiveBlend,
-            .isLineList    = isLineList,
-            .depthWrite    = depthWrite,
-        };
-    }
-    return PipelineDesc {
-        .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
-        .fragShader    = Vk::CreateShaderDesc<Fragment>(),
-        .doubleSided   = doubleSided,
-        .alphaBlend    = alphaBlend,
-        .additiveBlend = additiveBlend,
-        .isLineList    = isLineList,
-        .depthWrite    = depthWrite,
-    };
-}
-
-}
+static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
+static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 
 auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
-    const bool               translucent = alphaBlend || additiveBlend;
-    const PipelineDesc desc = translucent
-        ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
-          )
-        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(
-              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
-          );
+    Vk::MaterialFlags flags = Vk::MaterialFlags::None;
+    if (doubleSided) {
+        flags |= Vk::MaterialFlags::DoubleSided;
+    }
+    if (additiveBlend) {
+        flags |= Vk::MaterialFlags::AdditiveBlend;
+    } else if (alphaBlend) {
+        flags |= Vk::MaterialFlags::TranslucentBlend;
+    }
+    if (depthWrite && (alphaBlend || additiveBlend)) {
+        flags |= Vk::MaterialFlags::DepthWrite;
+    }
 
-    auto mat_res = _impl->pipelines.CreateMaterial(desc);
+    const bool forward = alphaBlend || additiveBlend;
+    std::expected<Material, ErrorCode> mat_res = forward
+        ? _impl->pipelines.CreateMaterial<
+              MaterialPipelineFamily::Forward,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>,
+              Passes::ForwardPass>(flags)
+        : _impl->pipelines.CreateMaterial<
+              MaterialPipelineFamily::Deferred,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS>,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMesh, Shaders::Modules::BasicPS>,
+              Passes::GBufferBasePass>(flags);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
-    Material mat  = mat_res.value();
+    Material mat  = *mat_res;
     mat.albedoMap = TextureHandle::Invalid;
     return mat;
 }
