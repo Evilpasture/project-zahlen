@@ -7,6 +7,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../pipeline/PipelineTypes.hpp"
+
 #include <concepts>
 #include <optional>
 #include <type_traits>
@@ -245,7 +247,7 @@ template <VkImageLayout OldLayout, VkImageLayout NewLayout>
     VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
     uint32_t           baseMip  = 0,
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
-) noexcept -> ZHLN_ImageBarrierDesc;
+) noexcept -> ImageBarrierDesc;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 void TransitionLayout(
@@ -558,7 +560,7 @@ DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
 
 struct PassResource {
-    ZHLN_ImageBarrierDesc barrier;
+    ImageBarrierDesc barrier;
 };
 
 using PassRecordFn = void (*)(VkCommandBuffer, const void* userData);

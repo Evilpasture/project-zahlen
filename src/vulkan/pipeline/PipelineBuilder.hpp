@@ -12,6 +12,8 @@
 
 #include <optional>
 
+#include "PipelineTypes.hpp"
+
 namespace ZHLN::Vk {
 
 
@@ -20,14 +22,18 @@ enum class PipelineBuilderError : uint8_t {
     MissingLayout ZHLN_ANNOTATION(ZHLN::Description<"Missing pipeline layout.">{})       = 2,
     LayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline layout creation failed.">{}),
     PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed.">{}),
-    TooManyColorAttachments ZHLN_ANNOTATION(ZHLN::Description<"More color formats than the descriptor's fixed blend table holds.">{}),
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
 };
 
 
+struct StencilState {
+    VkStencilOpState front {};
+    VkStencilOpState back {};
+};
+
 struct PipelineConfig {
-    // Keep stage metadata by value: typed builder transitions move this config,
-    // and the C descriptor borrows it only during synchronous pipeline creation.
+    // Keep stage metadata by value across typed builder transitions; Vulkan's
+    // create structures borrow the backing data only during synchronous creation.
     std::optional<ShaderStagesView> stages;
     VkPipelineLayout                layout = VK_NULL_HANDLE;
 
@@ -60,9 +66,23 @@ struct PipelineConfig {
 
     const VkSpecializationInfo* specialization_info = nullptr;
 
-    std::optional<ZHLN_StencilState> stencil {};
-    bool                             color_write_enable = true;
+    std::optional<StencilState> stencil {};
+    bool                        color_write_enable = true;
 };
+
+struct ComputePipelineConfig {
+    ShaderDesc shader {};
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipelineCache cache = VK_NULL_HANDLE;
+    const VkSpecializationInfo* specialization = nullptr;
+    bool descriptor_heap = false;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping = nullptr;
+};
+
+[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept
+    -> std::expected<VkPipeline, VkResult>;
+[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept
+    -> std::expected<VkPipeline, VkResult>;
 
 
 template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
@@ -206,12 +226,11 @@ class PipelineBuilder {
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, ErrorCode> {
         return Validate().and_then([&]() -> std::expected<Pipeline, ErrorCode> {
-            const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
-            VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
-            if (pipeline == VK_NULL_HANDLE) {
+            auto pipeline = CreateGraphicsPipeline(device, _cfg);
+            if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
-            return Pipeline(device, pipeline);
+            return Pipeline(device, *pipeline);
         });
     }
 
@@ -237,7 +256,7 @@ class PipelineBuilder {
     }
 
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
-        _cfg.stencil = ZHLN_StencilState {.front = front, .back = back};
+        _cfg.stencil = StencilState {.front = front, .back = back};
         return *this;
     }
 
@@ -294,13 +313,12 @@ class PipelineBuilder {
             static_assert(!HasDepth || Formats::depth_format != VK_FORMAT_UNDEFINED, "Typed pipeline must specify its depth attachment format.");
         }
         return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
-            const ZHLN_GraphicsPipelineDesc desc     = GetDesc();
-            VkPipeline                      pipeline = ZHLN_CreateGraphicsPipeline(device, &desc);
-            if (pipeline == VK_NULL_HANDLE) {
+            auto pipeline = CreateGraphicsPipeline(device, _cfg);
+            if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
             using Result = TypedPipeline<ColorCount, HasDepth, Formats>;
-            return Result {Pipeline(device, pipeline), typename Result::BuilderToken {}};
+            return Result {Pipeline(device, *pipeline), typename Result::BuilderToken {}};
         });
     }
 
@@ -315,11 +333,11 @@ class PipelineBuilder {
         if (!_cfg.stages) {
             return std::unexpected(MissingShaders);
         }
-        const ZHLN_ShaderStages* stages = _cfg.stages->Get();
+        const ShaderStages* stages = _cfg.stages->Get();
         if (stages->vert.code == nullptr && stages->mesh.code == nullptr) {
             return std::unexpected(MissingShaders);
         }
-        for (const ZHLN_Shader* shader: {&stages->vert, &stages->task, &stages->mesh, &stages->frag}) {
+        for (const ShaderStageData* shader: {&stages->vert, &stages->task, &stages->mesh, &stages->frag}) {
             if ((shader->code == nullptr) != (shader->size == 0) || shader->size % sizeof(uint32_t) != 0) {
                 return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
             }
@@ -327,40 +345,7 @@ class PipelineBuilder {
         if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return std::unexpected(MissingLayout);
         }
-        if (_cfg.color_formats.size() > ZHLN_MAX_COLOR_ATTACHMENTS) {
-            return std::unexpected(TooManyColorAttachments);
-        }
         return {};
-    }
-
-    [[nodiscard]] constexpr auto GetDesc() const noexcept -> ZHLN_GraphicsPipelineDesc {
-        return {
-            .stages               = _cfg.stages ? _cfg.stages->Get() : nullptr,
-            .layout               = _cfg.layout,
-            .pipeline_cache       = _cfg.pipeline_cache,
-            .descriptor_heap      = _cfg.descriptor_heap,
-            .vs_mapping           = _cfg.vs_mapping,
-            .ps_mapping           = _cfg.ps_mapping,
-            .vertex_bindings      = _cfg.bindings,
-            .vertex_attributes    = _cfg.attributes,
-            .vertex_binding_count = _cfg.bindingCount,
-            .attribute_count      = _cfg.attributeCount,
-            .color_formats        = _cfg.color_formats.data(),
-            .color_format_count   = static_cast<uint32_t>(_cfg.color_formats.size()),
-            .depth_format         = _cfg.depth_format,
-            .topology             = _cfg.topology,
-            .polygon_mode         = _cfg.polygon_mode,
-            .cull_mode            = _cfg.cull_mode,
-            .front_face           = _cfg.front_face,
-            .depth_test           = _cfg.depth_test,
-            .depth_write          = _cfg.depth_write,
-            .blend_enable         = _cfg.blend_enable,
-            .additive_blend       = _cfg.additive_blend,
-            .view_mask            = _cfg.view_mask,
-            .specialization_info  = _cfg.specialization_info,
-            .stencil              = _cfg.stencil.has_value() ? &*_cfg.stencil : nullptr,
-            .color_write_enable   = _cfg.color_write_enable,
-        };
     }
 
     PipelineConfig _cfg;
@@ -372,7 +357,7 @@ class ComputePipelineBuilder {
     ComputePipelineBuilder() = default;
 
     auto Shader(const uint32_t* code, size_t size, const char* entry = nullptr) noexcept -> ComputePipelineBuilder&;
-    auto Shader(const ZHLN_ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
+    auto Shader(const ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
@@ -386,9 +371,7 @@ class ComputePipelineBuilder {
   private:
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
 
-    const uint32_t*                                      _code                = nullptr;
-    size_t                                               _size                = 0;
-    const char*                                          _entry               = nullptr;
+    ShaderDesc                                          _shader {};
     VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
     VkPipelineCache                                      _cache               = VK_NULL_HANDLE;
     const VkSpecializationInfo*                          _specialization_info = nullptr;

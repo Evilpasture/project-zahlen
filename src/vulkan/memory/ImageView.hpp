@@ -82,7 +82,7 @@ class ImageView {
         -> std::expected<ImageView, ErrorCode>;
 
   private:
-    DeviceHandle<VkImageView, ZHLN_DestroyImageView> _handle;
+    ImageViewHandle _handle;
     VkImageViewCreateInfo _info {};
 };
 

@@ -630,7 +630,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         return;
     }
 
-    ZHLN_BlasGeometryDesc geom = {
+    Vk::BlasGeometryDesc geom = {
         .vertex_data   = scratchMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex    = scratchMesh->vertexCount > 0 ? scratchMesh->vertexCount - 1 : 0,
@@ -641,8 +641,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 
     uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
 
-    ZHLN_AccelerationStructureSizes sizes {};
-    Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount);
 
     const bool creatingBlas = !scratchMesh->blas;
     if (creatingBlas) {
@@ -654,10 +653,14 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
             return;
         }
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
-        scratchMesh->blas       = Vk::AccelerationStructure(
-            ctx.Device(),
-            Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+        auto blas = Vk::CreateAccelerationStructure(
+            ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
+        if (!blas) {
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            return;
+        }
+        scratchMesh->blas = std::move(*blas);
         if (!scratchMesh->blas.Valid()) {
             allocator.DestroyBuffer(scratchMesh->blasBuffer);
             return;
@@ -807,7 +810,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     if (posMesh == nullptr) return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    const ZHLN_BlasGeometryDesc geom {
+    const Vk::BlasGeometryDesc geom {
         .vertex_data = posMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
@@ -816,8 +819,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         .index_type = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
     const uint32_t primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
-    ZHLN_AccelerationStructureSizes sizes {};
-    Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount, sizes);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
 
     auto bufferRes = Vk::Buffer::Create(
         impl.allocator, sizes.acceleration_structure_size,
@@ -825,10 +827,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     );
     if (!bufferRes) return std::unexpected(bufferRes.error());
     defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
-    Vk::AccelerationStructure blas(
-        impl.ctx.Device(), Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+    auto blasResult = Vk::CreateAccelerationStructure(
+        impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
     );
-    if (!blas.Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
+    if (!blasResult) return std::unexpected(Vk::ToFrameError(blasResult.error()));
+    Vk::AccelerationStructure blas = std::move(*blasResult);
 
     auto scratchRes = Vk::Buffer::Create(
         impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,

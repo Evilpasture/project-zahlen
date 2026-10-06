@@ -136,7 +136,7 @@ auto RenderContext::Create(
     VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
     int                     width       = 0;
     int                     height      = 0;
-    ZHLN_PhysicalDeviceInfo physicalInfo {};
+    Vk::PhysicalDeviceInfo physicalInfo {};
 
     return GetPlatformInstanceExtensions(target)
         .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
@@ -180,7 +180,7 @@ auto RenderContext::Create(
                 .Instance(instance)
                 .Surface(raw_surface)
                 .SelectPhysicalDevice()
-                .transform([&](const ZHLN_PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
+                .transform([&](const Vk::PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             if (target.IsTTY() && mode == PresentationMode::NativeSwapchain) {

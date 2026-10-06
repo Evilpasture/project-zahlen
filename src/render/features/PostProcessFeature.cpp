@@ -70,7 +70,7 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
         uint32_t mode   = 0;
     };
 
-    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
     return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get())
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(

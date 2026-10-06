@@ -630,7 +630,7 @@ struct RenderContext::Impl {
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
-    void RegisterShader(const ZHLN_ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
+    void RegisterShader(const Vk::ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 

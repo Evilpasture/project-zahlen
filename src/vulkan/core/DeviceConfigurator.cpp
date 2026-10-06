@@ -2,41 +2,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "DeviceConfigurator.hpp"
-#include "RenderCore.h"
+#include "PhysicalDevice.hpp"
 #include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
-auto MeshShaderLimitsSufficient(VkPhysicalDevice physical) noexcept -> bool {
-    if (physical == VK_NULL_HANDLE) {
-        return false;
-    }
-    VkPhysicalDeviceMeshShaderPropertiesEXT mesh {};
-    mesh.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
-    VkPhysicalDeviceProperties2 properties {};
-    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    properties.pNext = &mesh;
-    vkGetPhysicalDeviceProperties2(physical, &properties);
-
-    ZHLN_MeshShaderLimits limits {};
-    limits.max_mesh_output_vertices = mesh.maxMeshOutputVertices;
-    limits.max_mesh_output_primitives = mesh.maxMeshOutputPrimitives;
-    limits.max_task_work_group_invocations = mesh.maxTaskWorkGroupInvocations;
-    limits.max_mesh_work_group_invocations = mesh.maxMeshWorkGroupInvocations;
-    limits.supported = true; // Caller checked that VK_EXT_mesh_shader is advertised.
-    const bool sufficient = ZHLN_MeshShaderLimitsSufficient(&limits);
-    if (!sufficient) {
+auto MeshShaderLimitsSufficient(const VkPhysicalDevice physical) noexcept -> bool {
+    const MeshShaderLimits limits = QueryMeshShaderLimits(physical);
+    if (!MeshShaderLimitsSufficient(limits)) {
         ZHLN::Log(
             "[Vulkan] Mesh shader limits insufficient (vertices={}, primitives={}, taskInvocations={}, meshInvocations={}); using vertex pipelines.",
             limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_task_work_group_invocations,
             limits.max_mesh_work_group_invocations
         );
+        return false;
     }
-    return sufficient;
+    return true;
 }
 
-void ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags requiredOps) noexcept {
-    if (physical == VK_NULL_HANDLE) {
+void ReportSubgroupSupport(const VkPhysicalDevice physical, const VkSubgroupFeatureFlags requiredOps) noexcept {
+    if (physical == VK_NULL_HANDLE || vkGetPhysicalDeviceProperties2 == nullptr) {
         return;
     }
     VkPhysicalDeviceSubgroupProperties subgroup {};

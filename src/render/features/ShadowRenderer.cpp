@@ -57,7 +57,7 @@ auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) const noexcept -> con
     return _indirectCommands[frameIndex];
 }
 
-auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
+auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
     _cascadeLayout = impl.emptyPipelineLayout;
 
@@ -112,7 +112,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
         });
 }
 
-auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag)
+auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
     _punctualLayout = impl.emptyPipelineLayout;
     return Vk::ShaderStagesView::Create(vert, frag)

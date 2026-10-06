@@ -3,6 +3,7 @@
 
 #include "SemaphorePool.hpp"
 #include <Zahlen/Core/Math.hpp>
+#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
@@ -42,14 +43,20 @@ void SemaphorePool::Rebuild(const VkDevice device, const uint32_t count) noexcep
     _device = device;
     _count  = ZHLN::Math::Min(count, 6U);
 
+    const VkSemaphoreCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
     for (uint32_t i = 0; i < _count; ++i) {
-        _semaphores[i] = ZHLN_CreateSemaphore(_device);
+        if (vkCreateSemaphore(_device, &info, nullptr, &_semaphores[i]) != VK_SUCCESS) {
+            Cleanup();
+            return;
+        }
     }
 }
 
 auto SemaphorePool::operator[](const uint32_t index) const noexcept -> VkSemaphore {
     if (index >= _count) [[unlikely]] {
-        ReportSemaphoreBoundsError(index, _count);
+        ZHLN::Panic("[Vk] SemaphorePool index {} out of bounds (size {}).", index, _count);
     }
     return _semaphores[index];
 }

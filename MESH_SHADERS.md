@@ -67,19 +67,17 @@ before using them with the version-6 shaders.
 
 ## 2. Device enablement
 
-* Extension: `VK_EXT_mesh_shader` — requested **optionally**
-  (`RenderInit.cpp: GetDeviceExtensions`), gated on `CheckMeshShaderSupport()`.
+* Extension: `VK_EXT_mesh_shader` — requested **optionally** by the C++ device
+  configurator, gated on extension support, entry-point availability, and limits.
 * Features: `taskShader`, `meshShader`, `multiviewMeshShader`
   (`VkPhysicalDeviceMeshShaderFeaturesEXT`, chained only when supported).
-* Limits: `ZHLN_QueryMeshShaderLimits()` +
-  `ZHLN_MeshShaderLimitsSufficient()` demand
+* Limits: `QueryMeshShaderLimits()` + `MeshShaderLimitsSufficient()` demand
   `maxMeshOutputVertices ≥ 64`, `maxMeshOutputPrimitives ≥ 124`,
   `maxTaskWorkGroupInvocations ≥ 32`, `maxMeshWorkGroupInvocations ≥ 64`
   — exactly the budget baked into the shaders.
-* Entry points (`vkCmdDrawMeshTasksEXT`, `…IndirectEXT`, `…IndirectCountEXT`)
-  are resolved once in `ZHLN_CreateDevice` and stored on `ZHLN_Device`;
-  `ZHLN::Vk::Context` forwards to them, and `Context::MeshShadersSupported()`
-  is the single source of truth.
+* Volk loads the device-level entry points after `vkCreateDevice`; the typed
+  `Vk::Context` records whether the required mesh commands resolved, and
+  `Context::MeshShadersSupported()` is the single source of truth.
 
 `RenderConfig::enableMeshShading` (default true) is the create-time request.
 `ZHLN_NO_MESH_SHADING=1` forces the vertex path at `RenderContext::Create`
@@ -97,10 +95,9 @@ context's lifetime.
    survived the cut while `VK_EXT_mesh_shader` did not — mesh shading looked
    unsupported on hardware that fully supports it, while
    `VK_EXT_descriptor_heap` kept working because `ExtensionBuilder::ForDevice()`
-   enumerates into a growable vector. Both probes now enumerate the full list
-   (`EnumerateDeviceExtensions` / `EnumerateInstanceExtensions`, with a
-   `VK_INCOMPLETE` retry loop), and the same clamp was removed from the C-side
-   instance-extension filter.
+   enumerates into a growable vector. The instance and device probes now
+   enumerate the full list (`EnumerateDeviceExtensions` /
+   `EnumerateInstanceExtensions`, with a `VK_INCOMPLETE` retry loop).
 2. **All-or-nothing optional features.** `FeatureChain::Optional<T>` drops the
    *entire* feature struct if any single requested `VkBool32` is unsupported.
    Requesting `multiviewMeshShader` unconditionally would therefore have
@@ -118,14 +115,13 @@ round number reveals a truncation regression) from "features not advertised",
 
 ## 3. Pipelines
 
-`ZHLN_ShaderStages` carries handle-free SPIR-V metadata for vertex, fragment,
-task, and mesh stages. `ZHLN_PopulateShaderStageInfos` emits **task+mesh
-instead of vertex** when mesh SPIR-V is present (a pipeline may not declare
-both). Each stage chains an inline `VkShaderModuleCreateInfo` and, when using
-the descriptor heap, the same `VkShaderDescriptorSetAndBindingMappingInfoEXT`
-(`vs_mapping`) for task and mesh, since both consume the `scene` block.
-`ZHLN_CreateGraphicsPipeline` passes `pVertexInputState`/`pInputAssemblyState`
-as `NULL` for mesh pipelines; the descriptor-heap flag path is untouched.
+`Vk::ShaderStages` / `ShaderStagesView` carry handle-free SPIR-V metadata for
+vertex, fragment, task, and mesh stages. `Vk::CreateGraphicsPipeline` emits
+**task+mesh instead of vertex** when mesh SPIR-V is present (a pipeline may not
+declare both). Each stage chains an inline `VkShaderModuleCreateInfo` and, when
+using the descriptor heap, the configured
+`VkShaderDescriptorSetAndBindingMappingInfoEXT` mapping. Mesh pipelines omit
+`pVertexInputState` and `pInputAssemblyState`.
 
 `ReflectedLayout::Build` now folds `VK_SHADER_STAGE_TASK_BIT_EXT` and
 `VK_SHADER_STAGE_MESH_BIT_EXT` into the reflected bindless layout.

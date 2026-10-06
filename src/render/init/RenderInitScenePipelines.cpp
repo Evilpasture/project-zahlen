@@ -500,8 +500,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             if (!ctx.RayTracingSupported()) {
                 return {};
             }
-            ZHLN_AccelerationStructureSizes tlasSizes;
-            Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances, tlasSizes);
+            const Vk::AccelerationStructureSizes tlasSizes = Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances);
 
             return CreatePerFrame(
                        allocator, tlasSizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
@@ -523,11 +522,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .and_then([&](auto&& tib) -> std::expected<void, ErrorCode> {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-                        frames.tlas[i] = Vk::AccelerationStructure(
-                            ctx.Device(), Vk::CreateAccelerationStructure(
-                                              ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
-                                          )
+                        auto tlas = Vk::CreateAccelerationStructure(
+                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
+                            Vk::AccelerationStructureType::TopLevel
                         );
+                        if (!tlas) {
+                            return std::unexpected(Vk::ToFrameError(tlas.error()));
+                        }
+                        frames.tlas[i] = std::move(*tlas);
                         if (!frames.tlas[i].Valid()) {
                             return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
                         }

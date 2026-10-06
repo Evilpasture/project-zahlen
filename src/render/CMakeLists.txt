@@ -112,8 +112,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 endif()
 
 set_source_files_properties("${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES GENERATED TRUE)
-set_source_files_properties("${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES
-    COMPILE_OPTIONS "$<$<BOOL:${ZHLN_HAS_WC23_EXTENSIONS}>:-Wno-c23-extensions>")
 add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 add_dependencies(zahlen_render zahlen_gpu_types)

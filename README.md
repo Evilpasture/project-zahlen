@@ -13,7 +13,7 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
   Slang normally comes as a host `slangc` (Vulkan SDK or a GitHub release). When no `slangc` is on PATH, CMake
   builds the vendored [extern/slang](https://github.com/shader-slang/slang) submodule. `./tools/build.sh --zig`
   can still fall back to the compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
-* **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
+* **C compiler (C11)**: Builds the remaining C dependencies such as Volk; the engine itself is C++26.
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 * **resvg (optional)**: `plugins/SVG` rasterizes `.svg` documents through [resvg](https://github.com/linebender/resvg)'s C API.
   CMake looks for it (CMake package, `resvg.pc`, or a bare prefix) and, when it is not installed, warns and skips that one

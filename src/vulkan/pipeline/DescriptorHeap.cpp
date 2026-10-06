@@ -158,7 +158,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     _mappedRegion = std::move(*mapped);
     _mappedPtr    = _mappedRegion.Data();
 
-    const VkDeviceAddress address = GetBufferAddress(_device, _buffer.Handle());
+    const VkDeviceAddress address = ctx.BufferAddress(_buffer.Handle());
     if (address == 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::DeviceAddressFailed);
     }

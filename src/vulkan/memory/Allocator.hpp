@@ -364,8 +364,20 @@ void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset =
 }
 
 inline void CopyBuffer(VkCommandBuffer cmd, VkBuffer src, VkBuffer dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {
-    const ZHLN_BufferCopyDesc copy = {.src = src, .dst = dst, .size = size, .src_offset = srcOffset, .dst_offset = dstOffset};
-    ZHLN_CmdCopyBuffer(cmd, &copy);
+    const VkBufferCopy2 region {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_COPY_2,
+        .srcOffset = srcOffset,
+        .dstOffset = dstOffset,
+        .size = size,
+    };
+    const VkCopyBufferInfo2 copyInfo {
+        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+        .srcBuffer = src,
+        .dstBuffer = dst,
+        .regionCount = 1,
+        .pRegions = &region,
+    };
+    vkCmdCopyBuffer2(cmd, &copyInfo);
 }
 
 inline void CopyBuffer(VkCommandBuffer cmd, const Buffer& src, const Buffer& dst, VkDeviceSize size, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0) {

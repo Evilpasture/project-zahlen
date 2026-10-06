@@ -200,7 +200,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     if (!mappedInstances) return;
     std::memcpy(mappedInstances->Data(), tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
-    ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
+    Vk::TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
     auto& scratch = frames.tlasScratchBuffer[presenter.frameIndex];
     Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())},
@@ -416,7 +416,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    _impl->presenter.sync.StepTimeline(frame_index);
+    (void)_impl->presenter.sync.StepTimeline(frame_index);
 
     _impl->gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();

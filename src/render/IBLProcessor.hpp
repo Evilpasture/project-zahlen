@@ -66,7 +66,7 @@ class IBLProcessor {
             ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (procedural sky)...");
         }
 
-        const auto requireShader = [](const ZHLN_ShaderDesc& shader) -> std::expected<ZHLN_ShaderDesc, ZHLN::ErrorCode> {
+        const auto requireShader = [](const ShaderDesc& shader) -> std::expected<ShaderDesc, ZHLN::ErrorCode> {
             if (shader.code == nullptr || shader.size == 0) {
                 return std::unexpected(ZHLN::Vk::ShaderStageCreationError::ShaderLoadingFailed);
             }
@@ -282,7 +282,7 @@ class IBLProcessor {
                     }
                 }
                 ImageBarrier(
-                    cmd, ZHLN_ImageBarrierDesc {
+cmd, ImageBarrierDesc {
                              .image      = radianceImage->Handle(),
                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
@@ -302,7 +302,7 @@ class IBLProcessor {
                 VkBufferImageCopy2 visualRegion = region;
                 visualRegion.bufferOffset = visualOffsetFloats * sizeof(float);
                 CopyBufferToImage<1>(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), {visualRegion});
-                ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
+                ImageBarrier(cmd, ImageBarrierDesc {
                     .image      = state.payload.visualSkyImage.Handle(),
                     .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                     .dst_access = VK_ACCESS_2_SHADER_READ_BIT,

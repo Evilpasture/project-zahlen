@@ -102,7 +102,7 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
                     Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
                 });
 
-                const VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
+                const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
                 return Adopt(std::move(gpu_buf), elementCount, address);
             }
         );
@@ -151,7 +151,7 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
 
     return Vk::Buffer::Create(_allocator, size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> BufferHandle {
-            const VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
+            const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
             return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
         })
         .value_or(BufferHandle::Invalid);

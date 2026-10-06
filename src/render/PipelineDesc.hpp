@@ -9,11 +9,11 @@
 namespace ZHLN {
 
 struct PipelineDesc {
-    ZHLN_ShaderDesc vertexShader;
-    ZHLN_ShaderDesc fragShader;
+    Vk::ShaderDesc vertexShader;
+    Vk::ShaderDesc fragShader;
 
-    ZHLN_ShaderDesc taskShader;
-    ZHLN_ShaderDesc meshShader;
+    Vk::ShaderDesc taskShader;
+    Vk::ShaderDesc meshShader;
     bool            doubleSided   = false;
     bool            alphaBlend    = false;
     bool            additiveBlend = false;

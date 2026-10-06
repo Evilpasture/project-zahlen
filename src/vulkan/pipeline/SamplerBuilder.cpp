@@ -95,8 +95,8 @@ auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Samp
         return std::unexpected(SamplerCreationError::NullDevice);
     }
 
-    VkSampler sampler = ZHLN_CreateSampler(device, &_info);
-    if (sampler == VK_NULL_HANDLE) {
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (vkCreateSampler(device, &_info, nullptr, &sampler) != VK_SUCCESS) {
         return std::unexpected(SamplerCreationError::CreationFailed);
     }
 

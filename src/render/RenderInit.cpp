@@ -27,7 +27,7 @@ auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::Fra
 std::expected<Vk::Pipeline, ErrorCode>
     RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
     const auto loaded = LoadShaderData(cs);
-    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);

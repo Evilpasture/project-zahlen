@@ -4,60 +4,47 @@ This document outlines the architecture, resource lifetime model, and pipeline e
 
 ---
 
-## 1. Architectural Philosophy
+## 1. Architecture
 
-ZHLN is built on a **Dual-Layer Compilation Model** to balance low-level driver control, compilation speed, and developer safety.
+The renderer is a C++26 Vulkan subsystem organized by responsibility. It calls Vulkan through Volk directly where appropriate and keeps policy, ownership, and error handling in the module that owns each domain; there is no parallel procedural C façade.
 
-```
-       [ Client Engine Code (ECS Systems, Gameplay, Editor) ]
-                                 │
-                                 ▼
-   ┌───────────────────────────────────────────────────────────┐
-   │             C++ Object-Oriented Frontend                  │
-   │  - RAII Resource Wrappers (Buffer, Image, Pipeline)       │  <-- src/vulkan/
-   │  - Compile-Time Layout Contracts (DescriptorLayout)       │
-   │  - Frame loop orchestration (RenderContext, RenderFrame)  │
-   └─────────────────────────────┬─────────────────────────────┘
-                                 │ (Inlined Type Conversions)
-                                 ▼
-   ┌───────────────────────────────────────────────────────────┐
-   │                 Procedural C Backend                      │
-   │  - Thin Vulkan API Abstractions                           │  <-- RenderCore.h
-   │  - Hardware Selection & Swapchain Infrastructure          │
-   │  - State transitions, command submission, and sync        │
-   └───────────────────────────────────────────────────────────┘
-```
+* **`core/`** owns instance/device setup, physical-device selection, and typed handles.
+* **`presentation/`** owns surfaces, swapchains, pacing, and presentation.
+* **`execution/`** owns command recording, synchronization, queue submission, and barriers.
+* **`memory/`** owns VMA-backed resources, staging, texture uploads, and render targets.
+* **`pipeline/`** owns shader, descriptor, sampler, and pipeline construction.
+* **`diagnostics/`** owns validation routing, GPU fault reporting, address-binding tracking, and acceleration-structure helpers.
+* **`graph/`** provides image/layout and render-graph abstractions used by the renderer.
 
-* **The C Backend (`RenderCore.h`):** Exposes a stateless, procedural C23 API. It handles the raw Vulkan boilerplates (instance creation, device selection, swapchain recreation, synchronization primitives). It does not allocate memory on the heap and remains independent of C++ engine structures.
-* **The C++ Frontend (`RenderCore.hpp`):** Wraps raw Vulkan handles in strongly-typed RAII structures. It leverages C++23 type-safety features to validate descriptor bindings, vertex layouts, and image transitions at compile time, eliminating runtime state validation.
+`Rendering.hpp` is the umbrella include for the Vulkan subsystem. Its `VulkanHeader.hpp` include establishes Volk's dispatch declarations before the domain headers.
 
 ### Vulkan Loading (Volk)
 
-The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk) (pinned at `extern/volk`, tag matching the CI SDK version) acquires the loader at runtime and dispatches through its own function pointers:
+The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk), pinned in `extern/volk`, acquires it at runtime and dispatches Vulkan calls through its function pointers:
 
-* `vk*` names are Volk dispatch pointers, not loader prototypes — call sites are unaffected, but every pointer is `NULL` until the loader is acquired. `volk.h` therefore owns the Vulkan includes everywhere (`RenderingPCH.h`, `RenderCore.h`) and must be included *before* any header that pulls in `<vulkan/vulkan.h>`.
-* `ZHLN_EnsureVulkanLoader()` (RenderCore.c) is a stateless `volkInitialize()` — idempotent, race-safe. `ZHLN_CreateInstance()` and the pre-instance helpers (`ExtensionBuilder::ForInstance()`, `EnumerateInstanceExtensions()`) call it before touching any dispatch pointer.
-* `ZHLN_CreateInstance()` calls `volkLoadInstance()` right after instance creation; `ZHLN_CreateDevice()` calls `volkLoadDevice()` so device-level commands hit the driver's entry points directly, skipping the loader trampolines. The engine is single-device; multi-device would need `volkCreateDeviceTable()` per device.
+* `VulkanHeader.hpp` includes `volk.h`; include it (through `Rendering.hpp`) before any header that pulls in Vulkan declarations.
+* `EnumerateInstanceExtensions()` and `Vk::Instance::Create()` call `volkInitialize()` before using instance-level dispatch. `Instance::Create()` calls `volkLoadInstance()` after creating the instance; device setup in `Context.cpp` calls `volkLoadDevice()` after `vkCreateDevice()`.
+* Loader initialization failure is returned/reported through the existing C++ instance and extension paths instead of causing a link-time dependency on a Vulkan loader.
 
-This keeps tools and executables runnable on machines without a loader installed (clean `ZHLN_EnsureVulkanLoader()` failure instead of a missing-library abort at process start) and removes loader overhead from the hot paths.
+Volk's dispatch table is process-global in this build, so the renderer permits one live Vulkan instance at a time. `Instance::Create()` claims that slot and refuses a concurrent second instance rather than silently replacing dispatch state.
 
 ### Diagnostics Ownership (Vk::Instance)
 
-The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/vulkan/core/Instance.hpp) owns the Vulkan instance and its persistent debug messengers, and routes validation diagnostics into **caller-owned storage**. The optional GPU address tracker is separate C++ state: it holds only live bindings while the device feature is enabled and is cleared after device teardown:
+The C++ `Vk::Instance` (src/vulkan/core/Instance.hpp) owns the Vulkan instance and persistent debug messengers, and routes validation diagnostics into **caller-owned storage**. The optional GPU address tracker is separate C++ state: it holds only live bindings while the device feature is enabled and is cleared after device teardown:
 
 * An observer that needs values to outlive an engine (the test framework) registers a sink — `RenderContext::UseDiagnostics(&validationErrors, &deviceLost)` — before creating engines. Every instance created afterwards increments those atomics **directly**, including teardown-time events fired while the instance is being destroyed, so per-test before/after snapshots bracketing a whole engine lifecycle are exact. There is no retirement fold and none is needed: the storage is the single source of truth and it already outlives the engine.
 * `RenderContext::ValidationErrorCount()` / `RenderContext::DeviceLostCount()` are **live views**: the active instance's counters, zero while no engine exists. Workload-scoped snapshots inside a running engine (RenderPerformance, RTR, mesh shaders, …) use these. Unregistered engines count into per-instance members, and those counts die with the instance.
-* The instance descriptor carries a `ZHLN_DebugForwarding` (hooks + owner pointer); the pNext messenger (instance create/destroy) and persistent validation messenger forward error severities into the counting target. A separate INFO-only messenger subscribes to device-address-binding events and forwards the binding payload plus callback `pObjects` to the C++ tracker. The stateless behaviors (stderr logging, the GPU-AV out-of-bounds abort) stay in the C callback.
+* `Vk::Instance` installs the debug messenger callbacks and routes validation severities into the selected counters. A separate INFO-only messenger subscribes to device-address-binding events and forwards the binding payload plus callback `pObjects` to the C++ GPU-address tracker.
 * `Vk::Instance::IncrementNumericalDeviceLoss()` is the diagnostics increment for `VK_ERROR_DEVICE_LOST` observed on void paths; it bumps the active instance's counter and is unobservable when no engine is live. Nothing reads the counter for control flow -- recovery rides the monadic frame-result chain.
-* `Vk::Instance` is move-aware: the C-side forwarding pointer is re-pointed on every move, so builder-to-context transfers keep the hook valid.
+* `Vk::Instance` is move-aware: its debug-state owner pointer is rebound on every move, so builder-to-context transfers keep callback state valid.
 * The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `Instance::Create()` claims the slot with a compare-and-swap and refuses (returning an invalid instance) while another is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
 
 ### One dispatch table per image
 
-Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_vulkan`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the RHI's symbols (`volk*`, `ZHLN_*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time. Consequences:
+Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_vulkan`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the RHI's symbols (`volk*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time; the separate `ZHLN_*` rule continues to hide internal engine C-prefix symbols. Consequences:
 
 * The engine `.so` always initializes and dispatches through **its own** table, regardless of what an executable embeds.
-* An executable-embedded copy has its own table, global-level initialized on demand via `ZHLN_EnsureVulkanLoader()` — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
+* An executable-embedded copy has its own table, initialized on demand via Volk — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
 
 ---
 
@@ -256,21 +243,16 @@ is exactly the bug that shape invites. Both faces always get the same state;
 `StencilOp(front, back)` remains for the rarer pipeline that wants them to
 differ.
 
-The C descriptor carries the same single fact (`ZHLN_StencilState*` in
-`ZHLN_GraphicsPipelineDesc`, NULL = off), so the enable cannot be re-invented at
-the boundary: `ZHLN_CreateGraphicsPipeline` reads it out of the pointer's
-presence and refuses a state over a depth format with no stencil aspect
-(`zhln_format_has_stencil`) instead of handing the driver a test with nothing to
-apply it to. A pass that attaches a stencil view it does not test is still fine —
-that is what the format member says, and what
-`dynamicRenderingUnusedAttachments` covers (`DESCRIPTOR_HEAPS.md`).
+The C++ `PipelineBuilder` stores an optional `StencilState`; setting a stencil
+operation enables stencil testing, and `CreateGraphicsPipeline` rejects stencil
+state when the configured depth format has no stencil aspect. A pass may still
+attach a stencil-capable view without testing it — the dynamic-rendering format
+member describes the attachment, while `dynamicRenderingUnusedAttachments`
+covers the unused aspect (`DESCRIPTOR_HEAPS.md`).
 
-The blend half is preset-shaped in the same way but not yet exposed: the C layer
-composes each attachment from one of two named states (alpha, additive), the
-caller's write mask, and nothing else. A descriptor naming more colors than
-`ZHLN_MAX_COLOR_ATTACHMENTS` is refused by name
-(`PipelineBuilderError::TooManyColorAttachments`) rather than blended by a table
-shorter than the attachment count.
+Blend presets are also builder operations (`AlphaBlend()` and
+`AdditiveBlend()`); the pipeline implementation builds the attachment states
+from the configured color formats and write mask.
 
 ### Descriptor Heaps (VK_EXT_descriptor_heap)
 The scene binding model no longer uses descriptor sets, pools, or set layouts.
@@ -288,7 +270,7 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 * Legacy set/binding decorations in the (unchanged) Slang shaders are remapped
   onto the heaps at **pipeline creation** through
   `VkShaderDescriptorSetAndBindingMappingEXT` chains
-  (`ZHLN_GraphicsPipelineDesc::descriptor_heap`, `PipelineBuilder::HeapMappings`).
+  (`PipelineBuilder::HeapMappings` and `PipelineBuilder::HeapPipeline()`).
   No shader changes were required.
 * Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
   `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read

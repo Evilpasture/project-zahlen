@@ -26,7 +26,7 @@ constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
 
 }
 
-auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+auto ReflectComputeThreadGroupSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -65,7 +65,7 @@ auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> st
     return result;
 }
 
-auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+auto ReflectComputeDispatchSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -99,7 +99,7 @@ auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::
 namespace {
 
 template <typename T>
-auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<T> {
+auto ReflectSpecializationConstant(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<T> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -127,11 +127,11 @@ auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t const
 
 }
 
-auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
+auto ReflectSpecializationConstantU32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
     return ReflectSpecializationConstant<uint32_t>(shader, constantId);
 }
 
-auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
+auto ReflectSpecializationConstantF32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
@@ -140,7 +140,7 @@ bool ReflectedLayout::Build(VkDevice , ShaderStagesView shaders) noexcept {
     const auto* const      raw = shaders.Get();
     // Reflect the same borrowed SPIR-V the inline module create infos will use.
     // The caller keeps any disk-backed storage alive through this call.
-    for (const ZHLN_Shader* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
+    for (const ShaderStageData* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
         if (shader->code != nullptr && shader->size > 0) {
             builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entry_point}, shader->stage);
         }
@@ -148,7 +148,7 @@ bool ReflectedLayout::Build(VkDevice , ShaderStagesView shaders) noexcept {
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice , const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+bool ReflectedLayout::Build(VkDevice , const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
     ReflectedLayoutBuilder builder;
     builder.AddStageUnsafe(shader, stage);
     return BuildInto(*this, builder);
@@ -162,7 +162,7 @@ bool ReflectedLayout::Build(VkDevice , std::span<const ReflectedStageInput> stag
     return BuildInto(*this, builder);
 }
 
-void ReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
+void ReflectedLayoutBuilder::AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }

@@ -91,28 +91,13 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
         return {};
     }
 
-    const ZHLN_Device raw_dev = {
-        .handle         = _ctx->Device(),
-        .graphics_queue = _ctx->GraphicsQueue(),
-        .present_queue  = _ctx->PresentQueue(),
-        .transfer_queue = _ctx->TransferQueue(),
-        .compute_queue  = _ctx->ComputeQueue()
-    };
-    const ZHLN_PhysicalDeviceInfo raw_phys = _ctx->PhysicalInfo();
-    ZHLN_SwapchainDesc            s_desc   = {
-        .device                = &raw_dev,
-        .physical              = &raw_phys,
-        .surface               = surface.Get(),
-        .width                 = width,
-        .height                = height,
-        .vsync                 = _vsync,
-        .present_mode          = _pacer.RequestedPresentMode(),
-        .enable_present_timing = _pacer.WantsPresentTiming(),
-        .old_swapchain         = swapchain.Get().handle,
-    };
-
-    if (!swapchain.Rebuild(s_desc)) {
-        return std::unexpected(PresentationError::SwapchainCreationFailed);
+    const VkExtent2D requestedExtent {.width = width, .height = height};
+    auto swapchainResult = swapchain.Rebuild(
+        _ctx->Device(), _ctx->PhysicalInfo(), surface.Get(), requestedExtent, _vsync,
+        _pacer.RequestedPresentMode(), _pacer.WantsPresentTiming()
+    );
+    if (!swapchainResult) {
+        return std::unexpected(ToFrameError(swapchainResult.error()));
     }
     _pacer.OnSwapchainRebuilt(_ctx->Device(), swapchain.Get().handle, swapchain.Get().image_count, swapchain.Get().present_mode);
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
@@ -172,12 +157,9 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 
     const auto& sc = swapchain.Get();
     uint32_t    imageIndex = 0;
-    ZHLN_AcquireDesc acquire {
-        .swapchain       = sc.handle,
-        .image_available = sync[slot].image_available,
-        .timeout_ns      = UINT64_MAX,
-    };
-    const VkResult res = ZHLN_AcquireImage(_ctx->Device(), &acquire, &imageIndex);
+    const VkResult res = vkAcquireNextImageKHR(
+        _ctx->Device(), sc.handle, UINT64_MAX, sync.ImageAvailable(slot), VK_NULL_HANDLE, &imageIndex
+    );
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
         if (res == VK_ERROR_OUT_OF_DATE_KHR && desiredExtent.width != 0 && desiredExtent.height != 0) {
             (void)Rebuild(desiredExtent.width, desiredExtent.height);
@@ -228,13 +210,12 @@ auto SwapchainPresenter::Present(
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
     const bool     presents = swapchain.Valid();
-    const uint32_t slot     = frameIndex;
-    const ZHLN_FrameSync& frameSync = sync[slot];
+    const uint32_t slot = frameIndex;
 
     std::array<VkSemaphoreSubmitInfo, 4> waits {};
     uint32_t                             waitCount = 0;
     if (presents) {
-        waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(frameSync.image_available, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+        waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(sync.ImageAvailable(slot), 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
     }
     for (const VkSemaphoreSubmitInfo& extra: extraWaits) {
         if (waitCount == waits.size()) {
@@ -251,7 +232,7 @@ auto SwapchainPresenter::Present(
     }
     auto submitRes = Vk::QueueSubmit(
         graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount},
-        std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1u : 0u}, frameSync.in_flight
+        std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1u : 0u}, sync.InFlight(slot)
     );
     if (!submitRes) [[unlikely]] {
         return std::unexpected(submitRes.error());
@@ -268,26 +249,31 @@ auto SwapchainPresenter::Present(
         timedChain.emplace(*prediction);
         presentId = &timedChain->presentId;
     }
-    const ZHLN_PresentDesc present {
-        .present_queue   = presentQueue,
-        .swapchain       = swapchain.Get().handle,
-        .render_finished = presentSem,
-        .image_index     = imageIndex,
-        .present_id      = presentId,
+    const auto presentFrame = [&](const VkPresentId2KHR* id) -> FrameOutcome<PresentSuboptimal> {
+        const VkPresentInfoKHR info {
+            .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .pNext              = id,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores    = &presentSem,
+            .swapchainCount     = 1,
+            .pSwapchains        = &swapchain.Get().handle,
+            .pImageIndices      = &imageIndex,
+        };
+        const VkResult result = vkQueuePresentKHR(presentQueue, &info);
+        if (result == VK_SUCCESS) {
+            return {};
+        }
+        if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+            return PresentSuboptimal {};
+        }
+        return std::unexpected(ToFrameError(result));
     };
-    auto presented = Vk::PresentFrame(present);
+    auto presented = presentFrame(presentId);
     if (!presented && presentId != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {
         if (_ctx != nullptr) {
             _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
         }
-        const ZHLN_PresentDesc retry {
-            .present_queue   = presentQueue,
-            .swapchain       = swapchain.Get().handle,
-            .render_finished = presentSem,
-            .image_index     = imageIndex,
-            .present_id      = nullptr,
-        };
-        presented = Vk::PresentFrame(retry);
+        presented = presentFrame(nullptr);
     }
     if (!presented) {
         return std::unexpected(presented.error());

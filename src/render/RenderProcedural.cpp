@@ -19,7 +19,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 
     const auto source = Vk::MakeStageSource<Shaders::Modules::ProceduralBakeCS>();
     const auto loaded = LoadShaderData(source);
-    const ZHLN_ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
+    const Vk::ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
 
     struct BakeSpec {
         int bakeType = 0;

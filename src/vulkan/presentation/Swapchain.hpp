@@ -3,18 +3,42 @@
 
 #pragma once
 
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
+#endif
+
+#include "../core/PhysicalDevice.hpp"
+#include <span>
+#include <vector>
+
 namespace ZHLN::Vk {
 
 struct SwapchainSupport {
-    ZHLN_SwapchainSupport raw;
-    [[nodiscard]] auto    Formats() const noexcept -> std::span<const VkSurfaceFormatKHR>;
-    [[nodiscard]] auto    PresentModes() const noexcept -> std::span<const VkPresentModeKHR>;
+    VkSurfaceCapabilitiesKHR       capabilities {};
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR>   present_modes;
+
+    [[nodiscard]] auto Formats() const noexcept -> std::span<const VkSurfaceFormatKHR> {
+        return formats;
+    }
+    [[nodiscard]] auto PresentModes() const noexcept -> std::span<const VkPresentModeKHR> {
+        return present_modes;
+    }
+};
+
+struct SwapchainData {
+    VkSwapchainKHR           handle = VK_NULL_HANDLE;
+    std::vector<VkImage>     images;
+    std::vector<VkImageView> views;
+    uint32_t                 image_count = 0;
+    VkFormat                 format = VK_FORMAT_UNDEFINED;
+    VkExtent2D               extent {};
+    VkPresentModeKHR         present_mode = VK_PRESENT_MODE_MAX_ENUM_KHR;
 };
 
 class Swapchain {
   public:
     Swapchain() noexcept = default;
-    Swapchain(VkDevice device, ZHLN_Swapchain raw) noexcept;
     ~Swapchain() noexcept;
 
     Swapchain(const Swapchain&)                    = delete;
@@ -23,23 +47,31 @@ class Swapchain {
     Swapchain(Swapchain&& other) noexcept;
     auto operator=(Swapchain&& other) noexcept -> Swapchain&;
 
-    [[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_Swapchain& {
-        return _raw;
+    [[nodiscard]] auto Get() const noexcept -> const SwapchainData& {
+        return _data;
     }
-    [[nodiscard("Verify swapchain validity before use")]]
-    constexpr auto Valid() const noexcept -> bool {
-        return _raw.handle != VK_NULL_HANDLE;
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return _data.handle != VK_NULL_HANDLE;
     }
-    constexpr explicit operator bool() const noexcept {
+    explicit operator bool() const noexcept {
         return Valid();
     }
 
-    auto Rebuild(const ZHLN_SwapchainDesc& desc) noexcept -> bool;
+    [[nodiscard]] auto Rebuild(
+        VkDevice device,
+        const PhysicalDeviceInfo& physical,
+        VkSurfaceKHR surface,
+        VkExtent2D extent,
+        bool vsync,
+        VkPresentModeKHR requestedPresentMode,
+        bool enablePresentTiming
+    ) noexcept -> std::expected<void, VkResult>;
 
   private:
     void Destroy() noexcept;
 
-    VkDevice       _device = VK_NULL_HANDLE;
-    ZHLN_Swapchain _raw    = {};
+    VkDevice      _device = VK_NULL_HANDLE;
+    SwapchainData _data {};
 };
+
 } // namespace ZHLN::Vk

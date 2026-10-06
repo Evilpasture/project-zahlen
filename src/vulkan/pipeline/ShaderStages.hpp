@@ -3,8 +3,11 @@
 
 #pragma once
 
-#include "ShaderProgram.hpp"
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
+#endif
 
+#include "ShaderProgram.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <array>
@@ -25,20 +28,33 @@ enum class ShaderStageCreationError : uint8_t {
     VertexShaderEmpty ZHLN_ANNOTATION(ZHLN::Description<"Vertex or mesh shader is empty">{}),
 };
 
-[[nodiscard]] constexpr auto CreateShaderDesc(const uint32_t* code, size_t size, const char* entry = nullptr) -> ZHLN_ShaderDesc {
-    return ZHLN_ShaderDesc {.code = code, .size = size, .entry_point = entry};
+struct ShaderStageData {
+    const uint32_t*       code = nullptr;
+    size_t                size = 0;
+    VkShaderStageFlagBits stage {};
+    char                  entry_point[64] {};
+    uint32_t              view_mask = 0;
+};
+
+struct ShaderStages {
+    ShaderStageData task {};
+    ShaderStageData mesh {};
+    ShaderStageData vert {};
+    ShaderStageData frag {};
+};
+
+[[nodiscard]] constexpr auto CreateShaderDesc(const uint32_t* code, size_t size, const char* entry = nullptr) noexcept -> ShaderDesc {
+    return {.code = code, .size = size, .entry_point = entry};
 }
 
 template <typename T, size_t Extent>
-[[nodiscard]] constexpr auto CreateShaderDesc(std::span<T, Extent> codeSpan, const char* entry = nullptr) -> ZHLN_ShaderDesc {
-    return ZHLN_ShaderDesc {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
+[[nodiscard]] constexpr auto CreateShaderDesc(std::span<T, Extent> codeSpan, const char* entry = nullptr) noexcept -> ShaderDesc {
+    return {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
 }
 
 // A stage source names the module one pipeline stage is built from: where the
 // cooked bytes live for a hot reload, the generated fallback that stands in for
-// them, and the entry point the module declares. The stage travels in the type
-// and is a Vulkan stage flag, so a source cannot name a module compiled for a
-// different stage, and task, mesh and ray-tracing stages fit without a table.
+// them, and the entry point the module declares.
 template <VkShaderStageFlagBits Stage>
 struct ShaderStageSource {
     static constexpr VkShaderStageFlagBits stage = Stage;
@@ -53,25 +69,17 @@ using ComputeStageSource  = ShaderStageSource<VK_SHADER_STAGE_COMPUTE_BIT>;
 using TaskStageSource     = ShaderStageSource<VK_SHADER_STAGE_TASK_BIT_EXT>;
 using MeshStageSource     = ShaderStageSource<VK_SHADER_STAGE_MESH_BIT_EXT>;
 
-// The module already knows the stage it was compiled for (ShaderProgram.hpp),
-// so naming the module names the stage: one template argument, nothing to keep
-// in step, and no assert needed to catch a caller who got it wrong.
 template <ShaderProgram Module>
 [[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Module::Stage> {
     return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
 }
 
-// Validated stage metadata and borrowed SPIR-V. Copying this view copies no
-// bytecode. The supplied code must remain alive and unchanged through
-// reflection and the synchronous vkCreateGraphicsPipelines call. Entry-point
-// names live in the view itself; descriptors returned by Vertex/Fragment must
-// not outlive it.
 class ShaderStagesView {
   public:
     ShaderStagesView() = default;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
+    static auto Create(const ShaderDesc& vert, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
 
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
@@ -82,7 +90,7 @@ class ShaderStagesView {
     }
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh(const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
+    static auto CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag)
         -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
 
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
@@ -94,14 +102,14 @@ class ShaderStagesView {
         return CreateMesh(CreateShaderDesc<Task>(), CreateShaderDesc<Mesh>(), CreateShaderDesc<Frag>());
     }
 
-    [[nodiscard]] constexpr auto Get() const noexcept -> const ZHLN_ShaderStages* {
+    [[nodiscard]] constexpr auto Get() const noexcept -> const ShaderStages* {
         return &_raw;
     }
-    [[nodiscard]] auto Vertex() const noexcept -> ZHLN_ShaderDesc {
-        return {.code = _raw.vert.code, .size = _raw.vert.size, .entry_point = _raw.vert.code ? _raw.vert.entry_point : nullptr};
+    [[nodiscard]] auto Vertex() const noexcept -> ShaderDesc {
+        return {.code = _raw.vert.code, .size = _raw.vert.size, .entry_point = _raw.vert.code != nullptr ? _raw.vert.entry_point : nullptr};
     }
-    [[nodiscard]] auto Fragment() const noexcept -> ZHLN_ShaderDesc {
-        return {.code = _raw.frag.code, .size = _raw.frag.size, .entry_point = _raw.frag.code ? _raw.frag.entry_point : nullptr};
+    [[nodiscard]] auto Fragment() const noexcept -> ShaderDesc {
+        return {.code = _raw.frag.code, .size = _raw.frag.size, .entry_point = _raw.frag.code != nullptr ? _raw.frag.entry_point : nullptr};
     }
     [[nodiscard]] auto IsMeshPipeline() const noexcept -> bool {
         return _raw.mesh.code != nullptr;
@@ -113,29 +121,22 @@ class ShaderStagesView {
 
   private:
     friend class OwnedShaderStages;
-    explicit ShaderStagesView(ZHLN_ShaderStages raw) noexcept: _raw(raw) {
-    }
+    explicit ShaderStagesView(ShaderStages stages) noexcept: _raw(stages) {}
 
-    ZHLN_ShaderStages _raw {};
+    ShaderStages _raw {};
 };
 
 static_assert(std::is_trivially_copyable_v<ShaderStagesView>);
 
-// Disk overrides and alignment copies are owned; generated fallbacks are
-// borrowed. Recompute the span after a move, never cache a pointer into storage.
 struct ShaderBytecode {
     std::span<const std::byte> fallback {};
-    std::vector<uint32_t>     storage {};
+    std::vector<uint32_t>      storage {};
 
     [[nodiscard]] auto Code() const noexcept -> std::span<const std::byte> {
         return storage.empty() ? fallback : std::as_bytes(std::span {storage});
     }
 };
 
-// Owns only bytecode and pointer-free stage metadata. A view is materialized
-// from the current buffers on demand, so moving this owner never needs to
-// repair shader pointers. Borrowed fallbacks must outlive each view's use
-// and remain immutable through the synchronous reflection/build calls.
 class OwnedShaderStages {
   public:
     OwnedShaderStages(const OwnedShaderStages&) = delete;
@@ -153,20 +154,18 @@ class OwnedShaderStages {
         const char* taskEntry = nullptr, const char* meshEntry = nullptr, const char* fragEntry = nullptr
     ) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
 
-    // Call only on a live (not moved-from) owner. The result borrows this
-    // owner's SPIR-V until reflection/pipeline creation completes.
     [[nodiscard]] auto View() const noexcept -> ShaderStagesView;
 
   private:
     struct StageMetadata {
         VkShaderStageFlagBits stage {};
-        std::array<char, sizeof(ZHLN_Shader::entry_point)> entryPoint {};
+        std::array<char, 64> entryPoint {};
         uint32_t viewMask = 0;
     };
 
     OwnedShaderStages(ShaderBytecode vert, ShaderBytecode frag, ShaderBytecode task, ShaderBytecode mesh, const ShaderStagesView& validated) noexcept;
-    [[nodiscard]] static auto MetadataOf(const ZHLN_Shader& shader) noexcept -> StageMetadata;
-    [[nodiscard]] static auto MakeStage(const ShaderBytecode& source, const StageMetadata& meta) noexcept -> ZHLN_Shader;
+    [[nodiscard]] static auto MetadataOf(const ShaderStageData& shader) noexcept -> StageMetadata;
+    [[nodiscard]] static auto MakeStage(const ShaderBytecode& source, const StageMetadata& meta) noexcept -> ShaderStageData;
 
     ShaderBytecode _vert;
     ShaderBytecode _frag;
@@ -178,4 +177,4 @@ class OwnedShaderStages {
     StageMetadata  _meshMeta;
 };
 
-}
+} // namespace ZHLN::Vk

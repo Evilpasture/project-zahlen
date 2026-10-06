@@ -104,7 +104,7 @@ constexpr auto MakeLayoutBarrierDesc(
     VkImageAspectFlags aspect,
     uint32_t           baseMip,
     uint32_t           mipCount
-) noexcept -> ZHLN_ImageBarrierDesc {
+) noexcept -> ImageBarrierDesc {
     using Src = LayoutTraits<OldLayout>;
     using Dst = LayoutTraits<NewLayout>;
     return {

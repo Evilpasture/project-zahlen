@@ -783,10 +783,10 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
                 vmaDestroyImage(_allocator != nullptr ? _allocator->Handle() : nullptr, entry.image, entry.allocation);
                 break;
             case DeferredDeletionEntry::Type::AccelerationStructure:
-                ZHLN_DestroyAS(entry.device, entry.accelerationStructure);
+                vkDestroyAccelerationStructureKHR(entry.device, entry.accelerationStructure, nullptr);
                 break;
             case DeferredDeletionEntry::Type::Pipeline:
-                ZHLN_DestroyPipeline(entry.device, entry.pipeline);
+                vkDestroyPipeline(entry.device, entry.pipeline, nullptr);
                 break;
         }
     }

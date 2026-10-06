@@ -23,6 +23,12 @@
 
 namespace ZHLN::Vk {
 
+struct ShaderDesc {
+    const uint32_t* code = nullptr;
+    size_t          size = 0;
+    const char*     entry_point = nullptr;
+};
+
 namespace Declared {
 
 template <ZHLN::StringLiteral Name, VkDescriptorType Type, uint32_t Set, uint32_t Binding>
@@ -335,10 +341,10 @@ template <typename Set, typename Half, typename Check, typename... Slots>
 
 
 template <ShaderProgram Program>
-[[nodiscard]] auto CreateShaderDesc() noexcept -> ZHLN_ShaderDesc {
+[[nodiscard]] auto CreateShaderDesc() noexcept -> ShaderDesc {
     const std::span<const uint8_t> bytes = Program::Bytes();
     const std::string_view entryPoint = Program::EntryPoint;
-    return ZHLN_ShaderDesc {
+    return ShaderDesc {
         .code        = std::bit_cast<const uint32_t*>(bytes.data()),
         .size        = bytes.size_bytes(),
         .entry_point = entryPoint.data(),

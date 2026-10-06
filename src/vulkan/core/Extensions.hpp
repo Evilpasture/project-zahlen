@@ -10,6 +10,12 @@
 #include <Zahlen/Error.hpp>
 namespace ZHLN::Vk {
 
+[[nodiscard]] auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties>;
+[[nodiscard]] auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties>;
+[[nodiscard]] auto HasExtension(std::span<const VkExtensionProperties> available, std::string_view name) noexcept -> bool;
+[[nodiscard]] auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool;
+[[nodiscard]] auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool;
+
 class ExtensionResult {
   public:
     ExtensionResult() = default;

@@ -48,11 +48,11 @@ class ShadowRenderer {
     // --- pipelines ----------------------------------------------------------
 
     [[nodiscard]] auto CompileCascadePipelines(
-        RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag
+        RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag
     ) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto CompilePunctualPipeline(
-        RenderContext::Impl& impl, VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag
+        RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag
     ) -> std::expected<void, ErrorCode>;
 
     // --- what the shadow pass needs -----------------------------------------
