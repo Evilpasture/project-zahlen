@@ -12,9 +12,15 @@
 #include <Jolt/Math/Mat44.h>
 // clang-format on
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/Arena.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/EngineServices.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
+#include <array>
+#include <cstddef>
+#include <memory>
+#include <vector>
 
 struct cgltf_data;
 struct cgltf_node;
@@ -29,6 +35,24 @@ class Registry;
 
 class ZHLN_API AnimationSystem {
   public:
+    // Animation callbacks can yield while a chunk is active. Keep one arena per
+    // ParallelFor chunk rather than sharing a worker arena: a suspended chunk's
+    // scratch must remain valid while another task runs on the same worker.
+    struct ScratchStorage {
+        void ResetForUpdate() noexcept;
+        auto GetChunkArena(uint32_t chunkIndex, size_t minimumCapacity) -> LinearArena&;
+        auto GetJointOutputArena(size_t minimumCapacity) -> LinearArena&;
+        auto GetCallbackWorldTransforms(uint32_t chunkIndex) noexcept -> std::vector<JPH::Mat44>&;
+
+      private:
+        std::array<std::unique_ptr<LinearArena>, TaskSystem::MaxParallelForChunks> _chunkArenas {};
+        // Keep the public std::vector callback signature while reusing its
+        // capacity per task chunk rather than allocating one vector per entity.
+        std::array<std::vector<JPH::Mat44>, TaskSystem::MaxParallelForChunks> _callbackWorldTransforms {};
+        // Shared across chunks; PoseUploadQueue copies it before the next reset.
+        std::unique_ptr<LinearArena> _jointOutputArena;
+    };
+
     AnimationSystem()  = default;
     ~AnimationSystem() = default;
 
@@ -58,7 +82,7 @@ class ZHLN_API AnimationSystem {
                                   const Components::HierarchyComponent, const Components::MeshComponent,
                                   Components::MorphTargetComponent&, Components::TransformComponent&> query,
                        ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
-                       BonePosePostProcessor postProcessor);
+                       BonePosePostProcessor postProcessor, ECS::Local<ScratchStorage> scratchStorage);
 
   private:
     void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;
