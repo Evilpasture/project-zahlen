@@ -4,6 +4,7 @@
 #pragma once
 #include "RenderInternal.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/FullscreenPassRecorder.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <utility>
@@ -55,45 +56,49 @@ struct TonemapBlitPass: Vk::RenderPass<
     GetSwapchainImageT   getSwapchainImage;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
-        auto& blitInputImage = [&]() -> auto& {
-            if constexpr (Mode != AAMode::None) {
-                return impl.accumulationHistory.Current();
-            } else {
-                return impl.graphResources.hdrSceneColor;
+        FullscreenPassRecorder<Shaders::Blit, Shaders::Modules::BlitPS>::RecordCustom(
+            impl, cmd, impl.blitPass, [&]() {
+                auto& blitInputImage = [&]() -> auto& {
+                    if constexpr (Mode != AAMode::None) {
+                        return impl.accumulationHistory.Current();
+                    } else {
+                        return impl.graphResources.hdrSceneColor;
+                    }
+                }();
+
+                const uint32_t fIdx = impl.presenter.frameIndex;
+                const BlitPushConstants pc {
+                    .vignetteIntensity = impl.settings.post.vignetteIntensity,
+                    .vignettePower     = impl.settings.post.vignettePower,
+                    .fullBright        = impl.currentUniforms.fullBright != 0 ? 1 : 0,
+                    .exposure          = impl.settings.post.exposure,
+                    .bloomStrength     = impl.settings.post.bloomStrength,
+                    .contrast          = impl.settings.post.contrast,
+                    .saturation        = impl.settings.post.saturation,
+                    .tonemapper        = impl.settings.post.tonemapper,
+                    .colorFilter       = {
+                        impl.settings.post.colorFilter[0], impl.settings.post.colorFilter[1], impl.settings.post.colorFilter[2]
+                    },
+                    ._padding          = 0.0f
+                };
+
+                return MakeFullscreenPassArgs(
+                    pc,
+                    Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
+                    Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(impl.graphResources.bloomFinalTarget)),
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(impl.presenter.depthTarget)),
+                    Vk::Unread<"frame">(impl.frames.frameUniformBuffers[fIdx])
+                );
+            },
+            [this](RenderContext::Impl& drawImpl, VkCommandBuffer drawCmd, auto&& execute) {
+                const auto swapchainTarget = getSwapchainImage();
+
+                drawImpl.BindHeapsAndPushFrame(drawCmd);
+                Vk::DynamicPass(swapchainTarget.Extent()).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(drawCmd, [&]() {
+                    execute();
+                });
             }
-        }();
-
-        const uint32_t fIdx = impl.presenter.frameIndex;
-
-        const Vk::HeapBlockBase block = impl.blitPass.WriteHeapParameters<Shaders::Blit>(
-            impl.ctx, impl.heapManager,
-            Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes<Mode>>>(blitInputImage)),
-            Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(impl.graphResources.bloomFinalTarget)),
-            Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(impl.presenter.depthTarget)),
-            Vk::Unread<"frame">(impl.frames.frameUniformBuffers[fIdx])
         );
-
-        const BlitPushConstants pc {
-            .vignetteIntensity = impl.settings.post.vignetteIntensity,
-            .vignettePower     = impl.settings.post.vignettePower,
-            .fullBright        = impl.currentUniforms.fullBright != 0 ? 1 : 0,
-            .exposure          = impl.settings.post.exposure,
-            .bloomStrength     = impl.settings.post.bloomStrength,
-            .contrast          = impl.settings.post.contrast,
-            .saturation        = impl.settings.post.saturation,
-            .tonemapper        = impl.settings.post.tonemapper,
-            .colorFilter       = {impl.settings.post.colorFilter[0], impl.settings.post.colorFilter[1], impl.settings.post.colorFilter[2]},
-            ._padding          = 0.0f
-        };
-
-        if (impl.blitPass.pipeline.Valid()) {
-            const auto swapchainTarget = getSwapchainImage();
-
-            impl.BindHeapsAndPushFrame(cmd);
-            Vk::DynamicPass(swapchainTarget.Extent()).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-                impl.blitPass.ExecuteHeap<Shaders::Modules::BlitPS>(impl.ctx, cmd, pc, block);
-            });
-        }
     }
 };
 

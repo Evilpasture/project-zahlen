@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/aa/TAAPass.hpp"
+#include "passes/FullscreenPassRecorder.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -14,21 +15,19 @@ struct TAAPushConstants {
 static_assert(GpuAbi::ScenePassPayload<TAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void TAAPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    const uint32_t fIdx = impl.presenter.frameIndex;
+    FullscreenPassRecorder<Shaders::Taa, Shaders::Modules::TaaPS>::Record(
+        impl, ctx.Cmd(), impl.taaPass, [&]() {
+            const uint32_t fIdx = impl.presenter.frameIndex;
 
-    if (impl.taaPass.pipeline.Valid()) {
-        const Vk::HeapBlockBase block = impl.taaPass.WriteHeapParameters<Shaders::Taa>(
-            impl.ctx, impl.heapManager,
-            Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor)),
-            Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumPrevious>>(impl.accumulationHistory.Previous())),
-            Vk::Slot<"texVelocity">(Vk::Assume<Vk::ShaderRead<Res_Velocity>>(impl.graphResources.velocityBuffer)),
-            Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
-        );
-
-        impl.taaPass.ExecuteHeap<Shaders::Modules::TaaPS>(
-            impl.ctx, ctx.Cmd(), TAAPushConstants {.feedback = impl.settings.antiAliasing.taaFeedback}, block
-        );
-    }
+            return MakeFullscreenPassArgs(
+                TAAPushConstants {.feedback = impl.settings.antiAliasing.taaFeedback},
+                Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor)),
+                Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumPrevious>>(impl.accumulationHistory.Previous())),
+                Vk::Slot<"texVelocity">(Vk::Assume<Vk::ShaderRead<Res_Velocity>>(impl.graphResources.velocityBuffer)),
+                Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+            );
+        }
+    );
 }
 
 }
