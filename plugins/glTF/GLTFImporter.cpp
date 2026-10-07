@@ -1016,9 +1016,10 @@ auto GetOrCreateCompiledPrimitive(
     // BDA by the task/mesh shaders; the vertex/index buffers above stay live
     // for BLAS builds and for the legacy vertex pipeline.
     const bool hasMeshlets = !primJob.meshlets.Empty();
+    const auto packedMeshlets = PackMeshlets(primJob.meshlets.meshlets);
 
     BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateMeshletBuffer(primJob.meshlets.meshlets) :
+        hasMeshlets ? ctx.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), kMeshletPackedBytes) :
                       BufferHandle::Invalid;
     BufferHandle meshletVertexVbo =
         hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.vertices}) :

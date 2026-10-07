@@ -12,7 +12,7 @@
 
 #include <Zahlen/EngineServices.hpp>
 #include <Zahlen/Frame.hpp>
-#include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/ecs/Carrier.hpp>
 
 namespace ZHLN {
 

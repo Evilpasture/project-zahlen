@@ -12,6 +12,7 @@
 #include <Zahlen/Frame.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/ecs/Carrier.hpp>
 #include <Zahlen/ecs/SystemAccess.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <Zahlen/ecs/SystemSignature.hpp>
@@ -27,32 +28,6 @@
 #include <vector>
 
 namespace ZHLN::ECS {
-
-// A graph that provides no services: the graph a unit test builds when it wants
-// to exercise ordering, queries and frame parameters and nothing else. Systems
-// that ask for a service cannot be added to it -- that is a compile error, not a
-// null pointer at run time.
-struct NoServices {};
-
-// What the executor hands a system. Two references and a frame: the registry the
-// graph runs against, the services the graph was built with, and this
-// execution's clock and scratch. No engine pointers, no null service slots.
-//
-// `local` is this node's own state (see Local<T>): the graph fills it in for each
-// invocation, and it is the only way a system reaches state that belongs to it
-// rather than to the world.
-//
-// The `typedef` names the services type so a resolver can ask, of the carrier it
-// was handed, whether those services provide what it was asked to resolve.
-template <typename ServicesT>
-struct Carrier {
-    using Services = ServicesT;
-
-    ECS::Registry&                  registry;
-    ServicesT&                      services;
-    const ZHLN::Frame&              frame;
-    TemplatedDetail::LocalStateView local {};
-};
 
 // What the core hands a node's function: the carrier the graph was executed with,
 // and the storage this node owns. One of these is built per invocation on the

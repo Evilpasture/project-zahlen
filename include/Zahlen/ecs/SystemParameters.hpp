@@ -184,12 +184,6 @@ inline constexpr bool IsLocalParam = false;
 template <typename T>
 inline constexpr bool IsLocalParam<Local<T>> = true;
 
-// The family id of a Local<T> slot. Locals are not components and are never
-// stored in the registry; the id exists so a node's state can be found by type
-// with the same by-family lookup the scheduler uses for services.
-template <typename T>
-struct LocalToken {};
-
 // One slot of a node's state: where it is in the block, what lives there, and
 // how to bring it to life and take it down. The construct/destroy pair is
 // instantiated per T by the same walk that computes the offset, so a slot
@@ -212,15 +206,6 @@ struct LocalLayout {
     size_t                     align = 1;
 
     [[nodiscard]] bool Empty() const noexcept { return slots.empty(); }
-};
-
-// What a system is handed to resolve its own state: the block the graph
-// allocated for this node, and the layout its signature asked for. The pointer
-// belongs to one node and one invocation; nothing else may read it.
-struct LocalStateView {
-    void*                block = nullptr;
-    const LocalSlotDesc* slots = nullptr;
-    size_t               count = 0;
 };
 
 } // namespace TemplatedDetail

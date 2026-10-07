@@ -70,6 +70,7 @@ struct CaptureResult {
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
     const auto meshlets = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions});
+    const auto packedMeshlets = ZHLN::PackMeshlets(meshlets.meshlets);
 
     return {
         .posBuffer           = rc.CreateVertexBuffer(std::span {positions}),
@@ -78,7 +79,7 @@ struct CaptureResult {
         .indexBuffer         = rc.CreateIndexBuffer(std::span<const uint32_t> {indices}),
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = static_cast<uint32_t>(indices.size()),
-        .meshletBuffer       = rc.CreateMeshletBuffer(meshlets.meshlets),
+        .meshletBuffer       = rc.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), ZHLN::kMeshletPackedBytes),
         .meshletVertexBuffer = rc.CreateStorageBuffer(std::span {meshlets.vertices}),
         .meshletTriBuffer    = rc.CreateStorageBuffer(std::span {meshlets.triangles}),
         .meshletCount        = static_cast<uint32_t>(meshlets.meshlets.size()),

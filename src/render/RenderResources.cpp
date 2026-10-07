@@ -10,7 +10,6 @@
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Geometry2D.hpp"
 #include "Zahlen/GraphicsSettings.hpp"
-#include "Zahlen/Meshlet.hpp"
 #include "Zahlen/Render/Handles.hpp"
 #include "Zahlen/Render/PresentTiming.hpp"
 #include "Zahlen/Render/Types.hpp"
@@ -97,11 +96,6 @@ auto RenderContext::CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle 
 
 auto RenderContext::CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle {
     return CreateStorageBuffer(static_cast<size_t>(maxParticles) * sizeof(Particle3D));
-}
-
-auto RenderContext::CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle {
-    const auto packed = PackMeshlets(meshlets);
-    return CreateStorageBuffer(std::as_bytes(std::span {packed}), kMeshletPackedBytes);
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {

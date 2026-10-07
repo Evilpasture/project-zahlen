@@ -9,7 +9,6 @@
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/Meshlet.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/FrameData.hpp>
@@ -127,9 +126,6 @@ class ZHLN_API RenderContext {
     // so a host asks for a particle count and never for a stride.
     [[nodiscard]] auto CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle;
     [[nodiscard]] auto CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle;
-    // Meshlet data the host partitioned: the renderer packs the descs to the wire
-    // records, so a caller passes meshlets and never a stride.
-    [[nodiscard]] auto CreateMeshletBuffer(std::span<const MeshletDesc> meshlets) -> BufferHandle;
 
     // Descriptions, not GPU layouts: src/render/GpuPack.cpp writes the struct the
     // update and render passes read. @p texture is the engine's own handle -- the
