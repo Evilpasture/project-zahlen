@@ -51,6 +51,19 @@ inline auto CreateTransform(JPH::Vec3Arg translation, JPH::QuatArg rotation) {
     return JPH::Mat44::sRotationTranslation(rotation, translation);
 }
 
+// Exact scalar equality for matrix-cache comparisons; this is not an epsilon test.
+[[nodiscard]] inline auto SameMatrix(const JPH::Mat44& left, const JPH::Mat44& right) noexcept -> bool {
+    for (int column = 0; column < 4; ++column) {
+        const JPH::Vec4 leftColumn  = left.GetColumn4(column);
+        const JPH::Vec4 rightColumn = right.GetColumn4(column);
+        if (leftColumn.GetX() != rightColumn.GetX() || leftColumn.GetY() != rightColumn.GetY() || leftColumn.GetZ() != rightColumn.GetZ() ||
+            leftColumn.GetW() != rightColumn.GetW()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 struct TransformTRS {
     JPH::Vec3 translation {0.0f, 0.0f, 0.0f};
     JPH::Quat rotation = JPH::Quat::sIdentity();
