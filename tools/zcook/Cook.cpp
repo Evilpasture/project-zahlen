@@ -70,7 +70,7 @@ int CookMesh(int argc, char** argv) {
 
     CookedMeshHeader meshHeader {};
     meshHeader.magic   = 0x3048534D;
-    meshHeader.version = 6; // Version 6: separate 8-byte tangent-frame and 12-byte surface streams
+    meshHeader.version = 7; // Version 7: meshlet records reorder coneCutoff before coneAxis (16-alignment, no implicit pad)
 
     if (compiled.positions.empty()) {
         meshHeader.boundingBoxMin[0] = meshHeader.boundingBoxMin[1] = meshHeader.boundingBoxMax[0] = meshHeader.boundingBoxMax[1] =

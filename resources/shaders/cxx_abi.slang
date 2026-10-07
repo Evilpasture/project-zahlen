@@ -7,7 +7,3 @@ module cxx_abi;
 public struct CxxEnumAttribute {
     string name;
 };
-
-[__AttributeUsage(_AttributeTargets.Struct)]
-public struct CxxSkipAttribute {
-};

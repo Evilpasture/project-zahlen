@@ -229,8 +229,8 @@ type it spells through its own includes.
 | `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
 | `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
 | `TextureHandle`, `RenderTextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `FrameTarget` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
-| `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
-| `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
+| `Mesh`, `Material`, `DrawFlags`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
+| `MeshletDesc`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
 
 Two consequences are the point of the split. Editing a renderer struct
 recompiles the renderer and its consumers instead of every translation unit that

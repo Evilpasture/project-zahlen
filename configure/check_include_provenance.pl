@@ -113,7 +113,6 @@ my %FIRST_PARTY = (
     CSGOperation     => ['include/Zahlen/Render/Types.hpp'],
     CSGModifier      => ['include/Zahlen/Render/Types.hpp'],
     # Meshlet contract
-    GPUMeshlet       => ['src/render/GpuHandwritten.hpp'],
     MeshletBuildResult => ['include/Zahlen/Meshlet.hpp'],
     MeshletDesc      => ['include/Zahlen/Meshlet.hpp'],
     kMeshletMaxVertices => ['include/Zahlen/Meshlet.hpp'],

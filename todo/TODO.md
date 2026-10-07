@@ -114,8 +114,11 @@ handles and `ExplosionSystem::Release` and its cleanup pass are gone with them (
 one `TestExplosion` assertion that used a handle to prove the effect was alive now
 holds the simulation's own state instead). The `GpuLayout.hpp` rule below still
 holds, now for every struct: `InstanceData`, `Particle3D`, `ClusterBounds`,
-`ClusterVolume` and the five above are all generated. `GPUMeshlet` is unchanged --
-still hand-written, still the one `[CxxSkip]`, for the reason recorded below.
+`ClusterVolume` and the five above are all generated, and `GPUMeshlet` joined
+them: swapping `coneCutoff` ahead of `coneAxis` seats every member with no
+implicit pad under any layout, so the generator transcribes it (offsets asserted
+in the emitted header) and `fetchMeshlet` is a typed load. The hand-written
+struct and the `[CxxSkip]` vocabulary are both gone.
 
 Two include rules are what make the header compile-checkable on its own:
 - It includes `"GpuLayout.hpp"` (renderer-internal since the public-API

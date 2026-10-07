@@ -1,12 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GpuHandwritten.hpp"
+#include "GpuLayout.hpp"
 #include <Zahlen/Meshlet.hpp>
 #include <cstring>
 #include <meshoptimizer.h>
 
 namespace ZHLN {
+
+static_assert(sizeof(GPUMeshlet) == kMeshletPackedBytes, "meshlet wire stride drifted from the generated layout");
 
 MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float* positions, size_t vertexCount, size_t posStride) noexcept {
     MeshletBuildResult out;
@@ -95,9 +97,9 @@ std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcep
             .sphereCenter   = {d.sphereCenter[0], d.sphereCenter[1], d.sphereCenter[2]},
             .sphereRadius   = d.sphereRadius,
             .coneApex       = {d.coneApex[0], d.coneApex[1], d.coneApex[2]},
-            .coneAxis       = {d.coneAxis[0], d.coneAxis[1], d.coneAxis[2]},
             .coneCutoff     = d.coneCutoff,
-            ._pad           = 0,
+            .coneAxis       = {d.coneAxis[0], d.coneAxis[1], d.coneAxis[2]},
+            ._padding       = 0,
         };
         std::memcpy(out.data() + i * sizeof(GPUMeshlet), &g, sizeof(GPUMeshlet));
     }

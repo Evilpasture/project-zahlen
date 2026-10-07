@@ -22,6 +22,7 @@ namespace ZHLN {
 // Structs only the renderer has a name for.
 using GeneratedGpu::ClusterBounds;
 using GeneratedGpu::ClusterVolume;
+using GeneratedGpu::GPUMeshlet;
 using GeneratedGpu::InstanceData;
 using GeneratedGpu::Particle3D;
 

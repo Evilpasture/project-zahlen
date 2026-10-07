@@ -26,7 +26,8 @@ atomics through buffer device addresses. It is a non-owning, unchecked shader
 view; callers must retain their existing zero-address and bounds guards.
 Host-visible `uint64_t` addresses stay scalar in push data, instance data and
 heap layouts, so this wrapper adds no descriptor or host ABI fields. Meshlets
-and packed skin data still use word buffers with their existing byte strides.
+load typed through `GPUBuffer<GPUMeshlet>`; packed skin data still uses word
+buffers with its existing byte stride.
 The intentional invalid-pointer diagnostic in `hang_gpu.slang` stays raw.
 
 Descriptor binding authority lives in the shaders: the C++ side reflects
@@ -60,9 +61,11 @@ engine hands the renderer its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
 `Zahlen/Render/FrameData.hpp`) and `src/render/GpuPack.cpp` writes these structs
 field by field. A field added, removed, reordered
 or retyped here re-emits the host side on the next build; a Slang kind without a
-C++ spelling fails that build by name instead. Two exceptions: `GPUMeshlet` is still
-hand-written -- its ABI is the raw word protocol in `fetchMeshlet`, which no
-`std140`/`std430` declaration of consecutive `float3`s can spell -- and
-`ClusterVolume`'s generated size (8) is its `StructuredBuffer` stride, not the
-16-byte `ConstantBuffer`-wrapper rounding SPIR-V reports. Both are documented in
-`tools/zshader/GpuTypes.cpp`.
+C++ spelling fails that build by name instead. One exception: `ClusterVolume`'s
+generated size (8) is its `StructuredBuffer` stride, not the 16-byte
+`ConstantBuffer`-wrapper rounding SPIR-V reports (documented in
+`tools/zshader/GpuTypes.cpp`). `GPUMeshlet` generates like the rest: its field
+order (`coneCutoff` between the `float3`s) seats every member with no implicit
+pad under any layout, so the emitted offsets are asserted in the generated
+header and `fetchMeshlet` is a typed `GPUBuffer` load. Do not reorder the Slang
+declaration.

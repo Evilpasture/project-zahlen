@@ -80,7 +80,9 @@ public struct InstanceData {
     public float4 uvRow1[15];
 };
 
-[CxxSkip]
+// Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
+// seats at 48 with no implicit pad under any layout, which is what lets
+// zshader generate the host side. Do not reorder.
 public struct GPUMeshlet {
     public uint vertexOffset;
     public uint triangleOffset;
@@ -91,8 +93,9 @@ public struct GPUMeshlet {
     public float sphereRadius;
 
     public float3 coneApex;
-    public float3 coneAxis;
     public float coneCutoff;
+    public float3 coneAxis;
+    public uint _padding;
 };
 
 public struct SkinVertex {
@@ -282,20 +285,7 @@ public extension InstanceData {
 
     [ForceInline]
     public GPUMeshlet fetchMeshlet(uint meshletIndex) {
-        GPUBuffer<uint> words = GPUBuffer<uint>(this.meshletAddress);
-        uint base = meshletIndex * 16u;
-
-        GPUMeshlet m;
-        m.vertexOffset   = words.load(base + 0u);
-        m.triangleOffset = words.load(base + 1u);
-        m.vertexCount    = words.load(base + 2u);
-        m.triangleCount  = words.load(base + 3u);
-        m.sphereCenter   = float3(asfloat(words.load(base + 4u)), asfloat(words.load(base + 5u)), asfloat(words.load(base + 6u)));
-        m.sphereRadius   = asfloat(words.load(base + 7u));
-        m.coneApex       = float3(asfloat(words.load(base + 8u)), asfloat(words.load(base + 9u)), asfloat(words.load(base + 10u)));
-        m.coneAxis       = float3(asfloat(words.load(base + 11u)), asfloat(words.load(base + 12u)), asfloat(words.load(base + 13u)));
-        m.coneCutoff     = asfloat(words.load(base + 14u));
-        return m;
+        return GPUBuffer<GPUMeshlet>(this.meshletAddress).load(meshletIndex);
     }
 
     [ForceInline]

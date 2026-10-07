@@ -31,12 +31,8 @@
 // with its independent consteval parser. Both halves agree by construction,
 // and the check still fails against the module's bytes rather than our walk.
 //
-// Two things the walk refuses to derive, and fails on instead of guessing:
+// One thing the walk refuses to derive, and fails on instead of guessing:
 //
-//   * GPUMeshlet is skipped ([CxxSkip]): its ABI is the raw word protocol in
-//     instance_data.slang's fetchMeshlet (coneAxis at byte 44), which no
-//     std140/std430 declaration of consecutive float3s can spell (Slang seats
-//     it at 48). The hand-written ZHLN::GPUMeshlet stays authoritative.
 //   * Struct footprints are recomputed as AlignUp(extent, maxAlign): layout
 //     reports ClusterVolume as 16 bytes (ConstantBuffer rounding) while its
 //     StructuredBuffer stride -- the number the engine uploads by -- is 8.
@@ -73,12 +69,13 @@ constexpr std::string_view kAbiWrapper = "GpuAbiTypes";
 constexpr std::string_view kEntryPoint = "CSMain";
 
 // The cxx_abi.slang vocabulary this walk answers to. Unknown names fail in
-// ReadMemberAttributes/IsSkipped, so a vocabulary edit lands here loudly.
-// [CxxArray], [CxxCArray], [CxxQuat] and [CxxDefault] used to live here: they
-// existed only to respell a type the Slang kind already names, and the host
-// structs now carry their own defaults, so every one of them is gone.
+// ReadMemberAttributes/RejectStructAttributes, so a vocabulary edit lands here
+// loudly. [CxxArray], [CxxCArray], [CxxQuat], [CxxDefault] and [CxxSkip] used to
+// live here: the first four existed only to respell a type the Slang kind
+// already names, the last one skipped a struct the module no longer wraps, and
+// the host structs now carry their own defaults, so every one of them is gone.
+// The struct vocabulary is empty.
 constexpr std::string_view kAttrEnum = "CxxEnum";
-constexpr std::string_view kAttrSkip = "CxxSkip";
 
 // The storage spellings: Jolt's pod lane types, one per Slang float vector
 // width. JPH::Vec3/Vec4 are the *compute* types (16 bytes, 16-aligned, three
@@ -234,22 +231,16 @@ auto ReadMemberAttributes(slang::VariableReflection* var, std::string_view struc
     return spelling;
 }
 
-// True when the struct opts out of emission. Enumerates every attribute on
-// the way, so a struct-level annotation outside the one-word vocabulary is
-// loud too.
-auto IsSkipped(std::string_view structName, slang::TypeReflection* type) -> bool {
-    bool skipped = false;
+// The struct vocabulary is empty (see above), so any annotation on a walked
+// struct fails rather than being silently ignored.
+auto RejectStructAttributes(std::string_view structName, slang::TypeReflection* type) -> void {
     for (unsigned i: std::views::iota(0u, type->getUserAttributeCount())) {
         const char* raw = type->getUserAttributeByIndex(i)->getName();
         if (raw == nullptr) {
             Fail("gpu types: {} carries an unnamed annotation", structName);
         }
-        if (std::string_view {raw} != kAttrSkip) {
-            Fail("gpu types: {} carries [{}], which is not a cxx_abi struct annotation", structName, raw);
-        }
-        skipped = true;
+        Fail("gpu types: {} carries [{}], which is not a cxx_abi struct annotation", structName, raw);
     }
-    return skipped;
 }
 
 // The member's alignment as Slang seats it: every alignas in the header
@@ -442,16 +433,13 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
         // A nested struct recurses through the same builder; anything else
         // takes its mapped spelling, held against the member size Slang
         // reported. The nested footprint is the recomputed one (AlignUp,
-        // never the padded getSize), and a skipped type named as a member
-        // fails: nothing may hold what the host never emits.
+        // never the padded getSize).
         if (mapped.form == CxxForm::Struct) {
             const char* nestedName = memberLayout->getName();
             if (nestedName == nullptr || nestedName[0] == '\0') {
                 Fail("gpu types: {}.{} is an unnamed struct; a nested type has nothing to be checked by", structName, memberName);
             }
-            if (IsSkipped(nestedName, memberLayout->getType())) {
-                Fail("gpu types: {}.{} names the [CxxSkip] '{}'; nothing may hold what the host never emits", structName, memberName, nestedName);
-            }
+            RejectStructAttributes(nestedName, memberLayout->getType());
             StructDef inner   = BuildStruct(nestedName, memberLayout, nestedOut);
             mapped.spelling = inner.name;
             mapped.size     = inner.size;
@@ -514,10 +502,6 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 // terms (Zahlen/ParticleEmitterDesc.hpp, Zahlen/Render/FrameData.hpp) and
 // src/render/GpuPack.cpp packs them into these structs, which is what lets
 // zahlen_engine build with no shader tool having run.
-//
-// GPUMeshlet is intentionally absent -- its ABI is the raw word protocol in
-// instance_data.slang's fetchMeshlet, which no std140/std430 declaration of
-// consecutive float3s can spell (see GpuTypes.cpp).
 
 #pragma once
 
@@ -722,9 +706,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         if (typeName == nullptr || typeName[0] == '\0') {
             Fail("gpu types: '{}.{}' is an unnamed struct; a struct has nothing to be checked by", options.module, name);
         }
-        if (IsSkipped(typeName, memberLayout->getType())) {
-            continue;
-        }
+        RejectStructAttributes(typeName, memberLayout->getType());
         structs.push_back(BuildStruct(typeName, memberLayout, nested));
     }
 

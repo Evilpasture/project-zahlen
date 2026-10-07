@@ -12,7 +12,6 @@
 // header; this file proves the module agrees with them.
 
 #include "GpuAbi.hpp"
-#include "GpuHandwritten.hpp"
 #include "pipeline/SpirvLayout.hpp"
 #include <optional>
 #include <tuple>
@@ -58,8 +57,6 @@ template <typename... Ts>
 static_assert(kTypes.Complete(), "the GPU ABI module did not parse: the checks below would prove nothing");
 
 static_assert(CheckAll(static_cast<GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete");
-
-static_assert(Matches<ZHLN::GPUMeshlet>("GPUMeshlet"), "GPUMeshlet does not have the size its .slang declaration compiles to");
 
 constexpr Vk::HeapPushDataLayout kReflectedScenePushLayout = kTypes.HeapPushData(ZHLN::Vk::kDescriptorHeapPushDataTypeName).value_or(Vk::HeapPushDataLayout {});
 static_assert(
