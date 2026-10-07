@@ -45,6 +45,7 @@
 // PNG twin; a failing run leaves the whole series on disk for inspection.
 
 #include "TestsFramework.hpp"
+#include "helpers/HeadlessEngineFixture.hpp"
 
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -305,9 +306,15 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
     if (b >= kFloor && b >= 1.6 * r && b >= 1.6 * g) {
         return HueClass::Blue;
     }
-    // The yellow and magenta probes are metallic; their specular is tinted
-    // and a tight complementary-channel cap excludes light on neutral ground.
-    if (r >= kFloor && g >= kFloor && r >= 0.55 * g && g >= 0.55 * r && b <= 0.45 * std::min(r, g)) {
+    // The yellow probe is metallic; its specular is tinted. This scene is hot
+    // (sun 220, kW point lights, ambient exposure 10), so the yellow face
+    // sits deep in the tonemap shoulder, which lifts the complementary
+    // channel past the old 0.45 cap -- the same failure the cyan probe
+    // already hit and fixed. Same relaxation (0.65 cap + minimum chroma),
+    // same neutral-ground rejection.
+    const double weakerYellow = std::min(r, g);
+    if (r >= kFloor && g >= kFloor && r >= 0.55 * g && g >= 0.55 * r &&
+        b <= 0.65 * weakerYellow && weakerYellow - b >= 33.0) {
         return HueClass::Yellow;
     }
     // The cyan probe is dielectric. At the sweep's near-normal view the
@@ -321,7 +328,10 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
         r <= 0.65 * weakerCyan && weakerCyan - r >= 33.0) {
         return HueClass::Cyan;
     }
-    if (r >= kFloor && b >= kFloor && r >= 0.55 * b && b >= 0.55 * r && g <= 0.45 * std::min(r, b)) {
+    // The magenta probe is metallic: same hot-face story as yellow above.
+    const double weakerMagenta = std::min(r, b);
+    if (r >= kFloor && b >= kFloor && r >= 0.55 * b && b >= 0.55 * r &&
+        g <= 0.65 * weakerMagenta && weakerMagenta - g >= 33.0) {
         return HueClass::Magenta;
     }
     return HueClass::None;
@@ -330,6 +340,8 @@ enum class HueClass : uint8_t { Red, Green, Blue, Yellow, Cyan, Magenta, None };
 static_assert(ClassifyPixel(122, 243, 245) == HueClass::Cyan && ClassifyPixel(139, 243, 244) == HueClass::Cyan);
 static_assert(ClassifyPixel(87, 94, 95) != HueClass::Cyan && ClassifyPixel(70, 150, 215) != HueClass::Cyan);
 static_assert(ClassifyPixel(237, 29, 22) == HueClass::Red && ClassifyPixel(255, 255, 255) == HueClass::None);
+static_assert(ClassifyPixel(200, 190, 95) == HueClass::Yellow && ClassifyPixel(200, 95, 200) == HueClass::Magenta);
+static_assert(ClassifyPixel(150, 150, 150) != HueClass::Yellow && ClassifyPixel(150, 150, 150) != HueClass::Magenta);
 
 [[nodiscard]] uint32_t CountHue(const RgbImage& img, HueClass hue) {
     if (!img.Valid()) {
@@ -555,15 +567,22 @@ template <typename SceneFn>
 
 struct DistanceStabilitySuite {
     DistanceStabilitySuite() {
-        ZHLN::Fiber::InitMainThread();
-        ZHLN::TaskSystem::Init(2, 32, ZHLN::kMinimumFiberStackSize);
+        // Nested in the group binary's session: the task system and the pooled
+        // engine outlive this suite (see HeadlessEngineFixture.hpp). A raw
+        // TaskSystem::Shutdown here would take the task system out from under
+        // the suites that run after it.
+        ZHLN::Test::Headless::BeginSession();
     }
 
     ~DistanceStabilitySuite() {
-        ZHLN::TaskSystem::Shutdown();
+        ZHLN::Test::Headless::EndSession();
     }
 
     static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
+        // Exclusive engine: only one Vulkan instance may be live at a
+        // time (see engines_are_serial_and_the_slot_is_released), so the
+        // pool must not be holding one when this builds its own.
+        ZHLN::Test::Headless::ShutdownPooledEngines();
 
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},

@@ -16,6 +16,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -39,6 +40,17 @@ enum class LogSeverity : uint8_t { Debug, Info, Warning, Error };
 
 void SetLogLevel(LogLevel level) noexcept;
 auto GetLogLevel() noexcept -> LogLevel;
+
+// Test-quiet log capture. While capturing, InternalWriteLog records every
+// formatted line into a bounded buffer; when suppressOutput is set the lines
+// are additionally withheld from their channel. The test runner captures
+// per-test and prints the buffer only when the test fails, so a green run
+// shows RUN/PASS/FAIL instead of engine chatter. Not nestable: a second
+// BeginLogCapture clears the buffer and restarts. Panics bypass suppression
+// (InternalPanic cancels the capture first), so a fatal always prints.
+void BeginLogCapture(bool suppressOutput = true);
+auto EndLogCapture() -> std::vector<std::string>;
+void CancelLogCapture();
 
 struct LogContext {
     std::string_view     fmt;

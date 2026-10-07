@@ -2,6 +2,11 @@
 
 Status: proposal, written 2026-09-27. Nothing here is implemented yet.
 
+Update 2026-10-07: Tier 0 is now the standing rule, with helpers, worked
+exemplars, quiet logs, and uncommitted sample-asset coverage documented in
+`tests/INVARIANT_TESTING.md`. Tier 2 (golden store) remains deferred. The
+Tier 0/1 history below is unchanged.
+
 The render suites have been carrying the fidelity work on heuristics — counts of
 "gold-ish pixels", mean luma windows, dark-pixel percentages. They catch a
 broken renderer, but they also fail a *better* one, because what they encode is

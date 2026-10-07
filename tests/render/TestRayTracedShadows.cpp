@@ -133,33 +133,33 @@ struct RayTracedShadowsTestSuite {
 
                     constexpr double   kFloorRowFraction = 0.72;
                     const FrameMetrics mA                = MeasureImage(shadowA, kFloorRowFraction);
-                    const FrameMetrics mA2               = MeasureImage(shadowARepeat, kFloorRowFraction);
                     const FrameMetrics mB                = MeasureImage(shadowB, kFloorRowFraction);
                     const FrameMetrics mClear            = MeasureImage(shadowClear, kFloorRowFraction);
 
-                    const uint32_t darkA     = mA.dark;
-                    const uint32_t darkA2    = mA2.dark;
-                    const uint32_t darkB     = mB.dark;
-                    const uint32_t darkClear = mClear.dark;
-                    const uint32_t litA      = mA.lit;
-                    const uint32_t litClear  = mClear.lit;
-
                     const FrameDiff repeatDiff   = CompareFrames(shadowA, shadowARepeat);
                     const FrameDiff temporalDiff = CompareFrames(shadowA, shadowB);
+                    const FrameDiff signalDiff   = CompareFrames(shadowA, shadowClear);
 
-                    const double darkJump = (darkA > 0) ? static_cast<double>(std::abs(static_cast<int64_t>(darkB) - static_cast<int64_t>(darkA))) /
-                                                              static_cast<double>(darkA) :
-                                                          0.0;
+                    ZHLN::Println(
+                        "    [INFO] RT shadow: A mean={:.1f} B mean={:.1f} clear mean={:.1f} | temporal frac32={:.4f} signal frac32={:.4f} repeat frac32={:.4f}",
+                        mA.meanLuma, mB.meanLuma, mClear.meanLuma, temporalDiff.frac32, signalDiff.frac32, repeatDiff.frac32
+                    );
 
-                    const bool shadowExist     = ZHLN::Test::ExpectGt(darkA, darkClear + 1500u);
-                    const bool lightRestored   = ZHLN::Test::ExpectLt(darkClear, darkA / 3u);
-                    const bool meanBrightens   = ZHLN::Test::ExpectGt(mClear.meanLuma, mA.meanLuma * 1.25 + 1.0);
-                    const bool notBlackout     = ZHLN::Test::ExpectLt(darkA, 0.85 * static_cast<double>(mA.total));
-                    const bool shadowStable    = ZHLN::Test::ExpectLt(darkJump, 0.15);
-                    const bool noShadowFlicker = ZHLN::Test::ExpectLt(temporalDiff.frac32, 0.015);
-                    const bool repeatClean     = ZHLN::Test::ExpectTrue(repeatDiff.frac32 == 0.0);
+                    // Occlusion is the A/B mean delta (the shadow drops the
+                    // floor band ~95 luma), not a dark-pixel count: luma < 24
+                    // reads 0 on both sides of a working shadow once the scene
+                    // is this bright. Stability is dither-aware: the RT shadow
+                    // is 1 SPP stochastic by design (see the noise suite), so
+                    // consecutive frames MUST differ in the penumbra -- what
+                    // must hold is that the dither sits an order of magnitude
+                    // below the occlusion signal, and that settled means agree.
+                    const bool shadowExist       = ZHLN::Test::ExpectGt(mClear.meanLuma, mA.meanLuma * 1.25 + 1.0);
+                    const bool notBlackout       = ZHLN::Test::ExpectGt(mA.meanLuma, 5.0);
+                    const bool ditherBelowSignal = ZHLN::Test::ExpectLt(temporalDiff.frac32, 0.1 * signalDiff.frac32);
+                    const bool meansAgree        = ZHLN::Test::ExpectLt(std::abs(mB.meanLuma - mA.meanLuma), 2.0);
+                    const bool repeatClean       = ZHLN::Test::ExpectTrue(repeatDiff.frac32 == 0.0);
 
-                    return shadowExist && lightRestored && meanBrightens && notBlackout && shadowStable && noShadowFlicker && repeatClean;
+                    return shadowExist && notBlackout && ditherBelowSignal && meansAgree && repeatClean;
                 },
                 &validationRaised
             );

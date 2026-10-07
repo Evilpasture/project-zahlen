@@ -898,7 +898,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             // A headless target starts UNDEFINED. If rendering failed before
             // acquisition, treating it as COLOR_ATTACHMENT here makes the
             // readback barrier invalid and writes a black success image.
-            ZHLN::Log("[Test Capture] No completed headless frame was drawn; capture refused.");
+            ZHLN::LogWarning("[Test Capture] No completed headless frame was drawn; capture refused.");
             return std::unexpected(ScreenshotError::DestinationNotRecorded);
         }
         const auto& frameImage = *dest->acquired;
@@ -998,13 +998,16 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         }
         if (writeAlpha) {
             ofs.write(reinterpret_cast<const char*>(rgba), static_cast<std::streamsize>(pixels * 4u));
-            ZHLN::Log("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
+            ZHLN::LogDebug("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
         }
         ofs.close();
 
         const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
         const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
-        ZHLN::Log(
+        // Debug-level: a suite captures dozens of frames, and at Info this line
+        // alone drowns the test output. Tests capture at Verbose and print
+        // these statistics only when the test fails.
+        ZHLN::LogDebug(
             "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB ({:.2f},{:.2f},{:.2f}); "
             "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
             outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
@@ -1093,7 +1096,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     ofs.write(reinterpret_cast<const char*>(rgb.data()), rgb.size());
     ofs.close();
 
-    ZHLN::Log("[Test Capture] Rendered frame written to: {}", outputPath);
+    ZHLN::LogDebug("[Test Capture] Rendered frame written to: {}", outputPath);
     return {};
 }
 

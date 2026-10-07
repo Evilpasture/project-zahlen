@@ -958,4 +958,239 @@ FitBernoulliNoise(const TemporalMoments& m, const BBox& b, double clusterToleran
     return out;
 }
 
+// ============================================================================
+// Invariant Gates
+// ============================================================================
+//
+// Absolute pixel counts ("gold pixels > 100") encode today's look, so every
+// fidelity improvement fails them. The gates below are the replacement shapes
+// (see tests/INVARIANT_TESTING.md):
+//
+// - noise-relative: an effect must exceed the run's own measured floor
+//   (MeasureNoiseFloor, DescribeSeries, ExceedsNoise),
+// - differential: A vs B captured in the same process, compared pooled
+//   (CompareFrames, DownsampleBox) rather than counted,
+// - share/ratio hue: DominantHueShare and YellowShare, whose floors are
+//   relative to the window's own brightest pixel.
+//
+// Presence floors (e.g. share > 0.01) are fine: they pin existence, not look.
+
+struct SeriesStats {
+    double mean   = 0.0;
+    double stddev = 0.0;
+    double min    = 0.0;
+    double max    = 0.0;
+    size_t count  = 0;
+};
+
+// Mean/stddev/min/max of a metric series, e.g. per-frame mean luma over a
+// warmup window. The stddev is what noise-relative gates scale against.
+[[nodiscard]] inline SeriesStats DescribeSeries(const std::vector<double>& values) {
+    SeriesStats stats;
+    stats.count = values.size();
+    if (values.empty()) {
+        return stats;
+    }
+    double sum = 0.0;
+    double mn  = values[0];
+    double mx  = values[0];
+    for (const double v: values) {
+        sum += v;
+        mn = std::min(mn, v);
+        mx = std::max(mx, v);
+    }
+    stats.mean = sum / static_cast<double>(values.size());
+    stats.min  = mn;
+    stats.max  = mx;
+    if (values.size() > 1) {
+        double variance = 0.0;
+        for (const double v: values) {
+            const double d = v - stats.mean;
+            variance += d * d;
+        }
+        stats.stddev = std::sqrt(variance / static_cast<double>(values.size() - 1));
+    }
+    return stats;
+}
+
+// True when `effect` clears k sigma of measured noise floor AND an absolute
+// presence floor. The k-sigma term scales with the run's own jitter
+// (exposure, device, driver); the floor keeps a bit-exact-zero noise run
+// from passing on dust. Prefer this over `effect > CONSTANT`.
+[[nodiscard]] inline bool ExceedsNoise(double effect, double noiseStd, double k = 3.0, double floor = 0.0) noexcept {
+    return effect > k * noiseStd && effect > floor;
+}
+
+[[nodiscard]] inline double RelativeDifference(double a, double b) noexcept {
+    const double denom = std::max({std::abs(a), std::abs(b), 1e-9});
+    return std::abs(a - b) / denom;
+}
+
+// Monotonicity with a slack band, for sweeps that must move one way
+// (roughness rows, radius responses, LOD steps) without pinning the values.
+[[nodiscard]] inline bool IsMonotonicNonDecreasing(const std::vector<double>& values, double tolerance = 0.0) noexcept {
+    for (size_t i = 1; i < values.size(); ++i) {
+        if (values[i] + tolerance < values[i - 1]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] inline bool IsMonotonicNonIncreasing(const std::vector<double>& values, double tolerance = 0.0) noexcept {
+    for (size_t i = 1; i < values.size(); ++i) {
+        if (values[i] > values[i - 1] + tolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The engine's own frame-to-frame jitter over `frames` (consecutive captures
+// of an unchanged scene): mean/stddev of pairwise meanAbs plus the worst
+// pooled over-32 fraction. Gate temporal effects against this instead of a
+// constant: `ExceedsNoise(effect.meanAbs, floor.meanAbsStd)` fails a real
+// flicker and survives a noisier-or-quieter renderer.
+struct NoiseFloor {
+    double meanAbsMean = 0.0;
+    double meanAbsStd  = 0.0;
+    double frac32Max   = 0.0;
+    size_t pairs       = 0;
+};
+
+[[nodiscard]] inline NoiseFloor MeasureNoiseFloor(const std::vector<RgbImage>& frames) {
+    NoiseFloor floor;
+    if (frames.size() < 2) {
+        return floor;
+    }
+    std::vector<double> means;
+    means.reserve(frames.size() - 1);
+    for (size_t i = 1; i < frames.size(); ++i) {
+        const FrameDiff diff = CompareFrames(frames[i - 1], frames[i]);
+        means.push_back(diff.meanAbs);
+        floor.frac32Max = std::max(floor.frac32Max, diff.frac32);
+        ++floor.pairs;
+    }
+    const SeriesStats stats = DescribeSeries(means);
+    floor.meanAbsMean       = stats.mean;
+    floor.meanAbsStd        = stats.stddev;
+    return floor;
+}
+
+// Box-downsampled copy, for pooled A/B comparisons that must ignore
+// one-pixel TAA edges and denoiser jitter. Compare the outputs with
+// CompareFrames and gate on the pooled fractions, not on counts.
+[[nodiscard]] inline RgbImage DownsampleBox(const RgbImage& img, int outWidth, int outHeight) {
+    RgbImage out;
+    if (!img.Valid() || outWidth <= 0 || outHeight <= 0) {
+        return out;
+    }
+    out.width  = outWidth;
+    out.height = outHeight;
+    out.rgb.resize(static_cast<size_t>(outWidth) * static_cast<size_t>(outHeight) * 3u);
+    for (int y = 0; y < outHeight; ++y) {
+        const int y0 = y * img.height / outHeight;
+        const int y1 = (y + 1) * img.height / outHeight;
+        for (int x = 0; x < outWidth; ++x) {
+            const int x0 = x * img.width / outWidth;
+            const int x1 = (x + 1) * img.width / outWidth;
+            uint64_t    sumR = 0, sumG = 0, sumB = 0, count = 0;
+            for (int sy = y0; sy < y1; ++sy) {
+                for (int sx = x0; sx < x1; ++sx) {
+                    const size_t p = (static_cast<size_t>(sy) * static_cast<size_t>(img.width) + static_cast<size_t>(sx)) * 3u;
+                    sumR += img.rgb[p + 0];
+                    sumG += img.rgb[p + 1];
+                    sumB += img.rgb[p + 2];
+                    ++count;
+                }
+            }
+            const size_t d = (static_cast<size_t>(y) * static_cast<size_t>(outWidth) + static_cast<size_t>(x)) * 3u;
+            out.rgb[d + 0] = count > 0 ? static_cast<uint8_t>(sumR / count) : 0;
+            out.rgb[d + 1] = count > 0 ? static_cast<uint8_t>(sumG / count) : 0;
+            out.rgb[d + 2] = count > 0 ? static_cast<uint8_t>(sumB / count) : 0;
+        }
+    }
+    return out;
+}
+
+// Crops an image to a normalized rect (clamped to the frame), for gating on
+// a predicted region -- where a mirror image must land, what a probe window
+// actually contains -- instead of the whole frame. Empty rects and invalid
+// images crop to invalid.
+[[nodiscard]] inline RgbImage CropImage(const RgbImage& img, NormalizedRect rect) {
+    if (!img.Valid()) {
+        return {};
+    }
+    const int x0 = std::clamp(static_cast<int>(rect.x0 * static_cast<double>(img.width)), 0, img.width);
+    const int y0 = std::clamp(static_cast<int>(rect.y0 * static_cast<double>(img.height)), 0, img.height);
+    const int x1 = std::clamp(static_cast<int>(rect.x1 * static_cast<double>(img.width)), 0, img.width);
+    const int y1 = std::clamp(static_cast<int>(rect.y1 * static_cast<double>(img.height)), 0, img.height);
+    if (x1 <= x0 || y1 <= y0) {
+        return {};
+    }
+    RgbImage out;
+    out.width  = x1 - x0;
+    out.height = y1 - y0;
+    out.rgb.resize(static_cast<size_t>(out.width * out.height * 3));
+    for (int y = y0; y < y1; ++y) {
+        const size_t src = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x0)) * 3u;
+        const size_t dst = (static_cast<size_t>(y - y0) * static_cast<size_t>(out.width)) * 3u;
+        std::copy_n(img.rgb.data() + src, static_cast<size_t>(out.width * 3), out.rgb.data() + dst);
+    }
+    return out;
+}
+
+// Share of the window reading warm: pixels above `levelFraction` of the
+// window's own max luma whose R and G both exceed `ratio` x B. The sibling
+// of DominantHueShare for hues no single channel dominates (gold, sodium
+// vapour, candlelight). Like DominantHueShare the floor is relative, so an
+// exposure change moves it with the picture instead of failing the test.
+[[nodiscard]] inline double YellowShare(
+    const RgbImage& img, const NormalizedRect& rect, double ratio = 1.3, double levelFraction = 0.25
+) {
+    if (!img.Valid()) {
+        return 0.0;
+    }
+
+    const int x0 = std::clamp(static_cast<int>(rect.x0 * img.width), 0, img.width - 1);
+    const int y0 = std::clamp(static_cast<int>(rect.y0 * img.height), 0, img.height - 1);
+    const int x1 = std::clamp(static_cast<int>(rect.x1 * img.width), x0 + 1, img.width);
+    const int y1 = std::clamp(static_cast<int>(rect.y1 * img.height), y0 + 1, img.height);
+
+    double maxLuma = 0.0;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            maxLuma        = std::max(maxLuma, Luma(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]));
+        }
+    }
+    if (maxLuma <= 0.0) {
+        return 0.0;
+    }
+
+    const double floorLuma = levelFraction * maxLuma;
+    uint32_t     total     = 0;
+    uint32_t     warm      = 0;
+
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const size_t i = (static_cast<size_t>(y) * static_cast<size_t>(img.width) + static_cast<size_t>(x)) * 3u;
+            const double r = img.rgb[i + 0];
+            const double g = img.rgb[i + 1];
+            const double b = img.rgb[i + 2];
+            ++total;
+
+            if (Luma(img.rgb[i + 0], img.rgb[i + 1], img.rgb[i + 2]) < floorLuma) {
+                continue;
+            }
+
+            if (std::min(r, g) >= ratio * b) {
+                ++warm;
+            }
+        }
+    }
+
+    return total > 0 ? static_cast<double>(warm) / static_cast<double>(total) : 0.0;
+}
+
 } // namespace ZHLN::Test::Image

@@ -402,6 +402,24 @@ struct RayTracedReflectionNoiseTestSuite {
             const auto onVsOn   = ZHLN::Test::Noise::MeasureResidual(a.rgb.data(), c.rgb.data(), kWidth, kHeight, kChangeThreshold);
             const auto ssrVsOff = ZHLN::Test::Noise::MeasureResidual(ssr.rgb.data(), b.rgb.data(), kWidth, kHeight, kChangeThreshold);
             const double topChanged = ChangedFractionInTopRows(LumaDifference(a, b));
+            // Diagnosis for the quarantine (see QuarantineList): the on/on
+            // control separates jitter in the probe rows (probe placement /
+            // threshold wrong) from a systematic shift (the switch leaking
+            // into a non-dithering term -- bloom or exposure -- which is what
+            // a ~0 on/on points at). MeanAbs sizes the leak: sub-luma means
+            // a benign post coupling, several luma means a gross leak.
+            const double topChangedOnOn = ChangedFractionInTopRows(LumaDifference(a, c));
+            const auto   meanAbsTop     = [](const std::vector<double>& diff) {
+                double sum = 0.0;
+                for (int y = 0; y < kCutoffProbeRows; ++y) {
+                    for (int x = 0; x < kWidth; ++x) {
+                        sum += std::abs(diff[static_cast<std::size_t>(y) * kWidth + x]);
+                    }
+                }
+                return sum / static_cast<double>(kCutoffProbeRows * kWidth);
+            };
+            const double topMeanAbsOnOff = meanAbsTop(LumaDifference(a, b));
+            const double topMeanAbsOnOn  = meanAbsTop(LumaDifference(a, c));
             ZHLN::Println(
                 "    [INFO] SSR probe vs off : meanAbs={:.3f} rms={:.3f} changed={:.5f}", ssrVsOff.meanAbs, ssrVsOff.rms, ssrVsOff.changedFraction
             );
@@ -412,6 +430,10 @@ struct RayTracedReflectionNoiseTestSuite {
                 "    [INFO] RTR on vs on  : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOn.meanAbs, onVsOn.rms, onVsOn.changedFraction
             );
             ZHLN::Println("    [INFO] changed fraction in top {} probe rows (must be ~0) = {:.5f}", kCutoffProbeRows, topChanged);
+            ZHLN::Println(
+                "    [INFO] top-row on/on control: changed={:.5f} | top meanAbs on/off={:.3f} on/on={:.3f}", topChangedOnOn, topMeanAbsOnOff,
+                topMeanAbsOnOn
+            );
 
             if (!ZHLN::Test::ExpectGt(onVsOff.changedFraction, 0.0)) {
                 if (maxAll < 4.0) {

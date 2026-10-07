@@ -3,7 +3,8 @@
 
 // tests/render/RunPipelineTests.cpp
 //
-// Entry point for the GPU_Pipeline group binary: pipeline, resource and culling mechanics.
+// Entry point for the GPU_Pipeline group binary: pipeline, resource and culling mechanics,
+// plus PBR robustness at distance.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace
 // helpers private to its own translation unit and exports a stats-returning
@@ -32,10 +33,12 @@ auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
 auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
+auto RunGLTFSampleAssetsSuite() -> ZHLN::Test::TestStats;
 auto RunNegativeScaleSuite() -> ZHLN::Test::TestStats;
 auto RunTextureTransformsSuite() -> ZHLN::Test::TestStats;
 auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
 auto RunUnlitMaterialsSuite() -> ZHLN::Test::TestStats;
+auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -63,9 +66,14 @@ auto main(int argc, char** argv) -> int {
         RunViewportSubregionSuite,
         RunHiZSuite,
         RunGLTFImportSuite,
+        RunGLTFSampleAssetsSuite,
         RunNegativeScaleSuite,
         RunTextureTransformsSuite,
         RunTransparentMaterialsSuite,
-        RunUnlitMaterialsSuite
+        RunUnlitMaterialsSuite,
+        // Last: it takes an exclusive engine, evicting the pooled one from
+        // the serial slot first (see its CreateTestEngine). Nothing after it
+        // pays a pool rebuild.
+        RunDistanceStabilitySuite
     );
 }

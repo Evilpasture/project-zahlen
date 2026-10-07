@@ -20,6 +20,9 @@ build if a test includes engine internals.
 GPU suites (`ZHLN_BUILD_GPU_TESTS`) judge public behaviour from
 `CaptureScreenshotPPM` pixels — camera aim, PBR response, UI layout, and
 ray-traced reflection colour vs PBR F0/roughness — not private systems.
+See `tests/INVARIANT_TESTING.md` for the no-absolute-pixels rule, quiet logs
+(`ZHLN_TEST_LOG=verbose`), sample-asset coverage without committed GLBs,
+and quarantine (`[ QUARANTINE ]` = known open engine bug, still running).
 
 ## Optional reference compatibility
 

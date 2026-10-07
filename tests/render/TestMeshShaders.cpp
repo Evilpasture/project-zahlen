@@ -486,7 +486,9 @@ struct MeshShaderTestSuite {
                 return {};
             }
 
-            auto setupScene = [](ZHLN::Engine& engine) {
+            // Declared (not deduced) return: every path returns, so a missing
+            // camera fails the test instead of flowing off the end (-Wreturn-type).
+            auto setupScene = [](ZHLN::Engine& engine) -> std::expected<void, ZHLN::ErrorCode> {
                 auto& reg = engine.GetRegistry();
                 auto& rc  = engine.GetRenderContext();
 
@@ -535,6 +537,7 @@ struct MeshShaderTestSuite {
                         engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false}
                     );
                 }
+                return {};
             };
 
             constexpr float dt = 1.0f / 60.0f;
@@ -561,7 +564,9 @@ struct MeshShaderTestSuite {
             // reports PASS is not verifying anything.
             const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
 
-            setupScene(*vertexEngine);
+            if (auto setupResult = setupScene(*vertexEngine); !setupResult) {
+                return std::unexpected(setupResult.error());
+            }
             const Image vertexA = capture(*vertexEngine, "headless_meshshader_vertex_a.ppm");
             ZHLN::Test::ExpectFalse(vertexEngine->GetRenderContext().GetInfo().meshShadingActive);
             const Image vertexB = capture(*vertexEngine, "headless_meshshader_vertex_b.ppm");
@@ -570,7 +575,9 @@ struct MeshShaderTestSuite {
             if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
-            setupScene(*meshEngine);
+            if (auto setupResult = setupScene(*meshEngine); !setupResult) {
+                return std::unexpected(setupResult.error());
+            }
             const Image meshImage = capture(*meshEngine, "headless_meshshader_mesh.ppm");
             ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive);
 
@@ -709,7 +716,9 @@ struct MeshShaderTestSuite {
                 return {};
             }
 
-            auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) {
+            // Declared (not deduced) return: every path returns, so a missing
+            // camera fails the test instead of flowing off the end (-Wreturn-type).
+            auto setupCloseup = [](ZHLN::Engine& engine, const CloseupSubject& subject) -> std::expected<void, ZHLN::ErrorCode> {
                 auto& reg = engine.GetRegistry();
                 auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
                 if (!settingsEnts.empty()) {
@@ -756,6 +765,7 @@ struct MeshShaderTestSuite {
                 }
                 // The closeup pose is chosen by the branch above: the write-back belongs
                 // after it, or the engine renders the pre-branch framing.
+                return {};
             };
 
             constexpr float dt = 1.0f / 60.0f;
@@ -784,7 +794,9 @@ struct MeshShaderTestSuite {
                 if (i > 0) {
                     ZHLN::Test::Headless::ResetScene(*vertexEngine);
                 }
-                setupCloseup(*vertexEngine, subjects[i]);
+                if (auto setupResult = setupCloseup(*vertexEngine, subjects[i]); !setupResult) {
+                    return std::unexpected(setupResult.error());
+                }
                 vertexFrames[i] = capture(*vertexEngine, std::string("headless_meshlet_closeup_") + subjects[i].name + "_vertex.ppm");
             }
 
@@ -797,7 +809,9 @@ struct MeshShaderTestSuite {
                 if (i > 0) {
                     ZHLN::Test::Headless::ResetScene(*meshEngine);
                 }
-                setupCloseup(*meshEngine, subjects[i]);
+                if (auto setupResult = setupCloseup(*meshEngine, subjects[i]); !setupResult) {
+                    return std::unexpected(setupResult.error());
+                }
                 meshFrames[i] = capture(*meshEngine, std::string("headless_meshlet_closeup_") + subjects[i].name + "_mesh.ppm");
             }
 

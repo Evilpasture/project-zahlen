@@ -79,12 +79,19 @@ struct PBRTestSuite {
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
-            // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping
+            // Set Fullbright = 0 to evaluate full PBR lighting and tonemapping.
+            // Scene levels are load-bearing: sun 220 + exposure 12 overexpose
+            // the red dielectric ~10x, so even its 5%-albedo channels clip and
+            // Khronos Neutral desaturates the result to white (PNG-proven: the
+            // "red" box rendered pure white). Levels match the culling-sweep
+            // scene's proven-sane combo; the INFO means below confirm red
+            // reads red -- if a future grade pushes faces back toward clip,
+            // re-level here, never in the gates.
             auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
             if (!settingsEnts.empty()) {
                 reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
                     pp.fullBright      = 0;
-                    pp.ambientExposure = 12.0f;
+                    pp.ambientExposure = 2.0f;
                 });
             }
 
@@ -98,7 +105,7 @@ struct PBRTestSuite {
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
                     .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
-                    .intensity = 220.0f,
+                    .intensity = 40.0f,
                     .direction = JPH::Vec3(0.0f, 0.35f, 0.93f).Normalized() // Direction TO the sun
                 }
             );
@@ -146,53 +153,63 @@ struct PBRTestSuite {
                 ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
             }
 
-            // 6. Capture rendered frame and validate pixel histogram
-            const std::string ppmPath    = "headless_pbr_output.ppm";
-            const auto        captureRes = rc.CaptureScreenshotPPM(ppmPath);
-            if (!captureRes) {
+            // 6. Capture and compare the two halves relatively. The old gate
+            // counted absolute pixels above fixed 8-bit floors (> 100 gold,
+            // > 100 red), so any exposure or tonemapping change failed it.
+            // The replacement asks two exposure-proof questions per half:
+            // does the gold window read warm (R and G both well above B)
+            // and does the red window read red-dominant -- each measured
+            // against its own brightest pixel, and each required to beat
+            // the OTHER half at its own hue, so shared background cancels.
+            const ZHLN::Test::Image::RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_pbr_output.ppm");
+            if (!frame.Valid()) {
                 return std::unexpected(PBRTestError::RenderOutputBlank);
             }
 
-            std::ifstream ppm(ppmPath, std::ios::binary);
-            if (!ppm.is_open()) {
-                return std::unexpected(PBRTestError::RenderOutputBlank);
-            }
+            // Boxes at x = -1.2/+1.2, z = 0 under a 60deg camera at z = 4:
+            // the left box spans roughly x in [0.20, 0.36], the right in
+            // [0.64, 0.80], both vertically centered. The windows frame
+            // each box with margin; the sky they also contain is shared,
+            // so the cross-half comparison cancels it.
+            const ZHLN::Test::Image::NormalizedRect goldWindow {.x0 = 0.10, .y0 = 0.30, .x1 = 0.45, .y1 = 0.70};
+            const ZHLN::Test::Image::NormalizedRect redWindow {.x0 = 0.55, .y0 = 0.30, .x1 = 0.90, .y1 = 0.70};
 
-            std::string header;
-            int         width = 0, height = 0, maxColor = 0;
-            ppm >> header >> width >> height >> maxColor;
-            ppm.get();
+            const double goldWarm = ZHLN::Test::Image::YellowShare(frame, goldWindow);
+            const double redWarm  = ZHLN::Test::Image::YellowShare(frame, redWindow);
 
-            std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 3));
-            ppm.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+            const auto goldStats = ZHLN::Test::Image::MeasureSubRegion(frame, goldWindow);
+            const auto redStats  = ZHLN::Test::Image::MeasureSubRegion(frame, redWindow);
+            // Red leads green by 43 luma here yet strict dominant-red share
+            // reads 0.000: at this brightness no pixel clears the 1.6x
+            // classifier even on a correctly red dielectric. So the red side
+            // compares R-minus-G EXCESS cross-half instead of shares. Green
+            // is the shared channel where red albedo's lead shows: gold's F0
+            // crushes blue (gold B = 106 vs red B = 191), so any B-based
+            // metric favours gold and R-G is the only honest axis. Linear
+            // physics gives red ~4x the excess (albedo keeps ~95% R-over-G,
+            // gold F0 ~23%); Neutral compresses the measured gap to ~2x
+            // (42.9 vs 20.9), and the bounds sit between.
+            const double goldExcess = goldStats.meanR - goldStats.meanG;
+            const double redExcess  = redStats.meanR - redStats.meanG;
+            ZHLN::Println(
+                "    [INFO] PBR dielectric vs metallic: gold window warm={:.3f} R-G excess={:.1f} mean=({:.1f},{:.1f},{:.1f}); red window warm={:.3f} R-G excess={:.1f} mean=({:.1f},{:.1f},{:.1f}).",
+                goldWarm, goldExcess, goldStats.meanR, goldStats.meanG, goldStats.meanB, redWarm, redExcess, redStats.meanR, redStats.meanG,
+                redStats.meanB
+            );
 
-            uint32_t goldColoredPixels = 0;
-            uint32_t redColoredPixels  = 0;
+            const bool goldPresent = ZHLN::Test::ExpectGt(goldWarm, 0.01);
+            const bool redPresent  = ZHLN::Test::ExpectGt(redExcess, 5.0);
+            const bool goldWarmer  = ZHLN::Test::ExpectGt(goldWarm, redWarm * 1.3);
+            const bool redRedder   = ZHLN::Test::ExpectGt(redExcess, goldExcess * 1.5) && ZHLN::Test::ExpectGt(redExcess, goldExcess + 10.0);
 
-            for (size_t i = 0; i < pixels.size(); i += 3) {
-                const uint8_t r = pixels[i + 0];
-                const uint8_t g = pixels[i + 1];
-                const uint8_t b = pixels[i + 2];
-
-                // Detect Gold metallic reflections (High Red & Green, Low Blue)
-                if (r > 60 && g > 40 && b < 40 && r >= g) {
-                    goldColoredPixels++;
-                }
-
-                // Detect Red dielectric diffuse (High Red, Low Green & Blue)
-                if (r > 60 && g < 40 && b < 40) {
-                    redColoredPixels++;
-                }
-            }
-
-            ZHLN::Test::ExpectGt(goldColoredPixels, 100u);
-            ZHLN::Test::ExpectGt(redColoredPixels, 100u);
-
-            if (goldColoredPixels < 100u || redColoredPixels < 100u) {
+            if (!goldPresent || !redPresent || !goldWarmer || !redRedder) {
                 return std::unexpected(PBRTestError::SpecularHighlightNotDetected);
             }
 
-            ZHLN::Println("    [PASS] PBR validated: {} gold metallic pixels, {} red dielectric pixels.", goldColoredPixels, redColoredPixels);
+            ZHLN::Println(
+                "    [PASS] PBR validated: gold warm share {:.3f} vs {:.3f}, red R-G excess {:.1f} vs {:.1f}.",
+                goldWarm, redWarm, redExcess, goldExcess
+            );
             return {};
         }
 

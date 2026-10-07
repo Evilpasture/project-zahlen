@@ -3,7 +3,9 @@
 
 // tests/render/RunPerformanceTests.cpp
 //
-// Entry point for the GPU_Performance group binary: throughput and long-run distance stability.
+// Entry point for the GPU_Performance group binary: throughput.
+// DistanceStability lives in GPU_Pipeline: it is a correctness suite, not a
+// throughput gate.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace
 // helpers private to its own translation unit and exports a stats-returning
@@ -21,7 +23,6 @@
 #include <string_view>
 
 auto RunRenderPerformanceSuites() -> ZHLN::Test::TestStats;
-auto RunDistanceStabilitySuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -31,7 +32,6 @@ auto main(int argc, char** argv) -> int {
     }
 
     return ZHLN::Test::Runner::RunDeferred(
-        RunRenderPerformanceSuites,
-        RunDistanceStabilitySuite
+        RunRenderPerformanceSuites
     );
 }

@@ -87,6 +87,12 @@ constexpr NormalizedRect kHaloWindow {.x0 = 0.44, .y0 = 0.25, .x1 = 0.56, .y1 = 
 // constant is `const` at namespace scope. It is still one object, not a
 // spelling that has to be converted at the crossing.
 const JPH::Float4 kEmissiveGreen {0.0f, 1.0f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+// Hue is asserted here, not at import scale: 6x is sibling-proven chromatic
+// (the multi-emissive direct boxes read their hues at 6x under worse wash),
+// while 100x through the default Khronos Neutral tonemap desaturates to
+// near-white BY DESIGN -- asserting hue there pins the test to the
+// tonemapper's highlight shoulder rather than to the emission path.
+const JPH::Float4 kHueGreen {0.0f, 6.0f, 0.0f, 1.0f};
 const JPH::Float4 kNoEmission {0.0f, 0.0f, 0.0f, 1.0f};
 const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 
@@ -101,6 +107,16 @@ const JPH::Float4 kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // look is gone"; the fix is the unit conversion at import, and this constant
 // tracks it so the test measures what an imported asset really does.
 const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
+// The halo frames run the bloom composite here, not at the engine default
+// 0.0 (which multiplies the whole Kawase chain by zero at composite --
+// blit.slang -- and made the patch-2 explicit on/off match bit-for-bit).
+// 0.01 is the production default (0.5) scaled by source energy: this neon
+// is 80x while production HDR sources are ~2-4, so a full-strength
+// composite would white out the room. Working point is on-halo in the
+// tens of luma (the feed gate needs > dark + 4, the slab bound < 127):
+// if a future run reads halo > 100, halve this; if < 15, double it.
+// Level the scene here, never in the gates.
+constexpr float kHaloBloomStrength = 0.01f;
 
 // Builds the unlit scene: one box at the origin, no lights of any kind, and
 // ambient/GI dialled out so nothing but emission can brighten a surface.
@@ -112,14 +128,19 @@ const JPH::Float4 kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f
 //
 // Returns false when material creation fails, which is a setup failure rather
 // than a rendering result.
-[[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity) {
+[[nodiscard]] bool BuildUnlitBoxScene(
+    ZHLN::Engine& engine, const JPH::Float4& emissiveFactor, std::optional<float> glowIntensity, std::optional<float> bloomStrength
+) {
     auto& registry = engine.GetRegistry();
     auto& renderCtx = engine.GetRenderContext();
 
     for (const ZHLN::Entity settings: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
-        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity](auto& pp) {
+        registry.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [glowIntensity, bloomStrength](auto& pp) {
             if (glowIntensity.has_value()) {
                 pp.glowIntensity = *glowIntensity;
+            }
+            if (bloomStrength.has_value()) {
+                pp.bloomStrength = *bloomStrength;
             }
             pp.fullBright      = 0;
             pp.ambientExposure = 0.0f;
@@ -168,7 +189,10 @@ struct UnlitMeasurement {
 };
 
 // Renders the unlit scene once and measures it.
-[[nodiscard]] auto MeasureUnlitBox(const JPH::Float4& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt)
+[[nodiscard]] auto MeasureUnlitBox(
+    const JPH::Float4& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt,
+    std::optional<float> bloomStrength = std::nullopt
+)
     -> UnlitMeasurement {
     UnlitMeasurement out;
 
@@ -183,7 +207,7 @@ struct UnlitMeasurement {
     }
     ZHLN::Test::Headless::DisableTAA(*engine);
 
-    if (!BuildUnlitBoxScene(*engine, emissiveFactor, glowIntensity)) {
+    if (!BuildUnlitBoxScene(*engine, emissiveFactor, glowIntensity, bloomStrength)) {
         return out;
     }
 
@@ -220,20 +244,31 @@ struct EmissiveShadingTestSuite {
         /**
          * An emissive surface with nothing shining on it still emits.
          *
-         * Three things are asserted against one another rather than against
+         * Four things are asserted against one another rather than against
          * absolute pixel values, so an exposure or tonemapper change does not
          * silently invalidate the test:
          *
-         *   1. the emissive box is bright and green in a scene with no lights;
-         *   2. the identical non-emissive box in the identical scene is dark,
-         *      which is what proves the light in (1) came from emission and
-         *      not from a stray ambient term;
-         *   3. the frame corner stays dark, so (1) is the emitter and not a
+         *   1. the import-scale (100x) box is bright: emission survives;
+         *   2. a 6x box is bright AND green: hue survives where the tonemap
+         *      keeps hue (100x desaturates to white under Khronos Neutral by
+         *      design, so hue is asserted below the shoulder and brightness
+         *      at the scale the importer produces);
+         *   3. the import-scale box outshines the identical non-emissive box
+         *      by a wide differential, which is what proves the light in (1)
+         *      came from emission: the "unlit" scene is not perfectly dark
+         *      (default sun/IBL light the control to ~109), so an absolute
+         *      control-darkness floor would grade the scene, not the emission;
+         *   4. the frame corner stays dark, so (1) is the emitter and not a
          *      full-screen brightening.
          */
         std::expected<void, ZHLN::ErrorCode> emission_survives_a_scene_with_no_lights() {
             const UnlitMeasurement emissive = MeasureUnlitBox(kEmissiveGreen, "emissive_unlit.ppm");
             if (!emissive.valid) {
+                return std::unexpected(EmissiveShadingError::CaptureFailed);
+            }
+
+            const UnlitMeasurement hue = MeasureUnlitBox(kHueGreen, "emissive_unlit_hue.ppm");
+            if (!hue.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }
 
@@ -252,32 +287,40 @@ struct EmissiveShadingTestSuite {
                 emissiveBox.meanLuma, emissiveBox.maxLuma, emissiveBox.meanR, emissiveBox.meanG, emissiveBox.meanB, emissive.greenShare,
                 controlBox.meanLuma, emissiveCorner.meanLuma
             );
+            ZHLN::Println(
+                "    [INFO] hue box (6x) meanLuma={:.1f} meanRGB=({:.1f}, {:.1f}, {:.1f}) greenShare={:.2f}", hue.box.meanLuma, hue.box.meanR,
+                hue.box.meanG, hue.box.meanB, hue.greenShare
+            );
 
-            // 1. The emitter is visible at all. Before the fix this window was
-            //    the clear colour: the lighting pass multiplied the baked-in
-            //    emission by an incident light of zero.
+            // 1. The import-scale emitter is visible at all. Before the fix this
+            //    window was the clear colour: the lighting pass multiplied the
+            //    baked-in emission by an incident light of zero.
             //
             //    The floor is deliberately a degenerate-case guard, not a
             //    calibration: what actually proves emission happened is (3),
             //    which compares this window against the identical box with the
-            //    emissive factor removed. Hardware measures ~240 for a
-            //    saturated emitter, and the control window is capped at 12 by
-            //    (3), so 16 separates "lit by its own emission" from "as dark
-            //    as the control" without pinning the test to one tonemapper's
-            //    output.
+            //    emissive factor removed.
             if (emissiveBox.meanLuma < 16.0) {
                 return std::unexpected(EmissiveShadingError::EmissiveWentDark);
             }
 
-            // 2. It is the colour it emits, not a grey wash.
-            if (emissive.greenShare < 0.5 || emissiveBox.meanG <= emissiveBox.meanR || emissiveBox.meanG <= emissiveBox.meanB) {
+            // 2. Emission keeps its hue where the tonemap keeps hue: the 6x
+            //    box must read green-dominant, while the 100x box is allowed
+            //    its Neutral-desaturated near-white (asserting green there
+            //    would pin the test to the highlight shoulder, not the
+            //    emission path).
+            if (hue.greenShare < 0.5 || hue.box.meanG <= hue.box.meanR || hue.box.meanG <= hue.box.meanB) {
                 return std::unexpected(EmissiveShadingError::EmissiveHueLost);
             }
 
-            // 3. The same box without the emissive factor stays dark, so the
-            //    scene really is unlit and (1) measured emission.
-            if (controlBox.meanLuma > 12.0 || controlBox.meanLuma * 3.0 > emissiveBox.meanLuma) {
-                ZHLN::Println("    [INFO] control box meanLuma={:.1f} vs emissive {:.1f}", controlBox.meanLuma, emissiveBox.meanLuma);
+            // 3. The import-scale box outshines the identical non-emissive box
+            //    by a wide differential, so the light in (1) came from emission
+            //    and not from the scene's residual lighting (default sun/IBL
+            //    lift the control to ~109: the scene is dim, not perfectly
+            //    unlit, which is why this is a differential, not a darkness
+            //    floor).
+            if (emissiveBox.meanLuma < controlBox.meanLuma * 1.5 + 5.0) {
+                ZHLN::Println("    [INFO] emissive meanLuma={:.1f} vs control {:.1f}", emissiveBox.meanLuma, controlBox.meanLuma);
                 return std::unexpected(EmissiveShadingError::ControlNotDark);
             }
 
@@ -326,8 +369,16 @@ struct EmissiveShadingTestSuite {
             // the two is what makes this a test of the glow layer rather than
             // of one hand-picked brightness: whatever the tonemapper and the
             // Kawase cascade do, they do it identically to both frames.
-            const UnlitMeasurement lit  = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo.ppm");
-            const UnlitMeasurement dark = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo_off.ppm", 0.0f);
+            // Explicit on/off at full linear feed (bloom_threshold_cs adds
+            // emissive * glowIntensity ungated), with the bloom composite
+            // running on BOTH frames: the engine default bloomStrength 0.0
+            // multiplies the chain away at composite, so flipping the feed
+            // with the master off compares off against off -- the patch-2
+            // bit-identical run. The OFF frame stays dark anyway: the dim
+            // surface sits below the threshold's soft knee, so only the
+            // feed lights the chain.
+            const UnlitMeasurement lit  = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo.ppm", 1.0f, kHaloBloomStrength);
+            const UnlitMeasurement dark = MeasureUnlitBox(kNeonGreen, "emissive_glow_halo_off.ppm", 0.0f, kHaloBloomStrength);
             if (!lit.valid || !dark.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
             }

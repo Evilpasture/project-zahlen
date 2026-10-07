@@ -127,7 +127,9 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
 target_link_libraries(GPU_Lighting PRIVATE zahlen_camera zahlen_asset_cooking)
 target_include_directories(GPU_Lighting PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 
-# Pipeline, resource and culling mechanics.
+# Pipeline, resource and culling mechanics, plus PBR robustness at distance.
+# DistanceStability moved here from GPU_Performance: it is a correctness
+# suite, not a throughput gate.
 zahlen_add_gpu_test_group(GPU_Pipeline 300
     RunPipelineTests.cpp
     TestRenderPipelines.cpp
@@ -141,10 +143,12 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
     TestGLTFImport.cpp
+    TestGLTFSampleAssets.cpp
     TestNegativeScale.cpp
     TestTextureTransforms.cpp
     TestTransparentMaterials.cpp
     TestUnlitMaterials.cpp
+    TestRenderDistanceStability.cpp
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
@@ -171,6 +175,39 @@ target_include_directories(GPU_Pipeline PRIVATE ${ZHLN_OPTIONAL_INCLUDE_ROOTS})
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
+# Sample-asset conformance without committed binaries: an optional shallow
+# clone of Khronos glTF-Sample-Assets into the build tree. The directory is
+# baked in as the default search root; $ZHLN_SAMPLE_ASSETS overrides it at
+# runtime. When neither exists the sample-asset tests SKIP instead of failing,
+# so this stays OFF-safe for air-gapped and minimal builds.
+option(ZHLN_FETCH_SAMPLE_ASSETS "Shallow-clone glTF-Sample-Assets into the build tree for sample-asset render tests" OFF)
+set(ZHLN_SAMPLE_ASSETS_DIR "" CACHE PATH "Path to a glTF-Sample-Assets checkout used by the sample-asset render tests")
+set(_zhln_sample_assets_default "${ZHLN_SAMPLE_ASSETS_DIR}")
+if(ZHLN_FETCH_SAMPLE_ASSETS AND _zhln_sample_assets_default STREQUAL "")
+  set(_zhln_sample_assets_default "${CMAKE_BINARY_DIR}/sample-assets/glTF-Sample-Assets")
+  if(NOT EXISTS "${_zhln_sample_assets_default}/Models")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+      message(STATUS "Cloning glTF-Sample-Assets (shallow) for sample-asset render tests...")
+      execute_process(
+        COMMAND ${GIT_EXECUTABLE} clone --depth 1 https://github.com/KhronosGroup/glTF-Sample-Assets.git "${_zhln_sample_assets_default}"
+        RESULT_VARIABLE _zhln_sample_clone_result
+        OUTPUT_QUIET ERROR_QUIET
+      )
+      if(NOT _zhln_sample_clone_result EQUAL 0)
+        message(WARNING "glTF-Sample-Assets clone failed; sample-asset render tests will SKIP.")
+      endif()
+    else()
+      message(WARNING "Git not found; sample-asset render tests will SKIP.")
+    endif()
+  endif()
+  if(NOT EXISTS "${_zhln_sample_assets_default}/Models")
+    set(_zhln_sample_assets_default "")
+  endif()
+endif()
+target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_SAMPLE_ASSETS_DIR="${_zhln_sample_assets_default}")
+unset(_zhln_sample_assets_default)
+
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
     TestViewmodel.cpp
@@ -178,12 +215,11 @@ zahlen_add_gpu_test_group(GPU_Interface 180
     TestPresentPacing.cpp
 )
 
-# Throughput and long-run distance stability. Kept apart from the others: these
-# two are the slowest suites and the most likely to hit the timeout.
+# Throughput. Kept apart from the others: it is the slowest suite and the
+# most likely to hit the timeout.
 zahlen_add_gpu_test_group(GPU_Performance 900
     RunPerformanceTests.cpp
     TestRenderPerformance.cpp
-    TestRenderDistanceStability.cpp
 )
 
 # TestRenderPerformance.cpp checks its measurements against the recorded

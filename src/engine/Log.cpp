@@ -8,13 +8,16 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <mutex>
 #include <print>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -39,6 +42,16 @@ auto TemplatedDetail::GetRegistryHead() noexcept -> std::atomic<TemplatedDetail:
 namespace {
 
 std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
+
+// Test-quiet capture buffer (see BeginLogCapture in <Zahlen/Log.hpp>).
+// Engine fibers log from worker threads, so every access takes the mutex;
+// the critical section is a bounded vector push, negligible next to the
+// formatted I/O the non-suppressed path already does.
+std::mutex               s_CaptureMutex;
+std::vector<std::string> s_Captured;
+bool                     s_Capturing      = false;
+bool                     s_SuppressOutput = false;
+constexpr size_t         kMaxCapturedLines = 512;
 
 constexpr auto SeverityTag(LogSeverity severity) noexcept -> std::string_view {
     switch (severity) {
@@ -84,6 +97,29 @@ auto GetLogLevel() noexcept -> LogLevel {
     return s_LogLevel.load(std::memory_order::acquire);
 }
 
+void BeginLogCapture(bool suppressOutput) {
+    std::lock_guard<std::mutex> lock(s_CaptureMutex);
+    s_Capturing      = true;
+    s_SuppressOutput = suppressOutput;
+    s_Captured.clear();
+}
+
+auto EndLogCapture() -> std::vector<std::string> {
+    std::lock_guard<std::mutex> lock(s_CaptureMutex);
+    s_Capturing      = false;
+    s_SuppressOutput = false;
+    std::vector<std::string> out;
+    out.swap(s_Captured);
+    return out;
+}
+
+void CancelLogCapture() {
+    std::lock_guard<std::mutex> lock(s_CaptureMutex);
+    s_Capturing      = false;
+    s_SuppressOutput = false;
+    s_Captured.clear();
+}
+
 auto GetCustomLogFile(FILE* overrideFile) -> FILE* {
     static FILE* logFile = nullptr;
     if (overrideFile != nullptr) {
@@ -119,6 +155,33 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
         fiberTag = std::format("{:#x}", fid);
     }
 
+    // Test-quiet capture: record the plain (never colorized) line, and when
+    // suppressed withhold it from the channel. Quiet still suppresses
+    // everything above, including capture: capture is for tests, which run
+    // at Verbose and suppress per-test instead of going Quiet, so a failure
+    // dump keeps even debug-level lines.
+    {
+        const auto capturedSeverity = static_cast<LogSeverity>(severity);
+        std::string plain;
+        if (capturedSeverity == LogSeverity::Info) {
+            plain = std::format("[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
+        } else {
+            plain = std::format("[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(capturedSeverity), message);
+        }
+        std::lock_guard<std::mutex> lock(s_CaptureMutex);
+        if (s_Capturing) {
+            if (s_Captured.size() >= kMaxCapturedLines) {
+                // Drop the oldest quarter; a failure diagnosis wants the
+                // recent lines, and steady-state spam is never the evidence.
+                s_Captured.erase(s_Captured.begin(), s_Captured.begin() + static_cast<std::ptrdiff_t>(kMaxCapturedLines / 4));
+            }
+            s_Captured.push_back(std::move(plain));
+            if (s_SuppressOutput) {
+                return;
+            }
+        }
+    }
+
     FILE* outStream = nullptr;
     if (channel == static_cast<uint8_t>(LogChannel::StdOut)) {
         outStream = stdout;
@@ -144,6 +207,9 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
 }
 
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
+    // A fatal must always print, even mid-capture: drop the suppression
+    // before forcing Verbose, so the panic line below reaches the channel.
+    CancelLogCapture();
     s_LogLevel.store(LogLevel::Verbose, std::memory_order::release);
     InternalWriteLog(static_cast<uint8_t>(LogChannel::StdErr), static_cast<uint8_t>(LogSeverity::Error), file, line, message);
     std::println(stderr, "Stack Trace:\n{}", GetPoorMansStacktrace());

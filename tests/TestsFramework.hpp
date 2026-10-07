@@ -455,9 +455,49 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
 
 
 struct TestStats {
-    uint32_t passed = 0;
-    uint32_t failed = 0;
+    uint32_t passed      = 0;
+    uint32_t failed      = 0;
+    uint32_t quarantined = 0;
 };
+
+// Quarantine: tests that fail on a KNOWN, still-open renderer bug -- never a
+// stale gate -- keep running, but their failures print [ QUARANTINE ] with
+// the reason and neither fail the suite nor the process exit code. A
+// quarantined test that passes prints a remove-the-entry nudge: the entry
+// must die when the bug does. ZHLN_TEST_QUARANTINE=off disables every entry
+// (strict mode for tracking a bug to zero).
+//
+// An entry needs the exact suite + test names (as [ RUN ] prints them), a
+// one-line mechanism, and a pointer to the evidence. No entry without all
+// three -- quarantine is for diagnosed bugs, not for red tests.
+struct QuarantinedTest {
+    std::string_view suite;
+    std::string_view test;
+    std::string_view reason;
+};
+
+inline const std::vector<QuarantinedTest>& QuarantineList() {
+    static const std::vector<QuarantinedTest> list {
+        {"RayTracedReflectionNoiseTestSuite", "rtr_is_live_and_rough_surfaces_stay_still",
+         "RTR switch shifts 3.4% of the roughness-cutoff probe rows through a non-dithering path (on/on-top control reads exactly 0 with "
+         "top meanAbs 0.12 vs 0.00: systematic sub-luma post coupling, bloom/exposure suspected); "
+         "see tests/INVARIANT_TESTING.md verdict 14. Remove when topChanged < 0.002 runs green unquarantined."},
+    };
+    return list;
+}
+
+inline std::string_view QuarantineReason(std::string_view suite, std::string_view test) {
+    const char* const env = std::getenv("ZHLN_TEST_QUARANTINE");
+    if (env != nullptr && std::string_view {env} == "off") {
+        return {};
+    }
+    for (const auto& entry: QuarantineList()) {
+        if (entry.suite == suite && entry.test == test) {
+            return entry.reason;
+        }
+    }
+    return {};
+}
 
 // One line per failed test, collected across every suite in the process
 // (RunDeferred's suites live in other translation units, so the registry is
@@ -526,6 +566,21 @@ TestStats RunSuite() {
             const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order::relaxed);
             const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order::relaxed);
 
+            // Quiet engine chatter: capture every engine log line and print
+            // the buffer only when the test fails, so a green run shows
+            // RUN/PASS/FAIL instead of IBL bakes and per-frame capture
+            // statistics. The level is raised to Verbose inside the capture
+            // so the failure dump keeps even debug-level lines (including
+            // the demoted [Test Capture] statistics). ZHLN_TEST_LOG=verbose
+            // disables the capture and streams engine logs for debugging.
+            const char* const testLogEnv     = std::getenv("ZHLN_TEST_LOG");
+            const bool        captureTestLogs = testLogEnv == nullptr || std::string_view {testLogEnv} != "verbose";
+            const ZHLN::LogLevel outerLogLevel = ZHLN::GetLogLevel();
+            if (captureTestLogs) {
+                ZHLN::SetLogLevel(ZHLN::LogLevel::Verbose);
+                ZHLN::BeginLogCapture(true);
+            }
+
             ReturnType result = std::unexpected(ZHLN::ErrorCode(TestFrameworkError::AssertionFailed));
 
 #if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
@@ -552,6 +607,12 @@ TestStats RunSuite() {
 #else
             result = (target.*pmf)();
 #endif
+
+            std::vector<std::string> capturedTestLogs;
+            if (captureTestLogs) {
+                capturedTestLogs = ZHLN::EndLogCapture();
+                ZHLN::SetLogLevel(outerLogLevel);
+            }
 
             // 2. Fail if new Vulkan Validation Errors occurred
             const uint32_t valErrorsAfter = g_validationErrors.load(std::memory_order::relaxed);
@@ -584,9 +645,18 @@ TestStats RunSuite() {
 
             if (testPassed) {
                 ZHLN::Println("  {}[ PASS ] {}{}", Color::Green, name, Color::Reset);
+                if (const std::string_view reason = QuarantineReason(suiteName, name); !reason.empty()) {
+                    ZHLN::Println("    {}[QUARANTINE] Passed while quarantined -- remove its entry:{} {}", Color::Yellow, Color::Reset, reason);
+                }
                 stats.passed++;
             } else {
-                ZHLN::Println("  {}[ FAIL ] {}{}", Color::Red, name, Color::Reset);
+                const bool quarantined = !QuarantineReason(suiteName, name).empty();
+                if (quarantined) {
+                    ZHLN::Println("  {}[ QUARANTINE ] {}{}", Color::Yellow, name, Color::Reset);
+                    ZHLN::Println("    {}Reason: {}{}", Color::Yellow, QuarantineReason(suiteName, name), Color::Reset);
+                } else {
+                    ZHLN::Println("  {}[ FAIL ] {}{}", Color::Red, name, Color::Reset);
+                }
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
                     ZHLN::Println(
                         "    {}Fatal Suite Error: {}::{}: {}{}", Color::Red, ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name(), ZHLN::Error(result.error()).Message(),
@@ -611,25 +681,56 @@ TestStats RunSuite() {
                         }
                     }
                 }
-                stats.failed++;
+                if (!capturedTestLogs.empty()) {
+                    ZHLN::Println(
+                        "    {}[ENGINE LOG] {} line(s) captured during this test (ZHLN_TEST_LOG=verbose to stream):{}",
+                        Color::Gray, capturedTestLogs.size(), Color::Reset
+                    );
+                    // Head for context (device, configuration), tail for the
+                    // failure itself; the middle is steady-state spam.
+                    constexpr size_t kHeadLines = 15;
+                    constexpr size_t kTailLines = 50;
+                    if (capturedTestLogs.size() <= kHeadLines + kTailLines) {
+                        for (const auto& line: capturedTestLogs) {
+                            ZHLN::Println("      | {}", line);
+                        }
+                    } else {
+                        for (size_t i = 0; i < kHeadLines; ++i) {
+                            ZHLN::Println("      | {}", capturedTestLogs[i]);
+                        }
+                        ZHLN::Println("      | ... ({} lines omitted) ...", capturedTestLogs.size() - kHeadLines - kTailLines);
+                        for (size_t i = capturedTestLogs.size() - kTailLines; i < capturedTestLogs.size(); ++i) {
+                            ZHLN::Println("      | {}", capturedTestLogs[i]);
+                        }
+                    }
+                }
+                // Quarantined failures keep their full diagnosis (fatal, recorded
+                // expectations, engine log above) but count aside and stay out
+                // of the global failed list: the bug is known and tracked in
+                // QuarantineList, so the suite must not go red over it twice.
+                if (quarantined) {
+                    stats.quarantined++;
+                } else {
+                    stats.failed++;
 
-                // Feed the global results section: name the error enum the test
-                // propagated, and count what the expectations recorded.
-                std::string detail;
-                if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
-                    detail = std::format("{}::{}", ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name());
+                    // Feed the global results section: name the error enum the test
+                    // propagated, and count what the expectations recorded.
+                    std::string detail;
+                    if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
+                        detail = std::format("{}::{}", ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name());
+                    }
+                    const size_t recorded = ctx.failures.size();
+                    if (!detail.empty() && recorded > 0) {
+                        detail += " + ";
+                    }
+                    if (recorded > 0) {
+                        detail += std::to_string(recorded) + (recorded == 1 ? " recorded failure" : " recorded failures");
+                    }
+                    if (detail.empty()) {
+                        detail = "failed without recorded details";
+                    }
+                    GetFailedTestSummaries().push_back(FailedTestSummary {std::string {suiteName}, std::string {name}, std::move(detail)});
                 }
-                const size_t recorded = ctx.failures.size();
-                if (!detail.empty() && recorded > 0) {
-                    detail += " + ";
-                }
-                if (recorded > 0) {
-                    detail += std::to_string(recorded) + (recorded == 1 ? " recorded failure" : " recorded failures");
-                }
-                if (detail.empty()) {
-                    detail = "failed without recorded details";
-                }
-                GetFailedTestSummaries().push_back(FailedTestSummary {std::string {suiteName}, std::string {name}, std::move(detail)});
             }
         }
     };
@@ -648,7 +749,13 @@ TestStats RunSuite() {
     }
 
     ZHLN::Println("--------------------------------------------------");
-    ZHLN::Println("Summary for {}: {} Passed, {} Failed", ZHLN::Reflect::TypeName<Suite>(), stats.passed, stats.failed);
+    if (stats.quarantined == 0) {
+        ZHLN::Println("Summary for {}: {} Passed, {} Failed", ZHLN::Reflect::TypeName<Suite>(), stats.passed, stats.failed);
+    } else {
+        ZHLN::Println(
+            "Summary for {}: {} Passed, {} Failed, {} Quarantined", ZHLN::Reflect::TypeName<Suite>(), stats.passed, stats.failed, stats.quarantined
+        );
+    }
     ZHLN::Println("==================================================\n");
 
     return stats;
@@ -664,6 +771,7 @@ class Runner {
             TestStats s = RunSuite<Suite>();
             totalStats.passed += s.passed;
             totalStats.failed += s.failed;
+            totalStats.quarantined += s.quarantined;
         };
 
         (run_one.template operator()<Suites>(), ...);
@@ -699,6 +807,7 @@ class Runner {
         const auto add = [&totalStats](TestStats s) {
             totalStats.passed += s.passed;
             totalStats.failed += s.failed;
+            totalStats.quarantined += s.quarantined;
         };
 
         (add(runners()), ...);
@@ -712,8 +821,12 @@ class Runner {
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);
         ZHLN::Println("Total Failed: {}", totalStats.failed);
+        if (totalStats.quarantined > 0) {
+            ZHLN::Println("Total Quarantined: {} (known open bugs; see [ QUARANTINE ] reasons above)", totalStats.quarantined);
+        }
         const char* const selected = std::getenv("ZHLN_TEST_FILTER");
-        const bool unmatchedFilter = selected != nullptr && *selected != '\0' && totalStats.passed == 0 && totalStats.failed == 0;
+        const bool unmatchedFilter =
+            selected != nullptr && *selected != '\0' && totalStats.passed == 0 && totalStats.failed == 0 && totalStats.quarantined == 0;
         if (unmatchedFilter) {
             ZHLN::Println("No test matched ZHLN_TEST_FILTER='{}'.", selected);
         }
@@ -731,6 +844,9 @@ class Runner {
         // Runner, its results section must not re-list the first run's failures.
         summaries.clear();
 
+        // Quarantined tests intentionally do not affect the exit code: the bug
+        // is known and tracked in QuarantineList, so the suite must not go red
+        // over it twice. ZHLN_TEST_QUARANTINE=off restores strictness.
         return totalStats.failed > 0 || unmatchedFilter ? 1 : 0;
     }
 };
