@@ -109,17 +109,19 @@ my %FIRST_PARTY = (
     Mesh             => ['include/Zahlen/Render/Types.hpp'],
     Material         => ['include/Zahlen/Render/Types.hpp'],
     DrawFlags        => ['include/Zahlen/Render/Types.hpp'],
-    GPUVolumetricVolume => ['include/Zahlen/Render/Types.hpp'],
+    GPUVolumetricVolume => ['src/render/GpuHandwritten.hpp'],
     CSGOperation     => ['include/Zahlen/Render/Types.hpp'],
     CSGModifier      => ['include/Zahlen/Render/Types.hpp'],
     # Meshlet contract
-    GPUMeshlet       => ['include/Zahlen/Meshlet.hpp'],
+    GPUMeshlet       => ['src/render/GpuHandwritten.hpp'],
     MeshletBuildResult => ['include/Zahlen/Meshlet.hpp'],
+    MeshletDesc      => ['include/Zahlen/Meshlet.hpp'],
     kMeshletMaxVertices => ['include/Zahlen/Meshlet.hpp'],
     kMeshletMaxTriangles => ['include/Zahlen/Meshlet.hpp'],
     kMeshletConeWeight => ['include/Zahlen/Meshlet.hpp'],
     kMeshletsPerTaskGroup => ['include/Zahlen/Meshlet.hpp'],
     kMeshShaderGroupSize => ['include/Zahlen/Meshlet.hpp'],
+    kMeshletPackedBytes => ['include/Zahlen/Meshlet.hpp'],
     # Reached by accident before the sweep: the ECS spells LightType, the
     # renderer spells GraphicsSettings, and neither included its own header.
     LightType        => ['include/Zahlen/Render/GpuEnums.hpp'],

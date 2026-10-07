@@ -118,7 +118,8 @@ int CookMesh(int argc, char** argv) {
         // VK_EXT_mesh_shader streams (version 4). Written last so that a v3
         // reader that stops after the index stream still sees a valid mesh.
         if (!compiled.meshlets.empty()) {
-            std::fwrite(compiled.meshlets.data(), 1, compiled.meshlets.size() * sizeof(GPUMeshlet), out);
+            const auto packedMeshlets = PackMeshlets(compiled.meshlets);
+            std::fwrite(packedMeshlets.data(), 1, packedMeshlets.size(), out);
             std::fwrite(compiled.meshletVertices.data(), 1, compiled.meshletVertices.size() * sizeof(uint32_t), out);
             std::fwrite(compiled.meshletTriangles.data(), 1, compiled.meshletTriangles.size(), out);
         }

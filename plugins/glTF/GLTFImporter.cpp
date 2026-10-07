@@ -1018,7 +1018,7 @@ auto GetOrCreateCompiledPrimitive(
     const bool hasMeshlets = !primJob.meshlets.Empty();
 
     BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.meshlets}) :
+        hasMeshlets ? ctx.CreateMeshletBuffer(primJob.meshlets.meshlets) :
                       BufferHandle::Invalid;
     BufferHandle meshletVertexVbo =
         hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.vertices}) :

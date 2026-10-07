@@ -131,7 +131,7 @@ struct CookerTestSuite {
 
             size_t expectedSize = sizeof(ZHLN::CookedMeshHeader) + (header.vertexCount * sizeof(ZHLN::VertexPosition)) +
                                   (header.vertexCount * sizeof(ZHLN::VertexTangentFrame)) + (header.vertexCount * sizeof(ZHLN::VertexSurface)) +
-                                  (header.indexCount * sizeof(uint32_t)) + (header.meshletCount * sizeof(ZHLN::GPUMeshlet)) +
+                                  (header.indexCount * sizeof(uint32_t)) + (header.meshletCount * ZHLN::kMeshletPackedBytes) +
                                   (header.meshletVertexCount * sizeof(uint32_t)) + header.meshletTriByteCount;
 
             ZHLN::Test::ExpectEq(static_cast<size_t>(fileSize), expectedSize);

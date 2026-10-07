@@ -78,7 +78,7 @@ struct CaptureResult {
         .indexBuffer         = rc.CreateIndexBuffer(std::span<const uint32_t> {indices}),
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = static_cast<uint32_t>(indices.size()),
-        .meshletBuffer       = rc.CreateStorageBuffer(std::span {meshlets.meshlets}),
+        .meshletBuffer       = rc.CreateMeshletBuffer(meshlets.meshlets),
         .meshletVertexBuffer = rc.CreateStorageBuffer(std::span {meshlets.vertices}),
         .meshletTriBuffer    = rc.CreateStorageBuffer(std::span {meshlets.triangles}),
         .meshletCount        = static_cast<uint32_t>(meshlets.meshlets.size()),

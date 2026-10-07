@@ -52,13 +52,16 @@ std::vector<uint32_t> MakeGridIndices() {
     return out;
 }
 
-// Byte-level comparison of the three streams the GPU consumes.
+// Byte-level comparison of the three streams the GPU consumes. The meshlet
+// stream compares packed: the desc is a logical view and carries no layout,
+// so determinism is pinned on the wire bytes PackMeshlets emits.
 bool StreamsEqual(const ZHLN::MeshletBuildResult& a, const ZHLN::MeshletBuildResult& b) {
     if (a.meshlets.size() != b.meshlets.size() || a.vertices.size() != b.vertices.size() || a.triangles.size() != b.triangles.size()) {
         return false;
     }
-    return std::memcmp(a.meshlets.data(), b.meshlets.data(), a.meshlets.size() * sizeof(ZHLN::GPUMeshlet)) == 0 &&
-           std::memcmp(a.vertices.data(), b.vertices.data(), a.vertices.size() * sizeof(uint32_t)) == 0 &&
+    const auto packedA = ZHLN::PackMeshlets(a.meshlets);
+    const auto packedB = ZHLN::PackMeshlets(b.meshlets);
+    return packedA == packedB && std::memcmp(a.vertices.data(), b.vertices.data(), a.vertices.size() * sizeof(uint32_t)) == 0 &&
            std::memcmp(a.triangles.data(), b.triangles.data(), a.triangles.size()) == 0;
 }
 
@@ -69,7 +72,8 @@ struct MeshletTestSuite {
         // The cooker and JIT importer write the same independent SoA streams.
         // Pin each shader-visible stride and offset; a total-size-only check
         // would miss swapping tangent-frame and surface bytes in a .zmesh.
-        // GPUMeshlet is re-checked as a guard against its assert being removed.
+        // The meshlet stride is pinned as the packed wire number; the packer
+        // is checked against it in build_is_deterministic below.
         std::expected<void, ZHLN::ErrorCode> gpu_stream_layout_is_pinned() {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
@@ -83,8 +87,9 @@ struct MeshletTestSuite {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexSkin), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
-            // Meshlet.hpp documents a 64-byte stride for GPUMeshlet.
-            if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::GPUMeshlet), size_t {64})) {
+            // The meshlet wire stride is a documented number, not a struct size:
+            // the shaders index the packed stream by hand.
+            if (!ZHLN::Test::ExpectEq(ZHLN::kMeshletPackedBytes, uint32_t {64})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
             return {};
@@ -110,6 +115,11 @@ struct MeshletTestSuite {
             }
             if (!StreamsEqual(a, b)) {
                 return std::unexpected(MeshletTestError::NotDeterministic);
+            }
+            // PackMeshlets must emit whole wire records: the stride pinned above
+            // is only true if the packer agrees with it.
+            if (!ZHLN::Test::ExpectEq(ZHLN::PackMeshlets(a.meshlets).size(), a.meshlets.size() * ZHLN::kMeshletPackedBytes)) {
+                return std::unexpected(MeshletTestError::LayoutDrift);
             }
             return {};
         }

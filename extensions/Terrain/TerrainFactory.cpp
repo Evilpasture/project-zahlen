@@ -51,7 +51,7 @@ void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const Verte
 
     // Storage, not vertex data: the task/mesh shaders reach these only through
     // their device address, they are never bound to the input assembler.
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::span {built.meshlets});
+    mesh.meshletBuffer       = ctx.CreateMeshletBuffer(built.meshlets);
     mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
     mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 

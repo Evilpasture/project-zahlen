@@ -5,6 +5,7 @@
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Meshlet.hpp>
 #include <cstdint>
 
 namespace ZHLN::Passes {

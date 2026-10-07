@@ -12,6 +12,7 @@
 // header; this file proves the module agrees with them.
 
 #include "GpuAbi.hpp"
+#include "GpuHandwritten.hpp"
 #include "pipeline/SpirvLayout.hpp"
 #include <optional>
 #include <tuple>

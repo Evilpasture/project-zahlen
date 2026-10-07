@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "GpuHandwritten.hpp"
 #include <Zahlen/Meshlet.hpp>
 #include <cstring>
 #include <meshoptimizer.h>
@@ -55,7 +56,7 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float*
             meshletTriangles.begin() + static_cast<ptrdiff_t>(m.triangle_offset) + (static_cast<ptrdiff_t>(m.triangle_count) * 3)
         );
 
-        out.meshlets[i] = GPUMeshlet {
+        out.meshlets[i] = MeshletDesc {
             .vertexOffset   = m.vertex_offset,
             .triangleOffset = alignedOffset,
             .vertexCount    = m.vertex_count,
@@ -65,7 +66,6 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, const float*
             .coneApex       = {bounds.cone_apex[0], bounds.cone_apex[1], bounds.cone_apex[2]},
             .coneAxis       = {bounds.cone_axis[0], bounds.cone_axis[1], bounds.cone_axis[2]},
             .coneCutoff     = bounds.cone_cutoff,
-            ._pad           = 0,
         };
     }
 
@@ -81,6 +81,27 @@ MeshletBuildResult BuildMeshlets(std::span<const uint32_t> indices, std::span<co
         return {};
     }
     return BuildMeshlets(indices, &positions[0].position[0], positions.size(), sizeof(VertexPosition));
+}
+
+std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcept {
+    std::vector<uint8_t> out(meshlets.size() * sizeof(GPUMeshlet));
+    for (size_t i = 0; i < meshlets.size(); ++i) {
+        const MeshletDesc& d = meshlets[i];
+        const GPUMeshlet   g {
+            .vertexOffset   = d.vertexOffset,
+            .triangleOffset = d.triangleOffset,
+            .vertexCount    = d.vertexCount,
+            .triangleCount  = d.triangleCount,
+            .sphereCenter   = {d.sphereCenter[0], d.sphereCenter[1], d.sphereCenter[2]},
+            .sphereRadius   = d.sphereRadius,
+            .coneApex       = {d.coneApex[0], d.coneApex[1], d.coneApex[2]},
+            .coneAxis       = {d.coneAxis[0], d.coneAxis[1], d.coneAxis[2]},
+            .coneCutoff     = d.coneCutoff,
+            ._pad           = 0,
+        };
+        std::memcpy(out.data() + i * sizeof(GPUMeshlet), &g, sizeof(GPUMeshlet));
+    }
+    return out;
 }
 
 }

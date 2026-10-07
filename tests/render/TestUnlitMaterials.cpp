@@ -162,7 +162,7 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
         .indexCount         = static_cast<uint32_t>(indices.size()),
     };
     if (const ZHLN::MeshletBuildResult built = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}); !built.Empty()) {
-        mesh.meshletBuffer       = rc.CreateStorageBuffer(std::span {built.meshlets});
+        mesh.meshletBuffer       = rc.CreateMeshletBuffer(built.meshlets);
         mesh.meshletVertexBuffer = rc.CreateStorageBuffer(std::span {built.vertices});
         mesh.meshletTriBuffer    = rc.CreateStorageBuffer(std::span {built.triangles});
         if (mesh.meshletBuffer == ZHLN::BufferHandle::Invalid || mesh.meshletVertexBuffer == ZHLN::BufferHandle::Invalid ||

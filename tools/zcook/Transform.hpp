@@ -24,7 +24,7 @@ struct CompiledMesh {
     // VK_EXT_mesh_shader streams (see include/Zahlen/Meshlet.hpp). Empty when
     // the mesh is degenerate, in which case consumers fall back to the classic
     // indexed draw path.
-    std::vector<GPUMeshlet> meshlets;
+    std::vector<MeshletDesc> meshlets;
     std::vector<uint32_t>   meshletVertices;
     std::vector<uint8_t>    meshletTriangles;
 

@@ -5,6 +5,7 @@
 
 #include <Zahlen/Common.h>
 #include <Zahlen/Vertex.hpp>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -18,37 +19,33 @@ inline constexpr float    kMeshletConeWeight   = 0.5f;
 inline constexpr uint32_t kMeshletsPerTaskGroup = 32;
 inline constexpr uint32_t kMeshShaderGroupSize = 64;
 
-// The one hand-written GPU struct left in the tree, and the last [CxxSkip] in the
-// generator: everything else the shaders declare is emitted from the reflection
-// (tools/zshader), and this one is not, because its ABI is not a declaration at
-// all. It is the raw word protocol this struct's reader uses -- `fetchMeshlet`
-// (resources/shaders/instance_data.slang:284) fetches `coneAxis` at byte 44,
-// where a std430 layout of consecutive float3s would seat it at 48. A generated
-// struct would therefore be correct-looking and wrong. `sizeof == 64` and the
-// 16-byte alignment are baked into the cooked mesh format (the baker, the render
-// side and this header all agree on them), so removing this struct means moving
-// the Slang word protocol, the cooked stride and the shader that reads it in one
-// change -- not a header edit. Until then it stays here, documented, and the
-// generator keeps skipping it by name.
-struct alignas(16) GPUMeshlet {
+// The meshlet wire stride, in bytes: one packed record per meshlet, the number
+// the cooked .zmesh format, the packer below and the shader's word protocol
+// (`fetchMeshlet`: 16 words) all agree on. A documented number, not a struct
+// size -- no public header names the GPU layout anymore.
+inline constexpr uint32_t kMeshletPackedBytes = 64;
+
+// One meshlet as logic, not layout: the offsets, counts and bounds BuildMeshlets
+// computes, with no alignment, padding or member-offset contract. Host code --
+// the cooker, the importers, the tests -- carries these; PackMeshlets turns them
+// into the wire records at the submit boundary (the LightDesc/GpuPack split,
+// applied to meshlets).
+struct MeshletDesc {
     uint32_t vertexOffset;
     uint32_t triangleOffset;
     uint32_t vertexCount;
     uint32_t triangleCount;
 
-    float sphereCenter[3];
-    float sphereRadius;
+    std::array<float, 3> sphereCenter;
+    float                sphereRadius;
 
-    float    coneApex[3];
-    float    coneAxis[3];
-    float    coneCutoff;
-    uint32_t _pad;
+    std::array<float, 3> coneApex;
+    std::array<float, 3> coneAxis;
+    float                coneCutoff;
 };
-static_assert(sizeof(GPUMeshlet) == 64);
-static_assert(alignof(GPUMeshlet) == 16);
 
 struct MeshletBuildResult {
-    std::vector<GPUMeshlet> meshlets;
+    std::vector<MeshletDesc> meshlets;
     std::vector<uint32_t>   vertices;
     std::vector<uint8_t>    triangles;
 
@@ -68,5 +65,12 @@ struct MeshletBuildResult {
     std::span<const uint32_t>       indices,
     std::span<const VertexPosition> positions
 ) noexcept;
+
+// Packs logical descs into the wire records the mesh shaders read:
+// out.size() == meshlets.size() * kMeshletPackedBytes. The record layout lives
+// in src/render/GpuHandwritten.hpp; this declaration is its only public trace.
+// GPU upload goes through RenderContext::CreateMeshletBuffer (which packs
+// internally); this function is the cooker and CPU-test seam.
+[[nodiscard]] ZHLN_API std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcept;
 
 }

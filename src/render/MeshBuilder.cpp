@@ -56,7 +56,7 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
         return;
     }
 
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::span {built.meshlets});
+    mesh.meshletBuffer       = ctx.CreateMeshletBuffer(built.meshlets);
     mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
     mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
 

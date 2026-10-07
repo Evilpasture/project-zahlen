@@ -5,7 +5,6 @@
 #pragma once
 #include "Rendering.hpp"
 #include <GeneratedGpuTypes.hpp>
-#include <Zahlen/Meshlet.hpp>
 #include <cstdint>
 #include <span>
 

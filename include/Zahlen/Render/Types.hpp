@@ -150,18 +150,6 @@ enum class DrawFlags : uint32_t {
     Viewmodel       = 1 << 5,
 };
 
-// Storage, not compute: nothing does vector maths on these; they are handed to
-// the volumetric pass as-is, so they are Float4. (The struct is allocated and
-// never filled today -- RenderInit sizes a buffer for it -- but its spelling is
-// what a fill would write through.)
-struct alignas(16) GPUVolumetricVolume {
-    JPH::Mat44  invTransform;
-    JPH::Float4 extentsAndType;
-    JPH::Float4 colorAndDensity;
-    JPH::Float4 emissiveAndAniso;
-};
-static_assert(sizeof(GPUVolumetricVolume) == 112);
-
 enum class CSGOperation : uint8_t { Difference = 0, Union = 1, Intersection = 2 };
 
 struct CSGModifier {
