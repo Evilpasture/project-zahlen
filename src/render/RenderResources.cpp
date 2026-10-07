@@ -4,6 +4,8 @@
 #include "GpuPack.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include "passes/forward/ForwardPass.hpp"
+#include "passes/gbuffer/GBufferBasePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Geometry2D.hpp"
@@ -384,51 +386,42 @@ void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte>
 }
 
 
-namespace {
-
-template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
-[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh, bool depthWrite) -> PipelineDesc {
-    if (withMesh) {
-        return PipelineDesc {
-            .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
-            .fragShader    = Vk::CreateShaderDesc<Fragment>(),
-            .taskShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicTask>(),
-            .meshShader    = Vk::CreateShaderDesc<Mesh>(),
-            .doubleSided   = doubleSided,
-            .alphaBlend    = alphaBlend,
-            .additiveBlend = additiveBlend,
-            .isLineList    = isLineList,
-            .depthWrite    = depthWrite,
-        };
-    }
-    return PipelineDesc {
-        .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
-        .fragShader    = Vk::CreateShaderDesc<Fragment>(),
-        .doubleSided   = doubleSided,
-        .alphaBlend    = alphaBlend,
-        .additiveBlend = additiveBlend,
-        .isLineList    = isLineList,
-        .depthWrite    = depthWrite,
-    };
-}
-
-}
+static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
+static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
+static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 
 auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
-    const bool               translucent = alphaBlend || additiveBlend;
-    const PipelineDesc desc = translucent
-        ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
-          )
-        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(
-              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
-          );
+    Vk::MaterialFlags flags = Vk::MaterialFlags::None;
+    if (doubleSided) {
+        flags |= Vk::MaterialFlags::DoubleSided;
+    }
+    if (additiveBlend) {
+        flags |= Vk::MaterialFlags::AdditiveBlend;
+    } else if (alphaBlend) {
+        flags |= Vk::MaterialFlags::TranslucentBlend;
+    }
+    if (depthWrite && (alphaBlend || additiveBlend)) {
+        flags |= Vk::MaterialFlags::DepthWrite;
+    }
 
-    auto mat_res = _impl->pipelines.CreateMaterial(desc);
+    const bool forward = alphaBlend || additiveBlend;
+    std::expected<Material, ErrorCode> mat_res = forward
+        ? _impl->pipelines.CreateMaterial<
+              MaterialPipelineFamily::Forward,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>,
+              Passes::ForwardPass>(flags)
+        : _impl->pipelines.CreateMaterial<
+              MaterialPipelineFamily::Deferred,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS>,
+              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMesh, Shaders::Modules::BasicPS>,
+              Passes::GBufferBasePass>(flags);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
-    Material mat  = mat_res.value();
+    Material mat  = *mat_res;
     mat.albedoMap = TextureHandle::Invalid;
     return mat;
 }
@@ -564,7 +557,8 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t w = static_cast<uint32_t>(side);
     const uint32_t h = static_cast<uint32_t>(side);
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator);
+    const auto imageConfig = Vk::ImageConfig::Texture2D({w, h}, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled);
+    auto imageRes = Vk::Image::Create(allocator, imageConfig);
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
@@ -594,7 +588,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
-    auto viewRes = Vk::ImageView::Create<kFormat>(ctx.Device(), image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
@@ -602,14 +596,13 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    auto samplerBuilder = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F);
-    auto samplerRes     = samplerBuilder.Build(ctx.Device());
+    blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
+    auto samplerRes = blueNoiseSamplerConfig.Create(ctx.Device());
     if (!samplerRes) {
         return std::unexpected(samplerRes.error());
     }
 
-    blueNoiseSampler     = std::move(*samplerRes);
-    blueNoiseSamplerInfo = samplerBuilder.Info();
+    blueNoiseSampler = std::move(*samplerRes);
     auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
@@ -630,7 +623,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         return;
     }
 
-    ZHLN_BlasGeometryDesc geom = {
+    Vk::BlasGeometryDesc geom = {
         .vertex_data   = scratchMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex    = scratchMesh->vertexCount > 0 ? scratchMesh->vertexCount - 1 : 0,
@@ -641,8 +634,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 
     uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
 
-    ZHLN_AccelerationStructureSizes sizes {};
-    Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount);
 
     const bool creatingBlas = !scratchMesh->blas;
     if (creatingBlas) {
@@ -654,10 +646,14 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
             return;
         }
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
-        scratchMesh->blas       = Vk::AccelerationStructure(
-            ctx.Device(),
-            Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+        auto blas = Vk::CreateAccelerationStructure(
+            ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
+        if (!blas) {
+            allocator.DestroyBuffer(scratchMesh->blasBuffer);
+            return;
+        }
+        scratchMesh->blas = std::move(*blas);
         if (!scratchMesh->blas.Valid()) {
             allocator.DestroyBuffer(scratchMesh->blasBuffer);
             return;
@@ -807,7 +803,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     if (posMesh == nullptr) return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    const ZHLN_BlasGeometryDesc geom {
+    const Vk::BlasGeometryDesc geom {
         .vertex_data = posMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
@@ -816,8 +812,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         .index_type = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
     const uint32_t primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
-    ZHLN_AccelerationStructureSizes sizes {};
-    Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount, sizes);
+    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
 
     auto bufferRes = Vk::Buffer::Create(
         impl.allocator, sizes.acceleration_structure_size,
@@ -825,10 +820,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     );
     if (!bufferRes) return std::unexpected(bufferRes.error());
     defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
-    Vk::AccelerationStructure blas(
-        impl.ctx.Device(), Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+    auto blasResult = Vk::CreateAccelerationStructure(
+        impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
     );
-    if (!blas.Valid()) return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
+    if (!blasResult) return std::unexpected(Vk::ToFrameError(blasResult.error()));
+    Vk::AccelerationStructure blas = std::move(*blasResult);
 
     auto scratchRes = Vk::Buffer::Create(
         impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,

@@ -24,9 +24,9 @@ constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
     return true;
 }
 
-}
+} // namespace
 
-auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+auto ReflectComputeThreadGroupSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -36,36 +36,36 @@ auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> st
         return std::nullopt;
     }
 
-    const SpvReflectEntryPoint* entryPoint = nullptr;
+    const SpvReflectEntryPoint* entry_point = nullptr;
     if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {
-        entryPoint = spvReflectGetEntryPoint(&module, shader.entry_point);
+        entry_point = spvReflectGetEntryPoint(&module, shader.entry_point);
     } else {
         for (uint32_t i = 0; i < module.entry_point_count; ++i) {
             const auto& candidate = module.entry_points[i];
             if (candidate.shader_stage != SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT) {
                 continue;
             }
-            if (entryPoint != nullptr) {
-                entryPoint = nullptr;
+            if (entry_point != nullptr) {
+                entry_point = nullptr;
                 break;
             }
-            entryPoint = &candidate;
+            entry_point = &candidate;
         }
     }
 
     const auto isConcreteSize = [](uint32_t value) { return value > 0 && value != SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT; };
 
     std::optional<std::array<uint32_t, 3>> result;
-    if (entryPoint != nullptr && entryPoint->shader_stage == SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT && isConcreteSize(entryPoint->local_size.x) &&
-        isConcreteSize(entryPoint->local_size.y) && isConcreteSize(entryPoint->local_size.z)) {
-        result = std::array<uint32_t, 3> {entryPoint->local_size.x, entryPoint->local_size.y, entryPoint->local_size.z};
+    if (entry_point != nullptr && entry_point->shader_stage == SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT && isConcreteSize(entry_point->local_size.x) &&
+        isConcreteSize(entry_point->local_size.y) && isConcreteSize(entry_point->local_size.z)) {
+        result = std::array<uint32_t, 3> {entry_point->local_size.x, entry_point->local_size.y, entry_point->local_size.z};
     }
 
     spvReflectDestroyShaderModule(&module);
     return result;
 }
 
-auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
+auto ReflectComputeDispatchSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -99,7 +99,7 @@ auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::
 namespace {
 
 template <typename T>
-auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<T> {
+auto ReflectSpecializationConstant(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<T> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::nullopt;
     }
@@ -125,36 +125,36 @@ auto ReflectSpecializationConstant(const ZHLN_ShaderDesc& shader, uint32_t const
     return result;
 }
 
-}
+} // namespace
 
-auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
+auto ReflectSpecializationConstantU32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t> {
     return ReflectSpecializationConstant<uint32_t>(shader, constantId);
 }
 
-auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
+auto ReflectSpecializationConstantF32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float> {
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
-bool ReflectedLayout::Build(VkDevice , ShaderStagesView shaders) noexcept {
+bool ReflectedLayout::Build(VkDevice /*unused*/, ShaderStagesView shaders) noexcept {
     ReflectedLayoutBuilder builder;
     const auto* const      raw = shaders.Get();
     // Reflect the same borrowed SPIR-V the inline module create infos will use.
     // The caller keeps any disk-backed storage alive through this call.
-    for (const ZHLN_Shader* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
+    for (const ShaderStageData* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
         if (shader->code != nullptr && shader->size > 0) {
-            builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entry_point}, shader->stage);
+            builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entryPoint}, shader->stage);
         }
     }
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice , const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+bool ReflectedLayout::Build(VkDevice /*unused*/, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
     ReflectedLayoutBuilder builder;
     builder.AddStageUnsafe(shader, stage);
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice , std::span<const ReflectedStageInput> stages) noexcept {
+bool ReflectedLayout::Build(VkDevice /*unused*/, std::span<const ReflectedStageInput> stages) noexcept {
     ReflectedLayoutBuilder builder;
     for (const auto& s: stages) {
         builder.AddStageUnsafe(s.shader, s.stage);
@@ -162,7 +162,7 @@ bool ReflectedLayout::Build(VkDevice , std::span<const ReflectedStageInput> stag
     return BuildInto(*this, builder);
 }
 
-void ReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
+void ReflectedLayoutBuilder::AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
@@ -198,8 +198,8 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
             for (uint32_t b = 0; b < reflected_set->binding_count; ++b) {
                 const auto* rb = reflected_set->bindings[b];
 
-                auto& merged = merged_sets[reflected_set->set][rb->binding];
-                merged.type  = static_cast<VkDescriptorType>(rb->descriptor_type);
+                auto& merged                = merged_sets[reflected_set->set][rb->binding];
+                merged.type                 = static_cast<VkDescriptorType>(rb->descriptor_type);
                 const bool is_runtime_array = (rb->count == 0);
                 const bool is_bindless_pool = is_runtime_array || (rb->count >= 1024);
                 merged.count                = is_bindless_pool ? 4096 : rb->count;
@@ -238,4 +238,4 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
     return any;
 }
 
-}
+} // namespace ZHLN::Vk

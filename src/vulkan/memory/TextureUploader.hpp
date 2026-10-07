@@ -54,9 +54,8 @@ class TextureUploader {
         const uint32_t   mips     = desc.generateMips ? GetMipLevels(desc.width, desc.height) : 1;
         const ImageUsage usage    = ImageUsage::Sampled | ImageUsage::TransferDst | (desc.generateMips ? ImageUsage::TransferSrc : ImageUsage::None);
 
-        auto imgRes = ImageBuilder {}
-                          .Texture2D(desc.width, desc.height, desc.format, usage, mips)
-                          .Build(_allocator);
+        const ImageConfig imageConfig = ImageConfig::Texture2D({desc.width, desc.height}, desc.format, usage, mips);
+        auto imgRes = Image::Create(_allocator, imageConfig);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
@@ -90,7 +89,7 @@ class TextureUploader {
             }
         });
 
-        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo2D(imgRes->Handle(), desc.format, mips, VK_IMAGE_ASPECT_COLOR_BIT));
+        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Texture2D, .mipCount = mips});
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -107,12 +106,10 @@ class TextureUploader {
     [[nodiscard]] auto Upload3D(const Upload3DDesc& desc) const noexcept -> std::expected<TextureResource, ErrorCode> {
         const size_t byteSize = static_cast<size_t>(desc.width) * desc.height * desc.depth * 4;
 
-        auto imgRes = ImageBuilder {}
-                          .Type(VK_IMAGE_TYPE_3D)
-                          .Format(desc.format)
-                          .Dimensions(desc.width, desc.height, desc.depth)
-                          .Usage(ImageUsage::Sampled | ImageUsage::TransferDst)
-                          .Build(_allocator);
+        const ImageConfig imageConfig = ImageConfig::Texture3D(
+            {desc.width, desc.height, desc.depth}, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst
+        );
+        auto imgRes = Image::Create(_allocator, imageConfig);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
@@ -140,7 +137,7 @@ class TextureUploader {
             );
         });
 
-        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfo3D(imgRes->Handle(), desc.format, VK_IMAGE_ASPECT_COLOR_BIT, 1));
+        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Texture3D});
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {
@@ -158,9 +155,8 @@ class TextureUploader {
         const size_t faceBytes  = static_cast<size_t>(desc.size) * desc.size * 4;
         const size_t totalBytes = faceBytes * 6;
 
-        auto imgRes = ImageBuilder {}
-                          .TextureCube(desc.size, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
-                          .Build(_allocator);
+        const ImageConfig imageConfig = ImageConfig::Cube(desc.size, desc.format, ImageUsage::Sampled | ImageUsage::TransferDst);
+        auto imgRes = Image::Create(_allocator, imageConfig);
         if (!imgRes) return std::unexpected(imgRes.error());
         ZHLN::defer _([&] { _allocator.DestroyImage(*imgRes); });
 
@@ -182,7 +178,7 @@ class TextureUploader {
             );
         });
 
-        auto viewRes = ImageView::Create(_ctx.Device(), MakeViewCreateInfoCube(imgRes->Handle(), desc.format, 1));
+        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Cube});
         if (!viewRes) return std::unexpected(viewRes.error());
 
         if (!desc.debugName.empty()) {

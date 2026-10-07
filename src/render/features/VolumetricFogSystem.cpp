@@ -36,7 +36,7 @@ namespace {
 } // namespace
 
 auto VolumetricFogSystem::Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    const auto build = [&impl](auto& pass, const ZHLN_ShaderDesc& shader) -> std::expected<void, ErrorCode> {
+    const auto build = [&impl](auto& pass, const Vk::ShaderDesc& shader) -> std::expected<void, ErrorCode> {
         if (auto built = pass.BuildHeap(
                 impl.ctx.Device(), impl.heapManager, shader, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, impl.pipelineCache.Get()
             );
@@ -77,17 +77,17 @@ void VolumetricFogSystem::DestroyNoise(Vk::Allocator& allocator) noexcept {
 
 void VolumetricFogSystem::InitSamplers(RenderContext::Impl& impl) noexcept {
     Vk::InitHeapPassSamplers<Shaders::VolumetricTemporal>(
-        impl.heapManager, _temporal.heapBindings, Vk::SamplerSlot<"linearSampler">(impl.defaultSamplerInfo)
+        impl.heapManager, _temporal.heapBindings, Vk::SamplerSlot<"linearSampler">(impl.defaultSamplerConfig)
     );
 
     // The noise volume tiles, so it repeats; the cascade map is sampled the
     // same way the raster shadow lookup does it, with the comparison sampler.
-    const VkSamplerCreateInfo repeatInfo = Vk::SamplerBuilder {}.Linear().Repeat().LodRange(0.0F, 0.0F).Info();
+    const Vk::SamplerConfig repeatConfig = Vk::SamplerConfig::LinearRepeat().WithLodRange(0.0F, 0.0F);
     Vk::InitHeapPassSamplers<Shaders::VolumetricFogInject>(
-        impl.heapManager, _fogInject.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatInfo)
+        impl.heapManager, _fogInject.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::VolumetricLightInject>(
-        impl.heapManager, _lightInject.heapBindings, Vk::SamplerSlot<"shadowSampler">(impl.shadowSamplerInfo)
+        impl.heapManager, _lightInject.heapBindings, Vk::SamplerSlot<"shadowSampler">(impl.shadowSamplerConfig)
     );
 }
 

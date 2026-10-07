@@ -32,37 +32,21 @@ inline auto
     RenderTarget rt;
     rt.extent = extent;
 
-    uint32_t mips = desc.mipLevels ? desc.mipLevels : 1;
+    const uint32_t mips = desc.mipLevels ? desc.mipLevels : 1;
+    ImageConfig imageConfig = ImageConfig::Texture2D(extent, F, desc.usage, mips, desc.arrayLayers);
+    imageConfig.cubeCompatible = desc.cubeCompatible;
 
-    const VkImageCreateInfo info = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = static_cast<VkImageCreateFlags>((desc.arrayLayers >= 6) * VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT),
-        .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = F,
-        .extent                = {.width = extent.width, .height = extent.height, .depth = 1},
-        .mipLevels             = mips,
-        .arrayLayers           = desc.arrayLayers,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = ToVk(desc.usage),
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr,
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
-    auto img_res = Image::Create(allocator, info, MemoryUsage::GPUOnly);
+    auto img_res = Image::Create(allocator, imageConfig);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
     ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    const auto viewDesc = desc.arrayLayers > 1
-        ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
-        : MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
-    auto view_res = ImageView::Create(ctx.Device(), viewDesc);
+    const ImageViewConfig viewConfig {
+        .kind = desc.arrayLayers > 1 ? ImageViewKind::Texture2DArray : ImageViewKind::Texture2D,
+    };
+    auto view_res = rt.image.CreateView(ctx.Device(), viewConfig);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
@@ -85,32 +69,15 @@ inline auto
     RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
     RenderTarget3D rt;
     rt.extent                    = extent;
-    const VkImageCreateInfo info = {
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .imageType             = VK_IMAGE_TYPE_3D,
-        .format                = F,
-        .extent                = extent,
-        .mipLevels             = 1,
-        .arrayLayers           = 1,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = ToVk(usage),
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = {},
-        .pQueueFamilyIndices   = {},
-        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-    };
-
-    auto img_res = Image::Create(allocator, info, MemoryUsage::GPUOnly);
+    const ImageConfig imageConfig = ImageConfig::Texture3D(extent, F, usage);
+    auto img_res = Image::Create(allocator, imageConfig);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }
     rt.image = std::move(img_res.value());
     ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    auto view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1));
+    auto view_res = rt.image.CreateView(ctx.Device(), {.kind = ImageViewKind::Texture3D});
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }

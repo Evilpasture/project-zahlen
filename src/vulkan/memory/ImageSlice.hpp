@@ -9,21 +9,23 @@
 #include <optional>
 #include <type_traits>
 
+#include "ImageView.hpp"
+
 namespace ZHLN::Vk {
 
 template <VkImageLayout Layout, VkFormat Format>
 struct TypedImage;
 
-// A borrowed view of an image. The handles and (when present) the view create
-// info belong to the caller; do not keep a slice past destruction or relocation
-// of the owning ImageView. Raw WSI/externally-owned views have no metadata.
+// A borrowed view of an image and, when available, its owning ImageView. Keep
+// slices within the lifetime and address-stability of that view owner. WSI or
+// externally-owned views can use the raw-handle constructors without metadata.
 struct ImageSlice {
-    VkImage                      image  = VK_NULL_HANDLE;
-    VkImageView                  view   = VK_NULL_HANDLE;
-    VkExtent3D                   extent {};
-    VkFormat                     format = VK_FORMAT_UNDEFINED;
-    VkImageAspectFlags           aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    const VkImageViewCreateInfo* info   = nullptr;
+    VkImage            image = VK_NULL_HANDLE;
+    VkImageView        view = VK_NULL_HANDLE;
+    VkExtent3D         extent {};
+    VkFormat           format = VK_FORMAT_UNDEFINED;
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    const ImageView*   viewResource = nullptr;
 
     constexpr ImageSlice() noexcept = default;
 
@@ -34,11 +36,11 @@ struct ImageSlice {
         image(img), view(v), extent(ext), format(fmt), aspect(asp) {
     }
 
-    ImageSlice(VkImage img, const ImageView& v, VkExtent3D ext, VkFormat fmt) noexcept:
-        image(img), view(v.Get()), extent(ext), format(fmt), aspect(v.Info().subresourceRange.aspectMask), info(&v.Info()) {
+    ImageSlice(VkImage img, const ImageView& owner, VkExtent3D ext, VkFormat fmt) noexcept:
+        image(img), view(owner.Get()), extent(ext), format(fmt), aspect(owner.AspectFlags()), viewResource(&owner) {
     }
-    ImageSlice(VkImage img, const ImageView& v, VkExtent2D ext, VkFormat fmt) noexcept:
-        ImageSlice(img, v, VkExtent3D {ext.width, ext.height, 1}, fmt) {
+    ImageSlice(VkImage img, const ImageView& owner, VkExtent2D ext, VkFormat fmt) noexcept:
+        ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt) {
     }
 
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {

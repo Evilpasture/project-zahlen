@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -17,19 +16,24 @@
 
 namespace ZHLN::Vk {
 
+enum class ValidationMode : uint8_t {
+    Off,
+    On,
+    GPU,
+};
+
 struct DiagnosticsSink {
     std::atomic<uint32_t>* validation = nullptr;
     std::atomic<uint32_t>* deviceLost  = nullptr;
 
-    [[nodiscard]] constexpr bool Valid() const noexcept {
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
         return validation != nullptr && deviceLost != nullptr;
     }
 };
 
 class Instance {
   public:
-    Instance() noexcept: _debugForwarding(std::unique_ptr<ZHLN_DebugForwarding>(new (std::nothrow) ZHLN_DebugForwarding {})) {
-    }
+    Instance() noexcept;
     ~Instance() noexcept;
 
     Instance(const Instance&)                    = delete;
@@ -38,8 +42,12 @@ class Instance {
     Instance(Instance&& other) noexcept;
     auto operator=(Instance&& other) noexcept -> Instance&;
 
-    [[nodiscard]] static auto
-        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ZHLN_ValidationMode validation) noexcept -> Instance;
+    [[nodiscard]] static auto Create(
+        std::string_view appName,
+        uint32_t appVersion,
+        std::span<const std::string_view> extensions,
+        ValidationMode validation
+    ) noexcept -> Instance;
 
     static void UseDiagnostics(DiagnosticsSink sink) noexcept;
 
@@ -55,7 +63,6 @@ class Instance {
 
     [[nodiscard]] static auto ValidationErrorCount() noexcept -> uint32_t;
     [[nodiscard]] static auto DeviceLostCount() noexcept -> uint32_t;
-
     static void IncrementNumericalDeviceLoss() noexcept;
 
     [[nodiscard]] static auto Active() noexcept -> Instance* {
@@ -63,17 +70,25 @@ class Instance {
     }
 
   private:
-    static void DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity) noexcept;
-    static void DeviceAddressBindingHookTrampoline(
-        void* userdata,
-        const VkDeviceAddressBindingCallbackDataEXT* binding,
-        const VkDebugUtilsMessengerCallbackDataEXT* callbackData
-    ) noexcept;
+    struct DebugState {
+        Instance* owner = nullptr;
+        bool      debugUtilsEnabled = false;
+    };
+
+    static auto VKAPI_CALL DebugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+        VkDebugUtilsMessageTypeFlagsEXT type,
+        const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+        void* userData
+    ) noexcept -> VkBool32;
+
+    void Destroy() noexcept;
+    void RebindDebugState() noexcept;
 
     VkInstance               _handle                  = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT _messenger               = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT _addressBindingMessenger = VK_NULL_HANDLE;
-    std::unique_ptr<ZHLN_DebugForwarding> _debugForwarding;
+    std::unique_ptr<DebugState> _debugState;
 
     std::atomic<uint32_t>  _validationErrors {0};
     std::atomic<uint32_t>  _deviceLost {0};
@@ -84,4 +99,4 @@ class Instance {
     static std::atomic<DiagnosticsSink> _registeredSink;
 };
 
-}
+} // namespace ZHLN::Vk

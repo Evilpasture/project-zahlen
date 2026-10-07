@@ -3,74 +3,72 @@
 
 #pragma once
 
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
+#endif
+
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
+#include <vector>
 
 namespace ZHLN::Vk {
 
 enum class CommandPoolError : uint8_t {
     PoolNotReady ZHLN_ANNOTATION(ZHLN::Description<"Command pool device handle is not initialized">{}) = 1,
-    CommandBufferAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Command buffer allocation failed (out of memory)">{}),
+    CommandBufferAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Command buffer allocation failed">{}),
 };
 
 template <Vk::QueueType QType>
 class CommandPool {
   public:
-    CommandPool() = default;
-    CommandPool(VkDevice device, uint32_t queueFamily);
-    ~CommandPool();
+    CommandPool() noexcept = default;
+    CommandPool(VkDevice device, uint32_t queueFamily) noexcept;
+    ~CommandPool() noexcept;
 
     CommandPool(const CommandPool&)                    = delete;
     auto operator=(const CommandPool&) -> CommandPool& = delete;
 
-    constexpr CommandPool(CommandPool&& other) noexcept;
+    CommandPool(CommandPool&& other) noexcept;
     auto operator=(CommandPool&& other) noexcept -> CommandPool&;
 
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return _device != VK_NULL_HANDLE;
+    [[nodiscard]] auto Valid() const noexcept -> bool {
+        return _device != VK_NULL_HANDLE && _pool != VK_NULL_HANDLE;
     }
-
-    constexpr explicit operator bool() const noexcept {
+    explicit operator bool() const noexcept {
         return Valid();
     }
 
-    [[nodiscard]] constexpr operator const ZHLN_CommandPool&() const noexcept {
-        return _raw;
-    }
-    [[nodiscard]] constexpr operator ZHLN_CommandPool&() noexcept {
-        return _raw;
-    }
     [[nodiscard]] auto EnsureValid() const noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto Allocate(uint32_t count) noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto AllocateSecondary(uint32_t count) noexcept -> std::expected<void, ErrorCode>;
-    void               Reset() noexcept;
+    void Reset() noexcept;
 
-    [[nodiscard]] constexpr auto operator[](const uint32_t idx) const noexcept -> Vk::CommandBuffer<QType> {
-        return Vk::CommandBuffer<QType> {_raw.buffers[idx]};
+    [[nodiscard]] auto operator[](uint32_t index) const noexcept -> Vk::CommandBuffer<QType> {
+        return Vk::CommandBuffer<QType> {_buffers[index]};
     }
-
-    [[nodiscard]] constexpr operator const ZHLN_CommandPool*() const noexcept {
-        return &_raw;
-    }
-    [[nodiscard]] constexpr operator ZHLN_CommandPool*() noexcept {
-        return &_raw;
+    [[nodiscard]] auto Size() const noexcept -> size_t {
+        return _buffers.size();
     }
 
   private:
-    VkDevice         _device = VK_NULL_HANDLE;
-    ZHLN_CommandPool _raw {};
+    [[nodiscard]] auto AllocateLevel(uint32_t count, VkCommandBufferLevel level) noexcept -> std::expected<void, ErrorCode>;
+    void Destroy() noexcept;
+
+    VkDevice                    _device = VK_NULL_HANDLE;
+    VkCommandPool               _pool = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> _buffers;
 };
 
 template <typename... Args>
 CommandPool(Args&&...) -> CommandPool<QueueType::Graphics>;
 
 template <uint32_t N, Vk::QueueType QType = Vk::QueueType::Graphics>
-    requires(N > 0 && N <= 8)
+    requires(N > 0)
 class CommandPools {
   public:
     struct Description {
-        uint32_t queueFamily    = 0;
+        uint32_t queueFamily = 0;
         uint32_t buffersPerPool = 1;
     };
 
@@ -78,25 +76,23 @@ class CommandPools {
 
     [[nodiscard]] static auto Create(VkDevice device, const Description& desc) noexcept -> CommandPools;
 
-    [[nodiscard]] constexpr auto operator[](const uint32_t frame) noexcept -> CommandPool<QType>& {
+    [[nodiscard]] auto operator[](uint32_t frame) noexcept -> CommandPool<QType>& {
         return _pools[frame % N];
     }
-
-    [[nodiscard]] constexpr auto operator[](const uint32_t frame) const noexcept -> const CommandPool<QType>& {
+    [[nodiscard]] auto operator[](uint32_t frame) const noexcept -> const CommandPool<QType>& {
         return _pools[frame % N];
     }
-
-    [[nodiscard]] constexpr auto Cmd(const uint32_t frame) const noexcept -> Vk::CommandBuffer<QType> {
+    [[nodiscard]] auto Cmd(uint32_t frame) const noexcept -> Vk::CommandBuffer<QType> {
         return _pools[frame % N][0];
     }
-
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+    [[nodiscard]] auto Valid() const noexcept -> bool {
         return _pools[0].Valid();
     }
 
   private:
-    std::array<CommandPool<QType>, N> _pools = {};
+    std::array<CommandPool<QType>, N> _pools {};
 };
-}
+
+} // namespace ZHLN::Vk
 
 #include "CommandPool.inl"

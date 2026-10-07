@@ -33,21 +33,21 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
   VUID-vkCmdExecuteCommands-pStencilAttachment-06775 /
   VUID-vkCmdDraw-dynamicRenderingUnusedAttachments-08917 fire for the
   parallel-recorded MainPass1 secondaries). The pipeline names that stencil
-  format itself: `ZHLN_CreateGraphicsPipeline` sets
+  format itself: `Vk::CreateGraphicsPipeline` sets
   `VkPipelineRenderingCreateInfo::stencilAttachmentFormat` from any depth format
-  that carries a stencil aspect (`zhln_format_has_stencil`) and refuses a stencil
-  state handed over with a format that has none.
+  that carries a stencil aspect and rejects stencil state when the configured
+  depth format has none.
 * Features: `VkPhysicalDeviceDescriptorHeapFeaturesEXT::descriptorHeap = VK_TRUE`,
   `VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT::dynamicRenderingUnusedAttachments = VK_TRUE`.
-* Entry points are resolved once in `ZHLN_CreateDevice` and stored on
-  `ZHLN_Device`; `ZHLN::Vk::Context` forwards to them.
+* Device entry points are loaded through Volk once `Vk::Context` creates the
+  logical device; the typed context exposes the queues and enabled capabilities.
 
 ### Pipeline layouts are NULL for heap pipelines
 
 `VkPipelineCreateFlags2CreateInfoKHR::flags` with
 `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` requires `layout` to be
-`VK_NULL_HANDLE` (not an empty layout). `RenderCore.c` normalizes this at the
-C layer; the builders accept a null layout only in heap mode.
+`VK_NULL_HANDLE` (not an empty layout). `Vk::PipelineBuilder` sets the required
+null layout in heap mode and rejects it for ordinary pipelines.
 
 ### State-model caveat
 
@@ -170,7 +170,7 @@ the old bindless set array.
   into the current frame `uiVbos`, and draws it with the normal `uiPipeline` and
   bindless texture indices.
 * `PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings` set
-  `descriptor_heap` on the pipeline desc; `RenderCore.c` chains the mapping
+  the descriptor-heap mode; the pipeline implementation chains the mapping
   structs into each `VkPipelineShaderStageCreateInfo` and adds
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
   `VkPipelineCreateFlags2CreateInfoKHR`.

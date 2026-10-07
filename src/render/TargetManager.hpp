@@ -206,7 +206,7 @@ class TargetManager {
     [[nodiscard]] auto Atlas2DView() const noexcept -> const Vk::ImageView& { return _shadowAtlas2DView; }
 
   private:
-    [[nodiscard]] auto CreateCascadeViews(VkImage image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto CreateCascadeViews(const Vk::Image& image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode>;
 
     Vk::Context&                             _ctx;
     Vk::Allocator&                           _allocator;

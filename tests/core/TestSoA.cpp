@@ -12,12 +12,15 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Reflection/Core.hpp>
 #include <Zahlen/Core/Arena.hpp>
+#include <Zahlen/Core/ArenaAllocator.hpp>
 #include <Zahlen/Core/SoA.hpp>
+#include <Zahlen/PoseUploads.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -29,6 +32,9 @@ enum class SoATestError : uint8_t {
     StreamAliasingDetected ZHLN_ANNOTATION(ZHLN::Description<"Two streams of one block overlap in memory."> {}) = 5,
     ProxyAccessFailed ZHLN_ANNOTATION(ZHLN::Description<"Writing through the proxy reference did not reach the stream."> {}) = 6,
     ScratchBoundsFailed ZHLN_ANNOTATION(ZHLN::Description<"SoAScratch accepted or reported a size outside its capacity."> {}) = 7,
+    ArenaAllocatorLifetimeFailed ZHLN_ANNOTATION(ZHLN::Description<"Arena-backed containers skipped construction or destruction."> {}) = 8,
+    ArenaAllocatorFallbackFailed ZHLN_ANNOTATION(ZHLN::Description<"A default arena allocator did not use its heap fallback."> {}) = 9,
+    PoseUploadLifetimeFailed ZHLN_ANNOTATION(ZHLN::Description<"Pose upload storage did not survive until its drain callback."> {}) = 10,
 };
 
 // A stand-in for an ECS component: plain aggregate, named members, no references.
@@ -41,6 +47,25 @@ struct SoAPosition {
 struct SoAElement {
     float    value = 0.0f;
     uint32_t tag   = 0u;
+};
+
+struct ArenaLifetimeProbe {
+    static inline int live = 0;
+
+    int value = 0;
+
+    explicit ArenaLifetimeProbe(int initialValue = 0) noexcept: value(initialValue) {
+        ++live;
+    }
+    ArenaLifetimeProbe(const ArenaLifetimeProbe& other) noexcept: value(other.value) {
+        ++live;
+    }
+    ArenaLifetimeProbe(ArenaLifetimeProbe&& other) noexcept: value(other.value) {
+        ++live;
+    }
+    ~ArenaLifetimeProbe() noexcept {
+        --live;
+    }
 };
 
 struct SoATestSuite {
@@ -108,6 +133,79 @@ struct SoATestSuite {
             // A worker index the pool was not sized for is a panic, not a silent
             // miss, so the contract tested here is only the clamp above.
             (void)pool.GetWorkerArena(0).Allocate(64, 8);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> arena_allocator_preserves_container_lifetimes() {
+            if (ArenaLifetimeProbe::live != 0) return std::unexpected(SoATestError::ArenaAllocatorLifetimeFailed);
+
+            {
+                ZHLN::LinearArena arena {32 * 1024};
+                {
+                    ZHLN::ScratchVector<ArenaLifetimeProbe> values {ZHLN::ArenaAllocator<ArenaLifetimeProbe> {arena}};
+                    values.emplace_back(11);
+                    values.emplace_back(22);
+                    values.reserve(8); // Reallocation still moves and destroys live elements.
+                    if (values.size() != 2 || values[0].value != 11 || values[1].value != 22 || ArenaLifetimeProbe::live != 2) {
+                        return std::unexpected(SoATestError::ArenaAllocatorLifetimeFailed);
+                    }
+                }
+                if (ArenaLifetimeProbe::live != 0 || arena.AllocatedBytes() == 0) {
+                    return std::unexpected(SoATestError::ArenaAllocatorLifetimeFailed);
+                }
+
+                {
+                    ZHLN::ArenaArray<ArenaLifetimeProbe, 0> values {ZHLN::ArenaAllocator<ArenaLifetimeProbe> {arena}};
+                    values.reserve(4);
+                    values.emplace_back(33);
+                    values.emplace_back(44);
+                    values.reserve(8);
+                    if (values.size() != 2 || values[0].value != 33 || values[1].value != 44 || ArenaLifetimeProbe::live != 2) {
+                        return std::unexpected(SoATestError::ArenaAllocatorLifetimeFailed);
+                    }
+                }
+                if (ArenaLifetimeProbe::live != 0) {
+                    return std::unexpected(SoATestError::ArenaAllocatorLifetimeFailed);
+                }
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> default_arena_allocator_falls_back_to_heap() {
+            ZHLN::ScratchVector<int> values;
+            values.push_back(7);
+            values.push_back(13);
+            values.reserve(8);
+            if (values.size() != 2 || values[0] != 7 || values[1] != 13) {
+                return std::unexpected(SoATestError::ArenaAllocatorFallbackFailed);
+            }
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> pose_upload_storage_survives_until_drain() {
+            constexpr size_t MatrixCount = 1200;
+            ZHLN::PoseUploadQueue queue;
+            std::vector<JPH::Mat44> producerMatrices(MatrixCount, JPH::Mat44::sIdentity());
+            producerMatrices.front() = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, 3.0f));
+            queue.Push(4, producerMatrices);
+
+            // A later producer write must not change the already queued palette;
+            // the second push also forces the queue to extend beyond its first
+            // arena segment on platforms with 64-byte Mat44 values.
+            producerMatrices.front() = JPH::Mat44::sTranslation(JPH::Vec3(9.0f, 8.0f, 7.0f));
+            queue.Push(12, producerMatrices);
+            if (queue.Size() != 2) return std::unexpected(SoATestError::PoseUploadLifetimeFailed);
+
+            size_t consumed = 0;
+            bool   valid    = true;
+            queue.Drain([&](const ZHLN::PoseUpload& upload) {
+                const float expectedX = upload.jointOffset == 4 ? 1.0f : 9.0f;
+                valid = valid && upload.matrices.size() == MatrixCount && upload.matrices.front().GetTranslation().GetX() == expectedX;
+                ++consumed;
+            });
+            if (!valid || consumed != 2 || queue.Size() != 0) {
+                return std::unexpected(SoATestError::PoseUploadLifetimeFailed);
+            }
             return {};
         }
 

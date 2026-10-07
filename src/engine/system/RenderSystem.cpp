@@ -172,11 +172,8 @@ void SubmitParticleEmitters(Engine& engine) {
 
 // The palettes the simulation pushed this frame, applied in order.
 void UploadPosePalettes(Engine& engine) {
-    auto&                       rc      = engine.GetRenderContext();
-    std::vector<PoseUpload>     uploads = engine.GetPoseUploads().Take();
-    for (const auto& upload: uploads) {
-        rc.UpdateJointMatrices(upload.jointOffset, upload.matrices);
-    }
+    auto& rc = engine.GetRenderContext();
+    engine.GetPoseUploads().Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
 void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {

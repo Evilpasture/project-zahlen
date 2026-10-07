@@ -11,11 +11,13 @@
 
 namespace ZHLN {
 
-auto TargetManager::CreateCascadeViews(VkImage image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode> {
+auto TargetManager::CreateCascadeViews(const Vk::Image& image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode> {
     out.clear();
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(_ctx.Device(), image, i, 1);
+        auto view_res = image.CreateView(
+            _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i, .layerCount = 1}
+        );
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -111,10 +113,10 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
-    if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
+    if (auto r = CreateCascadeViews(_graph.shadowMap.image, _shadowCascadeViews); !r) {
         return r;
     }
-    if (auto r = CreateCascadeViews(_shadowMapPrev.image.Handle(), _shadowCascadeViewsPrev); !r) {
+    if (auto r = CreateCascadeViews(_shadowMapPrev.image, _shadowCascadeViewsPrev); !r) {
         return r;
     }
     for (uint32_t i = 0; i < kCascades; ++i) {
@@ -124,7 +126,8 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     }
 
     auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kAtlasLayers}
+        _allocator, _ctx, atlasExt,
+        {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kAtlasLayers, .cubeCompatible = true}
     );
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
@@ -135,17 +138,16 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas   = std::move(*sa_res);
 
-    const VkImage atlas = _graph.shadowAtlas.image.Handle();
-    auto cube_res = Vk::ImageView::Create(
-        _ctx.Device(), Vk::MakeViewCreateInfoCubeArray(atlas, VK_FORMAT_D32_SFLOAT, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    auto cube_res = _graph.shadowAtlas.image.CreateView(
+        _ctx.Device(), {.kind = Vk::ImageViewKind::CubeArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
     );
     if (!cube_res) {
         return std::unexpected(cube_res.error());
     }
     _shadowAtlasCubeView = std::move(*cube_res);
 
-    auto array_res = Vk::ImageView::Create(
-        _ctx.Device(), Vk::MakeViewCreateInfo2DArray(atlas, VK_FORMAT_D32_SFLOAT, 0, kAtlasLayers, VK_IMAGE_ASPECT_DEPTH_BIT, 1)
+    auto array_res = _graph.shadowAtlas.image.CreateView(
+        _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
     );
     if (!array_res) {
         return std::unexpected(array_res.error());
@@ -198,10 +200,10 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             _graph.shadowMap = std::move(*sm_res);
             _shadowMapPrev  = std::move(*smp_res);
 
-            if (auto r = CreateCascadeViews(_graph.shadowMap.image.Handle(), _shadowCascadeViews); !r) {
+            if (auto r = CreateCascadeViews(_graph.shadowMap.image, _shadowCascadeViews); !r) {
                 return r;
             }
-            if (auto r = CreateCascadeViews(_shadowMapPrev.image.Handle(), _shadowCascadeViewsPrev); !r) {
+            if (auto r = CreateCascadeViews(_shadowMapPrev.image, _shadowCascadeViewsPrev); !r) {
                 return r;
             }
 
@@ -222,11 +224,9 @@ void TargetManager::RecreatePunctualShadowViews() noexcept {
     _punctualShadowViews.clear();
     _punctualShadowViews.resize(kPunctualLights);
     for (uint32_t i = 0; i < kPunctualLights; ++i) {
-        auto view_res = Vk::ImageView::Create2DArray<VK_FORMAT_D32_SFLOAT>(
-            _ctx.Device(), _graph.shadowAtlas.image.Handle(),
-            i * 6,
-            6,
-            VK_IMAGE_ASPECT_DEPTH_BIT
+        auto view_res = _graph.shadowAtlas.image.CreateView(
+            _ctx.Device(),
+            {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i * 6, .layerCount = 6}
         );
         if (view_res.has_value()) {
             _punctualShadowViews[i] = std::move(*view_res);

@@ -17,6 +17,7 @@ namespace ZHLN::Vk {
 class ResourceWriteBatch;
 class SamplerWriteBatch;
 class HeapManager;
+struct SamplerConfig;
 struct HeapPassBindings;
 
 enum class DescriptorHeapType : uint8_t {
@@ -168,8 +169,8 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
@@ -197,7 +198,7 @@ class SamplerWriteBatch {
     SamplerWriteBatch(SamplerWriteBatch&& other) noexcept;
     auto operator=(SamplerWriteBatch&& other) noexcept -> SamplerWriteBatch&;
 
-    void AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
+    void AddSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
 
     void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
@@ -288,29 +289,23 @@ class HeapManager {
         FreeStaticSamplerSlot(handle.index);
     }
 
-    void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-        WriteImage(handle, view.Info(), layout);
-    }
+    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     template <typename Resource>
-        requires requires(const Resource& resource) { resource.view.Info(); }
+        requires requires(const Resource& resource) { resource.view.Valid(); }
     void WriteImage(TextureHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
         WriteImage(handle, resource.view, layout);
     }
 
-    void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
-    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-        WriteStorageImage(handle, view.Info(), layout);
-    }
+    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
     template <typename Resource>
-        requires requires(const Resource& resource) { resource.view.Info(); }
+        requires requires(const Resource& resource) { resource.view.Valid(); }
     void WriteStorageImage(StorageImageHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
         WriteStorageImage(handle, resource.view, layout);
     }
     void WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
-    void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
+    void WriteSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
 
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;

@@ -11,7 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
-set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
@@ -33,7 +33,6 @@ check_cxx_compiler_flag("-fannotation-attributes"
                         ZHLN_HAS_ANNOTATION_ATTRIBUTES)
 check_cxx_compiler_flag("-stdlib=libc++" ZHLN_HAS_STDLIB_LIBCXX)
 
-check_cxx_compiler_flag("-Wc23-extensions" ZHLN_HAS_WC23_EXTENSIONS)
 
 include(CheckSymbolExists)
 set(CMAKE_REQUIRED_LIBRARIES ws2_32)

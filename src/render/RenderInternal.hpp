@@ -9,7 +9,7 @@
 #include "GeometryManager.hpp"
 #include "GpuLayout.hpp"
 #include "GpuAbi.hpp"
-#include "PipelineDesc.hpp"
+#include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
 #include "Rendering.hpp"
@@ -339,10 +339,12 @@ struct RenderContext::Impl {
     Vk::HeapPassBindings volumetricIntegrationHeapBindings;
     Vk::HeapPassBindings volumetricTemporalHeapBindings;
 
-    VkSamplerCreateInfo shadowSamplerInfo {};
-    VkSamplerCreateInfo defaultSamplerInfo {};
-    VkSamplerCreateInfo pointSamplerInfo {};
-    VkSamplerCreateInfo blueNoiseSamplerInfo {};
+    Vk::SamplerConfig globalSamplerConfig {};
+    Vk::SamplerConfig clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
+    Vk::SamplerConfig shadowSamplerConfig {};
+    Vk::SamplerConfig defaultSamplerConfig {};
+    Vk::SamplerConfig pointSamplerConfig {};
+    Vk::SamplerConfig blueNoiseSamplerConfig {};
 
     Vk::SamplerHandle globalSamplerSlot;
     Vk::SamplerHandle materialSamplerBaseSlot; // Nine contiguous S/T wrap combinations.
@@ -422,11 +424,11 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     void               BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
-    std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
+    std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
     void                           BuildSceneHeapMappings() noexcept;
     void                           BuildDecalHeapMappings() noexcept;
     void                           WriteSceneStaticImageDescriptors() noexcept;
-    void                           WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
+    void                           WritePointSamplerToHeap(const Vk::SamplerConfig& config) noexcept;
     void                           WriteTransLightingToHeap() noexcept;
     void                           InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
@@ -630,7 +632,7 @@ struct RenderContext::Impl {
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
-    void RegisterShader(const ZHLN_ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
+    void RegisterShader(const Vk::ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
@@ -883,8 +885,9 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
-        LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
+    template <Vk::ShaderProgram ShaderModule, typename PushConstants = void>
+    [[nodiscard]] auto LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
+        -> std::expected<Vk::Pipeline, ErrorCode>;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
@@ -895,12 +898,13 @@ template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
-    return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
-        .Build(allocator)
+    const auto imageConfig = Vk::ImageConfig::Texture2D(
+        {width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled
+    );
+    return Vk::Image::Create(allocator, imageConfig)
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             defer _([&] { allocator.DestroyImage(image); });
-            auto  viewRes = Vk::ImageView::Create(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }
@@ -943,6 +947,7 @@ struct GroupRange {
     const NativeMaterial* material;
     uint32_t              start;
     uint32_t              count;
+    VkCullModeFlags       cullMode;
 };
 
 inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
@@ -987,6 +992,23 @@ template <VkShaderStageFlagBits Stage>
         return {.storage = std::move(aligned)};
     }
     return {.fallback = bytes};
+}
+
+template <Vk::ShaderProgram ShaderModule, typename PushConstants>
+auto RenderContext::Impl::LoadAndCreateComputeShader(
+    Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass
+) const noexcept -> std::expected<Vk::Pipeline, ErrorCode> {
+    const auto loaded = LoadShaderData(cs);
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
+    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    if (shader.code == nullptr || shader.size == 0) {
+        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
+    }
+    if (!pass.ReflectDispatchLayout(shader)) {
+        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
+    }
+
+    return Vk::ComputePipeline<ShaderModule, PushConstants>::Create(ctx, shader, Vk::PipelineCreateBindings {.layout = layout}, pipelineCache.Get());
 }
 
 template <typename T = Vk::Buffer, typename... Args>

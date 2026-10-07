@@ -33,7 +33,7 @@ struct ReflectedSet {
 };
 
 struct ReflectedStageInput {
-    ZHLN_ShaderDesc       shader;
+    ShaderDesc       shader;
     VkShaderStageFlagBits stage;
 };
 
@@ -54,17 +54,17 @@ struct ReflectedLayout {
 
     bool Build(VkDevice device, ShaderStagesView shaders) noexcept;
 
-    bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
+    bool Build(VkDevice device, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
 
     bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
 };
 
-[[nodiscard]] auto ReflectComputeThreadGroupSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
+[[nodiscard]] auto ReflectComputeThreadGroupSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
 
-[[nodiscard]] auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
+[[nodiscard]] auto ReflectComputeDispatchSize(const ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
 
-[[nodiscard]] auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t>;
-[[nodiscard]] auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float>;
+[[nodiscard]] auto ReflectSpecializationConstantU32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t>;
+[[nodiscard]] auto ReflectSpecializationConstantF32(const ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float>;
 
 class ReflectedLayoutBuilder {
   public:
@@ -76,7 +76,7 @@ class ReflectedLayoutBuilder {
     ReflectedLayoutBuilder& operator=(const ReflectedLayoutBuilder&) = delete;
     ~ReflectedLayoutBuilder() noexcept                               = default;
 
-    void AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
+    void AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
 
     [[nodiscard]] auto BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool;
 

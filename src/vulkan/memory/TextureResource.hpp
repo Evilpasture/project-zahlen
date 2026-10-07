@@ -22,7 +22,7 @@ struct TextureResource {
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {image.Handle(), view, extent, view.Info().format};
+        return ImageSlice {image.Handle(), view, extent, view.Format()};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

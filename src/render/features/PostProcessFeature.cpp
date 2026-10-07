@@ -70,7 +70,7 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
         uint32_t mode   = 0;
     };
 
-    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
     return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get())
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
@@ -94,17 +94,16 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
 #endif
 
 void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
-    const VkSamplerCreateInfo defaultInfo = impl.defaultSamplerInfo;
-    const VkSamplerCreateInfo pointInfo   = impl.pointSamplerInfo;
+    const Vk::SamplerConfig defaultConfig = impl.defaultSamplerConfig;
+    const Vk::SamplerConfig pointConfig = impl.pointSamplerConfig;
+    const Vk::SamplerConfig blueNoiseConfig = impl.blueNoiseSamplerConfig;
 
-    Vk::InitHeapPassSamplers<Shaders::Gtao>(impl.heapManager, _gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomDown>(impl.heapManager, _bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers<Shaders::BloomUp>(impl.heapManager, _bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-
-    const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
+    Vk::InitHeapPassSamplers<Shaders::Gtao>(impl.heapManager, _gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomDown>(impl.heapManager, _bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::BloomUp>(impl.heapManager, _bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-        impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+        impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
 }
 

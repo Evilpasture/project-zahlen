@@ -37,9 +37,14 @@ inline void PipelineBarrier(
     vkCmdPipelineBarrier2(cmd, &dep_info);
 }
 
-inline void MemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc& desc) noexcept {
+inline void MemoryBarrier(VkCommandBuffer cmd, const MemoryBarrierDesc& desc) noexcept {
     const VkMemoryBarrier2 barrier = MakeMemoryBarrier(desc);
     PipelineBarrier(cmd, {}, {}, std::span<const VkMemoryBarrier2>(&barrier, 1));
+}
+
+inline void ImageBarrier(VkCommandBuffer cmd, const ImageBarrierDesc& desc) noexcept {
+    const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
+    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
 }
 
 inline void MemoryBarrier(

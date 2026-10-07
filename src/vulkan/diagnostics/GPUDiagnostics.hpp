@@ -171,7 +171,7 @@ class GPUDiagnostics {
     }
 
     [[gnu::always_inline]]
-    void RegisterShader(const ZHLN_ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
+    void RegisterShader(const ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
         if (desc.code != nullptr && desc.size > 0) {
             RegisterShader(std::span<const uint32_t>(desc.code, desc.size / sizeof(uint32_t)), desc.entry_point ? desc.entry_point : fallbackEntry);
         }

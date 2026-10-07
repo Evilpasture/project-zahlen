@@ -290,7 +290,7 @@ void TextureManager::OnDeviceLost() {
 
 auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
     -> std::expected<TextureHandle, ErrorCode> {
-    const VkFormat format = view.Info().format;
+    const VkFormat format = view.Format();
     return Adopt(std::move(image), std::move(view)).transform([&](uint32_t slot) {
         return RegisterAnonymous(slot, format, width, height);
     });

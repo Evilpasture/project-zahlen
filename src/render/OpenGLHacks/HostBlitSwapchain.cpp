@@ -141,7 +141,7 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
 
     auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
                        VkAccessFlags2 dstAccess) {
-        Vk::ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
+        Vk::ImageBarrier(cmd, Vk::ImageBarrierDesc {
                                   .image      = image,
                                   .src_access = srcAccess,
                                   .dst_access = dstAccess,

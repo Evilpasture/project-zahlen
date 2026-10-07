@@ -95,20 +95,32 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
 void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset) {
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(_recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
 
-    ZHLN_BufferImageCopyDesc copy_region = {
-        .buffer           = stagingBuf,
-        .image            = dstImage,
-        .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .width            = w,
-        .height           = h,
-        .buffer_offset    = offset,
-        .mip_level        = 0,
-        .base_array_layer = 0
+    const VkBufferImageCopy2 region {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+        .bufferOffset = offset,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = {0, 0, 0},
+        .imageExtent = {w, h, 1},
     };
-    ZHLN_CmdCopyBufferToImage(_recorder.Handle(), &copy_region);
+    const VkCopyBufferToImageInfo2 copyInfo {
+        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+        .srcBuffer = stagingBuf,
+        .dstImage = dstImage,
+        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .regionCount = 1,
+        .pRegions = &region,
+    };
+    vkCmdCopyBufferToImage2(_recorder.Handle(), &copyInfo);
 
     if (mipLevels > 1) {
-        ZHLN_GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     } else {
         TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             _recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1

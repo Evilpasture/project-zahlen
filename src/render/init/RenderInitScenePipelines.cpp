@@ -108,7 +108,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
         .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
         .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader(
+            return LoadAndCreateComputeShader<Shaders::Modules::SkinningCS, SkinningConstants>(
                        Vk::MakeStageSource<Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
             )
                 .transform([&](auto&& pipeline) -> auto { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -176,14 +176,13 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
-    auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
+    shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    return shadowSamplerBuilder.Build(ctx.Device())
+    return shadowSamplerConfig.Create(ctx.Device())
         .transform_error([](auto err) -> ErrorCode { return err; })
 
         .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
-            shadowSampler     = std::forward<decltype(sampler)>(sampler);
-            shadowSamplerInfo = shadowSamplerBuilder.Info();
+            shadowSampler = std::forward<decltype(sampler)>(sampler);
             return {};
         })
 
@@ -327,7 +326,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
                      .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
                      .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
                          hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-                         return LoadAndCreateComputeShader(
+                         return LoadAndCreateComputeShader<Shaders::Modules::HangGpuCS>(
                                     Vk::MakeStageSource<Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
                          )
                              .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -500,8 +499,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             if (!ctx.RayTracingSupported()) {
                 return {};
             }
-            ZHLN_AccelerationStructureSizes tlasSizes;
-            Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances, tlasSizes);
+            const Vk::AccelerationStructureSizes tlasSizes = Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances);
 
             return CreatePerFrame(
                        allocator, tlasSizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
@@ -523,11 +521,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .and_then([&](auto&& tib) -> std::expected<void, ErrorCode> {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-                        frames.tlas[i] = Vk::AccelerationStructure(
-                            ctx.Device(), Vk::CreateAccelerationStructure(
-                                              ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
-                                          )
+                        auto tlas = Vk::CreateAccelerationStructure(
+                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
+                            Vk::AccelerationStructureType::TopLevel
                         );
+                        if (!tlas) {
+                            return std::unexpected(Vk::ToFrameError(tlas.error()));
+                        }
+                        frames.tlas[i] = std::move(*tlas);
                         if (!frames.tlas[i].Valid()) {
                             return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
                         }

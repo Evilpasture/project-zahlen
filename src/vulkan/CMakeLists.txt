@@ -17,8 +17,10 @@ set(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES
 add_library(
   zahlen_vulkan STATIC
   ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
-  core/RenderCore.c
   core/RenderCore.cpp
+  core/Handles.cpp
+  core/Device.cpp
+  core/PhysicalDevice.cpp
   core/Instance.cpp
   core/Context.cpp
   core/Extensions.cpp
@@ -31,12 +33,13 @@ add_library(
   memory/Allocator.cpp
   memory/StagingContext.cpp
   execution/CommandRecorder.cpp
+  execution/RenderQueue.cpp
   execution/Commands.cpp
   execution/SemaphorePool.cpp
   pipeline/PipelineBuilder.cpp
   pipeline/PipelineCache.cpp
   pipeline/DescriptorHeap.cpp
-  pipeline/SamplerBuilder.cpp
+  pipeline/SamplerConfig.cpp
   pipeline/ShaderStages.cpp
   pipeline/ReflectedLayout.cpp
   pipeline/ComputePass.cpp
@@ -70,19 +73,11 @@ if(ZHLN_ENABLE_CLANG_TIDY)
 endif()
 
 set_source_files_properties(
-  core/RenderCore.c
-  PROPERTIES LANGUAGE C
-             C_STANDARD 23
-             C_STANDARD_REQUIRED ON
-             C_EXTENSIONS OFF)
-
-set_source_files_properties(
   ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
   PROPERTIES LANGUAGE C
              C_STANDARD 11
              C_STANDARD_REQUIRED ON
              C_EXTENSIONS OFF
-             SKIP_PRECOMPILE_HEADERS ON
              COMPILE_OPTIONS "-w")
 
 target_compile_features(zahlen_vulkan PUBLIC cxx_std_26)
@@ -111,7 +106,6 @@ target_compile_definitions(zahlen_vulkan PRIVATE VMA_STATIC_VULKAN_FUNCTIONS=0
 
 target_precompile_headers(
   zahlen_vulkan PRIVATE
-  "$<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/RenderingPCH.h>"
   "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>")
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)

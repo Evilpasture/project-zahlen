@@ -6,7 +6,7 @@
 
 #define ZHLN_RENDERING_HPP_INCLUDED
 
-#include "RenderingPCH.h" // IWYU pragma: keep
+#include "VulkanHeader.hpp" // IWYU pragma: keep
 
 // clang-format off
 // IWYU pragma: begin_exports
@@ -34,8 +34,8 @@
 #include <atomic>
 
 
-#include "core/RenderCore.h"
 #include "core/FrameConfig.hpp"
+#include "core/FrameStorage.hpp"
 
 // clang-format off
 #include "core/Extensions.hpp"
@@ -47,6 +47,7 @@
 #include "core/Context.hpp"
 #include "execution/CommandRecorder.hpp"
 #include "execution/RenderQueue.hpp"
+#include "execution/GpuPayload.hpp"
 #include "presentation/Swapchain.hpp"
 #include "execution/FrameSync.hpp"
 #include "execution/CommandPool.hpp"
@@ -55,8 +56,10 @@
 #include "memory/ImageView.hpp"
 #include "memory/ImageSlice.hpp"
 #include "memory/BufferSlice.hpp"
+#include "pipeline/PipelineTypes.hpp"
 #include "core/RenderCore.hpp"
 #include "graph/DynamicRendering.hpp"
+#include "pipeline/SamplerConfig.hpp"
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
 #include "pipeline/PushDataLayout.hpp"
@@ -68,9 +71,9 @@
 #include "pipeline/Specialization.hpp"
 #include "pipeline/ShaderProgram.hpp"
 #include "pipeline/PipelineBuilder.hpp"
+#include "pipeline/GraphicsPipeline.hpp"
 #include "pipeline/PipelineCache.hpp"
 #include "pipeline/HeapBindings.hpp"
-#include "pipeline/SamplerBuilder.hpp"
 #include "pipeline/HeapMappingBuilder.hpp"
 #include "memory/RenderTarget.hpp"
 #include "memory/StagingContext.hpp"

@@ -375,7 +375,7 @@ def check_expansions_libclang(
         # The language flag depends on the file: handing -std=c++26 to a .c
         # file makes libclang refuse the translation unit outright, which is a
         # fatal load error rather than a diagnostic.
-        lang_flags = ["-x", "c", "-std=c23"] if path.suffix == ".c" else ["-std=c++26"]
+        lang_flags = ["-x", "c", "-std=c11"] if path.suffix == ".c" else ["-std=c++26"]
         try:
             tu = index.parse(
                 str(path),

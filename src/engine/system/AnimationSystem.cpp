@@ -6,6 +6,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/ArenaAllocator.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -15,7 +16,9 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <span>
+#include <vector>
 
 namespace ZHLN {
 
@@ -98,13 +101,112 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, JPH::Floa
     outWeights = JPH::Float4 {lanes[0], lanes[1], lanes[2], lanes[3]};
 }
 
+struct AnimationNodeScratch {
+    JPH::Vec3   previousTranslation = JPH::Vec3::sZero();
+    JPH::Quat   previousRotation    = JPH::Quat::sIdentity();
+    JPH::Vec3   previousScale       = JPH::Vec3::sReplicate(1.0f);
+    JPH::Vec3   currentTranslation  = JPH::Vec3::sZero();
+    JPH::Quat   currentRotation     = JPH::Quat::sIdentity();
+    JPH::Vec3   currentScale        = JPH::Vec3::sReplicate(1.0f);
+    JPH::Float4 morphWeights {};
+    uint32_t    activeMorphCount = 0;
+    bool        computed         = false;
+};
+
+[[nodiscard]] auto AnimationScratchCapacity(size_t nodeCount, bool needsWorldBuffer) -> size_t {
+    if (nodeCount == 0) {
+        return 0;
+    }
+
+    const size_t matrixArrays       = needsWorldBuffer ? 2 : 1;
+    const size_t max                = std::numeric_limits<size_t>::max();
+    const size_t matrixBytesPerNode = sizeof(JPH::Mat44) * matrixArrays;
+
+    if (nodeCount > max / sizeof(AnimationNodeScratch) || nodeCount > max / matrixBytesPerNode) {
+        Panic("Animation scratch size overflows for {} prefab nodes", nodeCount);
+    }
+
+    const size_t nodeBytes   = nodeCount * sizeof(AnimationNodeScratch);
+    const size_t matrixBytes = nodeCount * matrixBytesPerNode;
+    const size_t padding     = (alignof(AnimationNodeScratch) - 1) + (alignof(JPH::Mat44) - 1);
+    if (nodeBytes > max - matrixBytes || nodeBytes + matrixBytes > max - padding) {
+        Panic("Animation scratch size overflows for {} prefab nodes", nodeCount);
+    }
+    return nodeBytes + matrixBytes + padding;
+}
+
+[[nodiscard]] auto SingleArrayCapacity(size_t elementCount, size_t elementSize, size_t elementAlignment) -> size_t {
+    const size_t max = std::numeric_limits<size_t>::max();
+    if (elementCount > max / elementSize) {
+        Panic("Animation joint output size overflows for {} matrices", elementCount);
+    }
+    const size_t bytes   = elementCount * elementSize;
+    const size_t padding = elementAlignment - 1;
+    if (bytes > max - padding) {
+        Panic("Animation joint output size overflows for {} matrices", elementCount);
+    }
+    return bytes + padding;
+}
+
+[[nodiscard]] auto EnsureArenaCapacity(std::unique_ptr<LinearArena>& arena, size_t minimumCapacity) -> LinearArena& {
+    constexpr size_t kInitialCapacity = 16 * 1024;
+    const size_t     requested        = std::max(minimumCapacity, kInitialCapacity);
+
+    if (arena == nullptr || arena->Capacity() < requested) {
+        size_t capacity = arena == nullptr ? kInitialCapacity : arena->Capacity();
+        while (capacity < requested) {
+            if (capacity > std::numeric_limits<size_t>::max() / 2) {
+                capacity = requested;
+                break;
+            }
+            capacity *= 2;
+        }
+        arena = std::make_unique<LinearArena>(capacity);
+    }
+    return *arena;
+}
+
+}
+
+void AnimationSystem::ScratchStorage::ResetForUpdate() noexcept {
+    for (auto& arena: _chunkArenas) {
+        if (arena != nullptr) {
+            arena->Reset();
+        }
+    }
+    for (auto& transforms: _callbackWorldTransforms) {
+        transforms.clear();
+    }
+    if (_jointOutputArena != nullptr) {
+        _jointOutputArena->Reset();
+    }
+}
+
+auto AnimationSystem::ScratchStorage::GetChunkArena(uint32_t chunkIndex, size_t minimumCapacity) -> LinearArena& {
+    if (chunkIndex >= _chunkArenas.size()) {
+        Panic("Animation ParallelFor chunk index {} exceeds its scratch storage", chunkIndex);
+    }
+    return EnsureArenaCapacity(_chunkArenas[chunkIndex], minimumCapacity);
+}
+
+auto AnimationSystem::ScratchStorage::GetJointOutputArena(size_t minimumCapacity) -> LinearArena& {
+    return EnsureArenaCapacity(_jointOutputArena, minimumCapacity);
+}
+
+auto AnimationSystem::ScratchStorage::GetCallbackWorldTransforms(uint32_t chunkIndex) noexcept -> std::vector<JPH::Mat44>& {
+    if (chunkIndex >= _callbackWorldTransforms.size()) {
+        Panic("Animation ParallelFor chunk index {} exceeds its callback scratch", chunkIndex);
+    }
+    return _callbackWorldTransforms[chunkIndex];
 }
 
 void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
                                         const Components::HierarchyComponent, const Components::MeshComponent,
                                         Components::MorphTargetComponent&, Components::TransformComponent&> query,
                              ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
-                             BonePosePostProcessor postProcessor) {
+                             BonePosePostProcessor postProcessor, ECS::Local<ScratchStorage> scratchStorage) {
+    scratchStorage->ResetForUpdate();
+
     const float dt = frameDt.value;
     auto entities  = query.Entities<Components::AnimatorComponent>();
     auto animators = query.Raw<Components::AnimatorComponent>();
@@ -115,6 +217,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
 
     uint32_t totalJoints        = 0;
     auto     allSkinnedEntities = query.Entities<Components::SkeletalMeshComponent>();
+    auto     allMeshEntities    = query.Entities<Components::MeshComponent>();
 
     for (Entity e: allSkinnedEntities) {
         auto skelMesh = query.Get<Components::SkeletalMeshComponent>(e);
@@ -130,13 +233,40 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
         }
     }
 
-    if (totalJoints == 0 && entities.empty()) {
-        return;
-    }
+    const size_t jointCount = std::max<size_t>(totalJoints, 1);
+    LinearArena& jointArena = scratchStorage->GetJointOutputArena(SingleArrayCapacity(jointCount, sizeof(JPH::Mat44), alignof(JPH::Mat44)));
+    ScratchVector<JPH::Mat44> calculatedJoints {ArenaAllocator<JPH::Mat44> {jointArena}};
+    calculatedJoints.resize(jointCount, JPH::Mat44::sIdentity());
 
-    JPH::Array<JPH::Mat44> calculatedJoints(std::max(totalJoints, 1u), JPH::Mat44::sIdentity());
+    TaskSystem::ParallelFor(static_cast<uint32_t>(entities.size()), 1, [&](uint32_t start, uint32_t end, uint32_t chunkIndex) {
+        // One chunk owns one arena and one callback vector. A user postprocessor
+        // may yield; another task on the same worker therefore cannot reset or
+        // overwrite this chunk's scratch while it is suspended.
+        size_t maxNodeCount = 0;
+        for (uint32_t i = start; i < end; ++i) {
+            if (animators[i].prefab != nullptr) {
+                maxNodeCount = std::max(maxNodeCount, animators[i].prefab->nodes.size());
+            }
+        }
 
-    TaskSystem::ParallelFor(entities.size(), 1, [&](uint32_t start, uint32_t end, uint32_t) {
+        LinearArena* chunkArena = nullptr;
+        if (maxNodeCount != 0) {
+            chunkArena = &scratchStorage->GetChunkArena(chunkIndex, AnimationScratchCapacity(maxNodeCount, postProcessor == nullptr));
+        }
+
+        ScratchVector<AnimationNodeScratch> nodeScratch {ArenaAllocator<AnimationNodeScratch> {chunkArena}};
+        nodeScratch.resize(maxNodeCount);
+
+        const size_t matrixCount = maxNodeCount * (postProcessor == nullptr ? 2u : 1u);
+        ScratchVector<JPH::Mat44> matrixScratch {ArenaAllocator<JPH::Mat44> {chunkArena}};
+        matrixScratch.resize(matrixCount);
+
+        std::vector<JPH::Mat44>* callbackWorldTransforms = nullptr;
+        if (postProcessor != nullptr) {
+            callbackWorldTransforms = &scratchStorage->GetCallbackWorldTransforms(chunkIndex);
+            callbackWorldTransforms->reserve(maxNodeCount);
+        }
+
         for (uint32_t i = start; i < end; ++i) {
             Entity                         rootEntity = entities[i];
             Components::AnimatorComponent& anim       = animators[i];
@@ -144,30 +274,46 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
             if (!anim.prefab) {
                 continue;
             }
-            const ModelPrefab& prefab = *anim.prefab;
+            const ModelPrefab& prefab   = *anim.prefab;
+            const size_t       nodeCount = prefab.nodes.size();
 
-            std::vector<JPH::Vec3> baseT(prefab.nodes.size());
-            std::vector<JPH::Quat> baseR(prefab.nodes.size());
-            std::vector<JPH::Vec3> baseS(prefab.nodes.size());
-            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
-                const Math::TransformTRS trs = Math::Decompose(prefab.nodes[n].localTransform);
-                baseT[n]                     = trs.translation;
-                baseR[n]                     = trs.rotation;
-                baseS[n]                     = trs.scale;
+            std::span<AnimationNodeScratch> nodeStates;
+            std::span<JPH::Mat44>           localTransforms;
+            if (nodeCount != 0) {
+                nodeStates       = std::span<AnimationNodeScratch> {nodeScratch.data(), nodeCount};
+                localTransforms  = std::span<JPH::Mat44> {matrixScratch.data(), nodeCount};
             }
 
-            std::vector<JPH::Float4>          nodeMorphWeights(prefab.nodes.size(), JPH::Float4 {});
-            std::vector<uint32_t>             nodeActiveMorphCounts(prefab.nodes.size(), 0);
+            if (callbackWorldTransforms != nullptr) {
+                callbackWorldTransforms->resize(nodeCount);
+            }
+            std::span<JPH::Mat44> worldTransforms;
+            if (callbackWorldTransforms != nullptr) {
+                worldTransforms = std::span<JPH::Mat44> {*callbackWorldTransforms};
+            } else if (nodeCount != 0) {
+                worldTransforms = std::span<JPH::Mat44> {matrixScratch.data() + maxNodeCount, nodeCount};
+            }
+
+            for (size_t n = 0; n < nodeCount; ++n) {
+                AnimationNodeScratch& state = nodeStates[n];
+                const Math::TransformTRS trs = Math::Decompose(prefab.nodes[n].localTransform);
+
+                state.previousTranslation = trs.translation;
+                state.previousRotation    = trs.rotation;
+                state.previousScale       = trs.scale;
+                state.currentTranslation  = trs.translation;
+                state.currentRotation     = trs.rotation;
+                state.currentScale        = trs.scale;
+                state.morphWeights        = JPH::Float4 {};
+                state.activeMorphCount    = 0;
+                state.computed            = false;
+            }
 
             if (anim.blendDuration > 0.0f && anim.prevTrackIdx >= 0) {
                 anim.blendFactor = std::min(1.0f, anim.blendFactor + (dt / anim.blendDuration));
             } else {
                 anim.blendFactor = 1.0f;
             }
-
-            std::vector<JPH::Vec3> prevT = baseT;
-            std::vector<JPH::Quat> prevR = baseR;
-            std::vector<JPH::Vec3> prevS = baseS;
 
             if (anim.prevTrackIdx >= 0 && anim.blendFactor < 1.0f) {
                 anim.prevTrackTime += dt * anim.prevPlaybackSpeed;
@@ -177,20 +323,15 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 }
 
                 for (const auto& channel: prevClip.channels) {
-                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(nodeCount)) {
                         continue;
                     }
                     if (channel.path != AnimationPathType::Weights) {
-                        SampleChannel(
-                            channel, anim.prevTrackTime, prevT[channel.targetNodeIndex], prevR[channel.targetNodeIndex], prevS[channel.targetNodeIndex]
-                        );
+                        AnimationNodeScratch& state = nodeStates[channel.targetNodeIndex];
+                        SampleChannel(channel, anim.prevTrackTime, state.previousTranslation, state.previousRotation, state.previousScale);
                     }
                 }
             }
-
-            std::vector<JPH::Vec3> currT = baseT;
-            std::vector<JPH::Quat> currR = baseR;
-            std::vector<JPH::Vec3> currS = baseS;
 
             if (anim.currentTrackIdx >= 0 && anim.currentTrackIdx < static_cast<int32_t>(prefab.animations.size())) {
                 const auto& clip = prefab.animations[anim.currentTrackIdx];
@@ -204,34 +345,33 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 }
 
                 for (const auto& channel: clip.channels) {
-                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                    if (channel.targetNodeIndex < 0 || channel.targetNodeIndex >= static_cast<int32_t>(nodeCount)) {
                         continue;
                     }
 
+                    AnimationNodeScratch& state = nodeStates[channel.targetNodeIndex];
                     if (channel.path == AnimationPathType::Weights) {
                         const uint32_t numWeights = channel.keyTimes.empty() ?
                                                         0u :
                                                         static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
-                        nodeActiveMorphCounts[channel.targetNodeIndex] = std::min(numWeights, 4u);
-                        SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex]);
+                        state.activeMorphCount = std::min(numWeights, 4u);
+                        SampleWeightsChannel(channel, anim.currentTrackTime, state.morphWeights);
                     } else {
-                        SampleChannel(
-                            channel, anim.currentTrackTime, currT[channel.targetNodeIndex], currR[channel.targetNodeIndex], currS[channel.targetNodeIndex]
-                        );
+                        SampleChannel(channel, anim.currentTrackTime, state.currentTranslation, state.currentRotation, state.currentScale);
                     }
                 }
             }
 
-            std::vector<JPH::Mat44> localTransforms(prefab.nodes.size());
-            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
+            for (size_t n = 0; n < nodeCount; ++n) {
+                const AnimationNodeScratch& state = nodeStates[n];
                 if (anim.prevTrackIdx >= 0 && anim.blendFactor < 1.0f) {
-                    float     t        = anim.blendFactor;
-                    JPH::Vec3 blendedT = prevT[n] + t * (currT[n] - prevT[n]);
-                    JPH::Quat blendedR = prevR[n].SLERP(currR[n], t).Normalized();
-                    JPH::Vec3 blendedS = prevS[n] + t * (currS[n] - prevS[n]);
-                    localTransforms[n] = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
+                    const float     t        = anim.blendFactor;
+                    const JPH::Vec3 blendedT = state.previousTranslation + t * (state.currentTranslation - state.previousTranslation);
+                    const JPH::Quat blendedR = state.previousRotation.SLERP(state.currentRotation, t).Normalized();
+                    const JPH::Vec3 blendedS = state.previousScale + t * (state.currentScale - state.previousScale);
+                    localTransforms[n]       = JPH::Mat44::sRotationTranslation(blendedR, blendedT).PreScaled(blendedS);
                 } else {
-                    localTransforms[n] = JPH::Mat44::sRotationTranslation(currR[n], currT[n]).PreScaled(currS[n]);
+                    localTransforms[n] = JPH::Mat44::sRotationTranslation(state.currentRotation, state.currentTranslation).PreScaled(state.currentScale);
                 }
             }
 
@@ -239,35 +379,33 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 anim.prevTrackIdx = -1;
             }
 
-            std::vector<JPH::Mat44> worldTransforms(prefab.nodes.size(), JPH::Mat44::sIdentity());
-            std::vector<bool>       computed(prefab.nodes.size(), false);
-
             auto GetWorldTransform = [&](auto& self, int32_t nodeIdx) -> JPH::Mat44 {
-                if (nodeIdx < 0 || nodeIdx >= static_cast<int32_t>(prefab.nodes.size())) {
+                if (nodeIdx < 0 || nodeIdx >= static_cast<int32_t>(nodeCount)) {
                     return JPH::Mat44::sIdentity();
                 }
-                if (computed[nodeIdx]) {
+                if (nodeStates[nodeIdx].computed) {
                     return worldTransforms[nodeIdx];
                 }
 
-                JPH::Mat44 local     = localTransforms[nodeIdx];
-                int32_t    parentIdx = prefab.nodes[nodeIdx].parentIndex;
-
-                JPH::Mat44 world         = (parentIdx >= 0) ? self(self, parentIdx) * local : local;
-                worldTransforms[nodeIdx] = world;
-                computed[nodeIdx]        = true;
+                const JPH::Mat44 local     = localTransforms[nodeIdx];
+                const int32_t    parentIdx = prefab.nodes[nodeIdx].parentIndex;
+                const JPH::Mat44 world     = (parentIdx >= 0) ? self(self, parentIdx) * local : local;
+                worldTransforms[nodeIdx]    = world;
+                nodeStates[nodeIdx].computed = true;
                 return world;
             };
 
-            for (size_t n = 0; n < prefab.nodes.size(); ++n) {
-                auto _ = GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
+            for (size_t n = 0; n < nodeCount; ++n) {
+                static_cast<void>(GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n)));
             }
 
             if (postProcessor != nullptr) {
-                postProcessor(registry, rootEntity, prefab, localTransforms, worldTransforms);
+                postProcessor(registry, rootEntity, prefab, localTransforms, *callbackWorldTransforms);
+                // The callback may resize or reallocate its vector, so rebuild
+                // the view before using its (possibly changed) result below.
+                worldTransforms = std::span<JPH::Mat44> {*callbackWorldTransforms};
             }
 
-            auto allMeshEntities = query.Entities<Components::MeshComponent>();
             for (Entity childEnt: allMeshEntities) {
                 auto hier = query.Get<Components::HierarchyComponent>(childEnt);
                 if (!hier || hier->parent != rootEntity) {
@@ -275,14 +413,15 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 }
 
                 auto mesh = query.Get<Components::MeshComponent>(childEnt);
-                if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
+                if (!mesh || mesh->nodeIndex < 0 || mesh->nodeIndex >= static_cast<int32_t>(nodeCount)) {
                     continue;
                 }
 
-                if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
+                const AnimationNodeScratch& node = nodeStates[mesh->nodeIndex];
+                if (node.activeMorphCount > 0) {
                     if (auto morphComp = query.Get<Components::MorphTargetComponent>(childEnt)) {
-                        morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
-                        morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
+                        morphComp->activeCount = node.activeMorphCount;
+                        morphComp->weights     = node.morphWeights;
                     }
                 }
 
@@ -304,13 +443,19 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                     }
                 }
             }
+
+            // The callback receives a short-lived, reused per-chunk vector. Clear
+            // its elements after this entity while retaining capacity for the next.
+            if (callbackWorldTransforms != nullptr) {
+                callbackWorldTransforms->clear();
+            }
         }
     });
 
     if (totalJoints > 0) {
-        // One upload for the whole buffer: the palette is indexed by each mesh's
-        // jointOffset, so the frame's poses land in one contiguous region.
-        poseUploads->Push(0, std::span {calculatedJoints.data(), static_cast<size_t>(totalJoints)});
+        // PoseUploadQueue copies into its own arena, so this system's scratch can
+        // be safely reclaimed at the beginning of the next animation update.
+        poseUploads->Push(0, std::span<const JPH::Mat44> {calculatedJoints.data(), static_cast<size_t>(totalJoints)});
     }
 }
 

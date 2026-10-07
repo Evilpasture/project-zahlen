@@ -7,6 +7,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../pipeline/PipelineTypes.hpp"
+
 #include <concepts>
 #include <optional>
 #include <type_traits>
@@ -54,8 +56,8 @@ struct TypedImage {
     [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
         return slice.aspect;
     }
-    [[nodiscard]] constexpr auto Info() const noexcept -> const VkImageViewCreateInfo* {
-        return slice.info;
+    [[nodiscard]] constexpr auto ViewResource() const noexcept -> const ImageView* {
+        return slice.viewResource;
     }
     [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
         return slice;
@@ -107,8 +109,8 @@ struct TypedImage<Layout, Format> {
     [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
         return slice.aspect;
     }
-    [[nodiscard]] constexpr auto Info() const noexcept -> const VkImageViewCreateInfo* {
-        return slice.info;
+    [[nodiscard]] constexpr auto ViewResource() const noexcept -> const ImageView* {
+        return slice.viewResource;
     }
     [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
         return slice;
@@ -139,7 +141,7 @@ constexpr auto ImageSlice::Assume() const noexcept -> TypedImage<Layout, VK_FORM
 template <VkFormat Format, VkImageLayout Layout>
 constexpr auto ImageSlice::MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>> {
     static_assert(Format != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete VkFormat.");
-    if (!Valid() || format != Format || (info != nullptr && info->format != Format)) {
+    if (!Valid() || format != Format || (viewResource != nullptr && viewResource->Format() != Format)) {
         return std::nullopt;
     }
     ImageSlice result = *this;
@@ -245,7 +247,7 @@ template <VkImageLayout OldLayout, VkImageLayout NewLayout>
     VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
     uint32_t           baseMip  = 0,
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
-) noexcept -> ZHLN_ImageBarrierDesc;
+) noexcept -> ImageBarrierDesc;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 void TransitionLayout(
@@ -558,7 +560,7 @@ DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
 
 struct PassResource {
-    ZHLN_ImageBarrierDesc barrier;
+    ImageBarrierDesc barrier;
 };
 
 using PassRecordFn = void (*)(VkCommandBuffer, const void* userData);

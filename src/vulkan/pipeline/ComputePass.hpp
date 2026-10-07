@@ -59,7 +59,15 @@ inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* 
         ZHLN::Assert(desc.ctx != nullptr);
         PushHeapIndex(desc.cmd, desc.heapIndexOffset, desc.heapIndex);
     }
-    Dispatch(desc.cmd, desc.threadCountX, desc.threadCountY, desc.threadCountZ, desc.threadGroupSize[0], desc.threadGroupSize[1], desc.threadGroupSize[2]);
+    const auto workgroupCount = [](const uint32_t extent, const uint32_t localSize) noexcept {
+        return extent / localSize + static_cast<uint32_t>(extent % localSize != 0U);
+    };
+    vkCmdDispatch(
+        desc.cmd,
+        workgroupCount(desc.threadCountX, desc.threadGroupSize[0]),
+        workgroupCount(desc.threadCountY, desc.threadGroupSize[1]),
+        workgroupCount(desc.threadCountZ, desc.threadGroupSize[2])
+    );
 }
 
 }
@@ -74,7 +82,7 @@ struct ComputePass {
 
     uint32_t                heapIndexPushOffset = 0;
 
-    [[nodiscard]] bool ReflectDispatchLayout(const ZHLN_ShaderDesc& shader) noexcept {
+    [[nodiscard]] bool ReflectDispatchLayout(const ShaderDesc& shader) noexcept {
         auto reflected = ReflectComputeThreadGroupSize(shader);
         if (!reflected) {
             threadGroupSize   = {};
@@ -103,7 +111,7 @@ struct ComputePass {
 
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice                                             device,
-        const ZHLN_ShaderDesc&                               shader,
+        const ShaderDesc&                               shader,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
         uint32_t                                             indexPushOffset = 0,
         VkPipelineCache                                      cache           = VK_NULL_HANDLE
@@ -124,7 +132,7 @@ struct ComputePass {
 
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
         VkDevice                                             device,
-        const ZHLN_ShaderDesc&                               shader,
+        const ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
         uint32_t                                             indexPushOffset = 0,
@@ -217,7 +225,7 @@ struct ComputePass {
     static void DispatchGroups(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
         ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(groupCountX > 0 && groupCountY > 0 && groupCountZ > 0);
-        ZHLN::Vk::DispatchGroups(cmd, groupCountX, groupCountY, groupCountZ);
+        vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
@@ -412,7 +420,7 @@ struct DoubleBufferedComputePass {
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice               device,
         HeapManager&           heap,
-        const ZHLN_ShaderDesc& shader,
+        const ShaderDesc& shader,
         uint32_t               indexPushOffset,
         HeapLifecycle          lifecycle,
         VkPipelineCache        cache = VK_NULL_HANDLE
@@ -540,7 +548,7 @@ template <typename LayoutT>
 using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, ComputeDomain::Fixed>;
 
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
-[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
     -> std::expected<ComputePass<Domain>, ErrorCode> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
@@ -560,7 +568,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(
     VkDevice                                             device,
-    const ZHLN_ShaderDesc&                               shader,
+    const ShaderDesc&                               shader,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
     uint32_t                                             indexPushOffset,
     VkPipelineCache                                      cache = VK_NULL_HANDLE

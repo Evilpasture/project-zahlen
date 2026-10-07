@@ -27,6 +27,11 @@ struct Counter {
     ZHLN::Atomic<uint32_t> value {0};
 };
 
+// ParallelFor assigns one stable chunk index to each callback. Systems that need
+// task-local scratch can key it by this index without mistaking it for a worker
+// index (callbacks may yield or resume on another worker).
+inline constexpr uint32_t MaxParallelForChunks = 128;
+
 // Lifecycle transitions are serialized and redundant calls are no-ops. Call
 // Shutdown from an application control thread after all dispatched work has
 // completed; do not race task submission/Wait against a lifecycle transition.
@@ -87,7 +92,7 @@ void ParallelFor(uint32_t count, uint32_t chunkSize, Func&& func) {
         return;
     }
 
-    constexpr uint32_t MaxChunks         = 128;
+    constexpr uint32_t MaxChunks         = MaxParallelForChunks;
     uint32_t           adjustedChunkSize = chunkSize;
     uint32_t           numChunks         = (count + adjustedChunkSize - 1) / adjustedChunkSize;
 

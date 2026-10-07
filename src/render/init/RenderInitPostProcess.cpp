@@ -134,17 +134,15 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 #endif
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
-    auto defaultSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
+    defaultSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
     return std::expected<void, ErrorCode> {}
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return defaultSamplerBuilder.Build(ctx.Device()).and_then([&](auto defaultResult) -> auto {
-                defaultSampler     = std::move(defaultResult);
-                defaultSamplerInfo = defaultSamplerBuilder.Info();
-                auto pointBuilder  = Vk::SamplerBuilder {}.Nearest().ClampToEdge();
-                return pointBuilder.Build(ctx.Device()).transform([&](auto pointResult) -> auto {
-                    pointSampler     = std::move(pointResult);
-                    pointSamplerInfo = pointBuilder.Info();
-                    WritePointSamplerToHeap(pointBuilder.Info());
+            return defaultSamplerConfig.Create(ctx.Device()).and_then([&](auto defaultResult) -> auto {
+                defaultSampler = std::move(defaultResult);
+                pointSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
+                return pointSamplerConfig.Create(ctx.Device()).transform([&](auto pointResult) -> auto {
+                    pointSampler = std::move(pointResult);
+                    WritePointSamplerToHeap(pointSamplerConfig);
                 });
             });
         })

@@ -1,11 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Extensions.hpp"
-
 #include <Zahlen/Log.hpp>
-#include "RenderCore.h"
 
 namespace ZHLN::Vk {
 
@@ -13,6 +10,71 @@ enum class ExtensionBuilderError : uint8_t {
     MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
 };
 
+namespace {
+
+template <typename Enumerate>
+[[nodiscard]] auto EnumerateProperties(Enumerate&& enumerate) noexcept -> std::vector<VkExtensionProperties> {
+    std::vector<VkExtensionProperties> available;
+    for (;;) {
+        uint32_t count = 0;
+        if (enumerate(&count, nullptr) != VK_SUCCESS || count == 0) {
+            return {};
+        }
+
+        available.resize(count);
+        const VkResult result = enumerate(&count, available.data());
+        if (result == VK_SUCCESS) {
+            available.resize(count);
+            return available;
+        }
+        if (result != VK_INCOMPLETE) {
+            return {};
+        }
+    }
+}
+
+[[nodiscard]] auto ExtensionNames(const std::vector<VkExtensionProperties>& props) -> std::vector<std::string> {
+    std::vector<std::string> names;
+    names.reserve(props.size());
+    for (const auto& prop: props) {
+        names.emplace_back(prop.extensionName);
+    }
+    return names;
+}
+
+} // namespace
+
+auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties> {
+    if (volkInitialize() != VK_SUCCESS || vkEnumerateInstanceExtensionProperties == nullptr) {
+        return {};
+    }
+    return EnumerateProperties([](uint32_t* count, VkExtensionProperties* props) {
+        return vkEnumerateInstanceExtensionProperties(nullptr, count, props);
+    });
+}
+
+auto EnumerateDeviceExtensions(const VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties> {
+    if (physical == VK_NULL_HANDLE || vkEnumerateDeviceExtensionProperties == nullptr) {
+        return {};
+    }
+    return EnumerateProperties([physical](uint32_t* count, VkExtensionProperties* props) {
+        return vkEnumerateDeviceExtensionProperties(physical, nullptr, count, props);
+    });
+}
+
+auto HasExtension(const std::span<const VkExtensionProperties> available, const std::string_view name) noexcept -> bool {
+    return std::ranges::any_of(available, [name](const VkExtensionProperties& prop) {
+        return name == prop.extensionName;
+    });
+}
+
+auto IsInstanceExtensionSupported(const std::string_view extension) noexcept -> bool {
+    return HasExtension(EnumerateInstanceExtensions(), extension);
+}
+
+auto IsDeviceExtensionSupported(const VkPhysicalDevice physical, const std::string_view extension) noexcept -> bool {
+    return HasExtension(EnumerateDeviceExtensions(physical), extension);
+}
 
 ExtensionResult::ExtensionResult(std::vector<std::string>&& strings) noexcept: _strings(std::move(strings)) {
     RebuildPointers();
@@ -41,25 +103,25 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
+ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {}
 
-ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {
-}
-
-auto ExtensionBuilder::ForDevice(VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
-    return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateDeviceExtensions(physical)));
+auto ExtensionBuilder::ForDevice(const VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
+    return ExtensionBuilder(ExtensionNames(EnumerateDeviceExtensions(physical)));
 }
 
 auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
-    return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateInstanceExtensions()));
+    return ExtensionBuilder(ExtensionNames(EnumerateInstanceExtensions()));
 }
 
-bool ExtensionBuilder::Supports(std::string_view name) const noexcept { return IsSupported(name); }
-
-bool ExtensionBuilder::SupportsAll(std::initializer_list<std::string_view> names) const noexcept {
-    return std::ranges::all_of(names, [this](std::string_view name) { return IsSupported(name); });
+bool ExtensionBuilder::Supports(const std::string_view name) const noexcept {
+    return IsSupported(name);
 }
 
-auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuilder& {
+bool ExtensionBuilder::SupportsAll(const std::initializer_list<std::string_view> names) const noexcept {
+    return std::ranges::all_of(names, [this](const std::string_view name) { return IsSupported(name); });
+}
+
+auto ExtensionBuilder::Require(const std::string_view name) noexcept -> ExtensionBuilder& {
     if (Supports(name)) {
         Optional(name);
     } else {
@@ -68,16 +130,16 @@ auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuild
     return *this;
 }
 
-auto ExtensionBuilder::Optional(std::string_view name) noexcept -> ExtensionBuilder& {
+auto ExtensionBuilder::Optional(const std::string_view name) noexcept -> ExtensionBuilder& {
     if (const auto* matched = FindAvailable(name); matched != nullptr && !std::ranges::contains(_active, *matched)) {
         _active.push_back(*matched);
     }
     return *this;
 }
 
-auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> names, bool condition) noexcept -> ExtensionBuilder& {
+auto ExtensionBuilder::OptionalGroup(const std::initializer_list<std::string_view> names, const bool condition) noexcept -> ExtensionBuilder& {
     if (condition && SupportsAll(names)) {
-        for (auto name: names) {
+        for (const auto name: names) {
             Optional(name);
         }
     }
@@ -87,20 +149,20 @@ auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> nam
 auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::ErrorCode> {
     if (!_missingRequired.empty()) {
         for (const auto& name: _missingRequired) {
-            ZHLN::Log("[Extensions] Required Vulkan extension not supported by this driver: {}", name);
+            ZHLN::LogError("[Vulkan] Required extension is not supported: {}", name);
         }
         return std::unexpected(ExtensionBuilderError::MissingRequiredExtension);
     }
     return ExtensionResult(std::move(_active));
 }
 
-[[nodiscard]] bool ExtensionBuilder::IsSupported(std::string_view name) const noexcept {
+bool ExtensionBuilder::IsSupported(const std::string_view name) const noexcept {
     return std::ranges::contains(_available, name);
 }
 
-auto ExtensionBuilder::FindAvailable(std::string_view name) const noexcept -> const std::string* {
-    auto it = std::ranges::find(_available, name);
-    return it != _available.end() ? &(*it) : nullptr;
+auto ExtensionBuilder::FindAvailable(const std::string_view name) const noexcept -> const std::string* {
+    const auto it = std::ranges::find(_available, name);
+    return it != _available.end() ? &*it : nullptr;
 }
 
-}
+} // namespace ZHLN::Vk

@@ -115,6 +115,7 @@ void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups
                 if (group.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
+                passCtx.encoder.SetCullMode(group.cullMode);
                 passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,

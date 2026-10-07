@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -12,18 +11,19 @@
 
 namespace ZHLN::Vk {
 
-// Descriptor writes own the view description: ResourceWriteBatch copies it
-// into its transient arena, so no caller-owned pointer survives the write.
+// Carries a borrowed owned view to the synchronous heap write. The descriptor
+// batch copies the view's implementation metadata before flushing.
 struct ImageWrite {
-    VkImageViewCreateInfo info {};
-    VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    const ImageView* viewResource = nullptr;
+    ImageSlice       slice {};
+    VkImageLayout    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     ImageWrite() = default;
     explicit ImageWrite(const ImageView& view, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        info(view.Info()), layout(imageLayout) {
+        viewResource(&view), layout(imageLayout) {
     }
-    explicit ImageWrite(const VkImageViewCreateInfo& createInfo, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        info(createInfo), layout(imageLayout) {
+    explicit ImageWrite(const ImageSlice& source, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+        viewResource(source.viewResource), slice(source), layout(imageLayout) {
     }
 };
 
@@ -42,24 +42,31 @@ struct NamedSlot {
     T value {};
 };
 
+template <typename T>
+struct IsTypedImage: std::false_type {};
+template <VkImageLayout L, VkFormat F>
+struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
+
 namespace TemplatedDetail {
 
-template <ZHLN::StringLiteral Name, bool Unread, typename T>
+template <ZHLN::StringLiteral Name, bool IsUnread, typename T>
 [[nodiscard]] constexpr auto MakeNamedSlot(T&& value) noexcept {
     using U = std::remove_cvref_t<T>;
     if constexpr (std::is_same_v<U, ImageView>) {
-        // Slot stores a value, not a reference: copying the view metadata here
-        // leaves the owning ImageView (and its VkImageView handle) in place.
-        return NamedSlot<Name, ImageWrite, Unread> {.value = ImageWrite {value}};
-    } else if constexpr (requires(const U& image) { image.view.Info(); }) {
-        return NamedSlot<Name, ImageWrite, Unread> {.value = ImageWrite {value.view}};
-    } else if constexpr (requires(const U& b) {
-                             b.Handle();
-                             b.Size();
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
+    } else if constexpr (std::is_same_v<U, ImageSlice>) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
+    } else if constexpr (IsTypedImage<U>::value) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.Raw()}};
+    } else if constexpr (requires(const U& resource) { resource.view.Valid(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.view}};
+    } else if constexpr (requires(const U& buffer) {
+                             buffer.Handle();
+                             buffer.Size();
                          }) {
-        return NamedSlot<Name, BufferSlice, Unread> {.value = BufferSlice {value}};
+        return NamedSlot<Name, BufferSlice, IsUnread> {.value = BufferSlice {value}};
     } else {
-        return NamedSlot<Name, U, Unread> {.value = std::forward<T>(value)};
+        return NamedSlot<Name, U, IsUnread> {.value = std::forward<T>(value)};
     }
 }
 
@@ -75,28 +82,23 @@ template <ZHLN::StringLiteral Name, typename T>
     return TemplatedDetail::MakeNamedSlot<Name, true>(std::forward<T>(value));
 }
 
-template <ZHLN::StringLiteral Name, bool Unread = false>
+template <ZHLN::StringLiteral Name, bool IsUnread = false>
 struct NamedSampler {
     static constexpr std::string_view name = Name;
     static constexpr auto literal = Name;
-    static constexpr bool unread = Unread;
+    static constexpr bool unread = IsUnread;
 
-    VkSamplerCreateInfo value {};
+    SamplerConfig value {};
 };
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto SamplerSlot(const VkSamplerCreateInfo& info) noexcept -> NamedSampler<Name> {
-    return {.value = info};
+[[nodiscard]] constexpr auto SamplerSlot(SamplerConfig config) noexcept -> NamedSampler<Name> {
+    return {.value = config};
 }
 
 template <ZHLN::StringLiteral Name>
-[[nodiscard]] constexpr auto UnreadSampler(const VkSamplerCreateInfo& info) noexcept -> NamedSampler<Name, true> {
-    return {.value = info};
+[[nodiscard]] constexpr auto UnreadSampler(SamplerConfig config) noexcept -> NamedSampler<Name, true> {
+    return {.value = config};
 }
-
-template <typename T>
-struct IsTypedImage: std::false_type {};
-template <VkImageLayout L, VkFormat F>
-struct IsTypedImage<TypedImage<L, F>>: std::true_type {};
 
 }

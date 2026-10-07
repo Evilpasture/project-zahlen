@@ -30,10 +30,10 @@ struct RenderTarget {
     [[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED>;
 
     struct RenderTargetDescriptor {
-        ImageUsage         usage       = ImageUsage::None;
-        VkImageAspectFlags aspect      = GetFormatAspect(F);
-        uint32_t           arrayLayers = 1;
-        uint32_t           mipLevels   = 1;
+        ImageUsage usage = ImageUsage::None;
+        uint32_t   arrayLayers = 1;
+        uint32_t   mipLevels = 1;
+        bool       cubeCompatible = false;
     };
 
     [[nodiscard]] static auto
@@ -127,40 +127,22 @@ struct MipmappedRenderTarget {
         target.extent    = extent;
         target.mipLevels = GetMipLevels(extent.width, extent.height);
 
-        const VkImageCreateInfo info = {
-            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            .pNext                 = nullptr,
-            .flags                 = 0,
-            .imageType             = VK_IMAGE_TYPE_2D,
-            .format                = F,
-            .extent                = {.width = extent.width, .height = extent.height, .depth = 1},
-            .mipLevels             = target.mipLevels,
-            .arrayLayers           = 1,
-            .samples               = VK_SAMPLE_COUNT_1_BIT,
-            .tiling                = VK_IMAGE_TILING_OPTIMAL,
-            .usage                 = ToVk(usage),
-            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices   = nullptr,
-            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
-        };
-
-        auto img_res = Image::Create(allocator, info, MemoryUsage::GPUOnly);
+        const ImageConfig imageConfig = ImageConfig::Texture2D(extent, F, usage, target.mipLevels);
+        auto img_res = Image::Create(allocator, imageConfig);
         if (!img_res.has_value()) {
             return std::unexpected(img_res.error());
         }
         target.image = std::move(img_res.value());
         ZHLN::defer _([&] { target.Destroy(allocator); });
 
-        const VkImageAspectFlags aspect   = GetFormatAspect(F);
-        auto                     view_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect));
+        auto view_res = target.image.CreateView(ctx.Device());
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
         target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            auto mip_res = ImageView::Create(ctx.Device(), MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m));
+            auto mip_res = target.image.CreateView(ctx.Device(), {.baseMip = m, .mipCount = 1});
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }

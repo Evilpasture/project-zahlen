@@ -66,7 +66,7 @@ class IBLProcessor {
             ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (procedural sky)...");
         }
 
-        const auto requireShader = [](const ZHLN_ShaderDesc& shader) -> std::expected<ZHLN_ShaderDesc, ZHLN::ErrorCode> {
+        const auto requireShader = [](const ShaderDesc& shader) -> std::expected<ShaderDesc, ZHLN::ErrorCode> {
             if (shader.code == nullptr || shader.size == 0) {
                 return std::unexpected(ZHLN::Vk::ShaderStageCreationError::ShaderLoadingFailed);
             }
@@ -128,23 +128,27 @@ class IBLProcessor {
             state.shCpu = std::move(*shCpu);
         }
 
-        auto lutImg = ImageBuilder {}
-            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, 1)
-            .Build(impl.allocator);
+        auto lutImg = Image::Create(
+            impl.allocator,
+            ImageConfig::Texture2D({kLutSize, kLutSize}, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled)
+        );
         if (!lutImg) return std::unexpected(lutImg.error());
         state.payload.brdfLutImage = std::move(*lutImg);
-        auto specImg = ImageBuilder {}
-            .TextureCube(kBaseSize, cubeFormat, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels)
-            .Build(impl.allocator);
+        auto specImg = Image::Create(
+            impl.allocator,
+            ImageConfig::Cube(kBaseSize, cubeFormat, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels)
+        );
         if (!specImg) return std::unexpected(specImg.error());
         state.payload.prefilteredImage  = std::move(*specImg);
         state.payload.prefilteredFormat = cubeFormat;
         state.payload.environmentMode   = environmentMode;
         if (useVisualSky) {
-            auto skyImg = ImageBuilder {}
-                .Texture2D(radiance.width, radiance.height, VK_FORMAT_R32G32B32A32_SFLOAT,
-                           ImageUsage::TransferDst | ImageUsage::Sampled, 1)
-                .Build(impl.allocator);
+            auto skyImg = Image::Create(
+                impl.allocator,
+                ImageConfig::Texture2D(
+                    {radiance.width, radiance.height}, VK_FORMAT_R32G32B32A32_SFLOAT, ImageUsage::TransferDst | ImageUsage::Sampled
+                )
+            );
             if (!skyImg) return std::unexpected(skyImg.error());
             state.payload.visualSkyImage = std::move(*skyImg);
         }
@@ -183,11 +187,14 @@ class IBLProcessor {
         }
         const size_t visualOffsetFloats = stagedFloats;
         if (useVisualSky) stagedFloats += static_cast<size_t>(uploadWidth) * uploadHeight * 4u;
-        auto radianceImage = ImageBuilder {}
-            .Texture2D(uploadWidth, uploadHeight, VK_FORMAT_R32G32B32A32_SFLOAT,
-                       ImageUsage::TransferDst | ImageUsage::Sampled | (gpuSourceMips ? ImageUsage::TransferSrc : ImageUsage::None),
-                       sourceMipLevels)
-            .Build(impl.allocator);
+        auto radianceImage = Image::Create(
+            impl.allocator,
+            ImageConfig::Texture2D(
+                {uploadWidth, uploadHeight}, VK_FORMAT_R32G32B32A32_SFLOAT,
+                ImageUsage::TransferDst | ImageUsage::Sampled | (gpuSourceMips ? ImageUsage::TransferSrc : ImageUsage::None),
+                sourceMipLevels
+            )
+        );
         if (!radianceImage) return std::unexpected(radianceImage.error());
         ZHLN::defer _([&] { impl.allocator.DestroyImage(*radianceImage); });
         auto staging = Buffer::Create(impl.allocator, stagedFloats * sizeof(float), BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
@@ -223,30 +230,32 @@ class IBLProcessor {
 
         impl.heapManager.BeginImmediate();
 
-        const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+        auto brdfWriteView = state.payload.brdfLutImage.CreateView(impl.ctx.Device());
+        if (!brdfWriteView) return std::unexpected(brdfWriteView.error());
         const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
-            impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {brdfInfo})
+            impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(*brdfWriteView)
         );
 
-        const auto radianceInfo =
-            MakeViewCreateInfo2D(radianceImage->Handle(), VK_FORMAT_R32G32B32A32_SFLOAT, sourceMipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
-        const ImageWrite radianceWrite {radianceInfo};
+        auto radianceWriteView = radianceImage->CreateView(impl.ctx.Device(), {.mipCount = sourceMipLevels});
+        if (!radianceWriteView) return std::unexpected(radianceWriteView.error());
 
+        std::array<ImageView, kMipLevels> specMipViews {};
         std::array<HeapBlockBase, kMipLevels> specMipBlocks {};
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            const auto mipInfo =
-                MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
+            auto mipView = state.payload.prefilteredImage.CreateView(
+                impl.ctx.Device(), {.kind = ImageViewKind::Texture2DArray, .baseMip = mip, .mipCount = 1, .layerCount = 6}
+            );
+            if (!mipView) return std::unexpected(mipView.error());
+            specMipViews[mip] = std::move(*mipView);
             specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {mipInfo}),
-                Vk::Slot<"radianceMap">(radianceWrite)
+                impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipViews[mip]),
+                Vk::Slot<"radianceMap">(*radianceWriteView)
             );
         }
         HeapBlockBase shBlock {};
         if (!hasPreparedSH) {
-            const auto shMipInfo =
-                MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), cubeFormat, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, 0);
             shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {shMipInfo}), Vk::Slot<"radianceMap">(radianceWrite)
+                impl.ctx, impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipViews[0]), Vk::Slot<"radianceMap">(*radianceWriteView)
             );
         }
 
@@ -282,7 +291,7 @@ class IBLProcessor {
                     }
                 }
                 ImageBarrier(
-                    cmd, ZHLN_ImageBarrierDesc {
+cmd, ImageBarrierDesc {
                              .image      = radianceImage->Handle(),
                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
@@ -302,7 +311,7 @@ class IBLProcessor {
                 VkBufferImageCopy2 visualRegion = region;
                 visualRegion.bufferOffset = visualOffsetFloats * sizeof(float);
                 CopyBufferToImage<1>(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), {visualRegion});
-                ImageBarrier(cmd, ZHLN_ImageBarrierDesc {
+                ImageBarrier(cmd, ImageBarrierDesc {
                     .image      = state.payload.visualSkyImage.Handle(),
                     .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                     .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
@@ -372,17 +381,14 @@ class IBLProcessor {
             }
         }
 
-        const auto lutInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-        auto lutView = ImageView::Create(impl.ctx.Device(), lutInfo);
+        auto lutView = state.payload.brdfLutImage.CreateView(impl.ctx.Device());
         if (!lutView) return std::unexpected(lutView.error());
         state.payload.brdfLutView = std::move(*lutView);
-        const auto cubeInfo = MakeViewCreateInfoCube(state.payload.prefilteredImage.Handle(), cubeFormat, kMipLevels);
-        auto cubeView = ImageView::Create(impl.ctx.Device(), cubeInfo);
+        auto cubeView = state.payload.prefilteredImage.CreateView(impl.ctx.Device(), {.kind = ImageViewKind::Cube, .mipCount = kMipLevels});
         if (!cubeView) return std::unexpected(cubeView.error());
         state.payload.prefilteredView = std::move(*cubeView);
         if (useVisualSky) {
-            const auto skyInfo = MakeViewCreateInfo2D(state.payload.visualSkyImage.Handle(), VK_FORMAT_R32G32B32A32_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            auto skyView = ImageView::Create(impl.ctx.Device(), skyInfo);
+            auto skyView = state.payload.visualSkyImage.CreateView(impl.ctx.Device());
             if (!skyView) return std::unexpected(skyView.error());
             state.payload.visualSkyView = std::move(*skyView);
         }

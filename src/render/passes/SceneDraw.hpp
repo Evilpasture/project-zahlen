@@ -45,6 +45,11 @@ void SubmitDrawInstanced(
     const auto* nativeMat = drawCmd.material;
     auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
+    // Cull mode is dynamic on typed material pipelines, so sidedness does not
+    // expand the shared pipeline cache. Bit 9 is the existing material flag.
+    const bool doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
+    encoder.SetCullMode(doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
             {.pipeline    = nativeMat->meshPipeline,
@@ -91,7 +96,7 @@ using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
 [[nodiscard]] auto GBufferSceneTargets(RenderContext::Impl& impl) noexcept -> GBufferTargets;
 
 // Collapses the draw queue into runs of consecutive draws that share a
-// pipeline, which is the granularity a GPU-culled indirect draw is issued at.
+// pipeline and dynamic cull mode, the granularity of a GPU-culled indirect draw.
 [[nodiscard]] auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange>;
 
 }

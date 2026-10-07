@@ -12,6 +12,8 @@ namespace ZHLN::Passes {
 // scene color and tests against the main depth buffer without writing it, so
 // it can sit after the deferred chain without disturbing it.
 struct ForwardPass: Vk::RenderPass<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>> {
+    using PushConstants = RenderContext::Impl::ObjectConstants;
+
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

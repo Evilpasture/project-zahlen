@@ -95,7 +95,7 @@ target_compile_options(zshader PRIVATE
 # raw-string templates at Emit.cpp:129 and :210 -- not headers it consumes
 # (grep matches them anyway, which is how a PCH once got built around them).
 # zshader has no src/vulkan or VMA include path, and forcing the umbrella in
-# drags RenderingPCH.h's volk-then-vk_mem_alloc chain into a target that links
+# drags VulkanHeader.hpp's Volk include chain into a target that links
 # neither -- which is precisely the pair of failures this block once produced.
 # vulkan_core.h IS safe here: with no Rendering.hpp in the PCH there is no
 # volk in it either, so real prototypes first is the only order present --
