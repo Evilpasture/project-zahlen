@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Log.hpp>
 #include "HeapBindings.hpp"
 
@@ -109,7 +110,7 @@ struct ComputePass {
         return true;
     }
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, Vk::Error> BuildHeap(
         VkDevice                                             device,
         const ShaderDesc&                               shader,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
@@ -130,7 +131,7 @@ struct ComputePass {
         return {};
     }
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
+    [[nodiscard]] std::expected<void, Vk::Error> BuildHeapVariants(
         VkDevice                                             device,
         const ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
@@ -417,7 +418,7 @@ struct DoubleBufferedComputePass {
     std::array<uint32_t, 3>       threadGroupSize {};
     std::array<uint32_t, 3>       fixedDispatchSize {};
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, Vk::Error> BuildHeap(
         VkDevice               device,
         HeapManager&           heap,
         const ShaderDesc& shader,
@@ -549,7 +550,7 @@ using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comput
 
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-    -> std::expected<ComputePass<Domain>, ErrorCode> {
+    -> std::expected<ComputePass<Domain>, Vk::Error> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }
@@ -572,7 +573,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
     uint32_t                                             indexPushOffset,
     VkPipelineCache                                      cache = VK_NULL_HANDLE
-) noexcept -> std::expected<ComputePass<Domain>, ErrorCode> {
+) noexcept -> std::expected<ComputePass<Domain>, Vk::Error> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }

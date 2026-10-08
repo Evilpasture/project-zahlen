@@ -100,7 +100,7 @@ namespace {
 
 } // namespace
 
-auto ShaderStagesView::Create(const ShaderDesc& vert, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
+auto ShaderStagesView::Create(const ShaderDesc& vert, const ShaderDesc& frag) -> std::expected<ShaderStagesView, Vk::Error> {
     if (vert.code == nullptr || vert.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
@@ -116,7 +116,7 @@ auto ShaderStagesView::Create(const ShaderDesc& vert, const ShaderDesc& frag) ->
     return ShaderStagesView {stages};
 }
 
-auto ShaderStagesView::CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
+auto ShaderStagesView::CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag) -> std::expected<ShaderStagesView, Vk::Error> {
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }
@@ -169,7 +169,7 @@ auto OwnedShaderStages::MakeStage(const ShaderBytecode& source, const StageMetad
 }
 
 auto OwnedShaderStages::Create(ShaderBytecode vert, ShaderBytecode frag, const char* vertEntry, const char* fragEntry)
-    -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+    -> std::expected<OwnedShaderStages, Vk::Error> {
     auto view = ShaderStagesView::Create(CreateShaderDesc(vert.Code(), vertEntry), CreateShaderDesc(frag.Code(), fragEntry));
     if (!view) {
         return std::unexpected(view.error());
@@ -184,7 +184,7 @@ auto OwnedShaderStages::CreateMesh(
     const char*    taskEntry,
     const char*    meshEntry,
     const char*    fragEntry
-) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode> {
+) -> std::expected<OwnedShaderStages, Vk::Error> {
     auto view = ShaderStagesView::CreateMesh(
         CreateShaderDesc(task.Code(), taskEntry), CreateShaderDesc(mesh.Code(), meshEntry), CreateShaderDesc(frag.Code(), fragEntry)
     );

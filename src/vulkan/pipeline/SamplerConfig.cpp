@@ -72,7 +72,7 @@ enum class SamplerCreationError : uint8_t {
 
 } // namespace
 
-auto SamplerConfig::Create(VkDevice device) const noexcept -> std::expected<Sampler, ErrorCode> {
+auto SamplerConfig::Create(VkDevice device) const noexcept -> std::expected<Sampler, Vk::Error> {
     using enum SamplerCreationError;
     if (device == VK_NULL_HANDLE) {
         return std::unexpected(NullDevice);

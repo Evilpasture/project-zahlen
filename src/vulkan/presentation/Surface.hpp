@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -45,6 +46,6 @@ class Surface {
 
 
 [[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
-    -> std::expected<Surface, ErrorCode>;
+    -> std::expected<Surface, Vk::Error>;
 
 }

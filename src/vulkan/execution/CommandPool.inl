@@ -49,7 +49,7 @@ inline auto CommandPool<QType>::operator=(CommandPool&& other) noexcept -> Comma
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<void, ErrorCode> {
+inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<void, Vk::Error> {
     if (!Valid()) [[unlikely]] {
         return std::unexpected(CommandPoolError::PoolNotReady);
     }
@@ -57,17 +57,17 @@ inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<vo
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::Allocate(const uint32_t count) noexcept -> std::expected<void, ErrorCode> {
+inline auto CommandPool<QType>::Allocate(const uint32_t count) noexcept -> std::expected<void, Vk::Error> {
     return AllocateLevel(count, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) noexcept -> std::expected<void, ErrorCode> {
+inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) noexcept -> std::expected<void, Vk::Error> {
     return AllocateLevel(count, VK_COMMAND_BUFFER_LEVEL_SECONDARY);
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::AllocateLevel(const uint32_t count, const VkCommandBufferLevel level) noexcept -> std::expected<void, ErrorCode> {
+inline auto CommandPool<QType>::AllocateLevel(const uint32_t count, const VkCommandBufferLevel level) noexcept -> std::expected<void, Vk::Error> {
     if (auto valid = EnsureValid(); !valid) {
         return valid;
     }

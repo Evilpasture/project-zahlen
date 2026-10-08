@@ -6,6 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "PresentPacer.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
@@ -35,7 +36,11 @@ struct SwapchainTarget {
     bool       presentable = false;
 };
 
-inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB; // TODO(Evilpasture): Is this configurable? Should we hardcode this?
+// Fixed by contract, not by oversight: the headless destination's color target
+// bakes its format into RenderTarget<kHeadlessColorFormat>, and the host-blit
+// present path consumes that target in exactly this format. An 8-bit sRGB
+// target is what both sides agree on, so it stays hardcoded.
+inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
 class SwapchainPresenter {
   public:
@@ -62,13 +67,13 @@ class SwapchainPresenter {
     uint64_t resourceGeneration = 1;
 
     [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync = true)
-        -> std::expected<void, ErrorCode>;
+        -> std::expected<void, Vk::Error>;
 
-    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Vk::Error>;
     // Destruction requires all submitted frames to have completed.
     void Cleanup() noexcept;
 
-    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
+    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> std::expected<std::optional<SwapchainTarget>, Vk::Error>;
 
     // The swapchain transition must be recorded BEFORE the recorder is ended.
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
@@ -79,7 +84,7 @@ class SwapchainPresenter {
         ExecutableCommands                     cmds,
         uint32_t                               imageIndex,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
-    ) noexcept -> FrameOutcome<PresentSuboptimal>;
+    ) noexcept -> std::expected<std::optional<PresentSuboptimal>, Vk::Error>;
 
     void AdvanceFrame() noexcept {
         frameIndex = NextFrameSlot(frameIndex);

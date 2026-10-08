@@ -58,7 +58,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 
 namespace {
 
-[[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, ErrorCode> {
+[[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, Vk::Error> {
     if (!instance.Valid()) {
         return std::unexpected(ContextError::InvalidInstance);
     }
@@ -141,11 +141,10 @@ namespace {
     const VkPhysicalDeviceFeatures2*   features,
     const bool                         meshShaderRequested,
     const bool                         rayTracingRequested
-) noexcept -> std::expected<LogicalDevice, VkResult> // TODO(Evilpasture): Change E return to ErrorCode instead of VkResult.
-{
+) noexcept -> std::expected<LogicalDevice, Vk::Error> {
     if (physical.handle == VK_NULL_HANDLE || !physical.hasGraphics || physical.graphicsFamily == UINT32_MAX || physical.presentFamily == UINT32_MAX ||
         physical.transferFamily == UINT32_MAX || physical.computeFamily == UINT32_MAX) {
-        return std::unexpected(VK_ERROR_INITIALIZATION_FAILED); // TODO(Evilpasture): This is lying to the upper stack. Remove this whenever possible.
+        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
     }
 
     const std::array<uint32_t, 4>           candidates {physical.graphicsFamily, physical.presentFamily, physical.transferFamily, physical.computeFamily};
@@ -198,7 +197,7 @@ namespace {
     VkDevice       handle  = VK_NULL_HANDLE;
     const VkResult created = vkCreateDevice(physical.handle, &create_info, nullptr, &handle);
     if (created != VK_SUCCESS) {
-        return std::unexpected(created);
+        return std::unexpected(Vk::Error {created});
     }
 
     volkLoadDevice(handle);
@@ -251,19 +250,19 @@ namespace {
 
 } // namespace
 
-auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode> {
+auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, Vk::Error> {
     if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
         return std::unexpected(dispatch.error());
     }
 
-    PhysicalDeviceInfo info = ZHLN::Vk::SelectPhysicalDevice(_instance.Handle(), _surface, _scoreFn, _scoreUserdata);
-    if (info.handle == VK_NULL_HANDLE) {
+    const auto selected = ZHLN::Vk::SelectPhysicalDevice(_instance.Handle(), _surface, _scoreFn, _scoreUserdata);
+    if (!selected.has_value()) {
         return std::unexpected(ContextError::NoSuitableDeviceFound);
     }
-    return info;
+    return *selected;
 }
 
-auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
+auto ContextBuilder::Build() noexcept -> std::expected<Context, Vk::Error> {
     if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
         return std::unexpected(dispatch.error());
     }
@@ -368,7 +367,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     );
     if (!logical_device) {
         GPUAddressTracker::Get().SetEnabled(false);
-        return std::unexpected(ToFrameError(logical_device.error()));
+        return std::unexpected(logical_device.error());
     }
 
     context._device                      = std::move(*logical_device);

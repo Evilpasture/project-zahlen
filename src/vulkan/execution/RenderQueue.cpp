@@ -7,7 +7,7 @@
 namespace ZHLN::Vk {
 namespace {
 
-std::expected<void, ErrorCode> SubmitInfos(
+std::expected<void, Vk::Error> SubmitInfos(
     const VkQueue queue,
     const std::span<const VkCommandBufferSubmitInfo> commands,
     const std::span<const VkSemaphoreSubmitInfo> waits,
@@ -26,22 +26,22 @@ std::expected<void, ErrorCode> SubmitInfos(
 
     const VkResult result = vkQueueSubmit2(queue, 1, &submit, fence);
     if (result != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(Vk::Error {result});
     }
     return {};
 }
 
 } // namespace
 
-std::expected<void, ErrorCode> WaitIdle(const VkQueue queue) noexcept {
+std::expected<void, Vk::Error> WaitIdle(const VkQueue queue) noexcept {
     const VkResult result = vkQueueWaitIdle(queue);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(Vk::Error {result});
     }
     return {};
 }
 
-std::expected<void, ErrorCode> QueueSubmit(
+std::expected<void, Vk::Error> QueueSubmit(
     const VkQueue queue,
     ExecutableCommands commands,
     const std::span<const VkSemaphoreSubmitInfo> waits,
@@ -58,7 +58,7 @@ std::expected<void, ErrorCode> QueueSubmit(
     return SubmitInfos(queue, std::span<const VkCommandBufferSubmitInfo> {&commandInfo, 1}, waits, signals, fence);
 }
 
-std::expected<void, ErrorCode> QueueSubmit(
+std::expected<void, Vk::Error> QueueSubmit(
     const VkQueue queue,
     ExecutableCommands command,
     const VkSemaphore waitSemaphore,
@@ -82,7 +82,7 @@ std::expected<void, ErrorCode> QueueSubmit(
     );
 }
 
-std::expected<void, ErrorCode> SubmitAndWait(
+std::expected<void, Vk::Error> SubmitAndWait(
     const VkQueue queue,
     ExecutableCommands command,
     const VkSemaphore waitSemaphore,

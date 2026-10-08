@@ -12,6 +12,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 namespace ZHLN::Vk {
 
 class ResourceWriteBatch;
@@ -98,7 +99,7 @@ class DescriptorHeap {
     DescriptorHeap(DescriptorHeap&& other) noexcept;
     auto operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap&;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, Vk::Error>;
     void               Cleanup() noexcept;
 
     void Bind(VkCommandBuffer cmd) const noexcept;
@@ -223,8 +224,8 @@ class SlotAllocator {
     SlotAllocator(SlotAllocator&& other) noexcept;
     auto operator=(SlotAllocator&& other) noexcept -> SlotAllocator&;
 
-    void               Init(uint32_t capacity, ErrorCode errorOnExhaustion) noexcept;
-    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, ErrorCode>;
+    void               Init(uint32_t capacity, Vk::Error errorOnExhaustion) noexcept;
+    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, Vk::Error>;
     void               Free(uint32_t slot) noexcept;
     void               Skip(uint32_t count) noexcept;
     [[nodiscard]] auto Cursor() const noexcept -> uint32_t;
@@ -254,7 +255,7 @@ class HeapManager {
         uint32_t       staticSamplerCount,
         uint32_t       frameTransientResourceCount,
         uint32_t       immediateTransientResourceCount
-    ) noexcept -> std::expected<void, ErrorCode>;
+    ) noexcept -> std::expected<void, Vk::Error>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
 
@@ -264,21 +265,21 @@ class HeapManager {
         return _resourceHeap.Valid() && _samplerHeap.Valid();
     }
 
-    [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, Vk::Error>;
+    [[nodiscard]] auto ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -> std::expected<uint32_t, Vk::Error>;
 
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
-    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
+    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, Vk::Error> {
         return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
     }
 
-    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, ErrorCode> {
+    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, Vk::Error> {
         return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
     [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
-        -> std::expected<uint32_t, ErrorCode>;
+        -> std::expected<uint32_t, Vk::Error>;
 
     template <VkDescriptorType Type>
     void FreeStaticResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
@@ -339,9 +340,9 @@ class HeapManager {
     }
 
   private:
-    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, Vk::Error>;
     void               FreeStaticResourceSlot(uint32_t slot) noexcept;
-    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, Vk::Error>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
     ZHLN::Mutex _writeMutex {};

@@ -28,7 +28,7 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
 
 template <VkFormat F>
 inline auto
-    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode> {
+    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, Vk::Error> {
     RenderTarget rt;
     rt.extent = extent;
 
@@ -66,7 +66,7 @@ inline RenderTarget<F>::operator bool() const noexcept {
 
 template <VkFormat F>
 inline auto
-    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
+    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Vk::Error> {
     RenderTarget3D rt;
     rt.extent                    = extent;
     const ImageConfig imageConfig = ImageConfig::Texture3D(extent, F, usage);

@@ -6,6 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Render/PresentTiming.hpp>
 #include <volk.h>
 #include <array>
@@ -84,7 +85,7 @@ class PresentPacer {
 
     void Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept;
 
-    [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, Vk::Error>;
 
     [[nodiscard]] auto Policy() const noexcept -> PacingPolicy {
         return _policy;

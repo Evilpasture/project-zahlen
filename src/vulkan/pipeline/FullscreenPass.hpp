@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 namespace ZHLN::Vk {
 
 template <typename T>
@@ -19,7 +20,7 @@ struct FullscreenPass {
     std::vector<Pipeline>         pipelines;
     HeapPassBindings              heapBindings;
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, Vk::Error> BuildHeap(
         VkDevice                        device,
         HeapManager&                    heap,
         ShaderStagesView             shaders,
@@ -30,7 +31,7 @@ struct FullscreenPass {
         VkPipelineCache                 cache    = VK_NULL_HANDLE
     ) noexcept;
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
+    [[nodiscard]] std::expected<void, Vk::Error> BuildHeapVariants(
         VkDevice                              device,
         HeapManager&                          heap,
         ShaderStagesView                   shaders,

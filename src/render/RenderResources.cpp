@@ -577,9 +577,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
             .imageOffset       = {},
             .imageExtent       = {w, h, 1},
         };
-        Vk::CopyBufferToImage<1>(
-            cmd, staging.slice.buffer, image.Handle(), {region} // TODO(Evilpasture): Noisy boilerplate. Why am I forced to pass <1> and {region}?
-        );
+        Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 

@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "ShaderProgram.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
@@ -79,22 +80,22 @@ class ShaderStagesView {
     ShaderStagesView() = default;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(const ShaderDesc& vert, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
+    static auto Create(const ShaderDesc& vert, const ShaderDesc& frag) -> std::expected<ShaderStagesView, Vk::Error>;
 
     template <ShaderProgram Vert, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create() -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
+    static auto Create() -> std::expected<ShaderStagesView, Vk::Error> {
         static_assert(StageOf<Vert>() == VK_SHADER_STAGE_VERTEX_BIT, "Create() wants a vertex module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "Create() wants a fragment module second (<ShaderBindings.hpp>)");
         return Create(CreateShaderDesc<Vert>(), CreateShaderDesc<Frag>());
     }
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag) -> std::expected<ShaderStagesView, ZHLN::ErrorCode>;
+    static auto CreateMesh(const ShaderDesc& task, const ShaderDesc& mesh, const ShaderDesc& frag) -> std::expected<ShaderStagesView, Vk::Error>;
 
     template <ShaderProgram Task, ShaderProgram Mesh, ShaderProgram Frag>
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto CreateMesh() -> std::expected<ShaderStagesView, ZHLN::ErrorCode> {
+    static auto CreateMesh() -> std::expected<ShaderStagesView, Vk::Error> {
         static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "CreateMesh() wants a task module first (<ShaderBindings.hpp>)");
         static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "CreateMesh() wants a mesh module second (<ShaderBindings.hpp>)");
         static_assert(StageOf<Frag>() == VK_SHADER_STAGE_FRAGMENT_BIT, "CreateMesh() wants a fragment module third (<ShaderBindings.hpp>)");
@@ -146,7 +147,7 @@ class OwnedShaderStages {
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto Create(ShaderBytecode vert, ShaderBytecode frag, const char* vertEntry = nullptr, const char* fragEntry = nullptr)
-        -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
+        -> std::expected<OwnedShaderStages, Vk::Error>;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(
@@ -156,7 +157,7 @@ class OwnedShaderStages {
         const char*    taskEntry = nullptr,
         const char*    meshEntry = nullptr,
         const char*    fragEntry = nullptr
-    ) -> std::expected<OwnedShaderStages, ZHLN::ErrorCode>;
+    ) -> std::expected<OwnedShaderStages, Vk::Error>;
 
     [[nodiscard]] auto View() const noexcept -> ShaderStagesView;
 

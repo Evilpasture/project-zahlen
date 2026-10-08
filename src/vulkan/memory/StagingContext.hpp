@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstddef>
@@ -67,16 +68,16 @@ class StagingContext {
     StagingContext(StagingContext&& other) noexcept;
     auto operator=(StagingContext&&) -> StagingContext& = delete;
 
-    [[nodiscard]] static auto Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, ErrorCode>;
+    [[nodiscard]] static auto Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, Vk::Error>;
 
     [[nodiscard]] auto
-        UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept -> std::expected<void, ErrorCode>;
+        UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept -> std::expected<void, Vk::Error>;
 
     void UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, VkBuffer stagingBuf, VkDeviceSize offset);
     void UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer stagingBuf, uint32_t baseSize, uint32_t mipLevels);
     void AddBuffer(Buffer&& buf);
 
-    [[nodiscard]] auto ExecuteAsync() && -> std::expected<SubmittedStagingWork, ErrorCode>;
+    [[nodiscard]] auto ExecuteAsync() && -> std::expected<SubmittedStagingWork, Vk::Error>;
     void Abort() && noexcept;
 
   private:

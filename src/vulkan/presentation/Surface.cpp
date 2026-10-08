@@ -52,7 +52,7 @@ template <typename T, typename F>
     return vec;
 }
 
-[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, ZHLN::ErrorCode> {
+[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, Vk::Error> {
     auto displays = FetchVulkanVector<VkDisplayPropertiesKHR>([physicalDevice](uint32_t* c, VkDisplayPropertiesKHR* d) {
         vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, c, d);
     });
@@ -64,7 +64,7 @@ template <typename T, typename F>
     return displays[0];
 }
 
-[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ZHLN::ErrorCode> {
+[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, Vk::Error> {
     auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([physicalDevice, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
         vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
@@ -119,7 +119,7 @@ template <typename T, typename F>
 namespace ZHLN::Vk {
 
 auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
-    -> std::expected<Surface, ErrorCode> {
+    -> std::expected<Surface, Vk::Error> {
     if (physicalDevice == VK_NULL_HANDLE) {
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }

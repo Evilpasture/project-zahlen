@@ -9,6 +9,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 namespace ZHLN::Vk {
 
 template <VkFormat F>
@@ -37,7 +38,7 @@ struct RenderTarget {
     };
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
+        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, Vk::Error>;
 
     void Destroy(Allocator& allocator) noexcept {
         view = {};
@@ -91,7 +92,7 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Vk::Error>;
 };
 
 template <VkFormat F>
@@ -122,7 +123,7 @@ struct MipmappedRenderTarget {
     ~MipmappedRenderTarget() = default;
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, ErrorCode> {
+        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, Vk::Error> {
         MipmappedRenderTarget target;
         target.extent    = extent;
         target.mipLevels = GetMipLevels(extent.width, extent.height);
@@ -249,8 +250,8 @@ struct RenderTargetBundle {
     constexpr explicit RenderTargetBundle(Targets&... t) noexcept: targets(t...) {
     }
 
-    [[nodiscard]] auto Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) -> std::expected<void, ErrorCode> {
-        std::expected<void, ErrorCode> result;
+    [[nodiscard]] auto Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) -> std::expected<void, Vk::Error> {
+        std::expected<void, Vk::Error> result;
         std::apply([&](auto&... t) {
             ([&] {
                 if (!result) return;

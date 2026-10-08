@@ -28,7 +28,7 @@ namespace {
 
     // 3. Hard error (Device lost, fatal Vulkan error)
     if (!acquired) {
-        if (acquired.error().Is(FrameResult::DeviceLost)) {
+        if (acquired.error().Is(VK_ERROR_DEVICE_LOST)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         }
         destinations.AbortRecording(dest.id);
@@ -207,7 +207,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
         return;
     }
     if (ctx.Device() != VK_NULL_HANDLE) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(VK_ERROR_DEVICE_LOST)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         }
     }
@@ -216,7 +216,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(VK_ERROR_DEVICE_LOST)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         }
     }

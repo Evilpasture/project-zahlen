@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -39,9 +40,9 @@ class CommandPool {
         return Valid();
     }
 
-    [[nodiscard]] auto EnsureValid() const noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto Allocate(uint32_t count) noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto AllocateSecondary(uint32_t count) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto EnsureValid() const noexcept -> std::expected<void, Vk::Error>;
+    [[nodiscard]] auto Allocate(uint32_t count) noexcept -> std::expected<void, Vk::Error>;
+    [[nodiscard]] auto AllocateSecondary(uint32_t count) noexcept -> std::expected<void, Vk::Error>;
     void Reset() noexcept;
 
     [[nodiscard]] auto operator[](uint32_t index) const noexcept -> Vk::CommandBuffer<QType> {
@@ -52,7 +53,7 @@ class CommandPool {
     }
 
   private:
-    [[nodiscard]] auto AllocateLevel(uint32_t count, VkCommandBufferLevel level) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto AllocateLevel(uint32_t count, VkCommandBufferLevel level) noexcept -> std::expected<void, Vk::Error>;
     void Destroy() noexcept;
 
     VkDevice                    _device = VK_NULL_HANDLE;

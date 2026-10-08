@@ -236,9 +236,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
         });
 }
 
-RenderContext::~RenderContext()
-// TODO(Evilpasture): Add an explicit RenderContext::Destroy method.
-{
+void RenderContext::Destroy() noexcept {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
         if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
             ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
@@ -257,6 +255,10 @@ RenderContext::~RenderContext()
         Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         _impl->submittedStaging.reset();
     }
+}
+
+RenderContext::~RenderContext() {
+    Destroy();
 }
 
 } // namespace ZHLN

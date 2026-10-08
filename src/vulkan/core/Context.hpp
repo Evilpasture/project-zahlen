@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "Device.hpp"
 #include "Features.hpp"
 #include "Instance.hpp"
@@ -186,8 +187,8 @@ class ContextBuilder {
         return *this;
     }
 
-    [[nodiscard]] auto SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode>;
-    [[nodiscard]] auto Build() noexcept -> std::expected<Context, ErrorCode>;
+    [[nodiscard]] auto SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, Vk::Error>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<Context, Vk::Error>;
 
   private:
     std::optional<Vk::Instance>        _ownedInstance;

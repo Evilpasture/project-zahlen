@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 template <typename LayoutT>
-std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
+std::expected<void, Vk::Error> FullscreenPass<LayoutT>::BuildHeap(
     VkDevice                        device,
     HeapManager&                    heap,
     ShaderStagesView             shaders,
@@ -49,7 +49,7 @@ std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
 }
 
 template <typename LayoutT>
-std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
+std::expected<void, Vk::Error> FullscreenPass<LayoutT>::BuildHeapVariants(
     VkDevice                              device,
     HeapManager&                          heap,
     ShaderStagesView                   shaders,

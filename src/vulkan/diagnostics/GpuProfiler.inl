@@ -67,7 +67,7 @@ inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuPr
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
 inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept
-    -> std::expected<void, ErrorCode> {
+    -> std::expected<void, Vk::Error> {
     _device        = device;
     _recordedMasks = {};
     _enabled       = false;

@@ -8,6 +8,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {
@@ -57,7 +58,7 @@ class GpuProfiler {
     auto operator=(GpuProfiler&& other) noexcept -> GpuProfiler&;
 
     [[nodiscard]] auto
-        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, ErrorCode>;
+        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, Vk::Error>;
 
     [[nodiscard]] auto Enabled() const noexcept -> bool {
         return _enabled;

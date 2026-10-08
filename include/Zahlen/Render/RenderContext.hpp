@@ -80,6 +80,12 @@ class ZHLN_API RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
+    // Explicit teardown: drains the device, saves the pipeline cache, and
+    // releases destinations, diagnostics and pending staging work. The
+    // destructor calls this; hosts may also call it to release GPU resources
+    // before the RenderContext itself goes away.
+    void Destroy() noexcept;
+
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 

@@ -8,6 +8,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Defer.hpp>
 
 namespace ZHLN::Vk {
@@ -49,7 +50,7 @@ class TextureUploader {
     ) noexcept
         : _ctx(ctx), _allocator(allocator), _staging(staging), _cmdRing(cmdRing) {}
 
-    [[nodiscard]] auto Upload2D(const Upload2DDesc& desc) const noexcept -> std::expected<TextureResource, ErrorCode> {
+    [[nodiscard]] auto Upload2D(const Upload2DDesc& desc) const noexcept -> std::expected<TextureResource, Vk::Error> {
         const size_t     byteSize = static_cast<size_t>(desc.width) * desc.height * 4;
         const uint32_t   mips     = desc.generateMips ? GetMipLevels(desc.width, desc.height) : 1;
         const ImageUsage usage    = ImageUsage::Sampled | ImageUsage::TransferDst | (desc.generateMips ? ImageUsage::TransferSrc : ImageUsage::None);
@@ -103,7 +104,7 @@ class TextureUploader {
         };
     }
 
-    [[nodiscard]] auto Upload3D(const Upload3DDesc& desc) const noexcept -> std::expected<TextureResource, ErrorCode> {
+    [[nodiscard]] auto Upload3D(const Upload3DDesc& desc) const noexcept -> std::expected<TextureResource, Vk::Error> {
         const size_t byteSize = static_cast<size_t>(desc.width) * desc.height * desc.depth * 4;
 
         const ImageConfig imageConfig = ImageConfig::Texture3D(
@@ -151,7 +152,7 @@ class TextureUploader {
         };
     }
 
-    [[nodiscard]] auto UploadCube(const UploadCubeDesc& desc) const noexcept -> std::expected<TextureResource, ErrorCode> {
+    [[nodiscard]] auto UploadCube(const UploadCubeDesc& desc) const noexcept -> std::expected<TextureResource, Vk::Error> {
         const size_t faceBytes  = static_cast<size_t>(desc.size) * desc.size * 4;
         const size_t totalBytes = faceBytes * 6;
 

@@ -9,7 +9,6 @@
 
 #include <VkError.hpp>
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/ErrorCode.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>
@@ -108,7 +107,12 @@ class Instance {
         -> std::expected<Vk::Instance, Vk::Error>;
 
     struct DebugState {
-        Instance* owner             = nullptr; // TODO(Evilpasture): Owner? Then why is this a raw pointer? Let's make this clearer in ownership.
+        // Non-owning back-pointer: the Instance owns this DebugState (see
+        // _debugState), and the Vulkan debug callback receives it as userData,
+        // reaching the Instance through owner. It is deliberately a raw pointer,
+        // not a reference: the owning Instance is movable, and RebindDebugState
+        // repoints owner after a move.
+        Instance* owner             = nullptr;
         bool      debugUtilsEnabled = false;
     };
 
@@ -160,7 +164,7 @@ class InstanceBuilder {
         return *this;
     }
 
-    [[nodiscard]] auto Build() noexcept -> std::expected<Instance, ErrorCode>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<Instance, Vk::Error>;
 
   private:
     std::string_view              _appName        = "ZHLN Engine";

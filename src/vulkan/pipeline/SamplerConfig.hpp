@@ -7,7 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/ErrorCode.hpp>
+#include "../VkError.hpp"
 
 namespace ZHLN::Vk {
 
@@ -102,7 +102,7 @@ struct SamplerConfig {
         return result;
     }
 
-    [[nodiscard]] auto Create(VkDevice device) const noexcept -> std::expected<Sampler, ErrorCode>;
+    [[nodiscard]] auto Create(VkDevice device) const noexcept -> std::expected<Sampler, Vk::Error>;
 
 };
 

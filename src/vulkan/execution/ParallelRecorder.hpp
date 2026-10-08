@@ -6,6 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 namespace ZHLN::Vk {
 
 struct RecordingSlot {
@@ -26,7 +27,7 @@ class ParallelCommandRecorder {
     ParallelCommandRecorder(ParallelCommandRecorder&&) noexcept                    = default;
     auto operator=(ParallelCommandRecorder&&) noexcept -> ParallelCommandRecorder& = default;
 
-    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Vk::Error>;
 
     void Reset() noexcept;
 
@@ -48,7 +49,7 @@ class ParallelCommandRecorder {
     }
 
     template <typename SchedulerPolicy, typename... Callables>
-    [[nodiscard]] auto Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Record(SchedulerPolicy&& scheduler, Callables&&... callables) -> std::expected<void, Vk::Error>;
 
     [[nodiscard]] constexpr auto GetCommandBuffers() const noexcept -> std::span<const VkCommandBuffer, ConcurrentSlots> {
         return _cmds;
@@ -61,7 +62,7 @@ class ParallelCommandRecorder {
   private:
     template <typename SchedulerPolicy, size_t... Is, typename... Callables>
     [[nodiscard]] auto RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables)
-        -> std::expected<void, ErrorCode>;
+        -> std::expected<void, Vk::Error>;
 
     VkDevice                                                      _device = VK_NULL_HANDLE;
     std::array<CommandPool<QueueType::Graphics>, ConcurrentSlots> _pools;

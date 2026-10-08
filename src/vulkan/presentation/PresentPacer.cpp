@@ -237,7 +237,7 @@ void PresentPacer::Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept {
     }
 }
 
-auto PresentPacer::Predict() noexcept -> std::expected<PresentPrediction, ErrorCode> {
+auto PresentPacer::Predict() noexcept -> std::expected<PresentPrediction, Vk::Error> {
     if (!_timingActive) {
         return std::unexpected(PresentPacerError::TimingInactive);
     }

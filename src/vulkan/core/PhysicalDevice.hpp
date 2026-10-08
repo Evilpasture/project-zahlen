@@ -8,6 +8,7 @@
 #endif
 
 #include <cstdint>
+#include <optional>
 
 namespace ZHLN::Vk {
 
@@ -40,7 +41,7 @@ struct MeshShaderLimits {
 };
 
 [[nodiscard]] auto SelectPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, DeviceScoreFunction score = nullptr, const void* userdata = nullptr) noexcept
-    -> PhysicalDeviceInfo;
+    -> std::optional<PhysicalDeviceInfo>;
 
 [[nodiscard]] auto QueryMeshShaderLimits(VkPhysicalDevice physical) noexcept -> MeshShaderLimits;
 [[nodiscard]] auto MeshShaderLimitsSufficient(const MeshShaderLimits& limits) noexcept -> bool;

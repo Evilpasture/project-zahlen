@@ -146,7 +146,7 @@ auto ExtensionBuilder::OptionalGroup(const std::initializer_list<std::string_vie
     return *this;
 }
 
-auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::ErrorCode> {
+auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, Vk::Error> {
     if (!_missingRequired.empty()) {
         for (const auto& name: _missingRequired) {
             ZHLN::LogError("[Vulkan] Required extension is not supported: {}", name);

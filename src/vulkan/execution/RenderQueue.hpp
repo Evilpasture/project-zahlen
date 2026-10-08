@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "CommandRecorder.hpp"
 #include <Zahlen/Error.hpp>
 
@@ -14,9 +15,9 @@ namespace ZHLN::Vk {
 
 class Context;
 
-[[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept;
+[[nodiscard]] std::expected<void, Vk::Error> WaitIdle(VkQueue queue) noexcept;
 
-[[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(
+[[nodiscard]] std::expected<void, Vk::Error> SubmitAndWait(
     VkQueue               queue,
     ExecutableCommands    cmd,
     VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
@@ -45,7 +46,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     std::span<const VkSemaphoreSubmitInfo> waits = {},
     std::span<const VkSemaphoreSubmitInfo> signals = {},
     VkFence fence = VK_NULL_HANDLE
-) noexcept -> std::expected<void, ErrorCode>;
+) noexcept -> std::expected<void, Vk::Error>;
 
 [[nodiscard]] auto QueueSubmit(
     VkQueue queue,
@@ -57,7 +58,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     uint64_t signalValue = 0,
     VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkFence fence = VK_NULL_HANDLE
-) noexcept -> std::expected<void, ErrorCode>;
+) noexcept -> std::expected<void, Vk::Error>;
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
@@ -234,7 +235,7 @@ template <QueueType QType>
     uint64_t signalValue = 0,
     VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkFence fence = VK_NULL_HANDLE
-) noexcept -> std::expected<void, ErrorCode> {
+) noexcept -> std::expected<void, Vk::Error> {
     return QueueSubmit(
         ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence
     );

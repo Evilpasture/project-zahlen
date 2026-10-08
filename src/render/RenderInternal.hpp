@@ -5,6 +5,7 @@
 #include "DrawCommands.hpp"
 #include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
+#include "FrameError.hpp"
 #include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
 #include "GpuAbi.hpp"

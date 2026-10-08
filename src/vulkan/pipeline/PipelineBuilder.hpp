@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
 #include <optional>
@@ -75,8 +76,8 @@ struct ComputePipelineConfig {
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping        = nullptr;
 };
 
-[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
-[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
+[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, Vk::Error>;
+[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, Vk::Error>;
 
 template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
 class PipelineBuilder {
@@ -227,8 +228,8 @@ class PipelineBuilder {
     }
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, ErrorCode> {
-        return Validate().and_then([&]() -> std::expected<Pipeline, ErrorCode> {
+    auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, Vk::Error> {
+        return Validate().and_then([&]() -> std::expected<Pipeline, Vk::Error> {
             auto pipeline = CreateGraphicsPipeline(device, _cfg);
             if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
@@ -310,12 +311,12 @@ class PipelineBuilder {
         return PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {std::move(_cfg)};
     }
 
-    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
+    [[nodiscard]] auto Build(VkDevice device) const&& noexcept -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, Vk::Error> {
         if constexpr (!std::same_as<Formats, RuntimeAttachmentFormats>) {
             static_assert(Formats::color_formats.size() == ColorCount, "Typed pipeline color count does not match its formats.");
             static_assert(!HasDepth || Formats::depth_format != VK_FORMAT_UNDEFINED, "Typed pipeline must specify its depth attachment format.");
         }
-        return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
+        return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, Vk::Error> {
             auto pipeline = CreateGraphicsPipeline(device, _cfg);
             if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
@@ -331,7 +332,7 @@ class PipelineBuilder {
     explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
     }
 
-    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode> {
+    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, Vk::Error> {
         using enum PipelineBuilderError;
         if (!_cfg.stages) {
             return std::unexpected(MissingShaders);
@@ -368,10 +369,10 @@ class ComputePipelineBuilder {
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
     auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
 
-    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, Vk::Error>;
 
   private:
-    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Validate() const noexcept -> std::expected<void, Vk::Error>;
 
     ShaderDesc                                           _shader {};
     VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
@@ -387,7 +388,7 @@ class PipelineLayoutBuilder {
 
     PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
 
-    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, Vk::Error>;
 
   private:
     VkDevice                         _device;

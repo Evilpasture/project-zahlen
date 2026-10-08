@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
-auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
+auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Vk::Error> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);
@@ -35,7 +35,7 @@ void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Reset() noexce
 template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
 template <typename SchedulerPolicy, typename... Callables>
 auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Record(SchedulerPolicy&& scheduler, Callables&&... callables)
-    -> std::expected<void, ErrorCode> {
+    -> std::expected<void, Vk::Error> {
     static_assert(
         sizeof...(Callables) <= ConcurrentSlots, "The number of recording tasks exceeds the allocated "
                                                  "ParallelCommandRecorder slots."
@@ -48,10 +48,10 @@ template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
 template <typename SchedulerPolicy, size_t... Is, typename... Callables>
 auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
     SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables
-) -> std::expected<void, ErrorCode> {
+) -> std::expected<void, Vk::Error> {
     auto task_tuple = std::forward_as_tuple(std::forward<Callables>(callables)...);
     // Each worker only writes its own error slot; Dispatch joins before we read.
-    std::array<ErrorCode, ConcurrentSlots> errors {};
+    std::array<Vk::Error, ConcurrentSlots> errors {};
 
     // Expand the lambda pack and dispatch them to the scheduler at compile-time.
     // Each lambda bakes the constant 'Is' directly into its generated class structure.

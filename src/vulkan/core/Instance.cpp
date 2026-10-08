@@ -51,8 +51,9 @@ namespace {
 
 } // namespace
 
-Instance::Instance() noexcept: _debugState(new (std::nothrow) DebugState {}) {
-    RebindDebugState();
+Instance::Instance() noexcept {
+    // Construction stays allocation-free: the telemetry state (DebugState) is
+    // set up explicitly by Create, where an allocation failure can be reported.
 }
 
 void Instance::UseDiagnostics(const DiagnosticsSink sink) noexcept {
@@ -177,10 +178,13 @@ auto Instance::Create(
     const ValidationMode                    validation
 ) noexcept -> std::expected<Instance, Vk::Error> {
     Instance result;
+    // Telemetry is set up here, decoupled from construction: the constructor
+    // cannot report failure, Create can.
+    result._debugState.reset(new (std::nothrow) DebugState {});
     if (result._debugState == nullptr) {
-        // TODO(Evilpasture): Maybe I fucked up. Shouldn't have coupled telemetry to the creation.
-        return std::unexpected(Vk::Error {VK_ERROR_OUT_OF_HOST_MEMORY}); // What am I supposed to do?
+        return std::unexpected(Vk::Error {VK_ERROR_OUT_OF_HOST_MEMORY});
     }
+    result.RebindDebugState();
 
     const DiagnosticsSink sink = s_registered_sink.load(std::memory_order::acquire);
     if (sink.Valid()) {
@@ -369,7 +373,7 @@ auto Instance::Create(
     return result;
 }
 
-auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
+auto InstanceBuilder::Build() noexcept -> std::expected<Instance, Vk::Error> {
     return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode);
 }
 

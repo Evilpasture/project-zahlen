@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "Extensions.hpp"
 #include "Features.hpp"
 #include <Zahlen/Core/Description.hpp>
@@ -97,7 +98,7 @@ class DeviceConfigurator {
     auto OptionalFifoLatestReady(bool present) &&;
     auto OptionalPresentTiming(bool present) &&;
 
-    [[nodiscard]] auto Build() && -> std::expected<ConfiguredDevice<Ts...>, ErrorCode>;
+    [[nodiscard]] auto Build() && -> std::expected<ConfiguredDevice<Ts...>, Vk::Error>;
 
   private:
     template <typename...>
