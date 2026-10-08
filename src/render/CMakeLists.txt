@@ -37,6 +37,7 @@ set(RAW_RENDER_SOURCES
     pipelines/ComputeSimPipeline.cpp
     pipelines/DeferredPbrPipeline.cpp
     pipelines/UIPipeline.cpp
+    pipelines/ReflectionPipeline.cpp
     features/PostProcessFeature.cpp
     features/ShadowRenderer.cpp
     features/VolumetricFogSystem.cpp
@@ -56,10 +57,8 @@ set(RAW_RENDER_SOURCES
     passes/gbuffer/ViewmodelPass.cpp
     passes/lighting/ClusteredLightingPass.cpp
     passes/lighting/GtaoPass.cpp
-    passes/lighting/ReflectionCompositePass.cpp
     passes/lighting/RtrHalfTracePass.cpp
     passes/lighting/ShadowPass.cpp
-    passes/lighting/TranslucentReflectionPass.cpp
     passes/lighting/ReflectionInputs.cpp
     passes/postprocess/BloomPass.cpp
     passes/postprocess/HdrDenoisePass.cpp

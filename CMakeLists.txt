@@ -17,6 +17,34 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 project(zahlen LANGUAGES C CXX ASM)
 
+# CMake's Apple platform setup may pass the SDK's usr/include directory as an
+# explicit -isystem path. GCC's libstdc++ cstdlib uses #include_next <stdlib.h>,
+# and that explicit path can make GCC skip the SDK header. On Darwin, GCC already
+# finds it through --sysroot, so keep the SDK C headers implicit for GNU targets.
+if(APPLE AND IS_ABSOLUTE "${CMAKE_OSX_SYSROOT}")
+  set(_zhln_apple_sdk_usr_include "${CMAKE_OSX_SYSROOT}/usr/include")
+  cmake_path(NORMAL_PATH _zhln_apple_sdk_usr_include)
+  foreach(_zhln_lang IN ITEMS C CXX)
+    set(_zhln_compiler_id_var "CMAKE_${_zhln_lang}_COMPILER_ID")
+    set(_zhln_standard_include_var "CMAKE_${_zhln_lang}_STANDARD_INCLUDE_DIRECTORIES")
+    if("${${_zhln_compiler_id_var}}" STREQUAL "GNU" AND DEFINED ${_zhln_standard_include_var})
+      set(_zhln_standard_includes "${${_zhln_standard_include_var}}")
+      set(_zhln_filtered_standard_includes "")
+      foreach(_zhln_include IN LISTS _zhln_standard_includes)
+        set(_zhln_normalized_include "${_zhln_include}")
+        cmake_path(NORMAL_PATH _zhln_normalized_include)
+        if(NOT _zhln_normalized_include STREQUAL _zhln_apple_sdk_usr_include)
+          list(APPEND _zhln_filtered_standard_includes "${_zhln_include}")
+        endif()
+      endforeach()
+      if(NOT "${_zhln_standard_includes}" STREQUAL "${_zhln_filtered_standard_includes}")
+        set(${_zhln_standard_include_var} "${_zhln_filtered_standard_includes}")
+        message(STATUS "GNU ${_zhln_lang}: relying on --sysroot for the Apple SDK's usr/include")
+      endif()
+    endif()
+  endforeach()
+endif()
+
 if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
   message(
     FATAL_ERROR

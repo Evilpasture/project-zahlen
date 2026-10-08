@@ -1,22 +1,28 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "passes/lighting/TranslucentReflectionPass.hpp"
+#include "RenderInternal.hpp"
+#include "GBufferSurface.hpp"
 #include "passes/lighting/ReflectionInputs.hpp"
+#include "pipelines/ReflectionPipeline.hpp"
 #include <ShaderBindings.hpp>
 
-namespace ZHLN::Passes {
+namespace ZHLN {
 
-void TranslucentReflectionPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
+void ReflectionPipeline::Dispatch(
+    Vk::RasterPassContextBase& ctx,
+    const Passes::GBufferSurface& surface,
+    const GeneratedGpu::ScenePassPushConstants& pc
+) const noexcept {
+    RenderContext::Impl& impl = _impl;
     const uint32_t fIdx = impl.presenter.frameIndex;
+    const Passes::ReflectionInputs inputs = Passes::GatherReflectionInputs(impl);
 
-    const ReflectionInputs inputs = GatherReflectionInputs(impl);
-
-    const Vk::HeapBlockBase block = impl.translucentReflectionPass.WriteHeapParameters<Shaders::Reflection>(
+    const Vk::HeapBlockBase block = pass.WriteHeapParameters<Shaders::Reflection>(
         impl.ctx, impl.heapManager,
         Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(impl.graphResources.transDepthBuffer)),
-        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(impl.graphResources.transNormalBuffer)),
+        Vk::Slot<"texDepth">(surface.depth),
+        Vk::Slot<"texNormalRoughness">(surface.normals),
         Vk::Slot<"texEnvMap">(inputs.prefiltered),
         Vk::Slot<"texSkyEquirect">(inputs.visualSky),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
@@ -27,13 +33,13 @@ void TranslucentReflectionPass::operator()(Vk::RasterPassContextBase& ctx) const
         Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
         Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)),
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
-        Vk::Slot<"texSheen">(Vk::Assume<Vk::ShaderRead<Res_TransSheen>>(impl.graphResources.transSheenBuffer)),
-        Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ShaderRead<Res_TransAnisotropy>>(impl.graphResources.transAnisotropyBuffer)),
+        Vk::Slot<"texSheen">(surface.sheen),
+        Vk::Slot<"texAnisotropy">(surface.anisotropy),
         Vk::Slot<"tlas">(inputs.tlas)
     );
 
-    impl.translucentReflectionPass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
-        impl.ctx, ctx.Cmd(), ReflectionVariant(impl), pc, block
+    pass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
+        impl.ctx, ctx.Cmd(), Passes::ReflectionVariant(impl), pc, block
     );
 }
 

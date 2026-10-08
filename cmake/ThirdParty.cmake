@@ -24,6 +24,98 @@ set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
 set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
 
+# --- Apple SDK Blocks support for C sources ---
+# CoreAudio/AudioToolbox headers expose Blocks declarations. Miniaudio's
+# implementation and GLFW's Cocoa backend are both C-family code, so probe the
+# actual SDK headers with the project C compiler (the C++ -fblocks check does
+# not cover it). If it cannot parse them, only the affected C/Objective-C
+# targets are routed through Blocks-capable Clang; project C++ stays untouched.
+if(APPLE)
+    include(CheckCSourceCompiles)
+    set(_zhln_apple_sdk_blocks_probe_source [=[
+#include <AudioToolbox/AudioToolbox.h>
+#include <CoreAudio/CoreAudio.h>
+typedef void (^ZHLNBlock)(void);
+int main(void) { return sizeof(ZHLNBlock) == 0; }
+]=])
+    set(_zhln_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+    string(APPEND CMAKE_REQUIRED_FLAGS " -fblocks")
+    check_c_source_compiles(
+        "${_zhln_apple_sdk_blocks_probe_source}"
+        ZHLN_C_BLOCKS_SUPPORTED
+    )
+    set(CMAKE_REQUIRED_FLAGS "${_zhln_saved_required_flags}")
+    unset(_zhln_saved_required_flags)
+
+    set(_zhln_use_blocks_clang FALSE)
+    set(ZHLN_BLOCKS_C_COMPILER_LAUNCHER "")
+    if(NOT ZHLN_C_BLOCKS_SUPPORTED)
+        # Migrate an override cached by the former GLFW-only fallback.
+        set(ZHLN_BLOCKS_C_COMPILER "" CACHE FILEPATH
+            "Blocks-capable C compiler used only for Apple C/Objective-C sources that require Blocks")
+        if(NOT ZHLN_BLOCKS_C_COMPILER AND ZHLN_GLFW_C_COMPILER)
+            set(ZHLN_BLOCKS_C_COMPILER "${ZHLN_GLFW_C_COMPILER}" CACHE FILEPATH
+                "Blocks-capable C compiler used only for Apple C/Objective-C sources that require Blocks" FORCE)
+        endif()
+        if(NOT ZHLN_BLOCKS_C_COMPILER)
+            find_program(_zhln_blocks_clang
+                NAMES clang
+                HINTS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin
+            )
+            if(_zhln_blocks_clang)
+                set(ZHLN_BLOCKS_C_COMPILER "${_zhln_blocks_clang}" CACHE FILEPATH
+                    "Blocks-capable C compiler used only for Apple C/Objective-C sources that require Blocks" FORCE)
+            endif()
+        endif()
+
+        if(NOT ZHLN_BLOCKS_C_COMPILER)
+            message(FATAL_ERROR
+                "Apple CoreAudio/AudioToolbox C sources need a compiler with Blocks support. "
+                "No Clang was found; install Apple/Homebrew Clang or set "
+                "-DZHLN_BLOCKS_C_COMPILER=/path/to/clang."
+            )
+        endif()
+
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/CMakeFiles")
+        set(_zhln_apple_sdk_blocks_probe "${CMAKE_BINARY_DIR}/CMakeFiles/zhln-apple-sdk-blocks-probe.c")
+        file(WRITE "${_zhln_apple_sdk_blocks_probe}" "${_zhln_apple_sdk_blocks_probe_source}")
+        set(_zhln_apple_sdk_blocks_probe_flags -std=c11 -fblocks)
+        if(CMAKE_OSX_SYSROOT)
+            list(APPEND _zhln_apple_sdk_blocks_probe_flags -isysroot "${CMAKE_OSX_SYSROOT}")
+        endif()
+        foreach(_zhln_apple_sdk_arch IN LISTS CMAKE_OSX_ARCHITECTURES)
+            list(APPEND _zhln_apple_sdk_blocks_probe_flags -arch "${_zhln_apple_sdk_arch}")
+        endforeach()
+        execute_process(
+            COMMAND "${ZHLN_BLOCKS_C_COMPILER}" ${_zhln_apple_sdk_blocks_probe_flags} -fsyntax-only "${_zhln_apple_sdk_blocks_probe}"
+            RESULT_VARIABLE _zhln_apple_sdk_blocks_result
+            ERROR_VARIABLE _zhln_apple_sdk_blocks_error
+        )
+        file(REMOVE "${_zhln_apple_sdk_blocks_probe}")
+        if(NOT "${_zhln_apple_sdk_blocks_result}" STREQUAL "0")
+            message(FATAL_ERROR
+                "${ZHLN_BLOCKS_C_COMPILER} was selected for Apple SDK C sources but cannot parse "
+                "CoreAudio/AudioToolbox with -fblocks:\n${_zhln_apple_sdk_blocks_error}"
+            )
+        endif()
+
+        if(NOT CMAKE_GENERATOR MATCHES "Ninja|Makefiles")
+            message(FATAL_ERROR
+                "Routing only the Blocks-dependent C/Objective-C targets through a separate compiler "
+                "requires a Ninja or Makefile generator (compiler launchers are not supported by ${CMAKE_GENERATOR})."
+            )
+        endif()
+
+        set(_zhln_use_blocks_clang TRUE)
+        set(ZHLN_BLOCKS_C_COMPILER_LAUNCHER
+            "${CMAKE_CURRENT_LIST_DIR}/BlocksCCompilerLauncher.sh;${ZHLN_BLOCKS_C_COMPILER}"
+        )
+        message(STATUS
+            "Apple SDK C/Objective-C sources needing Blocks will compile with ${ZHLN_BLOCKS_C_COMPILER} (-fblocks)"
+        )
+    endif()
+endif()
+
 # --- GLFW ---
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -71,7 +163,14 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/glfw SYSTEM)
 # The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
 # still uses it; silence the deprecation noise on the vendored target only.
 if(APPLE)
-    target_compile_options(glfw PRIVATE -Wno-deprecated-declarations)
+    target_compile_options(glfw PRIVATE
+        -Wno-deprecated-declarations
+        "$<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:OBJC>>:-fblocks>"
+    )
+    if(_zhln_use_blocks_clang)
+        set_property(TARGET glfw PROPERTY C_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+        set_property(TARGET glfw PROPERTY OBJC_COMPILER_LAUNCHER "${ZHLN_BLOCKS_C_COMPILER_LAUNCHER}")
+    endif()
 endif()
 
 # --- LuaJIT ---
@@ -100,6 +199,44 @@ set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)
 set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
 set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
+
+if(APPLE)
+    # Jolt enables its Metal backend by default, which adds Objective-C++ files
+    # that include modern MetalKit/ModelIO SDK headers and use Blocks. Probe the
+    # actual OBJCXX frontend; if it cannot parse these headers, leave Jolt's
+    # Vulkan/CPU compute choices intact and omit only the optional Metal backend.
+    include(CheckSourceCompiles)
+    block()
+        set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+        string(APPEND CMAKE_REQUIRED_FLAGS " -fblocks")
+        check_source_compiles(OBJCXX [=[
+#import <MetalKit/MetalKit.h>
+#import <ModelIO/ModelIO.h>
+#include <simd/simd.h>
+#include <dispatch/dispatch.h>
+
+typedef void (^ZHLNMetalBlockProbe)(void);
+
+int main(void) {
+    ZHLNMetalBlockProbe block = nullptr;
+    (void)block;
+    return sizeof(vector_float2) == 0;
+}
+]=] ZHLN_JOLT_MTL_OBJCXX_SUPPORTED)
+    endblock()
+
+    if(NOT ZHLN_JOLT_MTL_OBJCXX_SUPPORTED)
+        set(JPH_USE_MTL OFF CACHE BOOL "Use Metal" FORCE)
+        message(STATUS
+            "Disabling Jolt Metal compute: ${CMAKE_OBJCXX_COMPILER_ID} (${CMAKE_OBJCXX_COMPILER}) cannot compile the MetalKit/ModelIO Objective-C++ headers with -fblocks. "
+            "Jolt's other configured compute backends are unchanged."
+        )
+    else()
+        message(STATUS
+            "Jolt Metal Objective-C++ SDK probe passed with ${CMAKE_OBJCXX_COMPILER_ID} (${CMAKE_OBJCXX_COMPILER})."
+        )
+    endif()
+endif()
 
 # Force the debug renderer to compile globally, even in Release configurations
 add_compile_definitions(JPH_DEBUG_RENDERER)
@@ -143,7 +280,9 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/extern/simdjson EXCLUDE_FROM_ALL SYSTEM)
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
-if(APPLE)
+if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang-specific warning groups. GCC silently accepts unknown -Wno-* flags
+    # until another diagnostic makes it print an "unrecognized option" note.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
 endif()
 

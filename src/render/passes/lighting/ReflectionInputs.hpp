@@ -6,10 +6,10 @@
 
 namespace ZHLN::Passes {
 
-// What both reflection composites bind identically: the prefiltered
-// environment map, original visible sky, split-sum BRDF lookup, blue-noise
-// tile, and top-level acceleration structure. Only the GBuffer they resolve
-// against differs, so the passes share these bindings.
+// Inputs shared by the opaque and translucent reflection graph passes: the
+// prefiltered environment map, original visible sky, split-sum BRDF lookup,
+// blue-noise tile, and top-level acceleration structure. Their surface reads
+// and output targets differ; these engine inputs do not.
 struct ReflectionInputs {
     Vk::ImageWrite    prefiltered;
     Vk::ImageWrite    visualSky;

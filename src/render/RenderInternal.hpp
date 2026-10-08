@@ -24,6 +24,7 @@
 #include "graph/RenderGraph.hpp"
 #include "pipeline/ComputePass.hpp"
 #include "pipeline/FullscreenPass.hpp"
+#include "pipelines/ReflectionPipeline.hpp"
 #include "ui/UIRenderer.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -138,7 +139,6 @@ using SMAAEdgeLayout       = Vk::ReflectedLayout;
 using SMAAWeightLayout     = Vk::ReflectedLayout;
 using SMAABlendLayout      = Vk::ReflectedLayout;
 using LightingLayout       = Vk::ReflectedLayout;
-using ReflectionLayout     = Vk::ReflectedLayout;
 using BlitLayout           = Vk::ReflectedLayout;
 using CullingLayout        = Vk::ReflectedLayout;
 using HiZGenerateLayout    = Vk::ReflectedLayout;
@@ -371,10 +371,8 @@ struct RenderContext::Impl {
     Vk::FullscreenPass<SMAAWeightLayout> smaaWeightPass;
     Vk::FullscreenPass<SMAABlendLayout>  smaaBlendPass;
 
-    Vk::FullscreenPass<LightingLayout>   lightingPass;
-    Vk::FullscreenPass<ReflectionLayout> reflectionPass;
-    Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
-    Vk::FullscreenPass<BlitLayout>       blitPass;
+    Vk::FullscreenPass<LightingLayout> lightingPass;
+    Vk::FullscreenPass<BlitLayout>     blitPass;
 
     Vk::FixedComputePass   clusterBoundsPass;
     Vk::FixedComputePass   clusterCullingPass;
@@ -629,6 +627,8 @@ struct RenderContext::Impl {
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
 
+    ReflectionPipeline reflectionPipeline;
+
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
@@ -639,7 +639,7 @@ struct RenderContext::Impl {
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher) {
+        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher), reflectionPipeline(*this) {
     }
 
     ~Impl() {

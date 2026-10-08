@@ -92,27 +92,13 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     const auto specInfos = spec.Infos(variants);
 
     if (ctx.RayTracingSupported()) {
-        auto res = BuildPassVariants(
-            this, reflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
-            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
-        );
-        if (!res) {
-            return res;
-        }
         return BuildPassVariants(
-            this, translucentReflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
+            this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
             Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
-    }
-    auto res = BuildPassVariants(
-        this, reflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
-        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
-    );
-    if (!res) {
-        return res;
     }
     return BuildPassVariants(
-        this, translucentReflectionPass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
+        this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
         Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }

@@ -8,7 +8,6 @@
 #define MA_NO_JACK
 #endif
 
-#define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Ranges.hpp>

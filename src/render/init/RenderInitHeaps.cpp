@@ -240,12 +240,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig),
-        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
-    );
-    Vk::InitHeapPassSamplers<Shaders::Reflection>(
-        heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+        heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
         Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig),
         Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
