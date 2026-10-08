@@ -11,7 +11,9 @@ namespace ZHLN {
 
 namespace {
 
-[[nodiscard]] auto AcquireDestinationImage(FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest) noexcept
+[[nodiscard]] auto AcquireDestinationImage(
+    FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest, Vk::InstanceView instance
+) noexcept
     -> std::expected<ZHLN::Optional<FrameDestinations::Acquired&>, ErrorCode> {
     // 1. Already acquired earlier this frame? Return the active reference.
     if (dest.acquired.has_value()) {
@@ -29,7 +31,7 @@ namespace {
     // 3. Hard error (Device lost, fatal Vulkan error)
     if (!acquired) {
         if (acquired.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::IncrementNumericalDeviceLoss();
+            instance.IncrementDeviceLost();
         }
         destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
@@ -139,7 +141,7 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
     }
 
     // Call the free function. We don't want to bloat Impl with a helper.
-    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
+    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest, ctx.Instance());
     if (!acquired) {
         return std::unexpected(acquired.error());
     }
@@ -208,7 +210,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
     }
     if (ctx.Device() != VK_NULL_HANDLE) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::IncrementNumericalDeviceLoss();
+            ctx.Instance().IncrementDeviceLost();
         }
     }
     destinations.Detach(aux);
@@ -217,7 +219,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::IncrementNumericalDeviceLoss();
+            ctx.Instance().IncrementDeviceLost();
         }
     }
     destinations.Clear();

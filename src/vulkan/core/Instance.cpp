@@ -17,10 +17,41 @@
 
 namespace ZHLN::Vk {
 
-std::atomic<Instance*>       Instance::s_active {nullptr};
-std::atomic<DiagnosticsSink> Instance::s_registered_sink {DiagnosticsSink {}};
-
 namespace {
+
+// Volk is configured with process-global function tables in this build. Keep
+// the previous single-instance limit while diagnostics and ownership move to
+// explicit per-instance state; the full per-device dispatch tables are a
+// separate follow-up.
+std::atomic_flag g_globalVolkDispatchInUse = ATOMIC_FLAG_INIT;
+
+class GlobalVolkDispatchLease {
+  public:
+    GlobalVolkDispatchLease() noexcept: _held(!g_globalVolkDispatchInUse.test_and_set(std::memory_order::acquire)) {
+    }
+    ~GlobalVolkDispatchLease() noexcept {
+        Release();
+    }
+
+    GlobalVolkDispatchLease(const GlobalVolkDispatchLease&) = delete;
+    auto operator=(const GlobalVolkDispatchLease&) -> GlobalVolkDispatchLease& = delete;
+
+    [[nodiscard]] auto Acquired() const noexcept -> bool {
+        return _held;
+    }
+    void TransferToInstance() noexcept {
+        _held = false;
+    }
+    void Release() noexcept {
+        if (_held) {
+            g_globalVolkDispatchInUse.clear(std::memory_order::release);
+            _held = false;
+        }
+    }
+
+  private:
+    bool _held = false;
+};
 
 [[nodiscard]] auto EnumerateInstanceLayers() noexcept -> std::vector<VkLayerProperties> {
     std::vector<VkLayerProperties> layers;
@@ -51,20 +82,8 @@ namespace {
 
 } // namespace
 
-Instance::Instance() noexcept {
-    // Construction stays allocation-free: the telemetry state (DebugState) is
-    // set up explicitly by Create, where an allocation failure can be reported.
-}
+Instance::Instance() noexcept = default;
 
-void Instance::UseDiagnostics(const DiagnosticsSink sink) noexcept {
-    s_registered_sink.store(sink.Valid() ? sink : DiagnosticsSink {}, std::memory_order::release);
-}
-
-void Instance::RebindDebugState() noexcept {
-    if (_debugState != nullptr) {
-        _debugState->owner = this;
-    }
-}
 
 void Instance::Destroy() noexcept {
     if (_handle != VK_NULL_HANDLE) {
@@ -80,8 +99,10 @@ void Instance::Destroy() noexcept {
         _addressBindingMessenger = VK_NULL_HANDLE;
     }
 
-    Instance* expected = this;
-    s_active.compare_exchange_strong(expected, nullptr, std::memory_order::release, std::memory_order::relaxed);
+    if (_ownsGlobalDispatch) {
+        g_globalVolkDispatchInUse.clear(std::memory_order::release);
+        _ownsGlobalDispatch = false;
+    }
 }
 
 Instance::~Instance() noexcept {
@@ -90,18 +111,8 @@ Instance::~Instance() noexcept {
 
 Instance::Instance(Instance&& other) noexcept:
     _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
-    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE)), _debugState(std::move(other._debugState)),
-    _validationErrors(other._validationErrors.load(std::memory_order::relaxed)), _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
-    _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
-    _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
-    RebindDebugState();
-    if (s_active.load(std::memory_order::acquire) == &other) {
-        s_active.store(this, std::memory_order::release);
-    }
-    other._validationErrors.store(0, std::memory_order::relaxed);
-    other._deviceLost.store(0, std::memory_order::relaxed);
-    other._validationTarget = &other._validationErrors;
-    other._deviceLostTarget = &other._deviceLost;
+    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE)), _diagnostics(std::move(other._diagnostics)),
+    _ownsGlobalDispatch(std::exchange(other._ownsGlobalDispatch, false)) {
 }
 
 auto Instance::operator=(Instance&& other) noexcept -> Instance& {
@@ -111,20 +122,8 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
         _handle                  = std::exchange(other._handle, VK_NULL_HANDLE);
         _messenger               = std::exchange(other._messenger, VK_NULL_HANDLE);
         _addressBindingMessenger = std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE);
-        _debugState              = std::move(other._debugState);
-        _validationErrors        = other._validationErrors.load(std::memory_order::relaxed);
-        _deviceLost              = other._deviceLost.load(std::memory_order::relaxed);
-        _validationTarget        = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
-        _deviceLostTarget        = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
-
-        RebindDebugState();
-        if (s_active.load(std::memory_order::acquire) == &other) {
-            s_active.store(this, std::memory_order::release);
-        }
-        other._validationErrors.store(0, std::memory_order::relaxed);
-        other._deviceLost.store(0, std::memory_order::relaxed);
-        other._validationTarget = &other._validationErrors;
-        other._deviceLostTarget = &other._deviceLost;
+        _diagnostics             = std::move(other._diagnostics);
+        _ownsGlobalDispatch      = std::exchange(other._ownsGlobalDispatch, false);
     }
     return *this;
 }
@@ -139,7 +138,9 @@ auto VKAPI_CALL Instance::DebugCallback(
         if (callbackData != nullptr) {
             for (const auto* node = static_cast<const VkBaseInStructure*>(callbackData->pNext); node != nullptr; node = node->pNext) {
                 if (node->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) {
-                    GPUAddressTracker::Get().OnBindingEvent(*reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData);
+                    if (auto* const diagnostics = static_cast<InstanceDiagnostics*>(userData); diagnostics != nullptr) {
+                        diagnostics->addressTracker.OnBindingEvent(*reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData);
+                    }
                     break;
                 }
             }
@@ -147,9 +148,9 @@ auto VKAPI_CALL Instance::DebugCallback(
         return VK_FALSE;
     }
 
-    auto* const state = static_cast<DebugState*>(userData);
-    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0 && state != nullptr && state->owner != nullptr) {
-        state->owner->_validationTarget->fetch_add(1, std::memory_order::relaxed);
+    auto* const diagnostics = static_cast<InstanceDiagnostics*>(userData);
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0 && diagnostics != nullptr) {
+        diagnostics->validationTarget->fetch_add(1, std::memory_order::relaxed);
     }
 
     const std::string_view message = callbackData != nullptr && callbackData->pMessage != nullptr ? std::string_view(callbackData->pMessage) :
@@ -175,21 +176,22 @@ auto Instance::Create(
     const std::string_view                  appName,
     const uint32_t                          appVersion,
     const std::span<const std::string_view> extensions,
-    const ValidationMode                    validation
+    const ValidationMode                    validation,
+    DiagnosticsSink*                        diagnosticsSink
 ) noexcept -> std::expected<Instance, ErrorCode> {
+    GlobalVolkDispatchLease globalDispatchLease;
+    if (!globalDispatchLease.Acquired()) {
+        return std::unexpected(InstanceError::GlobalDispatchInUse);
+    }
+
     Instance result;
-    // Telemetry is set up here, decoupled from construction: the constructor
-    // cannot report failure, Create can.
-    result._debugState.reset(new (std::nothrow) DebugState {});
-    if (result._debugState == nullptr) {
+    result._diagnostics.reset(new (std::nothrow) InstanceDiagnostics {});
+    if (result._diagnostics == nullptr) {
         return std::unexpected(ToError(VK_ERROR_OUT_OF_HOST_MEMORY));
     }
-    result.RebindDebugState();
-
-    const DiagnosticsSink sink = s_registered_sink.load(std::memory_order::acquire);
-    if (sink.Valid()) {
-        result._validationTarget = sink.validation;
-        result._deviceLostTarget = sink.deviceLost;
+    if (diagnosticsSink != nullptr && diagnosticsSink->Valid()) {
+        result._diagnostics->validationTarget = diagnosticsSink->validation;
+        result._diagnostics->deviceLostTarget = diagnosticsSink->deviceLost;
     }
 
     if (auto res = volkInitialize(); res != VK_SUCCESS) {
@@ -304,7 +306,7 @@ auto Instance::Create(
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = &Instance::DebugCallback,
-        .pUserData       = result._debugState.get(),
+        .pUserData       = result._diagnostics.get(),
     };
 
     const void* validation_chain = nullptr;
@@ -336,7 +338,7 @@ auto Instance::Create(
 
     volkLoadInstance(handle);
     result._handle                        = handle;
-    result._debugState->debugUtilsEnabled = debug_utils_enabled;
+    result._diagnostics->debugUtilsEnabled = debug_utils_enabled;
 
     if (validation != ValidationMode::Off && debug_utils_enabled && vkCreateDebugUtilsMessengerEXT != nullptr) {
         VkDebugUtilsMessengerCreateInfoEXT messenger_info = debug_info;
@@ -354,43 +356,38 @@ auto Instance::Create(
                 .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
                 .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT,
                 .pfnUserCallback = &Instance::DebugCallback,
-                .pUserData       = result._debugState.get(),
+                .pUserData       = result._diagnostics.get(),
             };
             const VkResult address_messenger_created = vkCreateDebugUtilsMessengerEXT(handle, &address_binding_info, nullptr, &result._addressBindingMessenger);
             if (address_messenger_created != VK_SUCCESS) {
                 result._addressBindingMessenger = VK_NULL_HANDLE;
+            } else {
+                result._diagnostics->hasAddressBindingMessenger = true;
             }
         }
     }
 
-    Instance* expected = nullptr;
-    if (!s_active.compare_exchange_strong(expected, &result, std::memory_order::release, std::memory_order::relaxed)) {
-        ZHLN::LogError("[Vulkan] Only one active Vulkan instance is supported by the diagnostics bridge.");
-        result.Destroy();
-        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED)); // This is why I fucking hate statics.
-    }
-
+    result._ownsGlobalDispatch = true;
+    globalDispatchLease.TransferToInstance();
     return result;
 }
 
-auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
-    return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode);
+auto Instance::ValidationErrorCount() const noexcept -> uint32_t {
+    return _diagnostics != nullptr ? _diagnostics->validationTarget->load(std::memory_order::relaxed) : 0;
 }
 
-auto Instance::ValidationErrorCount() noexcept -> uint32_t {
-    const Instance* const active = s_active.load(std::memory_order::acquire);
-    return active != nullptr ? active->_validationTarget->load(std::memory_order::relaxed) : 0;
+auto Instance::DeviceLostCount() const noexcept -> uint32_t {
+    return _diagnostics != nullptr ? _diagnostics->deviceLostTarget->load(std::memory_order::relaxed) : 0;
 }
 
-auto Instance::DeviceLostCount() noexcept -> uint32_t {
-    const Instance* const active = s_active.load(std::memory_order::acquire);
-    return active != nullptr ? active->_deviceLostTarget->load(std::memory_order::relaxed) : 0;
-}
-
-void Instance::IncrementNumericalDeviceLoss() noexcept {
-    if (Instance* const active = s_active.load(std::memory_order::acquire); active != nullptr) {
-        active->_deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
+void Instance::IncrementDeviceLost() noexcept {
+    if (_diagnostics != nullptr) {
+        _diagnostics->deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
     }
+}
+
+auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
+    return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode, _diagnostics);
 }
 
 } // namespace ZHLN::Vk

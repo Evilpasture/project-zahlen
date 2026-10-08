@@ -33,9 +33,10 @@ struct GpuAllocationSymbol {
 // Thread-safe, fault-time address resolver. Address-binding callbacks are
 // synchronous with Vulkan calls and may arrive concurrently from multiple
 // application threads, so the tracker does not use the engine's fiber mutex.
+// Owned per Instance; there is no process-wide singleton.
 class GPUAddressTracker {
   public:
-    [[nodiscard]] static auto Get() noexcept -> GPUAddressTracker&;
+    GPUAddressTracker() noexcept = default;
 
     // Starts a fresh device lifetime when enabled; disabling clears all ranges
     // after vkDestroyDevice has delivered its final unbind events.

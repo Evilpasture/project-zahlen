@@ -5,6 +5,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Render/Diagnostics.hpp>
 #include <bit>
 #include <cstdint>
 #include <string>
@@ -201,6 +202,10 @@ struct RenderConfig {
     bool enableMeshShading = true;
     std::string pipelineCachePath;
     std::string crashDumpPath;
+    // Explicit diagnostics sink: the caller owns the counters, the renderer
+    // writes to them. The sink and counters must outlive RenderContext,
+    // including teardown callbacks. Nullptr keeps the instance-local counters.
+    DiagnosticsSink* diagnostics = nullptr;
 };
 
 struct EngineConfig {

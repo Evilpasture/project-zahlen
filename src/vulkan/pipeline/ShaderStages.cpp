@@ -38,24 +38,21 @@ namespace {
     return view_mask;
 }
 
-[[nodiscard]] auto ReflectedEntryPoint(const ShaderDesc& desc) noexcept -> const char* {
+[[nodiscard]] auto ReflectedEntryPoint(const ShaderDesc& desc) noexcept -> std::array<char, 64> {
+    std::array<char, 64> name_copy {};
     SpvReflectShaderModule module {};
     if (spvReflectCreateShaderModule(desc.size, desc.code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
-        return nullptr;
+        return name_copy;
     }
     const char* name = module.entry_point_name;
     if ((name == nullptr || name[0] == '\0') && module.entry_point_count > 0) {
         name = module.entry_points[0].name;
     }
-    // The SPIRV-Reflect-owned name is copied into ShaderStageData immediately,
-    // before destroying the reflection module.
-    static thread_local std::array<char, 64> name_copy {};
-    name_copy.fill('\0');
     if (name != nullptr) {
         std::strncpy(name_copy.data(), name, name_copy.size() - 1);
     }
     spvReflectDestroyShaderModule(&module);
-    return name != nullptr && name_copy[0] != '\0' ? name_copy.data() : nullptr;
+    return name_copy;
 }
 
 [[nodiscard]] auto FallbackEntryPoint(const VkShaderStageFlagBits stage) noexcept -> const char* {
@@ -89,11 +86,15 @@ namespace {
         .viewMask   = DetectViewMask(desc),
     };
 
-    const char* entry = desc.entry_point != nullptr && desc.entry_point[0] != '\0' ? desc.entry_point : ReflectedEntryPoint(desc);
-    if (entry == nullptr || entry[0] == '\0') {
-        entry = FallbackEntryPoint(stage);
+    if (desc.entry_point != nullptr && desc.entry_point[0] != '\0') {
+        std::strncpy(result.entryPoint, desc.entry_point, sizeof(result.entryPoint) - 1);
+    } else {
+        const auto reflected_entry = ReflectedEntryPoint(desc);
+        std::copy(reflected_entry.begin(), reflected_entry.end(), result.entryPoint);
     }
-    std::strncpy(result.entryPoint, entry, sizeof(result.entryPoint) - 1);
+    if (result.entryPoint[0] == '\0') {
+        std::strncpy(result.entryPoint, FallbackEntryPoint(stage), sizeof(result.entryPoint) - 1);
+    }
     result.entryPoint[sizeof(result.entryPoint) - 1] = '\0';
     return result;
 }

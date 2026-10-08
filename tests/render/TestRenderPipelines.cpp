@@ -59,7 +59,8 @@ struct RenderPipelinesTestSuite {
                     .vsync          = false,
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true
+                    .headless       = true,
+                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -118,7 +119,7 @@ struct RenderPipelinesTestSuite {
             const auto boxMesh = reg.Get<ZHLN::Components::MeshComponent>(box);
             if (ZHLN::Test::ExpectTrue(boxMesh.has_value() && rc.GetGPUMaterial(boxMesh->materialAsset).has_value())) {
                 const ZHLN::MaterialID boxMaterial = boxMesh->materialAsset;
-                const auto validationErrors = ZHLN::RenderContext::ValidationErrorCount();
+                const auto validationErrors = engine->GetRenderContext().GetValidationErrorCount();
                 engine->ProcessEvents();
                 ZHLN::Test::ExpectEq(engine->Tick(dt, ZHLN::GameplayDriver::Cpp), ZHLN::GameplayStatus::OK);
                 rc.UnregisterGPUMaterial(boxMaterial);
@@ -136,7 +137,7 @@ struct RenderPipelinesTestSuite {
                     return std::unexpected(recreated.error());
                 }
                 ZHLN::Test::ExpectNe(recreated->pipeline, loose->pipeline);
-                ZHLN::Test::ExpectEq(ZHLN::RenderContext::ValidationErrorCount(), validationErrors);
+                ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), validationErrors);
             }
 
             return {};
@@ -160,7 +161,8 @@ struct RenderPipelinesTestSuite {
                     .vsync          = false,
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
-                    .headless       = true
+                    .headless       = true,
+                    .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                 },
                 .enableFallbackScene = false,
             };
@@ -179,10 +181,10 @@ struct RenderPipelinesTestSuite {
             // Before the first presented frame, the headless image is still
             // UNDEFINED. A screenshot must fail without submitting an invalid
             // COLOR_ATTACHMENT -> TRANSFER_SRC readback barrier.
-            const auto errorsBefore = ZHLN::RenderContext::ValidationErrorCount();
+            const auto errorsBefore = engine->GetRenderContext().GetValidationErrorCount();
             const auto emptyCapture = engine->GetRenderContext().CaptureScreenshotPPM("test_no_completed_frame.ppm");
             ZHLN::Test::ExpectFalse(emptyCapture.has_value());
-            ZHLN::Test::ExpectEq(ZHLN::RenderContext::ValidationErrorCount(), errorsBefore);
+            ZHLN::Test::ExpectEq(engine->GetRenderContext().GetValidationErrorCount(), errorsBefore);
             return {};
         }
 
@@ -545,22 +547,18 @@ struct RenderPipelinesTestSuite {
         // when the first engine dies, which is the invariant the pooled test
         // fixture and every serial reuse depend on.
         //
-        // Why refused: volk resolves Vulkan entry points into process-global
-        // dispatch tables (volkLoadInstance / volkLoadDevice in
-        // src/vulkan/core/PhysicalDevice.cpp), so a second device would silently rebind
-        // the function pointers the first one is calling through.
-        // Vk::InstanceBuilder::Build claims a single live-instance slot rather than
-        // let that happen. Lifting the restriction -- the prerequisite for more
-        // than one physics world in a process -- means threading a per-device
-        // VolkDeviceTable through the renderer, not deleting the claim.
+        // Why refused: Volk still resolves Vulkan entry points into
+        // process-global tables (volkLoadInstance / volkLoadDevice), so a second
+        // live Vulkan instance can rebind functions used by the first. A small
+        // dispatch lease preserves the existing single-instance limit while
+        // diagnostics now flow explicitly through each RenderConfig and
+        // InstanceView. Lifting the restriction requires the deferred per-device
+        // Volk tables, not removing the lease.
         //
         // The Jolt registration is refcounted underneath this: it is acquired
         // per engine, so the serial hand-off below only works because the
         // release does not unregister every shape type while a later engine
         // could still need them.
-        //
-        // It also pins the ambient chain: each engine publishes itself for its
-        // own lifetime, and the context is empty once the last one is gone.
         std::expected<void, ZHLN::ErrorCode> engines_are_serial_and_the_slot_is_released() {
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
@@ -573,7 +571,8 @@ struct RenderPipelinesTestSuite {
                         .vsync          = false,
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
-                        .headless       = true
+                        .headless       = true,
+                        .diagnostics    = &ZHLN::Test::g_renderDiagnostics
                     },
                     .enableFallbackScene = false,
                 };

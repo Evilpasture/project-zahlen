@@ -22,14 +22,9 @@
 #include <type_traits>
 #include <vector>
 
-// Render diagnostics: the framework owns the persistent counters. They are
-// registered (RunSuite) as the process diagnostics sink, so every engine --
-// including its teardown, where the persistent messenger fires destroy-time
-// validation events -- increments them directly. That is what lets the
-// per-test before/after snapshots below bracket a WHOLE engine lifecycle and
-// stay exact, with no post-mortem state in the library. The public
-// RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
-// (zero while no engine exists) and are meant for workload-scoped deltas.
+// Render diagnostics: the framework owns persistent counters and passes them
+// explicitly through RenderConfig::diagnostics. The sink outlives every test
+// engine, including teardown where Vulkan validation callbacks can still fire.
 #include <Zahlen/Render/Render.hpp>
 
 // Performance baselines live in tests/extras/profile/PerfBaseline.hpp, because
@@ -114,14 +109,12 @@ inline void TestTimeoutSignalHandler(int sig) {
 
 namespace ZHLN::Test {
 
-// Diagnostics totals owned by this framework. They outlast every engine in
-// the process, which is exactly why the engine increments them directly
-// (registered in RunSuite via RenderContext::UseDiagnostics): teardown-time
-// validation events land here too, and the per-test snapshots in RunSuite
-// observe a whole engine lifecycle without any post-mortem state in the
-// library.
+// Diagnostics totals owned by this framework. Engines receive this sink
+// explicitly through their RenderConfig; it remains alive through engine and
+// Vulkan teardown so post-mortem callbacks are included in test deltas.
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
+inline DiagnosticsSink       g_renderDiagnostics {&g_validationErrors, &g_deviceLost};
 
 // Internal to the framework: this is what the runner seeds a result with
 // before invoking a case. Timeouts instead exit the process with status 124.
@@ -535,12 +528,6 @@ TestStats RunSuite() {
     if (const auto separator = filter.find("::"); separator != std::string_view::npos && filter.substr(0, separator) != suiteName) {
         return {}; // Do not construct an unrelated suite (it may own an Engine).
     }
-
-    // Take ownership of the process diagnostics: framework storage outlasts
-    // every engine, so engines increment it directly (teardown included) and
-    // per-test deltas below bracket whole engine lifecycles exactly.
-    // Idempotent: nested suites re-register the same storage.
-    RenderContext::UseDiagnostics(g_validationErrors, g_deviceLost);
 
     Suite     suite;
     TestStats stats;

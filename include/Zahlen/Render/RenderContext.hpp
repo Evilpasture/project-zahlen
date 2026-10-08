@@ -232,11 +232,9 @@ class ZHLN_API RenderContext {
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
-    [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
+    [[nodiscard]] uint32_t GetValidationErrorCount() const noexcept;
 
-    [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
-
-    static void UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept;
+    [[nodiscard]] uint32_t GetDeviceLostCount() const noexcept;
 
     void WriteCheckpoint(std::string_view name) noexcept;
 

@@ -32,20 +32,12 @@ inline constexpr ErrorCategory kCategory     = {
     .to_name   = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
 };
 
-struct CategoryRide {
-    static inline bool registered = []() -> bool {
-        ZHLN::RegisterErrorCategory(kCategoryHash, &kCategory);
-        return true;
-    }();
-};
-
 [[nodiscard]] constexpr auto ToError(VkResult result) noexcept -> ErrorCode {
-    if consteval {
-    } else {
-        [[maybe_unused]] bool once = CategoryRide::registered;
-    }
     if (result == VK_ERROR_DEVICE_LOST) {
         return ErrorCode{FrameResult::DeviceLost};
+    }
+    if !consteval {
+        ZHLN::RegisterErrorCategory(kCategoryHash, &kCategory);
     }
     return ErrorCode{kCategoryHash, static_cast<uint32_t>(result)};
 }

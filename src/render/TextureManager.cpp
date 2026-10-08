@@ -192,8 +192,7 @@ uint32_t TextureManager::GetBindlessIndex(TextureHandle handle) const noexcept {
         }
 
         if constexpr (isDev) {
-            static uint32_t s_WarnCount = 0;
-            if (s_WarnCount++ < 5) {
+            if (_missingHandleWarningCount++ < 5) {
                 ZHLN::Log(
                     "[Warning] TextureHandle {:#X} was not found in registry! "
                     "Did you pass a raw integer instead of a registered asset handle?",

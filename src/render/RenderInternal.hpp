@@ -505,14 +505,15 @@ struct RenderContext::Impl {
     };
     std::unordered_map<RenderTextureHandle, RenderTexture> renderTextures;
 
-    // Process-wide IDs prevent a handle from one renderer from aliasing a new
-    // render texture (or a frame capability) after device-loss recovery.
+    // Process-wide IDs prevent stale handles or frame capabilities from
+    // aliasing resources in a new renderer after device-loss recovery.
     static inline std::atomic<uint64_t> nextRenderTextureId {1};
     static inline std::atomic<uint64_t> nextRendererId {1};
-    uint64_t                            rendererId            = nextRendererId.fetch_add(1, std::memory_order_relaxed);
-    uint64_t                            frameSerial           = 0;
-    uint64_t                            nextAcquisition       = 1;
-    bool                                warnedUnwrittenTarget = false;
+    uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
+    uint64_t                            frameSerial = 0;
+    uint64_t                            nextAcquisition = 1;
+    std::atomic<uint32_t> invalidDrawWarningCount {0};
+    bool warnedUnwrittenTarget = false;
 
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {

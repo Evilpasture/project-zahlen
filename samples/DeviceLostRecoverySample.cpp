@@ -171,6 +171,9 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     InstallProvokeSignal();
     ZHLN::TaskSystem::Scope taskScope;
+    std::atomic<uint32_t> validationErrors {0};
+    std::atomic<uint32_t> deviceLost {0};
+    ZHLN::DiagnosticsSink diagnostics {.validation = &validationErrors, .deviceLost = &deviceLost};
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048},
          .render  = {
@@ -179,6 +182,7 @@ auto main(int argc, char* argv[]) -> int {
               .fullscreen     = options.fullscreen,
               .validationMode = options.validationMode,
               .headless       = options.headless,
+              .diagnostics    = &diagnostics,
           },
           .enableFallbackScene = false}
     );
@@ -211,7 +215,7 @@ auto main(int argc, char* argv[]) -> int {
         ++recoveries;
         ZHLN::Log(
             "[Sample] Device-lost callback #{} (DeviceLostCount={}, subscribers={}). Re-uploading arena.", recoveries,
-            ZHLN::RenderContext::DeviceLostCount(), recovered.DeviceLostCallbackCount()
+            recovered.GetRenderContext().GetDeviceLostCount(), recovered.DeviceLostCallbackCount()
         );
         BuildArena(recovered, arena);
     });
@@ -271,7 +275,7 @@ auto main(int argc, char* argv[]) -> int {
             } else {
                 ZHLN::Log(
                     "[Sample] Provoking GPU abort via OpAbortKHR (frame {}, DeviceLostCount={}).",
-                    engine->GetCurrentFrame(), ZHLN::RenderContext::DeviceLostCount()
+                    engine->GetCurrentFrame(), engine->GetRenderContext().GetDeviceLostCount()
                 );
                 engine->ProvokeDeviceLost();
             }

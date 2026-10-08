@@ -42,8 +42,8 @@ enum class StagingRingBufferError : uint8_t {
 
 namespace {
 
-void SetGeneratedBufferName(VmaAllocator allocator, VkBuffer buffer, BufferUsage usage, size_t size) noexcept {
-    if (!GPUAddressTracker::Get().Enabled()) {
+void SetGeneratedBufferName(VmaAllocator allocator, GPUAddressTracker* tracker, VkBuffer buffer, BufferUsage usage, size_t size) noexcept {
+    if (tracker == nullptr || !tracker->Enabled()) {
         return;
     }
 
@@ -51,11 +51,11 @@ void SetGeneratedBufferName(VmaAllocator allocator, VkBuffer buffer, BufferUsage
     vmaGetAllocatorInfo(allocator, &allocatorInfo);
     const uint64_t objectHandle = reinterpret_cast<uint64_t>(buffer);
     const std::string name = std::format("Buffer[0x{:016X},usage=0x{:08X},size={}]", objectHandle, ToVk(usage), size);
-    Debug::SetObjectName(allocatorInfo.instance, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_BUFFER, name);
+    Debug::SetObjectName(*tracker, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_BUFFER, name);
 }
 
-void SetGeneratedImageName(VmaAllocator allocator, VkImage image, const VkImageCreateInfo& createInfo) noexcept {
-    if (!GPUAddressTracker::Get().Enabled()) {
+void SetGeneratedImageName(VmaAllocator allocator, GPUAddressTracker* tracker, VkImage image, const VkImageCreateInfo& createInfo) noexcept {
+    if (tracker == nullptr || !tracker->Enabled()) {
         return;
     }
 
@@ -66,7 +66,7 @@ void SetGeneratedImageName(VmaAllocator allocator, VkImage image, const VkImageC
         "Image[0x{:016X},fmt={},{}x{}x{},mips={},layers={}]", objectHandle, static_cast<uint32_t>(createInfo.format), createInfo.extent.width,
         createInfo.extent.height, createInfo.extent.depth, createInfo.mipLevels, createInfo.arrayLayers
     );
-    Debug::SetObjectName(allocatorInfo.instance, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_IMAGE, name);
+    Debug::SetObjectName(*tracker, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_IMAGE, name);
 }
 
 // Engine-owned MemoryUsage -> VMA. Exhaustive switch so adding an enumerator
@@ -93,7 +93,8 @@ Allocator::~Allocator() noexcept {
     }
 }
 
-Allocator::Allocator(Allocator&& other) noexcept: _handle(std::exchange(other._handle, nullptr)) {
+Allocator::Allocator(Allocator&& other) noexcept:
+    _handle(std::exchange(other._handle, nullptr)), _addressTracker(std::exchange(other._addressTracker, nullptr)) {
 }
 
 auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
@@ -101,7 +102,8 @@ auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
         if (_handle != nullptr) {
             vmaDestroyAllocator(_handle);
         }
-        _handle = std::exchange(other._handle, nullptr);
+        _handle         = std::exchange(other._handle, nullptr);
+        _addressTracker = std::exchange(other._addressTracker, nullptr);
     }
     return *this;
 }
@@ -162,7 +164,11 @@ std::expected<void, ErrorCode> Allocator::Init(VkInstance instance, VkPhysicalDe
 }
 
 std::expected<void, ErrorCode> Allocator::Init(const Context& ctx) noexcept {
-    return Init(ctx.Instance().Handle(), ctx.Physical(), ctx.Device());
+    auto result = Init(ctx.Instance().Handle(), ctx.Physical(), ctx.Device());
+    if (result) {
+        _addressTracker = ctx.Instance().AddressTracker();
+    }
+    return result;
 }
 
 void Allocator::DestroyBuffer(Buffer& buffer) const noexcept {
@@ -304,7 +310,7 @@ auto Buffer::Create(
         }
     }
 
-    SetGeneratedBufferName(allocator, buffer, usage, size);
+    SetGeneratedBufferName(allocator, allocatorRef._addressTracker, buffer, usage, size);
 
     Buffer b;
     b._handle        = buffer;
@@ -469,7 +475,7 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
         }
     }
 
-    SetGeneratedImageName(allocator, img, info);
+    SetGeneratedImageName(allocator, allocatorRef._addressTracker, img, info);
     Image result;
     result._handle = img;
     result._allocation = alloc;

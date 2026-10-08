@@ -19,7 +19,9 @@ Context::~Context() noexcept {
     // driver's final unbind notifications can retire their ranges.
     _device.Reset();
     if (_addressBindingReportEnabled) {
-        GPUAddressTracker::Get().SetEnabled(false);
+        if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
+            tracker->SetEnabled(false);
+        }
     }
 }
 
@@ -32,12 +34,14 @@ Context::Context(Context&& other) noexcept:
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
     if (this != &other) {
-        const bool previous_address_report = _addressBindingReportEnabled;
-        const bool incoming_address_report = other._addressBindingReportEnabled;
+        const bool         previous_address_report = _addressBindingReportEnabled;
+        const InstanceView previous_instance       = _instance;
 
         _device.Reset();
-        if (previous_address_report && !incoming_address_report) {
-            GPUAddressTracker::Get().SetEnabled(false);
+        if (previous_address_report) {
+            if (auto* const tracker = previous_instance.AddressTracker(); tracker != nullptr) {
+                tracker->SetEnabled(false);
+            }
         }
 
         _ownedInstance               = std::move(other._ownedInstance);
@@ -49,8 +53,10 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         _enabledFeatures             = std::move(other._enabledFeatures);
         _addressBindingReportEnabled = std::exchange(other._addressBindingReportEnabled, false);
 
-        if (_addressBindingReportEnabled && !previous_address_report) {
-            GPUAddressTracker::Get().SetEnabled(true);
+        if (_addressBindingReportEnabled) {
+            if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
+                tracker->SetEnabled(true);
+            }
         }
     }
     return *this;
@@ -61,10 +67,6 @@ namespace {
 [[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, ErrorCode> {
     if (!instance.Valid()) {
         return std::unexpected(ContextError::InvalidInstance);
-    }
-    if (const Instance* const active = Instance::Active(); active != nullptr && active->Handle() != instance.Handle()) {
-        ZHLN::LogError("[Vulkan] A context cannot replace the process-global dispatch table for another live instance.");
-        return std::unexpected(ContextError::MultipleInstancesUnsupported);
     }
     if (volkInitialize() != VK_SUCCESS) {
         ZHLN::LogError("[Vulkan] No Vulkan loader is available; volkInitialize() failed while preparing a context.");
@@ -272,7 +274,7 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     context._surface  = _surface;
     context._physical = _physical;
 
-    const bool has_address_binding_messenger = _hasAddressBindingMessenger;
+    const bool has_address_binding_messenger = _instance.HasAddressBindingMessenger();
 
     auto configured =
         DeviceConfigurator<>(_physical.handle)
@@ -354,7 +356,9 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
                                                     offsetof(VkPhysicalDeviceAddressBindingReportFeaturesEXT, reportAddressBinding)
                                                 );
 
-    GPUAddressTracker::Get().SetEnabled(address_binding_report_enabled);
+    if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
+        tracker->SetEnabled(address_binding_report_enabled);
+    }
     auto logical_device = BuildLogicalDevice(
         _physical, enabled_extensions, feature_root,
         FeatureBitEnabled(
@@ -366,7 +370,9 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         ) && FeatureBitEnabled(feature_root, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, offsetof(VkPhysicalDeviceRayQueryFeaturesKHR, rayQuery))
     );
     if (!logical_device) {
-        GPUAddressTracker::Get().SetEnabled(false);
+        if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
+            tracker->SetEnabled(false);
+        }
         return std::unexpected(logical_device.error());
     }
 

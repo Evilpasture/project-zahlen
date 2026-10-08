@@ -224,16 +224,12 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->deletionQueue.Drain();
 }
 
-void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {
-    Vk::Instance::UseDiagnostics({.validation = &validationErrors, .deviceLost = &deviceLost});
+uint32_t RenderContext::GetValidationErrorCount() const noexcept {
+    return _impl->ctx.Instance().ValidationErrorCount();
 }
 
-uint32_t RenderContext::ValidationErrorCount() noexcept {
-    return Vk::Instance::ValidationErrorCount();
-}
-
-uint32_t RenderContext::DeviceLostCount() noexcept {
-    return Vk::Instance::DeviceLostCount();
+uint32_t RenderContext::GetDeviceLostCount() const noexcept {
+    return _impl->ctx.Instance().DeviceLostCount();
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {

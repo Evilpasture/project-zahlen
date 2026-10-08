@@ -54,7 +54,7 @@ void DebugUtilsTracker::Shutdown() {
 
 namespace {
 
-void LogFaultAddress(std::string_view label, const VkDeviceFaultAddressInfoKHR& address) noexcept {
+void LogFaultAddress(GPUAddressTracker* tracker, std::string_view label, const VkDeviceFaultAddressInfoKHR& address) noexcept {
     if (address.addressType == VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR) {
         return;
     }
@@ -63,12 +63,11 @@ void LogFaultAddress(std::string_view label, const VkDeviceFaultAddressInfoKHR& 
         "  {}: 0x{:016X} ±{} ({})", label, address.reportedAddress, address.addressPrecision, ZHLN::Reflect::EnumToString(address.addressType)
     );
 
-    const GPUAddressTracker& tracker = GPUAddressTracker::Get();
-    if (!tracker.Enabled()) {
+    if (tracker == nullptr || !tracker->Enabled()) {
         return;
     }
 
-    const auto symbols = tracker.Resolve(address.reportedAddress);
+    const auto symbols = tracker->Resolve(address.reportedAddress);
     if (symbols.empty()) {
         ZHLN::Log("    -> No live device-address binding covers this address (possibly already unbound).");
         return;
@@ -155,7 +154,7 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
     }
 }
 
-void DumpKhrDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcept {
+void DumpKhrDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultReportsKHR == nullptr) {
         return;
     }
@@ -186,8 +185,8 @@ void DumpKhrDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcep
                 "\n[GPU DEVICE FAULT] #{} group={} flags={} \"{}\"", i, report.groupId,
                 ZHLN::Reflect::EnumToFlagsString(static_cast<VkDeviceFaultFlagBitsKHR>(report.flags), flags), report.description
             );
-            LogFaultAddress("Fault Addr", report.faultAddressInfo);
-            LogFaultAddress("Instruction Addr", report.instructionAddressInfo);
+            LogFaultAddress(tracker, "Fault Addr", report.faultAddressInfo);
+            LogFaultAddress(tracker, "Instruction Addr", report.instructionAddressInfo);
             LogVendorInfo("Vendor Info", report.vendorInfo);
         }
     }
@@ -222,7 +221,7 @@ void DumpKhrDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcep
     WriteVendorBinary(debug.pVendorBinaryData, debug.vendorBinarySize, crashDumpPath);
 }
 
-void DumpExtDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcept {
+void DumpExtDeviceFault(VkDevice device, GPUAddressTracker* tracker, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultInfoEXT == nullptr) {
         return;
     }
@@ -253,7 +252,7 @@ void DumpExtDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcep
 
     ZHLN::Log("\n[GPU DEVICE FAULT] {}", info.description);
     for (uint32_t i = 0; i < counts.addressInfoCount; ++i) {
-        LogFaultAddress(std::format("Fault Addr #{}", i), addressInfos[i]);
+        LogFaultAddress(tracker, std::format("Fault Addr #{}", i), addressInfos[i]);
     }
     for (uint32_t i = 0; i < counts.vendorInfoCount; ++i) {
         LogVendorInfo(std::format("Vendor Info #{}", i), vendorInfos[i]);
@@ -269,10 +268,10 @@ void DeviceFaultTracker::OnDeviceLost() const noexcept {
     }
 
     if (vkGetDeviceFaultReportsKHR != nullptr) {
-        DumpKhrDeviceFault(device, crashDumpPath);
+        DumpKhrDeviceFault(device, addressTracker, crashDumpPath);
         return;
     }
-    DumpExtDeviceFault(device, crashDumpPath);
+    DumpExtDeviceFault(device, addressTracker, crashDumpPath);
 }
 
 }

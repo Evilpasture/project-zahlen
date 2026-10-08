@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "GPUAddressTracker.hpp"
 #include <concepts>
 #include <cstdint>
 #include <functional>
@@ -111,8 +112,8 @@ static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 
 struct DeviceFaultTracker {
     DeviceFaultTracker() = default;
-    explicit DeviceFaultTracker(VkDevice inDevice, std::string inCrashDumpPath = {}) noexcept
-        : device(inDevice), crashDumpPath(std::move(inCrashDumpPath)) {
+    explicit DeviceFaultTracker(VkDevice inDevice, GPUAddressTracker* inAddressTracker, std::string inCrashDumpPath = {}) noexcept
+        : device(inDevice), addressTracker(inAddressTracker), crashDumpPath(std::move(inCrashDumpPath)) {
     }
 
     void WriteCheckpoint(VkCommandBuffer , std::string_view ) const noexcept {
@@ -122,10 +123,12 @@ struct DeviceFaultTracker {
     void OnDeviceLost() const noexcept;
     void Shutdown() noexcept {
         device = VK_NULL_HANDLE;
+        addressTracker = nullptr;
     }
 
-    VkDevice device = VK_NULL_HANDLE;
-    std::string crashDumpPath;
+    VkDevice           device = VK_NULL_HANDLE;
+    GPUAddressTracker* addressTracker = nullptr;
+    std::string        crashDumpPath;
 };
 static_assert(GPUCrashTrackerBackend<DeviceFaultTracker>);
 
@@ -141,11 +144,11 @@ class GPUDiagnostics {
     GPUDiagnostics(GPUDiagnostics&&)                         = delete;
     auto operator=(GPUDiagnostics&&) -> GPUDiagnostics&      = delete;
 
-    void Create(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, DiagnosticConfig config = {}) {
+    void Create(GPUVendor vendor, VkDevice device, VkPhysicalDevice physical, GPUAddressTracker* addressTracker, DiagnosticConfig config = {}) {
         Shutdown();
 
         _config       = config;
-        _faultTracker = DeviceFaultTracker(device, config.crashDumpPath);
+        _faultTracker = DeviceFaultTracker(device, addressTracker, config.crashDumpPath);
 
         auto configured = CreateConfiguredGPUCrashTracker(vendor, device, physical, config);
         if (!configured.Empty()) {

@@ -24,7 +24,6 @@ namespace ZHLN::Vk {
 enum class ContextError : uint8_t {
     InvalidInstance ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
     LoaderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan loader initialization failed"> {}),
-    MultipleInstancesUnsupported ZHLN_ANNOTATION(ZHLN::Description<"Only one Vulkan instance can use the global dispatch table"> {}),
     NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
 };
 
@@ -145,15 +144,11 @@ class ContextBuilder {
     auto Instance(InstanceView instance) noexcept -> ContextBuilder& {
         _ownedInstance.reset();
         _instance = instance;
-        const Vk::Instance* const active = Vk::Instance::Active();
-        _hasAddressBindingMessenger = active != nullptr && active->Handle() == instance.Handle() &&
-                                     active->HasAddressBindingMessenger();
         return *this;
     }
     auto Instance(Vk::Instance&& instance) noexcept -> ContextBuilder& {
         _ownedInstance.emplace(std::move(instance));
-        _instance                    = InstanceView(*_ownedInstance);
-        _hasAddressBindingMessenger = _ownedInstance->HasAddressBindingMessenger();
+        _instance = InstanceView(*_ownedInstance);
         return *this;
     }
     constexpr auto Surface(VkSurfaceKHR surface) noexcept -> ContextBuilder& {
@@ -193,7 +188,6 @@ class ContextBuilder {
     std::optional<Vk::Instance>        _ownedInstance;
     InstanceView                       _instance;
     VkSurfaceKHR                       _surface = VK_NULL_HANDLE;
-    bool                               _hasAddressBindingMessenger = false;
     PhysicalDeviceInfo                 _physical {};
     Vk::ValidationMode                 _validationMode = Vk::ValidationMode::On;
     std::vector<const char*>           _deviceExtensions;

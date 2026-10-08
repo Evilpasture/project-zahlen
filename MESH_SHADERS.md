@@ -257,9 +257,9 @@ The parity test controls for engine nondeterminism explicitly:
   once. The mesh path is allowed to differ by at most twice the vertex-vs-
   vertex noise (or the absolute floor, whichever is larger). Without a
   control there is no way to distinguish a path divergence from engine noise.
-* **Validation errors fail the test.** `RenderContext::ValidationErrorCount()`
-  is snapshotted around the rendered frames; correct pixels produced through
-  invalid API usage is not a pass.
+* **Validation errors fail the test.** The engine's
+  `RenderContext::GetValidationErrorCount()` is snapshotted around the rendered
+  frames; correct pixels produced through invalid API usage is not a pass.
 
 The comparator was itself validated against synthetic divergences (identical frames, a dropped cluster, a
 1-pixel and a 3-pixel geometry shift, a ±2 ULP jitter, two blank frames, and a

@@ -129,6 +129,7 @@ class TextureManager {
     // Kept across Clear() so unnamed uploads do not recycle old IDs.
     uint64_t                         _nextAnonymousHandle = 1ull << 63;
     mutable Mutex                    _mutex {};
+    mutable uint32_t                 _missingHandleWarningCount = 0;
 };
 
 }

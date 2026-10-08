@@ -45,7 +45,8 @@ struct ExplosionTestSuite {
                 .vsync          = false,
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On,
-                .headless       = true
+                .headless       = true,
+                .diagnostics    = &ZHLN::Test::g_renderDiagnostics
             },
             .enableFallbackScene = false,
         };

@@ -36,11 +36,6 @@ void SortByBase(std::vector<GpuAllocationSymbol>& entries) noexcept {
 
 } // namespace
 
-auto GPUAddressTracker::Get() noexcept -> GPUAddressTracker& {
-    static GPUAddressTracker tracker;
-    return tracker;
-}
-
 void GPUAddressTracker::SetEnabled(bool enabled) noexcept {
     const std::lock_guard lock(_mutex);
     const bool wasEnabled = _enabled.load(std::memory_order_relaxed);

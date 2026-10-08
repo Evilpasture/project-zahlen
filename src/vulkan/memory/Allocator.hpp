@@ -22,6 +22,7 @@ namespace ZHLN::Vk {
 class Context;
 class Buffer;
 class Image;
+class GPUAddressTracker;
 
 struct DeferredDeletionEntry {
     enum class Type : uint8_t { Buffer, Image, AccelerationStructure, Pipeline };
@@ -114,7 +115,8 @@ class Allocator {
     static void DestroyBuffer(VmaAllocator allocator, Buffer& buffer) noexcept;
     static void DestroyImage(VmaAllocator allocator, Image& image) noexcept;
 
-    VmaAllocator _handle = nullptr;
+    VmaAllocator       _handle         = nullptr;
+    GPUAddressTracker* _addressTracker = nullptr;
 };
 
 // Engine-owned memory classification. Values are mapped to the underlying
