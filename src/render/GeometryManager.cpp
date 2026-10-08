@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GeometryManager.hpp"
+#include "FrameError.hpp"
 #include <Zahlen/Vertex.hpp>
 #include <cstring>
 #include <format>
@@ -40,12 +41,12 @@ enum class BufferSourceError : uint8_t {
     return std::nullopt;
 }
 
-// The ring reports "no room for this upload" by handing back an allocation whose
+// TODO(some random AI i forgot when): The ring reports "no room for this upload" by handing back an allocation whose
 // mapped pointer is null, which every caller then has to re-test. Fold that into the
 // error channel once. It lives in this TU rather than in StagingRingBuffer because
 // the ring's other consumers (RenderResources.cpp, TextureUploader.hpp) still read
 // Allocation::mappedData; the follow-up step moves it to the source and deletes this
-// helper. See todo/TODO.md.
+// helper.
 [[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
     auto allocation = ring.Allocate(size);
     if (allocation.mappedData == nullptr) {
@@ -79,10 +80,12 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
 
     const auto rtBit = _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
 
-    return Vk::ToEngineExpected(Vk::Buffer::Create(
-               _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
-               {families.data(), familyCount}
-    ))
+    return Vk::ToEngineExpected(
+               Vk::Buffer::Create(
+                   _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
+                   sharingMode, {families.data(), familyCount}
+               )
+    )
         .and_then([this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
             defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
             auto  staging = AllocateStaging(_transferRing, size);
