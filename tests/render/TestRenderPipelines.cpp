@@ -549,7 +549,7 @@ struct RenderPipelinesTestSuite {
         // dispatch tables (volkLoadInstance / volkLoadDevice in
         // src/vulkan/core/PhysicalDevice.cpp), so a second device would silently rebind
         // the function pointers the first one is calling through.
-        // Vk::Instance::Create claims a single live-instance slot rather than
+        // Vk::InstanceBuilder::Build claims a single live-instance slot rather than
         // let that happen. Lifting the restriction -- the prerequisite for more
         // than one physics world in a process -- means threading a per-device
         // VolkDeviceTable through the renderer, not deleting the claim.

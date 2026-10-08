@@ -14,14 +14,18 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
-#include <string_view>
+#include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
 
 enum class ContextError : uint8_t {
-    InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed"> {}) = 1,
-    NoSuitableDeviceFound  ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
+    InvalidInstance ZHLN_ANNOTATION(ZHLN::Description<"No valid Vulkan instance was supplied"> {}) = 1,
+    LoaderInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan loader initialization failed"> {}),
+    MultipleInstancesUnsupported ZHLN_ANNOTATION(ZHLN::Description<"Only one Vulkan instance can use the global dispatch table"> {}),
+    NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
 };
 
 struct DevicePresentSupport {
@@ -33,8 +37,6 @@ struct DevicePresentSupport {
 
 class Context {
   public:
-    class Builder;
-
     Context() noexcept = default;
     ~Context() noexcept;
 
@@ -44,8 +46,8 @@ class Context {
     Context(Context&& other) noexcept;
     auto operator=(Context&& other) noexcept -> Context&;
 
-    [[nodiscard]] auto Instance() const noexcept -> VkInstance {
-        return _instanceObject.Handle();
+    [[nodiscard]] auto Instance() const noexcept -> InstanceView {
+        return _instance;
     }
     [[nodiscard]] auto Surface() const noexcept -> VkSurfaceKHR {
         return _surface;
@@ -119,92 +121,86 @@ class Context {
     }
 
   private:
-    Vk::Instance         _instanceObject;
-    VkSurfaceKHR         _surface = VK_NULL_HANDLE;
-    PhysicalDeviceInfo   _physical {};
-    LogicalDevice        _device;
-    DevicePresentSupport _present {};
-    EnabledFeatureSet    _enabledFeatures;
-    bool                 _addressBindingReportEnabled = false;
+    friend class ContextBuilder;
+
+    std::optional<Vk::Instance> _ownedInstance;
+    InstanceView               _instance;
+    VkSurfaceKHR               _surface = VK_NULL_HANDLE;
+    PhysicalDeviceInfo         _physical {};
+    LogicalDevice              _device;
+    DevicePresentSupport       _present {};
+    EnabledFeatureSet          _enabledFeatures;
+    bool                       _addressBindingReportEnabled = false;
 };
 
-class Context::Builder {
+class ContextBuilder {
   public:
-    constexpr Builder() noexcept = default;
+    constexpr ContextBuilder() noexcept = default;
 
-    constexpr Builder& AppName(std::string_view name) noexcept {
-        _appName = name;
-        return *this;
-    }
-    constexpr Builder& AppVersion(uint32_t version) noexcept {
-        _appVersion = version;
-        return *this;
-    }
-    constexpr Builder& ValidationMode(Vk::ValidationMode mode) noexcept {
+    constexpr auto ValidationMode(Vk::ValidationMode mode) noexcept -> ContextBuilder& {
         _validationMode = mode;
         return *this;
     }
-    constexpr Builder& Instance(VkInstance inst) noexcept {
-        _instanceView = inst;
+    // Views and lvalue owners are borrowed; only an rvalue owner is adopted.
+    auto Instance(InstanceView instance) noexcept -> ContextBuilder& {
+        _ownedInstance.reset();
+        _instance = instance;
+        const Vk::Instance* const active = Vk::Instance::Active();
+        _hasAddressBindingMessenger = active != nullptr && active->Handle() == instance.Handle() &&
+                                     active->HasAddressBindingMessenger();
         return *this;
     }
-    constexpr Builder& Instance(Vk::Instance&& inst) noexcept {
-        _instanceObject = std::move(inst);
-        _instanceView   = _instanceObject.Handle();
+    auto Instance(Vk::Instance&& instance) noexcept -> ContextBuilder& {
+        _ownedInstance.emplace(std::move(instance));
+        _instance                    = InstanceView(*_ownedInstance);
+        _hasAddressBindingMessenger = _ownedInstance->HasAddressBindingMessenger();
         return *this;
     }
-    constexpr Builder& Surface(VkSurfaceKHR surf) noexcept {
-        _surface = surf;
+    constexpr auto Surface(VkSurfaceKHR surface) noexcept -> ContextBuilder& {
+        _surface = surface;
         return *this;
     }
-    constexpr Builder& PhysicalDevice(const PhysicalDeviceInfo& physical) noexcept {
+    constexpr auto PhysicalDevice(const PhysicalDeviceInfo& physical) noexcept -> ContextBuilder& {
         _physical = physical;
         return *this;
     }
-    constexpr Builder& InstanceExtensions(std::span<const std::string_view> extensions) noexcept {
-        _instanceExtensions.assign(extensions.begin(), extensions.end());
-        return *this;
-    }
-    constexpr Builder& DeviceExtensions(std::span<const char* const> extensions) noexcept {
+    constexpr auto DeviceExtensions(std::span<const char* const> extensions) noexcept -> ContextBuilder& {
         _deviceExtensions.assign(extensions.begin(), extensions.end());
         return *this;
     }
-    constexpr Builder& DeviceExtensions(const std::vector<const char*>& extensions) noexcept {
+    constexpr auto DeviceExtensions(const std::vector<const char*>& extensions) noexcept -> ContextBuilder& {
         _deviceExtensions.assign(extensions.begin(), extensions.end());
         return *this;
     }
 
     template <typename... Ts>
-    Builder& DeviceFeatures(FeatureChain<Ts...>& chain) noexcept {
+    auto DeviceFeatures(FeatureChain<Ts...>& chain) noexcept -> ContextBuilder& {
         _features        = chain.GetRoot();
         _enabledFeatures = chain.SnapshotEnabled();
         return *this;
     }
 
-    constexpr Builder& ScoreFunction(DeviceScoreFunction score, const void* userdata = nullptr) noexcept {
+    constexpr auto ScoreFunction(DeviceScoreFunction score, const void* userdata = nullptr) noexcept -> ContextBuilder& {
         _scoreFn       = score;
         _scoreUserdata = userdata;
         return *this;
     }
 
-    [[nodiscard]] auto BuildInstance() noexcept -> std::expected<Vk::Instance, ErrorCode>;
-    [[nodiscard]] auto SelectPhysicalDevice() const noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode>;
+    [[nodiscard]] auto SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode>;
     [[nodiscard]] auto Build() noexcept -> std::expected<Context, ErrorCode>;
 
   private:
-    std::string_view                 _appName        = "ZHLN Engine";
-    uint32_t                         _appVersion     = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    Vk::ValidationMode               _validationMode = Vk::ValidationMode::On;
-    Vk::Instance                     _instanceObject;
-    VkInstance                       _instanceView = VK_NULL_HANDLE;
-    VkSurfaceKHR                     _surface      = VK_NULL_HANDLE;
-    PhysicalDeviceInfo               _physical {};
-    std::vector<std::string_view>    _instanceExtensions;
-    std::vector<const char*>         _deviceExtensions;
-    const VkPhysicalDeviceFeatures2* _features = nullptr;
-    EnabledFeatureSet                _enabledFeatures;
-    DeviceScoreFunction              _scoreFn       = nullptr;
-    const void*                      _scoreUserdata = nullptr;
+    std::optional<Vk::Instance>        _ownedInstance;
+    InstanceView                       _instance;
+    VkSurfaceKHR                       _surface = VK_NULL_HANDLE;
+    bool                               _hasAddressBindingMessenger = false;
+    PhysicalDeviceInfo                 _physical {};
+    Vk::ValidationMode                 _validationMode = Vk::ValidationMode::On;
+    std::vector<const char*>           _deviceExtensions;
+    const VkPhysicalDeviceFeatures2*    _features = nullptr;
+    EnabledFeatureSet                  _enabledFeatures;
+    DeviceScoreFunction               _scoreFn       = nullptr;
+    const void*                        _scoreUserdata = nullptr;
 };
 
 } // namespace ZHLN::Vk

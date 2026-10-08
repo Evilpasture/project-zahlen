@@ -81,13 +81,13 @@ auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux,
         }
 
         const Extent2D extent     = aux.GetFramebufferExtent();
-        auto           surfaceRes = CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
+        auto           surfaceRes = CreateSurfaceFromNative(ctx.Instance().Handle(), aux.GetNativeSurface());
         if (!surfaceRes) {
             return std::unexpected(ErrorCode {surfaceRes.error()});
         }
 
         auto owned     = std::make_unique<Vk::SwapchainPresenter>();
-        owned->surface = Vk::Surface(ctx.Instance(), surfaceRes->Release());
+        owned->surface = Vk::Surface(ctx.Instance().Handle(), surfaceRes->Release());
         if (owned->surface.Get() == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
             return std::unexpected(DestinationError::SurfaceUnusable);
         }

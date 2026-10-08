@@ -24,9 +24,10 @@ Context::~Context() noexcept {
 }
 
 Context::Context(Context&& other) noexcept:
-    _instanceObject(std::move(other._instanceObject)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)),
-    _physical(std::exchange(other._physical, PhysicalDeviceInfo {})), _device(std::move(other._device)), _present(other._present),
-    _enabledFeatures(std::move(other._enabledFeatures)), _addressBindingReportEnabled(std::exchange(other._addressBindingReportEnabled, false)) {
+    _ownedInstance(std::move(other._ownedInstance)), _instance(std::exchange(other._instance, InstanceView {})),
+    _surface(std::exchange(other._surface, VK_NULL_HANDLE)), _physical(std::exchange(other._physical, PhysicalDeviceInfo {})),
+    _device(std::move(other._device)), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)),
+    _addressBindingReportEnabled(std::exchange(other._addressBindingReportEnabled, false)) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
@@ -39,7 +40,8 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
             GPUAddressTracker::Get().SetEnabled(false);
         }
 
-        _instanceObject              = std::move(other._instanceObject);
+        _ownedInstance               = std::move(other._ownedInstance);
+        _instance                    = std::exchange(other._instance, InstanceView {});
         _surface                     = std::exchange(other._surface, VK_NULL_HANDLE);
         _physical                    = std::exchange(other._physical, PhysicalDeviceInfo {});
         _device                      = std::move(other._device);
@@ -55,6 +57,25 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 }
 
 namespace {
+
+[[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, ErrorCode> {
+    if (!instance.Valid()) {
+        return std::unexpected(ContextError::InvalidInstance);
+    }
+    if (const Instance* const active = Instance::Active(); active != nullptr && active->Handle() != instance.Handle()) {
+        ZHLN::LogError("[Vulkan] A context cannot replace the process-global dispatch table for another live instance.");
+        return std::unexpected(ContextError::MultipleInstancesUnsupported);
+    }
+    if (volkInitialize() != VK_SUCCESS) {
+        ZHLN::LogError("[Vulkan] No Vulkan loader is available; volkInitialize() failed while preparing a context.");
+        return std::unexpected(ContextError::LoaderInitializationFailed);
+    }
+
+    // Volk uses a process-global dispatch table in this build. Point it at the
+    // borrowed or owned instance before issuing any instance-level calls.
+    volkLoadInstance(instance.Handle());
+    return {};
+}
 
 [[nodiscard]] auto ExtensionEnabled(const std::span<const std::string> enabled, const std::string_view name) noexcept -> bool {
     return std::ranges::any_of(enabled, [name](const std::string& entry) { return entry == name; });
@@ -230,28 +251,29 @@ namespace {
 
 } // namespace
 
-std::expected<Vk::Instance, ErrorCode> Context::Builder::BuildInstance() noexcept {
-    _instanceObject = Instance::Create(_appName, _appVersion, _instanceExtensions, _validationMode);
-    if (!_instanceObject.Valid()) {
-        return std::unexpected(ContextError::InstanceCreationFailed);
+auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode> {
+    if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
+        return std::unexpected(dispatch.error());
     }
-    _instanceView = _instanceObject.Handle();
-    return std::move(_instanceObject);
-}
 
-auto Context::Builder::SelectPhysicalDevice() const noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode> {
-    const VkInstance   view = _instanceView != VK_NULL_HANDLE ? _instanceView : _instanceObject.Handle();
-    PhysicalDeviceInfo info = ZHLN::Vk::SelectPhysicalDevice(view, _surface, _scoreFn, _scoreUserdata);
+    PhysicalDeviceInfo info = ZHLN::Vk::SelectPhysicalDevice(_instance.Handle(), _surface, _scoreFn, _scoreUserdata);
     if (info.handle == VK_NULL_HANDLE) {
         return std::unexpected(ContextError::NoSuitableDeviceFound);
     }
     return info;
 }
 
-std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
+auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
+    if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
+        return std::unexpected(dispatch.error());
+    }
+
     Context context;
+    context._instance = _instance;
     context._surface  = _surface;
     context._physical = _physical;
+
+    const bool has_address_binding_messenger = _hasAddressBindingMessenger;
 
     auto configured =
         DeviceConfigurator<>(_physical.handle)
@@ -290,7 +312,7 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
             .OptionalExtension<VkPhysicalDeviceAddressBindingReportFeaturesEXT>(
                 VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME, [](auto& feature) { feature.reportAddressBinding = VK_TRUE; },
                 [](VkPhysicalDevice, const auto& enabled) { return enabled.reportAddressBinding == VK_TRUE; },
-                _validationMode != ValidationMode::Off && _instanceObject.HasAddressBindingMessenger() && vkCreateDebugUtilsMessengerEXT != nullptr
+                _validationMode != ValidationMode::Off && has_address_binding_messenger && vkCreateDebugUtilsMessengerEXT != nullptr
             )
             .OptionalExtension<VkPhysicalDeviceShaderConstantDataFeaturesKHR>(
                 VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, [](auto& feature) { feature.shaderConstantData = VK_TRUE; }
@@ -325,7 +347,7 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
         }
     }
 
-    const bool address_binding_report_enabled = _validationMode != ValidationMode::Off && _instanceObject.HasAddressBindingMessenger() &&
+    const bool address_binding_report_enabled = _validationMode != ValidationMode::Off && has_address_binding_messenger &&
                                                 vkCreateDebugUtilsMessengerEXT != nullptr &&
                                                 ExtensionEnabled(enabled_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME) &&
                                                 FeatureBitEnabled(
@@ -358,10 +380,7 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
         context._enabledFeatures.push_back(std::move(entry));
     }
 
-    if (!_instanceObject.Valid()) {
-        return std::unexpected(ContextError::InstanceCreationFailed);
-    }
-    context._instanceObject = std::move(_instanceObject);
+    context._ownedInstance = std::move(_ownedInstance);
     return context;
 }
 

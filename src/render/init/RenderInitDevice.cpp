@@ -131,7 +131,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
     impl->presentationMode      = mode;
 
     Vk::Instance           instanceObject;
-    VkInstance             instance    = VK_NULL_HANDLE;
+    Vk::InstanceView       instanceView;
     VkSurfaceKHR           raw_surface = VK_NULL_HANDLE;
     int                    width       = 0;
     int                    height      = 0;
@@ -139,14 +139,14 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
 
     return GetPlatformInstanceExtensions(target)
         .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
-            return Vk::Context::Builder()
+            return Vk::InstanceBuilder()
                 .AppName(impl->appName)
                 .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
-                .InstanceExtensions(inst_exts)
-                .BuildInstance()
+                .Extensions(inst_exts)
+                .Build()
                 .transform([&](Vk::Instance inst) -> void {
                     instanceObject = std::move(inst);
-                    instance       = instanceObject.Handle();
+                    instanceView   = Vk::InstanceView(instanceObject);
                 });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -161,7 +161,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
                 return {};
             }
             if (!target.IsTTY()) {
-                auto surfaceRes = CreateSurfaceFromNative(instance, target.GetNativeSurface());
+                auto surfaceRes = CreateSurfaceFromNative(instanceView.Handle(), target.GetNativeSurface());
                 if (!surfaceRes) {
                     return std::unexpected(surfaceRes.error());
                 }
@@ -175,8 +175,8 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return Vk::Context::Builder()
-                .Instance(instance)
+            return Vk::ContextBuilder()
+                .Instance(instanceView)
                 .Surface(raw_surface)
                 .SelectPhysicalDevice()
                 .transform([&](const Vk::PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
@@ -185,7 +185,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
             if (target.IsTTY() && mode == PresentationMode::NativeSwapchain) {
                 uint32_t modeWidth  = 0;
                 uint32_t modeHeight = 0;
-                auto     surfaceRes = Vk::CreateDisplaySurface(instance, physicalInfo.handle, modeWidth, modeHeight);
+                auto     surfaceRes = Vk::CreateDisplaySurface(instanceView.Handle(), physicalInfo.handle, modeWidth, modeHeight);
                 if (!surfaceRes) {
                     return std::unexpected(surfaceRes.error());
                 }
@@ -196,11 +196,11 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            impl->presenter.surface = Vk::Surface(instance, raw_surface);
+            impl->presenter.surface = Vk::Surface(instanceView.Handle(), raw_surface);
             return ConfigureDevice(physicalInfo.handle, mode == PresentationMode::NativeSwapchain, cfg.validationMode)
                 .and_then([&](auto&& setup) -> std::expected<void, ErrorCode> {
                     const std::vector<const char*>& devExtList = setup.extensions;
-                    return Vk::Context::Builder()
+                    return Vk::ContextBuilder()
                         .Instance(std::move(instanceObject))
                         .Surface(raw_surface)
                         .PhysicalDevice(physicalInfo)

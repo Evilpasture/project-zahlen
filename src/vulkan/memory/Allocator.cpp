@@ -162,7 +162,7 @@ std::expected<void, ZHLN::ErrorCode> Allocator::Init(VkInstance instance, VkPhys
 }
 
 std::expected<void, ZHLN::ErrorCode> Allocator::Init(const Context& ctx) noexcept {
-    return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
+    return Init(ctx.Instance().Handle(), ctx.Physical(), ctx.Device());
 }
 
 void Allocator::DestroyBuffer(Buffer& buffer) const noexcept {

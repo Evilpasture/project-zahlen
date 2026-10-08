@@ -7,11 +7,17 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <VkError.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <atomic>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -19,6 +25,10 @@ enum class ValidationMode : uint8_t {
     Off,
     On,
     GPU,
+};
+
+enum class InstanceError : uint8_t {
+    CreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed"> {}) = 1,
 };
 
 struct DiagnosticsSink {
@@ -30,6 +40,33 @@ struct DiagnosticsSink {
     }
 };
 
+class Instance;
+
+// A non-owning view of a Vulkan instance. Wrapping a raw handle is deliberately
+// explicit; a view made from an Instance is an ordinary, non-owning conversion.
+class InstanceView {
+  public:
+    constexpr InstanceView() noexcept = default;
+    explicit constexpr InstanceView(VkInstance handle) noexcept: _handle(handle) {
+    }
+    InstanceView(const Instance& instance) noexcept;
+
+    [[nodiscard]] constexpr auto Handle() const noexcept -> VkInstance {
+        return _handle;
+    }
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return _handle != VK_NULL_HANDLE;
+    }
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+
+  private:
+    VkInstance _handle = VK_NULL_HANDLE;
+};
+
+static_assert(std::is_trivially_copyable_v<InstanceView>);
+
 class Instance {
   public:
     Instance() noexcept;
@@ -40,9 +77,6 @@ class Instance {
 
     Instance(Instance&& other) noexcept;
     auto operator=(Instance&& other) noexcept -> Instance&;
-
-    [[nodiscard]] static auto
-        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ValidationMode validation) noexcept -> Instance;
 
     static void UseDiagnostics(DiagnosticsSink sink) noexcept;
 
@@ -67,6 +101,12 @@ class Instance {
     }
 
   private:
+    friend class InstanceBuilder;
+
+    [[nodiscard]] static auto
+        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ValidationMode validation) noexcept
+        -> std::expected<Vk::Instance, Vk::Error>;
+
     struct DebugState {
         Instance* owner             = nullptr; // TODO(Evilpasture): Owner? Then why is this a raw pointer? Let's make this clearer in ownership.
         bool      debugUtilsEnabled = false;
@@ -94,6 +134,39 @@ class Instance {
 
     static std::atomic<Instance*>       s_active;
     static std::atomic<DiagnosticsSink> s_registered_sink;
+};
+
+inline InstanceView::InstanceView(const Instance& instance) noexcept: _handle(instance.Handle()) {
+}
+
+class InstanceBuilder {
+  public:
+    constexpr InstanceBuilder() noexcept = default;
+
+    constexpr auto AppName(std::string_view name) noexcept -> InstanceBuilder& {
+        _appName = name;
+        return *this;
+    }
+    constexpr auto AppVersion(uint32_t version) noexcept -> InstanceBuilder& {
+        _appVersion = version;
+        return *this;
+    }
+    constexpr auto ValidationMode(Vk::ValidationMode mode) noexcept -> InstanceBuilder& {
+        _validationMode = mode;
+        return *this;
+    }
+    constexpr auto Extensions(std::span<const std::string_view> extensions) noexcept -> InstanceBuilder& {
+        _extensions.assign(extensions.begin(), extensions.end());
+        return *this;
+    }
+
+    [[nodiscard]] auto Build() noexcept -> std::expected<Instance, ErrorCode>;
+
+  private:
+    std::string_view              _appName        = "ZHLN Engine";
+    uint32_t                      _appVersion     = VK_MAKE_API_VERSION(0, 1, 0, 0);
+    Vk::ValidationMode            _validationMode = Vk::ValidationMode::On;
+    std::vector<std::string_view> _extensions;
 };
 
 } // namespace ZHLN::Vk

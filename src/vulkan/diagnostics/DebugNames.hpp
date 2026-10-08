@@ -47,17 +47,17 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
 
 template <typename CtxT>
 inline void SetImageName(const CtxT& ctx, VkImage image, std::string_view name) noexcept {
-    SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(image), VK_OBJECT_TYPE_IMAGE, name);
+    SetObjectName(ctx.Instance().Handle(), ctx.Device(), reinterpret_cast<uint64_t>(image), VK_OBJECT_TYPE_IMAGE, name);
 }
 
 template <typename CtxT>
 inline void SetImageViewName(const CtxT& ctx, VkImageView view, std::string_view name) noexcept {
-    SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name);
+    SetObjectName(ctx.Instance().Handle(), ctx.Device(), reinterpret_cast<uint64_t>(view), VK_OBJECT_TYPE_IMAGE_VIEW, name);
 }
 
 template <typename CtxT>
 inline void SetBufferName(const CtxT& ctx, VkBuffer buffer, std::string_view name) noexcept {
-    SetObjectName(ctx.Instance(), ctx.Device(), reinterpret_cast<uint64_t>(buffer), VK_OBJECT_TYPE_BUFFER, name);
+    SetObjectName(ctx.Instance().Handle(), ctx.Device(), reinterpret_cast<uint64_t>(buffer), VK_OBJECT_TYPE_BUFFER, name);
 }
 
 }

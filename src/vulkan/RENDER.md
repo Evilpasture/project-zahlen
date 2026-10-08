@@ -23,10 +23,14 @@ The renderer is a C++26 Vulkan subsystem organized by responsibility. It calls V
 The renderer does **not** link the Vulkan loader. [Volk](https://github.com/zeux/volk), pinned in `extern/volk`, acquires it at runtime and dispatches Vulkan calls through its function pointers:
 
 * `VulkanHeader.hpp` includes `volk.h`; include it (through `Rendering.hpp`) before any header that pulls in Vulkan declarations.
-* `EnumerateInstanceExtensions()` and `Vk::Instance::Create()` call `volkInitialize()` before using instance-level dispatch. `Instance::Create()` calls `volkLoadInstance()` after creating the instance; device setup in `Context.cpp` calls `volkLoadDevice()` after `vkCreateDevice()`.
-* Loader initialization failure is returned/reported through the existing C++ instance and extension paths instead of causing a link-time dependency on a Vulkan loader.
+* `EnumerateInstanceExtensions()` and `InstanceBuilder::Build()` call `volkInitialize()` before using instance-level dispatch. The instance builder loads its newly created instance; `ContextBuilder` also initializes Volk and loads the supplied `InstanceView`, including when borrowing an external instance. Device setup calls `volkLoadDevice()` after `vkCreateDevice()`.
+* Loader initialization failure is returned through the instance and context builders instead of causing a link-time dependency on a Vulkan loader.
 
-Volk's dispatch table is process-global in this build, so the renderer permits one live Vulkan instance at a time. `Instance::Create()` claims that slot and refuses a concurrent second instance rather than silently replacing dispatch state.
+Volk's dispatch table is process-global in this build, so the renderer permits one live Vulkan instance at a time. `InstanceBuilder::Build()` claims that slot and refuses a concurrent second instance rather than silently replacing dispatch state. A borrowed `InstanceView` does not claim ownership or extend the external instance's lifetime; the host must keep that instance alive until its `Context` and dependent resources are gone.
+
+### Instance and Context Builders
+
+`InstanceBuilder` creates an owning `Vk::Instance`; `ContextBuilder` creates the logical device and context. Pass a `Vk::Instance&&` to `ContextBuilder::Instance()` to transfer ownership into the resulting context. Pass an `InstanceView` to borrow instead; constructing a view from a raw `VkInstance` is explicit (`InstanceView{raw}`), and the external owner must outlive the context and its resources. The context destroys only an instance it owns.
 
 ### Diagnostics Ownership (Vk::Instance)
 
@@ -37,7 +41,7 @@ The C++ `Vk::Instance` (src/vulkan/core/Instance.hpp) owns the Vulkan instance a
 * `Vk::Instance` installs the debug messenger callbacks and routes validation severities into the selected counters. A separate INFO-only messenger subscribes to device-address-binding events and forwards the binding payload plus callback `pObjects` to the C++ GPU-address tracker.
 * `Vk::Instance::IncrementNumericalDeviceLoss()` is the diagnostics increment for `VK_ERROR_DEVICE_LOST` observed on void paths; it bumps the active instance's counter and is unobservable when no engine is live. Nothing reads the counter for control flow -- recovery rides the monadic frame-result chain.
 * `Vk::Instance` is move-aware: its debug-state owner pointer is rebound on every move, so builder-to-context transfers keep callback state valid.
-* The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `Instance::Create()` claims the slot with a compare-and-swap and refuses (returning an invalid instance) while another is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
+* The engine is **single-instance** by design — volk's dispatch tables are process-global and cannot serve two live instances. `InstanceBuilder::Build()` claims the slot with a compare-and-swap and returns an error while another instance is live, instead of letting a second one silently steal it. Sequential create/destroy cycles lose nothing.
 
 ### One dispatch table per image
 

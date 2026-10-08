@@ -36,7 +36,7 @@ struct ConfiguredDevice {
 
 // Resolves each optional feature and its extension(s) together. The result
 // owns both extension names and the feature chain until vkCreateDevice has
-// consumed them; Context::Builder copies the enabled-feature snapshot.
+// consumed them; ContextBuilder copies the enabled-feature snapshot.
 template <typename... Ts>
 class DeviceConfigurator {
   public:

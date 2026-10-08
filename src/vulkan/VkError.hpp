@@ -1,6 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/* PREAMBLE
+ * src/vulkan should never see ErrorCode.
+ * The boundary where Vk::Error is converted into the engine's polymorphic
+ * ZHLN::ErrorCode belongs exclusively in src/render/
+ * (where RenderContext and GeometryManager orchestrate the engine).
+ */
 
 #pragma once
 
@@ -20,8 +26,8 @@ namespace ZHLN::Vk {
 
 extern void VK_ERROR_CANNOT_BE_SUCCESS();
 
-inline constexpr uint32_t kCategoryHash = Hash32("ZHLN::Vk::Error");
-inline constexpr ErrorCategory kCategory = {
+inline constexpr uint32_t      kCategoryHash = Hash32("ZHLN::Vk::Error");
+inline constexpr ErrorCategory kCategory     = {
     .name      = "Vk",
     .to_string = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
     .to_name   = [](const uint32_t v) noexcept -> std::string_view { return Reflect::EnumToString(static_cast<VkResult>(v)); },
@@ -29,7 +35,7 @@ inline constexpr ErrorCategory kCategory = {
 
 class Error {
   public:
-    constexpr explicit Error(const VkResult code) noexcept: _code(code) {
+    constexpr Error(const VkResult code) noexcept: _code(code) {
         if (code == VK_SUCCESS) {
             if consteval {
                 VK_ERROR_CANNOT_BE_SUCCESS();
@@ -70,4 +76,4 @@ class Error {
     VkResult _code;
 };
 
-}
+} // namespace ZHLN::Vk

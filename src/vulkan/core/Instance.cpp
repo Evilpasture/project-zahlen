@@ -4,6 +4,7 @@
 #include "Instance.hpp"
 #include "../diagnostics/GPUAddressTracker.hpp"
 #include "Extensions.hpp"
+#include <VkError.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <atomic>
@@ -174,13 +175,11 @@ auto Instance::Create(
     const uint32_t                          appVersion,
     const std::span<const std::string_view> extensions,
     const ValidationMode                    validation
-) noexcept -> Instance // TODO(Evilpasture): Why the hell is this returning the Instance object that can be valid or invalid? We have std::expected goddamn it.
-                       // Just look at what the callee has to log a bunch of shit because you forced the return type to this.
-
-{
+) noexcept -> std::expected<Instance, Vk::Error> {
     Instance result;
     if (result._debugState == nullptr) {
-        return result;
+        // TODO(Evilpasture): Maybe I fucked up. Shouldn't have coupled telemetry to the creation.
+        return std::unexpected(Vk::Error {VK_ERROR_OUT_OF_HOST_MEMORY}); // What am I supposed to do?
     }
 
     const DiagnosticsSink sink = s_registered_sink.load(std::memory_order::acquire);
@@ -189,9 +188,8 @@ auto Instance::Create(
         result._deviceLostTarget = sink.deviceLost;
     }
 
-    if (volkInitialize() != VK_SUCCESS) {
-        ZHLN::LogError("[Vulkan] No Vulkan loader is available; volkInitialize() failed.");
-        return result;
+    if (auto res = volkInitialize(); res != VK_SUCCESS) {
+        return std::unexpected(Vk::Error {res});
     }
 
     const std::vector<VkExtensionProperties> available_extensions = EnumerateInstanceExtensions();
@@ -323,14 +321,13 @@ auto Instance::Create(
     };
 
 #if defined(__APPLE__)
-    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    VkInstance     handle  = VK_NULL_HANDLE;
-    const VkResult created = vkCreateInstance(&create_info, nullptr, &handle);
-    if (created != VK_SUCCESS) {
-        ZHLN::LogError("[Vulkan] vkCreateInstance failed: {}", static_cast<int32_t>(created));
-        return result;
+    VkInstance handle = VK_NULL_HANDLE;
+
+    if (const auto res = vkCreateInstance(&create_info, nullptr, &handle); res != VK_SUCCESS) {
+        return std::unexpected(Vk::Error {res});
     }
 
     volkLoadInstance(handle);
@@ -366,10 +363,14 @@ auto Instance::Create(
     if (!s_active.compare_exchange_strong(expected, &result, std::memory_order::release, std::memory_order::relaxed)) {
         ZHLN::LogError("[Vulkan] Only one active Vulkan instance is supported by the diagnostics bridge.");
         result.Destroy();
-        return result;
+        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED}); // This is why I fucking hate statics.
     }
 
     return result;
+}
+
+auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
+    return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode);
 }
 
 auto Instance::ValidationErrorCount() noexcept -> uint32_t {

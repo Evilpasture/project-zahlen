@@ -59,7 +59,7 @@ struct RegistryNode {
 // symbol on ELF, so the dynamic linker gives the executable and every library the
 // same object; PE has no equivalent merge and MinGW emits a fresh static per
 // image. An Error built inside libzahlen_engine.dll -- which is what
-// Context::Builder::BuildInstance() does, and what app/main.cpp:708 formats --
+// InstanceBuilder::Build() does, and what app/main.cpp:708 formats --
 // would then be read from the empty list in zahlen.exe and Message(), Category()
 // and Name() would answer "None" instead of the text the error was built with.
 // Declared here, defined once in the engine library (src/engine/Log.cpp), and
