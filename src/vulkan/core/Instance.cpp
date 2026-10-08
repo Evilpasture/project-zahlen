@@ -2,20 +2,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Instance.hpp"
-#include "Extensions.hpp"
 #include "../diagnostics/GPUAddressTracker.hpp"
+#include "Extensions.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
 
-std::atomic<Instance*>       Instance::_active {nullptr};
-std::atomic<DiagnosticsSink> Instance::_registeredSink {DiagnosticsSink {}};
+std::atomic<Instance*>       Instance::s_active {nullptr};
+std::atomic<DiagnosticsSink> Instance::s_registered_sink {DiagnosticsSink {}};
 
 namespace {
 
@@ -53,7 +55,7 @@ Instance::Instance() noexcept: _debugState(new (std::nothrow) DebugState {}) {
 }
 
 void Instance::UseDiagnostics(const DiagnosticsSink sink) noexcept {
-    _registeredSink.store(sink.Valid() ? sink : DiagnosticsSink {}, std::memory_order::release);
+    s_registered_sink.store(sink.Valid() ? sink : DiagnosticsSink {}, std::memory_order::release);
 }
 
 void Instance::RebindDebugState() noexcept {
@@ -77,7 +79,7 @@ void Instance::Destroy() noexcept {
     }
 
     Instance* expected = this;
-    _active.compare_exchange_strong(expected, nullptr, std::memory_order::release, std::memory_order::relaxed);
+    s_active.compare_exchange_strong(expected, nullptr, std::memory_order::release, std::memory_order::relaxed);
 }
 
 Instance::~Instance() noexcept {
@@ -85,17 +87,14 @@ Instance::~Instance() noexcept {
 }
 
 Instance::Instance(Instance&& other) noexcept:
-    _handle(std::exchange(other._handle, VK_NULL_HANDLE)),
-    _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
-    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE)),
-    _debugState(std::move(other._debugState)),
-    _validationErrors(other._validationErrors.load(std::memory_order::relaxed)),
-    _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
+    _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
+    _addressBindingMessenger(std::exchange(other._addressBindingMessenger, VK_NULL_HANDLE)), _debugState(std::move(other._debugState)),
+    _validationErrors(other._validationErrors.load(std::memory_order::relaxed)), _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
     _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
     _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
     RebindDebugState();
-    if (_active.load(std::memory_order::acquire) == &other) {
-        _active.store(this, std::memory_order::release);
+    if (s_active.load(std::memory_order::acquire) == &other) {
+        s_active.store(this, std::memory_order::release);
     }
     other._validationErrors.store(0, std::memory_order::relaxed);
     other._deviceLost.store(0, std::memory_order::relaxed);
@@ -113,12 +112,12 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
         _debugState              = std::move(other._debugState);
         _validationErrors        = other._validationErrors.load(std::memory_order::relaxed);
         _deviceLost              = other._deviceLost.load(std::memory_order::relaxed);
-        _validationTarget = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
-        _deviceLostTarget = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
+        _validationTarget        = other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget;
+        _deviceLostTarget        = other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget;
 
         RebindDebugState();
-        if (_active.load(std::memory_order::acquire) == &other) {
-            _active.store(this, std::memory_order::release);
+        if (s_active.load(std::memory_order::acquire) == &other) {
+            s_active.store(this, std::memory_order::release);
         }
         other._validationErrors.store(0, std::memory_order::relaxed);
         other._deviceLost.store(0, std::memory_order::relaxed);
@@ -130,17 +129,15 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
 
 auto VKAPI_CALL Instance::DebugCallback(
     const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-    const VkDebugUtilsMessageTypeFlagsEXT type,
-    const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
-    void* userData
+    const VkDebugUtilsMessageTypeFlagsEXT        type,
+    const VkDebugUtilsMessengerCallbackDataEXT*  callbackData,
+    void*                                        userData
 ) noexcept -> VkBool32 {
     if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT) != 0) {
         if (callbackData != nullptr) {
-            for (auto* node = static_cast<const VkBaseInStructure*>(callbackData->pNext); node != nullptr; node = node->pNext) {
+            for (const auto* node = static_cast<const VkBaseInStructure*>(callbackData->pNext); node != nullptr; node = node->pNext) {
                 if (node->sType == VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT) {
-                    GPUAddressTracker::Get().OnBindingEvent(
-                        *reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData
-                    );
+                    GPUAddressTracker::Get().OnBindingEvent(*reinterpret_cast<const VkDeviceAddressBindingCallbackDataEXT*>(node), callbackData);
                     break;
                 }
             }
@@ -153,16 +150,13 @@ auto VKAPI_CALL Instance::DebugCallback(
         state->owner->_validationTarget->fetch_add(1, std::memory_order::relaxed);
     }
 
-    const std::string_view message = callbackData != nullptr && callbackData->pMessage != nullptr
-        ? std::string_view(callbackData->pMessage)
-        : std::string_view("(no Vulkan diagnostic text)");
+    const std::string_view message = callbackData != nullptr && callbackData->pMessage != nullptr ? std::string_view(callbackData->pMessage) :
+                                                                                                    std::string_view("(no Vulkan diagnostic text)");
 
     if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
         ZHLN::LogError("[Vulkan] {}", message);
-        constexpr std::array<std::string_view, 4> kGpuBoundsMarkers = {
-            "out of bounds", "Out of bounds", "OOB", "bounds check failed"
-        };
-        if (ContainsAny(message, kGpuBoundsMarkers)) {
+        constexpr std::array<std::string_view, 4> k_gpu_bounds_markers = {"out of bounds", "Out of bounds", "OOB", "bounds check failed"};
+        if (ContainsAny(message, k_gpu_bounds_markers)) {
             ZHLN::LogError("[Vulkan] GPU-assisted validation detected an out-of-bounds shader access; aborting.");
             std::abort();
         }
@@ -176,17 +170,20 @@ auto VKAPI_CALL Instance::DebugCallback(
 }
 
 auto Instance::Create(
-    const std::string_view appName,
-    const uint32_t appVersion,
+    const std::string_view                  appName,
+    const uint32_t                          appVersion,
     const std::span<const std::string_view> extensions,
-    const ValidationMode validation
-) noexcept -> Instance {
+    const ValidationMode                    validation
+) noexcept -> Instance // TODO(Evilpasture): Why the hell is this returning the Instance object that can be valid or invalid? We have std::expected goddamn it.
+                       // Just look at what the callee has to log a bunch of shit because you forced the return type to this.
+
+{
     Instance result;
     if (result._debugState == nullptr) {
         return result;
     }
 
-    const DiagnosticsSink sink = _registeredSink.load(std::memory_order::acquire);
+    const DiagnosticsSink sink = s_registered_sink.load(std::memory_order::acquire);
     if (sink.Valid()) {
         result._validationTarget = sink.validation;
         result._deviceLostTarget = sink.deviceLost;
@@ -197,99 +194,108 @@ auto Instance::Create(
         return result;
     }
 
-    const std::vector<VkExtensionProperties> availableExtensions = EnumerateInstanceExtensions();
-    const std::vector<VkLayerProperties>     availableLayers     = EnumerateInstanceLayers();
+    const std::vector<VkExtensionProperties> available_extensions = EnumerateInstanceExtensions();
+    const std::vector<VkLayerProperties>     available_layers     = EnumerateInstanceLayers();
 
-    constexpr std::string_view kValidationLayer = "VK_LAYER_KHRONOS_validation";
-    bool enableValidation = validation != ValidationMode::Off;
-    bool gpuValidation    = validation == ValidationMode::GPU;
-    if (enableValidation && !HasLayer(availableLayers, kValidationLayer)) {
+    constexpr std::string_view k_validation_layer = "VK_LAYER_KHRONOS_validation";
+    bool                       enable_validation  = validation != ValidationMode::Off;
+    bool                       gpu_validation     = validation == ValidationMode::GPU;
+    if (enable_validation && !HasLayer(available_layers, k_validation_layer)) {
         ZHLN::LogWarning(
             "[Vulkan] Validation layer {} is not available; continuing without validation. Install the Vulkan SDK or configure VK_LAYER_PATH to enable it.",
-            kValidationLayer
+            k_validation_layer
         );
-        enableValidation = false;
-        gpuValidation    = false;
+        enable_validation = false;
+        gpu_validation    = false;
     }
 
-    std::vector<std::string> enabledExtensionNames;
-    enabledExtensionNames.reserve(extensions.size() + 3);
-    const auto addIfSupported = [&](const std::string_view name, const std::string_view messagePrefix) {
-        if (!HasExtension(availableExtensions, name)) {
+    std::vector<std::string> enabled_extension_names;
+    enabled_extension_names.reserve(extensions.size() + 3);
+    const auto add_if_supported = [&](const std::string_view name, const std::string_view messagePrefix) {
+        if (!HasExtension(available_extensions, name)) {
             ZHLN::LogWarning("{}{}", messagePrefix, name);
             return false;
         }
-        if (!std::ranges::contains(enabledExtensionNames, name)) {
-            enabledExtensionNames.emplace_back(name);
+        if (!std::ranges::contains(enabled_extension_names, name)) {
+            enabled_extension_names.emplace_back(name);
         }
         return true;
     };
 
     for (const std::string_view extension: extensions) {
-        addIfSupported(extension, "[Vulkan] Skipping unsupported instance extension: ");
+        add_if_supported(extension, "[Vulkan] Skipping unsupported instance extension: ");
     }
 
-    const bool debugUtilsEnabled = validation != ValidationMode::Off &&
-        addIfSupported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "[Vulkan] Debug utils is unavailable: ");
-    const bool validationFeaturesEnabled = enableValidation && gpuValidation &&
-        addIfSupported(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, "[Vulkan] GPU-assisted validation is unavailable: ");
-    if (gpuValidation && !validationFeaturesEnabled) {
-        gpuValidation = false;
+    const bool debug_utils_enabled         = validation != ValidationMode::Off &&
+                                             add_if_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "[Vulkan] Debug utils is unavailable: ");
+    const bool validation_features_enabled = enable_validation && gpu_validation &&
+                                             add_if_supported(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, "[Vulkan] GPU-assisted validation is unavailable: ");
+    if (gpu_validation && !validation_features_enabled) {
+        gpu_validation = false;
     }
-    const bool layerSettingsEnabled = enableValidation && gpuValidation &&
-        addIfSupported(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME, "[Vulkan] Layer settings extension is unavailable: ");
+    const bool layer_settings_enabled = enable_validation && gpu_validation &&
+                                        add_if_supported(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME, "[Vulkan] Layer settings extension is unavailable: ");
 
-    std::vector<const char*> enabledExtensions;
-    enabledExtensions.reserve(enabledExtensionNames.size());
-    for (const std::string& name: enabledExtensionNames) {
-        enabledExtensions.push_back(name.c_str());
+    std::vector<const char*> enabled_extensions;
+    enabled_extensions.reserve(enabled_extension_names.size());
+    for (const std::string& name: enabled_extension_names) {
+        enabled_extensions.push_back(name.c_str());
     }
 
-    std::string appNameStorage(appName);
-    const VkApplicationInfo applicationInfo {
+    std::string             app_name_storage(appName);
+    const VkApplicationInfo application_info {
         .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName   = appNameStorage.c_str(),
+        .pApplicationName   = app_name_storage.c_str(),
         .applicationVersion = appVersion,
         .apiVersion         = VK_API_VERSION_1_3,
     };
 
-    std::array<VkValidationFeatureEnableEXT, 2> enabledValidationFeatures {};
-    uint32_t enabledValidationFeatureCount = 0;
-    if (gpuValidation && validationFeaturesEnabled) {
-        enabledValidationFeatures[enabledValidationFeatureCount++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT;
-        enabledValidationFeatures[enabledValidationFeatureCount++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT;
+    std::array<VkValidationFeatureEnableEXT, 2> enabled_validation_features {};
+    uint32_t                                    enabled_validation_feature_count = 0;
+    if (gpu_validation && validation_features_enabled) {
+        enabled_validation_features[enabled_validation_feature_count++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT;
+        enabled_validation_features[enabled_validation_feature_count++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT;
     }
 
-    VkValidationFeaturesEXT validationFeatures {
-        .sType                         = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
-        .pNext                         = nullptr,
-        .enabledValidationFeatureCount = enabledValidationFeatureCount,
-        .pEnabledValidationFeatures    = enabledValidationFeatureCount != 0 ? enabledValidationFeatures.data() : nullptr,
+    VkValidationFeaturesEXT validation_features {
+        .sType                          = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+        .pNext                          = nullptr,
+        .enabledValidationFeatureCount  = enabled_validation_feature_count,
+        .pEnabledValidationFeatures     = enabled_validation_feature_count != 0 ? enabled_validation_features.data() : nullptr,
         .disabledValidationFeatureCount = 0,
         .pDisabledValidationFeatures    = nullptr,
     };
 
-    constexpr const char* kValidationLayerName = "VK_LAYER_KHRONOS_validation";
-    const VkBool32 forceRobustness = VK_TRUE;
-    const VkBool32 dumpDescriptors = VK_TRUE;
-    const VkBool32 dumpToStdout    = VK_TRUE;
-    const std::array<VkLayerSettingEXT, 3> layerSettings = {{
-        {.pLayerName = kValidationLayerName, .pSettingName = "gpuav_force_on_robustness", .type = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount = 1, .pValues = &forceRobustness},
-        {.pLayerName = kValidationLayerName, .pSettingName = "gpu_dump_descriptors", .type = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount = 1, .pValues = &dumpDescriptors},
-        {.pLayerName = kValidationLayerName, .pSettingName = "gpu_dump_to_stdout", .type = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount = 1, .pValues = &dumpToStdout},
+    constexpr const char*                  k_validation_layer_name = "VK_LAYER_KHRONOS_validation";
+    const VkBool32                         force_robustness        = VK_TRUE;
+    const VkBool32                         dump_descriptors        = VK_TRUE;
+    const VkBool32                         dump_to_stdout          = VK_TRUE;
+    const std::array<VkLayerSettingEXT, 3> layer_settings          = {{
+        {.pLayerName   = k_validation_layer_name,
+         .pSettingName = "gpuav_force_on_robustness",
+         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+         .valueCount   = 1,
+         .pValues      = &force_robustness},
+        {.pLayerName   = k_validation_layer_name,
+         .pSettingName = "gpu_dump_descriptors",
+         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+         .valueCount   = 1,
+         .pValues      = &dump_descriptors},
+        {.pLayerName   = k_validation_layer_name,
+         .pSettingName = "gpu_dump_to_stdout",
+         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+         .valueCount   = 1,
+         .pValues      = &dump_to_stdout},
     }};
 
-    VkLayerSettingsCreateInfoEXT layerSettingsInfo {
+    VkLayerSettingsCreateInfoEXT layer_settings_info {
         .sType        = VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT,
-        .pNext        = gpuValidation && validationFeaturesEnabled ? &validationFeatures : nullptr,
-        .settingCount = layerSettingsEnabled ? static_cast<uint32_t>(layerSettings.size()) : 0U,
-        .pSettings    = layerSettingsEnabled ? layerSettings.data() : nullptr,
+        .pNext        = gpu_validation && validation_features_enabled ? &validation_features : nullptr,
+        .settingCount = layer_settings_enabled ? static_cast<uint32_t>(layer_settings.size()) : 0U,
+        .pSettings    = layer_settings_enabled ? layer_settings.data() : nullptr,
     };
 
-    VkDebugUtilsMessengerCreateInfoEXT debugInfo {
+    VkDebugUtilsMessengerCreateInfoEXT debug_info {
         .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
         .pNext           = nullptr,
         .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
@@ -299,49 +305,49 @@ auto Instance::Create(
         .pUserData       = result._debugState.get(),
     };
 
-    const void* validationChain = nullptr;
-    if (gpuValidation && validationFeaturesEnabled) {
-        validationChain = layerSettingsEnabled ? static_cast<const void*>(&layerSettingsInfo) : static_cast<const void*>(&validationFeatures);
+    const void* validation_chain = nullptr;
+    if (gpu_validation && validation_features_enabled) {
+        validation_chain = layer_settings_enabled ? static_cast<const void*>(&layer_settings_info) : static_cast<const void*>(&validation_features);
     }
-    debugInfo.pNext = enableValidation ? validationChain : nullptr;
+    debug_info.pNext = enable_validation ? validation_chain : nullptr;
 
-    VkInstanceCreateInfo createInfo {
+    VkInstanceCreateInfo create_info {
         .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext                   = validation != ValidationMode::Off && debugUtilsEnabled ? &debugInfo : nullptr,
+        .pNext                   = validation != ValidationMode::Off && debug_utils_enabled ? &debug_info : nullptr,
         .flags                   = 0,
-        .pApplicationInfo        = &applicationInfo,
-        .enabledLayerCount       = enableValidation ? 1U : 0U,
-        .ppEnabledLayerNames     = enableValidation ? &kValidationLayerName : nullptr,
-        .enabledExtensionCount   = static_cast<uint32_t>(enabledExtensions.size()),
-        .ppEnabledExtensionNames = enabledExtensions.empty() ? nullptr : enabledExtensions.data(),
+        .pApplicationInfo        = &application_info,
+        .enabledLayerCount       = enable_validation ? 1U : 0U,
+        .ppEnabledLayerNames     = enable_validation ? &k_validation_layer_name : nullptr,
+        .enabledExtensionCount   = static_cast<uint32_t>(enabled_extensions.size()),
+        .ppEnabledExtensionNames = enabled_extensions.empty() ? nullptr : enabled_extensions.data(),
     };
 
 #if defined(__APPLE__)
     createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    VkInstance handle = VK_NULL_HANDLE;
-    const VkResult created = vkCreateInstance(&createInfo, nullptr, &handle);
+    VkInstance     handle  = VK_NULL_HANDLE;
+    const VkResult created = vkCreateInstance(&create_info, nullptr, &handle);
     if (created != VK_SUCCESS) {
         ZHLN::LogError("[Vulkan] vkCreateInstance failed: {}", static_cast<int32_t>(created));
         return result;
     }
 
     volkLoadInstance(handle);
-    result._handle = handle;
-    result._debugState->debugUtilsEnabled = debugUtilsEnabled;
+    result._handle                        = handle;
+    result._debugState->debugUtilsEnabled = debug_utils_enabled;
 
-    if (validation != ValidationMode::Off && debugUtilsEnabled && vkCreateDebugUtilsMessengerEXT != nullptr) {
-        VkDebugUtilsMessengerCreateInfoEXT messengerInfo = debugInfo;
-        messengerInfo.pNext = nullptr;
-        const VkResult messengerCreated = vkCreateDebugUtilsMessengerEXT(handle, &messengerInfo, nullptr, &result._messenger);
-        if (messengerCreated != VK_SUCCESS) {
+    if (validation != ValidationMode::Off && debug_utils_enabled && vkCreateDebugUtilsMessengerEXT != nullptr) {
+        VkDebugUtilsMessengerCreateInfoEXT messenger_info = debug_info;
+        messenger_info.pNext                              = nullptr;
+        const VkResult messenger_created                  = vkCreateDebugUtilsMessengerEXT(handle, &messenger_info, nullptr, &result._messenger);
+        if (messenger_created != VK_SUCCESS) {
             result._messenger = VK_NULL_HANDLE;
-            ZHLN::LogWarning("[Vulkan] Could not create validation debug messenger: {}", static_cast<int32_t>(messengerCreated));
+            ZHLN::LogWarning("[Vulkan] Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
         }
 
         if (vkCreateDebugUtilsMessengerEXT != nullptr) {
-            const VkDebugUtilsMessengerCreateInfoEXT addressBindingInfo {
+            const VkDebugUtilsMessengerCreateInfoEXT address_binding_info {
                 .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
                 .pNext           = nullptr,
                 .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT,
@@ -349,17 +355,15 @@ auto Instance::Create(
                 .pfnUserCallback = &Instance::DebugCallback,
                 .pUserData       = result._debugState.get(),
             };
-            const VkResult addressMessengerCreated = vkCreateDebugUtilsMessengerEXT(
-                handle, &addressBindingInfo, nullptr, &result._addressBindingMessenger
-            );
-            if (addressMessengerCreated != VK_SUCCESS) {
+            const VkResult address_messenger_created = vkCreateDebugUtilsMessengerEXT(handle, &address_binding_info, nullptr, &result._addressBindingMessenger);
+            if (address_messenger_created != VK_SUCCESS) {
                 result._addressBindingMessenger = VK_NULL_HANDLE;
             }
         }
     }
 
     Instance* expected = nullptr;
-    if (!_active.compare_exchange_strong(expected, &result, std::memory_order::release, std::memory_order::relaxed)) {
+    if (!s_active.compare_exchange_strong(expected, &result, std::memory_order::release, std::memory_order::relaxed)) {
         ZHLN::LogError("[Vulkan] Only one active Vulkan instance is supported by the diagnostics bridge.");
         result.Destroy();
         return result;
@@ -369,17 +373,17 @@ auto Instance::Create(
 }
 
 auto Instance::ValidationErrorCount() noexcept -> uint32_t {
-    const Instance* const active = _active.load(std::memory_order::acquire);
+    const Instance* const active = s_active.load(std::memory_order::acquire);
     return active != nullptr ? active->_validationTarget->load(std::memory_order::relaxed) : 0;
 }
 
 auto Instance::DeviceLostCount() noexcept -> uint32_t {
-    const Instance* const active = _active.load(std::memory_order::acquire);
+    const Instance* const active = s_active.load(std::memory_order::acquire);
     return active != nullptr ? active->_deviceLostTarget->load(std::memory_order::relaxed) : 0;
 }
 
 void Instance::IncrementNumericalDeviceLoss() noexcept {
-    if (Instance* const active = _active.load(std::memory_order::acquire); active != nullptr) {
+    if (Instance* const active = s_active.load(std::memory_order::acquire); active != nullptr) {
         active->_deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
     }
 }

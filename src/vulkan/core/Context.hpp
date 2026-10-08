@@ -7,29 +7,28 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "Device.hpp"
+#include "Features.hpp"
+#include "Instance.hpp"
+#include "PhysicalDevice.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <string_view>
 #include <vector>
 
-#include "Device.hpp"
-#include "Features.hpp"
-#include "Instance.hpp"
-#include "PhysicalDevice.hpp"
-
 namespace ZHLN::Vk {
 
 enum class ContextError : uint8_t {
-    InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed">{}) = 1,
-    NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found">{}),
+    InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed"> {}) = 1,
+    NoSuitableDeviceFound  ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found"> {}),
 };
 
 struct DevicePresentSupport {
-    bool fifoLatestReady = false;
-    bool presentTiming = false;
+    bool fifoLatestReady       = false;
+    bool presentTiming         = false;
     bool presentAtAbsoluteTime = false;
-    bool presentId2 = false;
+    bool presentId2            = false;
 };
 
 class Context {
@@ -120,10 +119,10 @@ class Context {
     }
 
   private:
-    Vk::Instance         _instanceObject {};
+    Vk::Instance         _instanceObject;
     VkSurfaceKHR         _surface = VK_NULL_HANDLE;
     PhysicalDeviceInfo   _physical {};
-    LogicalDevice        _device {};
+    LogicalDevice        _device;
     DevicePresentSupport _present {};
     EnabledFeatureSet    _enabledFeatures;
     bool                 _addressBindingReportEnabled = false;
@@ -193,19 +192,19 @@ class Context::Builder {
     [[nodiscard]] auto Build() noexcept -> std::expected<Context, ErrorCode>;
 
   private:
-    std::string_view      _appName = "ZHLN Engine";
-    uint32_t              _appVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    Vk::ValidationMode    _validationMode = Vk::ValidationMode::On;
-    Vk::Instance          _instanceObject {};
-    VkInstance            _instanceView = VK_NULL_HANDLE;
-    VkSurfaceKHR          _surface = VK_NULL_HANDLE;
-    PhysicalDeviceInfo    _physical {};
-    std::vector<std::string_view> _instanceExtensions;
-    std::vector<const char*>      _deviceExtensions;
+    std::string_view                 _appName        = "ZHLN Engine";
+    uint32_t                         _appVersion     = VK_MAKE_API_VERSION(0, 1, 0, 0);
+    Vk::ValidationMode               _validationMode = Vk::ValidationMode::On;
+    Vk::Instance                     _instanceObject;
+    VkInstance                       _instanceView = VK_NULL_HANDLE;
+    VkSurfaceKHR                     _surface      = VK_NULL_HANDLE;
+    PhysicalDeviceInfo               _physical {};
+    std::vector<std::string_view>    _instanceExtensions;
+    std::vector<const char*>         _deviceExtensions;
     const VkPhysicalDeviceFeatures2* _features = nullptr;
-    EnabledFeatureSet _enabledFeatures;
-    DeviceScoreFunction _scoreFn = nullptr;
-    const void*         _scoreUserdata = nullptr;
+    EnabledFeatureSet                _enabledFeatures;
+    DeviceScoreFunction              _scoreFn       = nullptr;
+    const void*                      _scoreUserdata = nullptr;
 };
 
 } // namespace ZHLN::Vk

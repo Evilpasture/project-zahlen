@@ -10,7 +10,6 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <new>
 #include <span>
 #include <string_view>
 
@@ -24,7 +23,7 @@ enum class ValidationMode : uint8_t {
 
 struct DiagnosticsSink {
     std::atomic<uint32_t>* validation = nullptr;
-    std::atomic<uint32_t>* deviceLost  = nullptr;
+    std::atomic<uint32_t>* deviceLost = nullptr;
 
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
         return validation != nullptr && deviceLost != nullptr;
@@ -42,12 +41,8 @@ class Instance {
     Instance(Instance&& other) noexcept;
     auto operator=(Instance&& other) noexcept -> Instance&;
 
-    [[nodiscard]] static auto Create(
-        std::string_view appName,
-        uint32_t appVersion,
-        std::span<const std::string_view> extensions,
-        ValidationMode validation
-    ) noexcept -> Instance;
+    [[nodiscard]] static auto
+        Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ValidationMode validation) noexcept -> Instance;
 
     static void UseDiagnostics(DiagnosticsSink sink) noexcept;
 
@@ -63,31 +58,33 @@ class Instance {
 
     [[nodiscard]] static auto ValidationErrorCount() noexcept -> uint32_t;
     [[nodiscard]] static auto DeviceLostCount() noexcept -> uint32_t;
+
+    // Be fucking warned, this does nothing. The only purpose here is to add one. That's it. It won't magically rebuild the device for you.
     static void IncrementNumericalDeviceLoss() noexcept;
 
     [[nodiscard]] static auto Active() noexcept -> Instance* {
-        return _active.load(std::memory_order::acquire);
+        return s_active.load(std::memory_order::acquire);
     }
 
   private:
     struct DebugState {
-        Instance* owner = nullptr;
+        Instance* owner             = nullptr; // TODO(Evilpasture): Owner? Then why is this a raw pointer? Let's make this clearer in ownership.
         bool      debugUtilsEnabled = false;
     };
 
     static auto VKAPI_CALL DebugCallback(
-        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-        VkDebugUtilsMessageTypeFlagsEXT type,
+        VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
+        VkDebugUtilsMessageTypeFlagsEXT             type,
         const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
-        void* userData
+        void*                                       userData
     ) noexcept -> VkBool32;
 
     void Destroy() noexcept;
     void RebindDebugState() noexcept;
 
-    VkInstance               _handle                  = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT _messenger               = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT _addressBindingMessenger = VK_NULL_HANDLE;
+    VkInstance                  _handle                  = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT    _messenger               = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT    _addressBindingMessenger = VK_NULL_HANDLE;
     std::unique_ptr<DebugState> _debugState;
 
     std::atomic<uint32_t>  _validationErrors {0};
@@ -95,8 +92,8 @@ class Instance {
     std::atomic<uint32_t>* _validationTarget = &_validationErrors;
     std::atomic<uint32_t>* _deviceLostTarget = &_deviceLost;
 
-    static std::atomic<Instance*>       _active;
-    static std::atomic<DiagnosticsSink> _registeredSink;
+    static std::atomic<Instance*>       s_active;
+    static std::atomic<DiagnosticsSink> s_registered_sink;
 };
 
 } // namespace ZHLN::Vk
