@@ -5,7 +5,6 @@
 #include "DrawCommands.hpp"
 #include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
-#include "FrameError.hpp"
 #include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
 #include "GpuAbi.hpp"
@@ -901,7 +900,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
-    return Vk::ToEngineExpected(Vk::Image::Create(allocator, imageConfig)).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
+    return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
         defer _([&] { allocator.DestroyImage(image); });
         auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
         if (!viewRes) {

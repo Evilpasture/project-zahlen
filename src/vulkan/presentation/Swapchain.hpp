@@ -66,7 +66,7 @@ class Swapchain {
         bool                      vsync,
         VkPresentModeKHR          requestedPresentMode,
         bool                      enablePresentTiming
-    ) noexcept -> std::expected<void, Vk::Error>;
+    ) noexcept -> std::expected<void, ErrorCode>;
 
   private:
     void Destroy() noexcept;

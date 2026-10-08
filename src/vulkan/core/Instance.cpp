@@ -176,13 +176,13 @@ auto Instance::Create(
     const uint32_t                          appVersion,
     const std::span<const std::string_view> extensions,
     const ValidationMode                    validation
-) noexcept -> std::expected<Instance, Vk::Error> {
+) noexcept -> std::expected<Instance, ErrorCode> {
     Instance result;
     // Telemetry is set up here, decoupled from construction: the constructor
     // cannot report failure, Create can.
     result._debugState.reset(new (std::nothrow) DebugState {});
     if (result._debugState == nullptr) {
-        return std::unexpected(Vk::Error {VK_ERROR_OUT_OF_HOST_MEMORY});
+        return std::unexpected(ToError(VK_ERROR_OUT_OF_HOST_MEMORY));
     }
     result.RebindDebugState();
 
@@ -193,7 +193,7 @@ auto Instance::Create(
     }
 
     if (auto res = volkInitialize(); res != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {res});
+        return std::unexpected(ToError(res));
     }
 
     const std::vector<VkExtensionProperties> available_extensions = EnumerateInstanceExtensions();
@@ -331,7 +331,7 @@ auto Instance::Create(
     VkInstance handle = VK_NULL_HANDLE;
 
     if (const auto res = vkCreateInstance(&create_info, nullptr, &handle); res != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {res});
+        return std::unexpected(ToError(res));
     }
 
     volkLoadInstance(handle);
@@ -367,13 +367,13 @@ auto Instance::Create(
     if (!s_active.compare_exchange_strong(expected, &result, std::memory_order::release, std::memory_order::relaxed)) {
         ZHLN::LogError("[Vulkan] Only one active Vulkan instance is supported by the diagnostics bridge.");
         result.Destroy();
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED}); // This is why I fucking hate statics.
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED)); // This is why I fucking hate statics.
     }
 
     return result;
 }
 
-auto InstanceBuilder::Build() noexcept -> std::expected<Instance, Vk::Error> {
+auto InstanceBuilder::Build() noexcept -> std::expected<Instance, ErrorCode> {
     return Vk::Instance::Create(_appName, _appVersion, _extensions, _validationMode);
 }
 

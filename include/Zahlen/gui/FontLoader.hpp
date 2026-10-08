@@ -6,7 +6,7 @@
 
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/gui/Font.hpp>
 #include <cstddef>
 #include <cstdint>

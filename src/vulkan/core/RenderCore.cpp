@@ -5,10 +5,10 @@
 
 namespace ZHLN::Vk {
 
-std::expected<void, Vk::Error> WaitIdle(const VkDevice device) noexcept {
+std::expected<void, ErrorCode> WaitIdle(const VkDevice device) noexcept {
     const VkResult result = vkDeviceWaitIdle(device);
     if (result != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {result});
+        return std::unexpected(ToError(result));
     }
     return {};
 }

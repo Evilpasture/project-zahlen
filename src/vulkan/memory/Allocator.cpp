@@ -106,7 +106,7 @@ auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
     return *this;
 }
 
-std::expected<void, Vk::Error> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
+std::expected<void, ErrorCode> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
     const VmaVulkanFunctions vfuncs = {
         .vkGetInstanceProcAddr                   = vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr                     = vkGetDeviceProcAddr,
@@ -161,7 +161,7 @@ std::expected<void, Vk::Error> Allocator::Init(VkInstance instance, VkPhysicalDe
     return {};
 }
 
-std::expected<void, Vk::Error> Allocator::Init(const Context& ctx) noexcept {
+std::expected<void, ErrorCode> Allocator::Init(const Context& ctx) noexcept {
     return Init(ctx.Instance().Handle(), ctx.Physical(), ctx.Device());
 }
 
@@ -228,12 +228,12 @@ auto Image::Release() noexcept -> std::pair<VkImage, VmaAllocation> {
     return {std::exchange(_handle, VK_NULL_HANDLE), std::exchange(_allocation, nullptr)};
 }
 
-auto Buffer::Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Vk::Error> {
+auto Buffer::Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, 0);
 }
 
 auto Buffer::Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-    -> std::expected<Buffer, Vk::Error> {
+    -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, minAlignment, VK_SHARING_MODE_EXCLUSIVE, {});
 }
 
@@ -245,7 +245,7 @@ auto Buffer::Create(
     VkDeviceSize              minAlignment,
     VkSharingMode             sharingMode,
     std::span<const uint32_t> queueFamilyIndices
-) noexcept -> std::expected<Buffer, Vk::Error> {
+) noexcept -> std::expected<Buffer, ErrorCode> {
     VmaAllocator      allocator = allocatorRef.Handle();
     VkBuffer          buffer    = VK_NULL_HANDLE;
     VmaAllocation     alloc     = nullptr;
@@ -358,7 +358,7 @@ auto Buffer::MappedRegion::operator=(MappedRegion&& other) noexcept -> MappedReg
     return *this;
 }
 
-auto Buffer::Map(Allocator& allocatorRef) noexcept -> std::expected<MappedRegion, Vk::Error> {
+auto Buffer::Map(Allocator& allocatorRef) noexcept -> std::expected<MappedRegion, ErrorCode> {
     if (!Valid()) {
         return std::unexpected(BufferMapError::NotAllocated);
     }
@@ -393,7 +393,7 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
     return staging;
 }
 
-auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept -> std::expected<Image, Vk::Error> {
+auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode> {
     using enum ImageCreationError;
     if (!allocatorRef.Valid() || config.format == VK_FORMAT_UNDEFINED || config.extent.width == 0 || config.extent.height == 0 ||
         config.extent.depth == 0 || config.mipLevels == 0 || config.arrayLayers == 0 || config.usage == ImageUsage::None) {
@@ -477,7 +477,7 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
     return result;
 }
 
-auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, Vk::Error> {
+auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode> {
     using enum ImageViewCreationError;
     if (device == VK_NULL_HANDLE || info.sType != VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO || info.image == VK_NULL_HANDLE ||
         info.format == VK_FORMAT_UNDEFINED || info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_NONE || info.subresourceRange.levelCount == 0 ||
@@ -497,7 +497,7 @@ auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> st
     return ImageView {device, view, info};
 }
 
-auto Image::CreateView(VkDevice device, const ImageViewConfig& config) const -> std::expected<ImageView, Vk::Error> {
+auto Image::CreateView(VkDevice device, const ImageViewConfig& config) const -> std::expected<ImageView, ErrorCode> {
     using enum ImageViewCreationError;
     const ImageConfig& image = _config;
     if (!Valid() || device == VK_NULL_HANDLE) {
@@ -622,7 +622,7 @@ auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> Staging
 }
 
 auto StagingRingBuffer::Init(Allocator& allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
-    -> std::expected<void, Vk::Error> {
+    -> std::expected<void, ErrorCode> {
     Cleanup();
     _allocator   = &allocator;
     _device      = device;

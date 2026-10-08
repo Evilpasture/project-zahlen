@@ -821,7 +821,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto  blasResult =
         Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel);
     if (!blasResult) {
-        return std::unexpected(Vk::ToFrameError(blasResult.error()));
+        return std::unexpected(blasResult.error());
     }
     Vk::AccelerationStructure blas = std::move(*blasResult);
 

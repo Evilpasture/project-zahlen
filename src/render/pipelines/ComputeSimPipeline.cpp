@@ -114,7 +114,7 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     );
 
     if (!submitted) [[unlikely]] {
-        if (submitted.error().Is(VK_ERROR_DEVICE_LOST)) {
+        if (submitted.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         } else {
             ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());

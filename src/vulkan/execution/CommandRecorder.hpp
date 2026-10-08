@@ -7,7 +7,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "../VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -63,13 +62,13 @@ class CommandRecorder {
         VkCommandBuffer cmd,
         VkCommandBufferUsageFlags flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         const VkCommandBufferInheritanceInfo* inheritance = nullptr
-    ) noexcept -> std::expected<CommandRecorder, Vk::Error>;
+    ) noexcept -> std::expected<CommandRecorder, ErrorCode>;
 
     [[nodiscard]] auto Handle() const noexcept -> VkCommandBuffer { return _cmd; }
     [[nodiscard]] auto IsRecording() const noexcept -> bool { return _cmd != VK_NULL_HANDLE; }
     explicit operator bool() const noexcept { return IsRecording(); }
 
-    [[nodiscard]] auto End() && noexcept -> std::expected<ExecutableCommands, Vk::Error>;
+    [[nodiscard]] auto End() && noexcept -> std::expected<ExecutableCommands, ErrorCode>;
     void Abort() && noexcept;
 
   private:

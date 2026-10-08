@@ -45,7 +45,7 @@ struct TlasGeometryDesc {
     VkBuffer buffer,
     VkDeviceSize size,
     AccelerationStructureType type
-) noexcept -> std::expected<AccelerationStructure, Vk::Error>;
+) noexcept -> std::expected<AccelerationStructure, ErrorCode>;
 [[nodiscard]] auto GetAccelerationStructureAddress(VkDevice device, VkAccelerationStructureKHR accelerationStructure) noexcept
     -> VkDeviceAddress;
 

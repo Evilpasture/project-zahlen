@@ -7,7 +7,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "../VkError.hpp"
 #include "PipelineBuilder.hpp"
 #include <array>
 #include <cstddef>
@@ -298,7 +297,7 @@ struct GraphicsShaderModules<Vertex, Fragment> {
     }
 
     [[nodiscard("Shader creation may fail; verify validity before pipeline creation")]]
-    static auto CreateStages() -> std::expected<ShaderStagesView, Vk::Error> {
+    static auto CreateStages() -> std::expected<ShaderStagesView, ErrorCode> {
         return ShaderStagesView::Create<Vertex, Fragment>();
     }
 };
@@ -337,7 +336,7 @@ struct GraphicsShaderModules<Task, Mesh, Fragment> {
     }
 
     [[nodiscard("Shader creation may fail; verify validity before pipeline creation")]]
-    static auto CreateStages() -> std::expected<ShaderStagesView, Vk::Error> {
+    static auto CreateStages() -> std::expected<ShaderStagesView, ErrorCode> {
         return ShaderStagesView::CreateMesh<Task, Mesh, Fragment>();
     }
 };
@@ -346,7 +345,7 @@ template <typename ShaderModule>
 concept GraphicsShaderModule = requires {
     { ShaderModule::is_mesh_pipeline } -> std::convertible_to<bool>;
     { ShaderModule::template PushLayoutMatches<void>() } -> std::same_as<bool>;
-    { ShaderModule::CreateStages() } -> std::same_as<std::expected<ShaderStagesView, Vk::Error>>;
+    { ShaderModule::CreateStages() } -> std::same_as<std::expected<ShaderStagesView, ErrorCode>>;
 };
 
 template <ShaderProgram ShaderModule, typename PushConstants = void>
@@ -371,12 +370,12 @@ struct ComputePipeline {
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(const Context& context, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-        -> std::expected<Pipeline, Vk::Error> {
+        -> std::expected<Pipeline, ErrorCode> {
         return Create(context, CreateShaderDesc<ShaderModule>(), bindings, cache);
     }
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, Vk::Error> {
+    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, ErrorCode> {
         return Create(context, PipelineCreateBindings {}, cache);
     }
 
@@ -386,7 +385,7 @@ struct ComputePipeline {
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto
         Create(const Context& context, const ShaderDesc& shader, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-        -> std::expected<Pipeline, Vk::Error> {
+        -> std::expected<Pipeline, ErrorCode> {
         if (context.Device() == VK_NULL_HANDLE) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
@@ -427,7 +426,7 @@ struct GraphicsPipeline {
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(const Context& context, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-        -> std::expected<Pipeline, Vk::Error> {
+        -> std::expected<Pipeline, ErrorCode> {
         auto stages = ShaderModule::CreateStages();
         if (!stages) {
             return std::unexpected(stages.error());
@@ -439,7 +438,7 @@ struct GraphicsPipeline {
     // context; otherwise callers with device-owned layouts/heaps use the overload
     // above.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, Vk::Error> {
+    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, ErrorCode> {
         if constexpr (requires {
                           { PassContract::PipelineBindings(context) } -> std::same_as<PipelineCreateBindings>;
                       }) {
@@ -454,7 +453,7 @@ struct GraphicsPipeline {
     // translation-unit reflection assertions.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(const Context& context, ShaderStagesView stages, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-        -> std::expected<Pipeline, Vk::Error> {
+        -> std::expected<Pipeline, ErrorCode> {
         if (context.Device() == VK_NULL_HANDLE) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }

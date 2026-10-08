@@ -27,7 +27,7 @@ enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
 };
 
-[[nodiscard]] auto WaitIdle(VkDevice device) noexcept -> std::expected<void, Vk::Error>;
+[[nodiscard]] auto WaitIdle(VkDevice device) noexcept -> std::expected<void, ErrorCode>;
 
 struct ScopedScissor {
     VkCommandBuffer commandRect;

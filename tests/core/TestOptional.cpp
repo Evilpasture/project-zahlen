@@ -5,7 +5,7 @@
 // suite/expectation API as the other core tests. Helpers and fixtures stay local.
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <concepts>
 #include <cstdint>
 #include <expected>

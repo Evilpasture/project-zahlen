@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GeometryManager.hpp"
-#include "FrameError.hpp"
 #include <Zahlen/Vertex.hpp>
 #include <cstring>
 #include <format>
@@ -80,11 +79,9 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
 
     const auto rtBit = _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
 
-    return Vk::ToEngineExpected(
-               Vk::Buffer::Create(
-                   _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
-                   sharingMode, {families.data(), familyCount}
-               )
+    return Vk::Buffer::Create(
+               _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
+               {families.data(), familyCount}
     )
         .and_then([this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
             defer _([&] { _allocator.DestroyBuffer(gpu_buf); });

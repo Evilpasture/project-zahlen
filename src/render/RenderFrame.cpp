@@ -363,12 +363,12 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // if the previous frame acquired no image and never submitted graphics.
     for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
         if (const VkResult waited = primarySync.Wait(frameSlot); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToFrameError(waited));
+            return std::unexpected(Vk::ToError(waited));
         }
         // Compute can be submitted without a graphics frame (minimized or
         // skipped acquisition), so its timeline must be waited independently.
         if (const VkResult waited = primarySync.WaitCompute(frameSlot); waited != VK_SUCCESS) {
-            return std::unexpected(Vk::ToFrameError(waited));
+            return std::unexpected(Vk::ToError(waited));
         }
     }
     for (auto& dest: _impl->destinations.Windows()) {
@@ -378,7 +378,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         auto& sess = dest.Presenter();
         for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(sess.frameIndex), sess.frameIndex}) {
             if (const VkResult waited = sess.sync.Wait(frameSlot); waited != VK_SUCCESS) {
-                return std::unexpected(Vk::ToFrameError(waited));
+                return std::unexpected(Vk::ToError(waited));
             }
         }
     }

@@ -5,7 +5,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Render/EnvironmentImage.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

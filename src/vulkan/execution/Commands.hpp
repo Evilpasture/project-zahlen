@@ -113,7 +113,7 @@ class CommandRing {
         return *this;
     }
 
-    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Vk::Error> {
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(_device, queueFamily);
@@ -160,11 +160,11 @@ class CommandRing {
         uint32_t             index;
     };
 
-    [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, Vk::Error> {
+    [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
         const uint32_t slotIndex = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
         if (_pending[slotIndex]) {
             if (const VkResult waited = vkWaitForFences(_device, 1, &_fences[slotIndex], VK_TRUE, UINT64_MAX); waited != VK_SUCCESS) {
-                return std::unexpected(Vk::Error {waited});
+                return std::unexpected(ToError(waited));
             }
             _pending[slotIndex] = false;
         }
@@ -172,9 +172,9 @@ class CommandRing {
         return Slot {_cmds[slotIndex], _fences[slotIndex], slotIndex};
     }
 
-    [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, Vk::Error> {
+    [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
         if (const VkResult reset = vkResetFences(_device, 1, &slot.fence); reset != VK_SUCCESS) {
-            return std::unexpected(Vk::Error {reset});
+            return std::unexpected(ToError(reset));
         }
         auto submitted = QueueSubmit(queue, std::move(cmds), {}, {}, slot.fence);
         if (submitted) { _pending[slot.index] = true; }

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
-#include "../VkError.hpp"
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -91,7 +91,7 @@ class ImageView {
     friend struct ImageSlice;
 
     [[nodiscard]] auto CreateInfo() const noexcept -> const VkImageViewCreateInfo& { return _info; }
-    [[nodiscard]] static auto Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, Vk::Error>;
+    [[nodiscard]] static auto Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode>;
 
     ImageView(VkDevice device, VkImageView view, const VkImageViewCreateInfo& info) noexcept:
         _handle(device, view), _info(info) {

@@ -152,7 +152,7 @@ auto DeviceConfigurator<Ts...>::OptionalPresentation(bool present) && {
 }
 
 template <typename... Ts>
-auto DeviceConfigurator<Ts...>::Build() && -> std::expected<ConfiguredDevice<Ts...>, Vk::Error> {
+auto DeviceConfigurator<Ts...>::Build() && -> std::expected<ConfiguredDevice<Ts...>, ErrorCode> {
     auto extensions = _extensions.Build();
     if (!extensions) {
         return std::unexpected(extensions.error());

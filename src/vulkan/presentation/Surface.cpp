@@ -47,7 +47,7 @@ template <typename T, typename F>
     return vec;
 }
 
-[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, Vk::Error> {
+[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, ErrorCode> {
     auto displays = FetchVulkanVector<VkDisplayPropertiesKHR>([physicalDevice](uint32_t* c, VkDisplayPropertiesKHR* d) {
         vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, c, d);
     });
@@ -57,7 +57,7 @@ template <typename T, typename F>
     return displays[0];
 }
 
-[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, Vk::Error> {
+[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ErrorCode> {
     auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([physicalDevice, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
         vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
@@ -109,7 +109,7 @@ template <typename T, typename F>
 } // namespace
 
 auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
-    -> std::expected<Surface, Vk::Error> {
+    -> std::expected<Surface, ErrorCode> {
     if (physicalDevice == VK_NULL_HANDLE) {
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
@@ -133,7 +133,7 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
 
     VkDisplayPlaneCapabilitiesKHR capabilities {};
     if (const auto res = vkGetDisplayPlaneCapabilitiesKHR(physicalDevice, mode->displayMode, plane_index, &capabilities); res != VK_SUCCESS) {
-        return std::unexpected(res);
+        return std::unexpected(ToError(res));
     };
 
     const VkDisplaySurfaceCreateInfoKHR create_info {

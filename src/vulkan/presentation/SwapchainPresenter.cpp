@@ -40,7 +40,7 @@ auto SwapchainPresenter::operator=(SwapchainPresenter&& other) noexcept -> Swapc
 }
 
 auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync)
-    -> std::expected<void, Vk::Error> {
+    -> std::expected<void, ErrorCode> {
     _ctx   = &ctx;
     _alloc = &alloc;
     _vsync = vsync;
@@ -57,7 +57,7 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
     return Rebuild(width, height);
 }
 
-auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Vk::Error> {
+auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode> {
     if ((_ctx == nullptr) || (_alloc == nullptr)) {
         return std::unexpected(PresentationError::ContextInvalid);
     }
@@ -118,7 +118,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     return {};
 }
 
-auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> std::expected<std::optional<SwapchainTarget>, Vk::Error> {
+auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget> {
     if (_ctx == nullptr) {
         return std::unexpected(PresentationError::ContextInvalid);
     }
@@ -135,7 +135,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     }
 
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {waited});
+        return std::unexpected(ToError(waited));
     }
     sync.MarkUnsubmitted(slot); // The prior submission finished; a skipped acquire does not need a fence.
     pools[slot].Reset();
@@ -164,7 +164,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         if (res == VK_ERROR_OUT_OF_DATE_KHR) {
             return std::nullopt;
         }
-        return std::unexpected(Vk::Error {res});
+        return std::unexpected(ToError(res));
     }
 
     if (_pacer.IsTimingActive()) {
@@ -204,7 +204,7 @@ auto SwapchainPresenter::Present(
     ExecutableCommands                     cmds,
     uint32_t                               imageIndex,
     std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> std::expected<std::optional<PresentSuboptimal>, Vk::Error> {
+) noexcept -> FrameOutcome<PresentSuboptimal> {
     if (!cmds) {
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
@@ -227,7 +227,7 @@ auto SwapchainPresenter::Present(
     const VkSemaphoreSubmitInfo signal      = Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
     if (const VkResult reset = sync.ResetFence(slot); reset != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {reset});
+        return std::unexpected(ToError(reset));
     }
     auto submit_res = Vk::QueueSubmit(
         graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), wait_count},
@@ -248,7 +248,7 @@ auto SwapchainPresenter::Present(
         timed_chain.emplace(*prediction);
         present_id = &timed_chain->presentId;
     }
-    const auto present_frame = [&](const VkPresentId2KHR* id) -> std::expected<std::optional<PresentSuboptimal>, Vk::Error> {
+    const auto present_frame = [&](const VkPresentId2KHR* id) -> FrameOutcome<PresentSuboptimal> {
         const VkPresentInfoKHR info {
             .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext              = id,
@@ -265,7 +265,7 @@ auto SwapchainPresenter::Present(
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
             return PresentSuboptimal {};
         }
-        return std::unexpected(Vk::Error {result});
+        return std::unexpected(ToError(result));
     };
     auto presented = present_frame(present_id);
     if (!presented && present_id != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {

@@ -10,13 +10,13 @@ namespace ZHLN::Vk {
 namespace {
 
 template <typename T, typename Enumerate>
-[[nodiscard]] auto EnumerateSurfaceValues(Enumerate&& enumerate) noexcept -> std::expected<std::vector<T>, Vk::Error> {
+[[nodiscard]] auto EnumerateSurfaceValues(Enumerate&& enumerate) noexcept -> std::expected<std::vector<T>, ErrorCode> {
     std::vector<T> values;
     for (;;) {
         uint32_t count  = 0;
         VkResult result = enumerate(&count, nullptr);
         if (result != VK_SUCCESS) {
-            return std::unexpected(Vk::Error {result});
+            return std::unexpected(ToError(result));
         }
         if (count == 0) {
             return values;
@@ -29,21 +29,21 @@ template <typename T, typename Enumerate>
             return values;
         }
         if (result != VK_INCOMPLETE) {
-            return std::unexpected(Vk::Error {result});
+            return std::unexpected(ToError(result));
         }
     }
 }
 
-[[nodiscard]] auto QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept -> std::expected<SwapchainSupport, Vk::Error> {
+[[nodiscard]] auto QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept -> std::expected<SwapchainSupport, ErrorCode> {
     if (physical == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || vkGetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr ||
         vkGetPhysicalDeviceSurfaceFormatsKHR == nullptr || vkGetPhysicalDeviceSurfacePresentModesKHR == nullptr) {
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
     SwapchainSupport support {};
     VkResult         result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &support.capabilities);
     if (result != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {result});
+        return std::unexpected(ToError(result));
     }
 
     auto formats = EnumerateSurfaceValues<VkSurfaceFormatKHR>([physical, surface](uint32_t* count, VkSurfaceFormatKHR* values) {
@@ -126,16 +126,16 @@ template <typename T, typename Enumerate>
     return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 }
 
-[[nodiscard]] auto RetrieveImages(const VkDevice device, const VkSwapchainKHR swapchain) noexcept -> std::expected<std::vector<VkImage>, Vk::Error> {
+[[nodiscard]] auto RetrieveImages(const VkDevice device, const VkSwapchainKHR swapchain) noexcept -> std::expected<std::vector<VkImage>, ErrorCode> {
     std::vector<VkImage> images;
     for (;;) {
         uint32_t count  = 0;
         VkResult result = vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr);
         if (result != VK_SUCCESS) {
-            return std::unexpected(Vk::Error {result});
+            return std::unexpected(ToError(result));
         }
         if (count == 0) {
-            return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
         }
 
         images.resize(count);
@@ -145,7 +145,7 @@ template <typename T, typename Enumerate>
             return images;
         }
         if (result != VK_INCOMPLETE) {
-            return std::unexpected(Vk::Error {result});
+            return std::unexpected(ToError(result));
         }
     }
 }
@@ -176,9 +176,9 @@ auto Swapchain::Rebuild(
     const bool                vsync,
     const VkPresentModeKHR    requestedPresentMode,
     const bool                enablePresentTiming
-) noexcept -> std::expected<void, Vk::Error> {
+) noexcept -> std::expected<void, ErrorCode> {
     if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || (Valid() && _device != device)) {
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
     auto support_result = QuerySwapchainSupport(physical.handle, surface);
@@ -187,13 +187,13 @@ auto Swapchain::Rebuild(
     }
     const SwapchainSupport& support = *support_result;
     if (support.formats.empty() || support.presentModes.empty()) {
-        return std::unexpected(Vk::Error {VK_ERROR_FORMAT_NOT_SUPPORTED});
+        return std::unexpected(ToError(VK_ERROR_FORMAT_NOT_SUPPORTED));
     }
 
     const VkSurfaceFormatKHR format       = ChooseFormat(support.formats);
     const VkPresentModeKHR   present_mode = ChoosePresentMode(support.presentModes, requestedPresentMode, vsync);
     if (present_mode == VK_PRESENT_MODE_MAX_ENUM_KHR) {
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
     const VkExtent2D chosen_extent = ChooseExtent(support.capabilities, extent);
 
@@ -205,7 +205,7 @@ auto Swapchain::Rebuild(
         image_count = support.capabilities.maxImageCount;
     }
     if (image_count == 0) {
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
     const std::array<uint32_t, 2> queue_families {physical.graphicsFamily, physical.presentFamily};
@@ -244,7 +244,7 @@ auto Swapchain::Rebuild(
     VkSwapchainKHR new_handle = VK_NULL_HANDLE;
     const VkResult created    = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
     if (created != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {created});
+        return std::unexpected(ToError(created));
     }
 
     auto images_result = RetrieveImages(device, new_handle);
@@ -299,7 +299,7 @@ auto Swapchain::Rebuild(
                 }
             }
             vkDestroySwapchainKHR(device, new_handle, nullptr);
-            return std::unexpected(Vk::Error {view_created});
+            return std::unexpected(ToError(view_created));
         }
     }
 

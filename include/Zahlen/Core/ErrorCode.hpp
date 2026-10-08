@@ -128,8 +128,8 @@ struct ErrorCode {
         static_assert(
             !Reflect::EnumHasValue<E>(0),
             "Error enums must not contain a 0 enumerator: ErrorCode's value word uses 0 for 'no "
-            "error'. Start error enumerators at 1; wrap foreign codes (e.g. VkResult) in the "
-            "boundary carrier (Vk::Error) instead."
+            "error'. Start error enumerators at 1; convert foreign codes (e.g. VkResult) "
+            "with Vk::ToError instead."
         );
         if (static_cast<uint32_t>(val) == 0) {
             if consteval {

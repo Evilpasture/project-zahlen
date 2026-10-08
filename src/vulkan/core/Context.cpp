@@ -58,7 +58,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 
 namespace {
 
-[[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, Vk::Error> {
+[[nodiscard]] auto LoadInstanceDispatch(const InstanceView instance) noexcept -> std::expected<void, ErrorCode> {
     if (!instance.Valid()) {
         return std::unexpected(ContextError::InvalidInstance);
     }
@@ -141,10 +141,10 @@ namespace {
     const VkPhysicalDeviceFeatures2*   features,
     const bool                         meshShaderRequested,
     const bool                         rayTracingRequested
-) noexcept -> std::expected<LogicalDevice, Vk::Error> {
+) noexcept -> std::expected<LogicalDevice, ErrorCode> {
     if (physical.handle == VK_NULL_HANDLE || !physical.hasGraphics || physical.graphicsFamily == UINT32_MAX || physical.presentFamily == UINT32_MAX ||
         physical.transferFamily == UINT32_MAX || physical.computeFamily == UINT32_MAX) {
-        return std::unexpected(Vk::Error {VK_ERROR_INITIALIZATION_FAILED});
+        return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
     const std::array<uint32_t, 4>           candidates {physical.graphicsFamily, physical.presentFamily, physical.transferFamily, physical.computeFamily};
@@ -197,7 +197,7 @@ namespace {
     VkDevice       handle  = VK_NULL_HANDLE;
     const VkResult created = vkCreateDevice(physical.handle, &create_info, nullptr, &handle);
     if (created != VK_SUCCESS) {
-        return std::unexpected(Vk::Error {created});
+        return std::unexpected(ToError(created));
     }
 
     volkLoadDevice(handle);
@@ -250,7 +250,7 @@ namespace {
 
 } // namespace
 
-auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, Vk::Error> {
+auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDeviceInfo, ErrorCode> {
     if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
         return std::unexpected(dispatch.error());
     }
@@ -262,7 +262,7 @@ auto ContextBuilder::SelectPhysicalDevice() noexcept -> std::expected<PhysicalDe
     return *selected;
 }
 
-auto ContextBuilder::Build() noexcept -> std::expected<Context, Vk::Error> {
+auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
     if (auto dispatch = LoadInstanceDispatch(_instance); !dispatch) {
         return std::unexpected(dispatch.error());
     }

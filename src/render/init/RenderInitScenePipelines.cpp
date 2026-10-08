@@ -246,7 +246,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     // pointers into its current SPIR-V buffers.
     const auto stages = shaders->View();
     csgPipelineLayout = emptyPipelineLayout;
-    return Vk::ToEngineExpected(Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)
         .Layout(emptyPipelineLayout)
         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
@@ -258,7 +258,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .ColorWriteEnable(false)
         .StencilWriteMask(1)
         .Cache(pipelineCache.Get())
-        .Build(ctx.Device()))
+        .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 
@@ -512,7 +512,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                             ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, Vk::AccelerationStructureType::TopLevel
                         );
                         if (!tlas) {
-                            return std::unexpected(Vk::ToFrameError(tlas.error()));
+                            return std::unexpected(tlas.error());
                         }
                         frames.tlas[i] = std::move(*tlas);
                         if (!frames.tlas[i].Valid()) {

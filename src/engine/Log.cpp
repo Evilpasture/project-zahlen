@@ -4,7 +4,7 @@
 
 #include "diagnostics/DiagnosticsInternal.hpp"
 #include <Zahlen/Core/Platform.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <atomic>

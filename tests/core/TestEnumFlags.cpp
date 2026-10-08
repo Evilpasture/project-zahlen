@@ -12,7 +12,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/EnumFlags.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
 #include <type_traits>

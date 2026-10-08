@@ -9,7 +9,7 @@ namespace ZHLN::Vk {
 
 auto CommandRecorder::Begin(
     VkCommandBuffer cmd, VkCommandBufferUsageFlags flags, const VkCommandBufferInheritanceInfo* inheritance
-) noexcept -> std::expected<CommandRecorder, Vk::Error> {
+) noexcept -> std::expected<CommandRecorder, ErrorCode> {
     if (cmd == VK_NULL_HANDLE) {
         return std::unexpected(CommandRecordingError::NullCommandBuffer);
     }
@@ -20,23 +20,23 @@ auto CommandRecorder::Begin(
     };
     if (const VkResult res = vkBeginCommandBuffer(cmd, &info); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed begin failed ({}).", Vk::Error {reset});
+            ZHLN::Log("[Vk] Command buffer reset after failed begin failed ({}).", ToError(reset));
         }
-        return std::unexpected(Vk::Error {res});
+        return std::unexpected(ToError(res));
     }
     return CommandRecorder {cmd};
 }
 
-auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Vk::Error> {
+auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, ErrorCode> {
     if (_cmd == VK_NULL_HANDLE) {
         return std::unexpected(CommandRecordingError::NotRecording);
     }
     const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE);
     if (const VkResult res = vkEndCommandBuffer(cmd); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed end failed ({}).", Vk::Error {reset});
+            ZHLN::Log("[Vk] Command buffer reset after failed end failed ({}).", ToError(reset));
         }
-        return std::unexpected(Vk::Error {res});
+        return std::unexpected(ToError(res));
     }
     return ExecutableCommands {cmd};
 }
@@ -44,7 +44,7 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Vk:
 void CommandRecorder::Abort() && noexcept {
     if (const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE); cmd != VK_NULL_HANDLE) {
         if (const VkResult res = vkResetCommandBuffer(cmd, 0); res != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", Vk::Error {res});
+            ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", ToError(res));
         }
     }
 }

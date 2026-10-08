@@ -8,7 +8,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "../VkError.hpp"
 #include "ShaderProgram.hpp"
 
 #include <Zahlen/Log.hpp>
@@ -94,7 +93,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     uint32_t            indexPushOffset,
     HeapLifecycle       lifecycle,
     HeapPassBindings&   out
-) noexcept -> std::expected<void, Vk::Error> {
+) noexcept -> std::expected<void, ErrorCode> {
     out.entries.clear();
     out.samplerSlots.clear();
     out.samplerNames.clear();

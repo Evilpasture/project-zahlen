@@ -19,7 +19,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
 #include <json/JSONSchema.hpp>
 

@@ -7,7 +7,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
 #endif
 
-#include "../VkError.hpp"
 #include <Zahlen/Threading/Mutex.hpp>
 
 // VMA forward declarations. <vk_mem_alloc.h> is pulled in only by
@@ -83,8 +82,8 @@ class Allocator {
     Allocator(Allocator&& other) noexcept;
     auto operator=(Allocator&& other) noexcept -> Allocator&;
 
-    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, Vk::Error>;
-    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, Vk::Error>;
+    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ErrorCode>;
 
     // Synchronous destruction: only use once GPU use has finished. Explicitly
     // consumes and invalidates the handle; neither Buffer nor Image has a
@@ -263,10 +262,10 @@ class Buffer {
     Buffer(Buffer&& other) noexcept;
     auto operator=(Buffer&& other) noexcept -> Buffer&;
 
-    [[nodiscard]] static auto Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Vk::Error>;
+    [[nodiscard]] static auto Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
 
     [[nodiscard]] static auto Create(Allocator& allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-        -> std::expected<Buffer, Vk::Error>;
+        -> std::expected<Buffer, ErrorCode>;
 
     [[nodiscard]] static auto Create(
         Allocator&                allocator,
@@ -276,7 +275,7 @@ class Buffer {
         VkDeviceSize              minAlignment,
         VkSharingMode             sharingMode,
         std::span<const uint32_t> queueFamilyIndices
-    ) noexcept -> std::expected<Buffer, Vk::Error>;
+    ) noexcept -> std::expected<Buffer, ErrorCode>;
 
     void Flush(Allocator& allocator, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
@@ -288,7 +287,7 @@ class Buffer {
     //
     // The default-constructed region is empty -- "nothing mapped" -- which is what the
     // long-lived holders reset to. A region handed to a caller by Map() is never empty: a
-    // buffer with no persistent mapping is reported as a Vk::Error instead, so Data() is
+    // buffer with no persistent mapping is reported as an ErrorCode instead, so Data() is
     // never null where a caller uses it.
     struct MappedRegion {
         MappedRegion() = default;
@@ -330,9 +329,9 @@ class Buffer {
 
     // A buffer only has memory to map once Create() succeeded, and only host-visible
     // memory carries a persistent mapping: those are the two ways Map() fails. Both
-    // travel as a Vk::Error instead of a null pointer a caller could take for a valid
+    // travel as an ErrorCode instead of a null pointer a caller could take for a valid
     // empty read.
-    [[nodiscard]] auto Map(Allocator& allocator) noexcept -> std::expected<MappedRegion, Vk::Error>;
+    [[nodiscard]] auto Map(Allocator& allocator) noexcept -> std::expected<MappedRegion, ErrorCode>;
     [[nodiscard]] auto Handle() const noexcept -> VkBuffer {
         return _handle;
     }
@@ -372,9 +371,9 @@ class Image {
     Image(Image&& other) noexcept;
     auto operator=(Image&& other) noexcept -> Image&;
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, Vk::Error>;
+    [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
 
-    [[nodiscard]] auto CreateView(VkDevice device, const ImageViewConfig& config = {}) const -> std::expected<ImageView, Vk::Error>;
+    [[nodiscard]] auto CreateView(VkDevice device, const ImageViewConfig& config = {}) const -> std::expected<ImageView, ErrorCode>;
 
     [[nodiscard]] auto Format() const noexcept -> VkFormat {
         return _config.format;
@@ -472,7 +471,7 @@ class StagingRingBuffer {
     auto operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer&;
 
     [[nodiscard]] auto Init(Allocator& allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
-        -> std::expected<void, Vk::Error>;
+        -> std::expected<void, ErrorCode>;
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;

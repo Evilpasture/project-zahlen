@@ -8,6 +8,7 @@
 #endif
 
 #include <VkError.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <atomic>
 #include <cstdint>
@@ -104,7 +105,7 @@ class Instance {
 
     [[nodiscard]] static auto
         Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ValidationMode validation) noexcept
-        -> std::expected<Vk::Instance, Vk::Error>;
+        -> std::expected<Vk::Instance, ErrorCode>;
 
     struct DebugState {
         // Non-owning back-pointer: the Instance owns this DebugState (see
@@ -164,7 +165,7 @@ class InstanceBuilder {
         return *this;
     }
 
-    [[nodiscard]] auto Build() noexcept -> std::expected<Instance, Vk::Error>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<Instance, ErrorCode>;
 
   private:
     std::string_view              _appName        = "ZHLN Engine";

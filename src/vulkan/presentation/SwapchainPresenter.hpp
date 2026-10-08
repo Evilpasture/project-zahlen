@@ -6,7 +6,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "../VkError.hpp"
 #include "PresentPacer.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
@@ -67,13 +66,13 @@ class SwapchainPresenter {
     uint64_t resourceGeneration = 1;
 
     [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync = true)
-        -> std::expected<void, Vk::Error>;
+        -> std::expected<void, ErrorCode>;
 
-    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Vk::Error>;
+    [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
     // Destruction requires all submitted frames to have completed.
     void Cleanup() noexcept;
 
-    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> std::expected<std::optional<SwapchainTarget>, Vk::Error>;
+    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
 
     // The swapchain transition must be recorded BEFORE the recorder is ended.
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
@@ -84,7 +83,7 @@ class SwapchainPresenter {
         ExecutableCommands                     cmds,
         uint32_t                               imageIndex,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
-    ) noexcept -> std::expected<std::optional<PresentSuboptimal>, Vk::Error>;
+    ) noexcept -> FrameOutcome<PresentSuboptimal>;
 
     void AdvanceFrame() noexcept {
         frameIndex = NextFrameSlot(frameIndex);

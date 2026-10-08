@@ -66,10 +66,10 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 .WithLodRange(0.0F, 0.0F);
             clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
-            return Vk::ToEngineExpected(globalSamplerConfig.Create(ctx.Device()))
+            return globalSamplerConfig.Create(ctx.Device())
                 .and_then([&](auto&& globalRes) -> std::expected<void, ErrorCode> {
                     globalSampler = std::forward<decltype(globalRes)>(globalRes);
-                    return Vk::ToEngineExpected(clampSamplerConfig.Create(ctx.Device()))
+                    return clampSamplerConfig.Create(ctx.Device())
                         .and_then([&](auto&& clampRes) -> std::expected<void, ErrorCode> {
                             clampSampler = std::forward<decltype(clampRes)>(clampRes);
                             return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);

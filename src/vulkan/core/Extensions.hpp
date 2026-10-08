@@ -8,7 +8,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
 #endif
 
-#include "../VkError.hpp"
 #include <Zahlen/Error.hpp>
 namespace ZHLN::Vk {
 
@@ -85,7 +84,7 @@ class ExtensionBuilder {
         return OptionalIf(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, enable);
     }
 
-    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, Vk::Error>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ErrorCode>;
 
   private:
     explicit ExtensionBuilder(std::vector<std::string>&& available) noexcept;

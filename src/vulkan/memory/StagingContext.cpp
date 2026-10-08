@@ -91,7 +91,7 @@ void StagingContext::Abort() && noexcept {
     std::move(_recorder).Abort();
 }
 
-auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, Vk::Error> {
+auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, ErrorCode> {
     CommandPool<QueueType::Graphics> pool(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
     if (auto allocated = pool.Allocate(1); !allocated) [[unlikely]] {
         return std::unexpected(allocated.error());
@@ -104,9 +104,9 @@ auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept ->
 }
 
 auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
-    -> std::expected<void, Vk::Error> {
+    -> std::expected<void, ErrorCode> {
     return Buffer::Create(*_allocator, bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
-        .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, Vk::Error> {
+        .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
             defer _([&] { _allocator->DestroyBuffer(staging); });
             auto  mapped = staging.Map(*_allocator);
             if (!mapped) {
@@ -183,7 +183,7 @@ void StagingContext::AddBuffer(Buffer&& buf) {
     _stagingBuffers.push_back(std::move(buf));
 }
 
-auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Vk::Error> {
+auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, ErrorCode> {
     auto executable = std::move(_recorder).End();
     if (!executable) {
         return std::unexpected(executable.error());
