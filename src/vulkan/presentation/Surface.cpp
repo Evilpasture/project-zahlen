@@ -52,7 +52,7 @@ template <typename T, typename F>
     return vec;
 }
 
-[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, Vk::Error> {
+[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, ZHLN::Vk::Error> {
     auto displays = FetchVulkanVector<VkDisplayPropertiesKHR>([physicalDevice](uint32_t* c, VkDisplayPropertiesKHR* d) {
         vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, c, d);
     });
@@ -64,7 +64,7 @@ template <typename T, typename F>
     return displays[0];
 }
 
-[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, Vk::Error> {
+[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ZHLN::Vk::Error> {
     auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([physicalDevice, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
         vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
