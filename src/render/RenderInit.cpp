@@ -92,24 +92,24 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, pipelineCachePath);
 
-    return allocator.Init(ctx)
+    return Vk::ToEngineExpected(allocator.Init(ctx))
         .and_then([&]() {
             deletionQueue.Init(allocator);
-            return stagingRingBuffer.Init(
+            return Vk::ToEngineExpected(stagingRingBuffer.Init(
                 allocator, ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphicsFamily, static_cast<VkDeviceSize>(64 * 1024 * 1024)
-            );
+            ));
         })
         .and_then([&]() {
-            return transferRingBuffer.Init(
+            return Vk::ToEngineExpected(transferRingBuffer.Init(
                 allocator, ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transferFamily, static_cast<VkDeviceSize>(64 * 1024 * 1024)
-            );
+            ));
         })
         .and_then([&]() { return InitDiagnosticsAndProfiling(); })
         .and_then([&]() { return InitShadowResources(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
-        .and_then([&]() { return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphicsFamily, cfg.vsync); })
+        .and_then([&]() { return Vk::ToEngineExpected(presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphicsFamily, cfg.vsync)); })
         .and_then([&]() {
             computePools = Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(
                 ctx.Device(), {.queueFamily = ctx.PhysicalInfo().computeFamily, .buffersPerPool = 1}

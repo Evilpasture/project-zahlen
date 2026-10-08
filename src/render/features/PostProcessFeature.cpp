@@ -71,7 +71,7 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
     };
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
-    return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get())
+    return Vk::ToEngineExpected(Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get()))
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return impl.BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(
                        pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0}

@@ -47,8 +47,8 @@ auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
 }
 
 auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode> {
-    return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
+    return Vk::ToEngineExpected(Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true}))
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
             const auto index = Adopt(std::move(tex.image), std::move(tex.view));
             if (index) {
@@ -61,8 +61,8 @@ auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height,
 auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode> {
     const std::span<const void* const, 6> faces {faceData, 6};
 
-    return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
-        .UploadCube({.faceData = faces, .size = size, .format = VK_FORMAT_R8G8B8A8_UNORM})
+    return Vk::ToEngineExpected(Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
+        .UploadCube({.faceData = faces, .size = size, .format = VK_FORMAT_R8G8B8A8_UNORM}))
         .and_then([&](Vk::TextureResource tex) -> std::expected<TextureHandle, ErrorCode> {
             auto index = Adopt(std::move(tex.image), std::move(tex.view));
             return index.transform([&](uint32_t slot) {

@@ -246,7 +246,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     // pointers into its current SPIR-V buffers.
     const auto stages = shaders->View();
     csgPipelineLayout = emptyPipelineLayout;
-    return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
+    return Vk::ToEngineExpected(Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)
         .Layout(emptyPipelineLayout)
         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
@@ -258,7 +258,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .ColorWriteEnable(false)
         .StencilWriteMask(1)
         .Cache(pipelineCache.Get())
-        .Build(ctx.Device())
+        .Build(ctx.Device()))
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 

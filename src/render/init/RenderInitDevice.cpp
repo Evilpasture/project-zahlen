@@ -37,7 +37,7 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode validationMode) {
     constexpr VkSubgroupFeatureFlags kUsedSubgroupOps = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
 
-    return Vk::DeviceConfigurator<>(physical)
+    return Vk::ToEngineExpected(Vk::DeviceConfigurator<>(physical)
         .OptionalPresentation(present)
         .OptionalExtension("VK_KHR_portability_subset", isMac)
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) {
@@ -96,7 +96,7 @@ auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode val
             }
         )
         .SubgroupDiagnostics(kUsedSubgroupOps)
-        .Build();
+        .Build());
 }
 
 auto SelectPresentationMode(const PresentationTarget& target) noexcept -> PresentationMode {
