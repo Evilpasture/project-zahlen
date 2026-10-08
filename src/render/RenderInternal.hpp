@@ -7,8 +7,8 @@
 #include "FrameDestinations.hpp"
 #include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
-#include "GpuLayout.hpp"
 #include "GpuAbi.hpp"
+#include "GpuLayout.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -558,7 +558,7 @@ struct RenderContext::Impl {
     };
 
     [[nodiscard]] auto FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode>;
-    [[nodiscard]] auto AcquireDestinationImage(FrameDestinations::Window& dest) noexcept -> std::expected<bool, ErrorCode>;
+
     [[nodiscard]] auto
         ReconcileDestination(FrameDestinations::Window& dest, Vk::CommandRecorder& recorder) noexcept -> std::expected<Vk::AttachmentLayout, ErrorCode>;
     [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget>;
@@ -595,12 +595,12 @@ struct RenderContext::Impl {
 
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
-    JPH::Mat44    current_view_proj    = JPH::Mat44::sIdentity();
-    JPH::Mat44    unjittered_view_proj = JPH::Mat44::sIdentity();
+    JPH::Mat44 current_view_proj    = JPH::Mat44::sIdentity();
+    JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
     // Kept for the pack boundary: light packing needs a world-to-view matrix, and
     // nothing else in the renderer holds one separately from the projection.
-    JPH::Mat44    view_matrix = JPH::Mat44::sIdentity();
-    JPH::Mat44    shadowProjView       = JPH::Mat44::sIdentity();
+    JPH::Mat44    view_matrix    = JPH::Mat44::sIdentity();
+    JPH::Mat44    shadowProjView = JPH::Mat44::sIdentity();
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
@@ -639,7 +639,8 @@ struct RenderContext::Impl {
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher), reflectionPipeline(*this) {
+        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher),
+        reflectionPipeline(*this) {
     }
 
     ~Impl() {
@@ -879,7 +880,7 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
-    void ApplySettings(GraphicsSettings&& incoming) noexcept;
+    void ApplySettings(GraphicsSettings incoming) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
@@ -898,28 +899,25 @@ template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
-    const auto imageConfig = Vk::ImageConfig::Texture2D(
-        {width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled
-    );
-    return Vk::Image::Create(allocator, imageConfig)
-        .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
-            defer _([&] { allocator.DestroyImage(image); });
-            auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
-            if (!viewRes) {
-                return std::unexpected(viewRes.error());
-            }
-            Vk::ImageView view = std::move(*viewRes);
-            heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view));
+    const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
+    return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
+        defer _([&] { allocator.DestroyImage(image); });
+        auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
+        if (!viewRes) {
+            return std::unexpected(viewRes.error());
+        }
+        Vk::ImageView view = std::move(*viewRes);
+        heapManager.BeginImmediate();
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view));
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-                heapManager.BindHeaps(cmd);
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-            });
-            return textureManager.Adopt(std::move(image), std::move(view));
+        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
+            heapManager.BindHeaps(cmd);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
+            pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
         });
+        return textureManager.Adopt(std::move(image), std::move(view));
+    });
 }
 
 // Pass-local encoder and renderer state for the draw helpers. The encoder
@@ -995,10 +993,9 @@ template <VkShaderStageFlagBits Stage>
 }
 
 template <Vk::ShaderProgram ShaderModule, typename PushConstants>
-auto RenderContext::Impl::LoadAndCreateComputeShader(
-    Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass
-) const noexcept -> std::expected<Vk::Pipeline, ErrorCode> {
-    const auto loaded = LoadShaderData(cs);
+auto RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
+    -> std::expected<Vk::Pipeline, ErrorCode> {
+    const auto           loaded = LoadShaderData(cs);
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");
     if (shader.code == nullptr || shader.size == 0) {

@@ -16,27 +16,27 @@ struct PhysicalDeviceInfo {
     VkPhysicalDeviceProperties2       properties {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     VkPhysicalDeviceFeatures2         features {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     VkPhysicalDeviceMemoryProperties2 memory {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-    uint32_t                          graphics_family = UINT32_MAX;
-    uint32_t                          present_family  = UINT32_MAX;
-    uint32_t                          transfer_family = UINT32_MAX;
-    uint32_t                          compute_family  = UINT32_MAX;
-    bool                              has_graphics    = false;
-    bool                              has_present     = false;
-    bool                              has_transfer    = false;
-    bool                              has_compute     = false;
+    uint32_t                          graphicsFamily = UINT32_MAX;
+    uint32_t                          presentFamily  = UINT32_MAX;
+    uint32_t                          transferFamily = UINT32_MAX;
+    uint32_t                          computeFamily  = UINT32_MAX;
+    bool                              hasGraphics    = false;
+    bool                              hasPresent     = false;
+    bool                              hasTransfer    = false;
+    bool                              hasCompute     = false;
 };
 
 using DeviceScoreFunction = int32_t (*)(const PhysicalDeviceInfo& info, const void* userdata) noexcept;
 
 struct MeshShaderLimits {
-    uint32_t max_mesh_output_vertices                  = 0;
-    uint32_t max_mesh_output_primitives                = 0;
-    uint32_t max_task_work_group_invocations           = 0;
-    uint32_t max_mesh_work_group_invocations           = 0;
-    uint32_t max_preferred_task_work_group_invocations = 0;
-    uint32_t max_preferred_mesh_work_group_invocations = 0;
-    bool     prefers_compact_vertex_output             = false;
-    bool     supported                                 = false;
+    uint32_t maxMeshOutputVertices                = 0;
+    uint32_t maxMeshOutputPrimitives              = 0;
+    uint32_t maxTaskWorkGroupInvocations          = 0;
+    uint32_t maxMeshWorkGroupInvocations          = 0;
+    uint32_t maxPreferredTaskWorkGroupInvocations = 0;
+    uint32_t maxPreferredMeshWorkGroupInvocations = 0;
+    bool     prefersCompactVertexOutput           = false;
+    bool     supported                            = false;
 };
 
 [[nodiscard]] auto SelectPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, DeviceScoreFunction score = nullptr, const void* userdata = nullptr) noexcept

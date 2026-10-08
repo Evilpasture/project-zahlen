@@ -17,7 +17,7 @@ constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAc
 }
 
 inline void PipelineBarrier(
-    VkCommandBuffer cmd,
+    VkCommandBuffer                         cmd,
     std::span<const VkBufferMemoryBarrier2> buffers,
     std::span<const VkImageMemoryBarrier2>  images,
     std::span<const VkMemoryBarrier2>       memory
@@ -47,9 +47,7 @@ inline void ImageBarrier(VkCommandBuffer cmd, const ImageBarrierDesc& desc) noex
     PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
 }
 
-inline void MemoryBarrier(
-    VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess
-) noexcept {
+inline void MemoryBarrier(VkCommandBuffer cmd, BarrierStage srcStage, BarrierAccess srcAccess, BarrierStage dstStage, BarrierAccess dstAccess) noexcept {
     MemoryBarrier(
         cmd, {.src_stage  = static_cast<VkPipelineStageFlags2>(srcStage),
               .src_access = static_cast<VkAccessFlags2>(srcAccess),
@@ -82,11 +80,11 @@ constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
 template <QueueType QType>
 constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
     if constexpr (QType == QueueType::Graphics) {
-        return ctx.PhysicalInfo().graphics_family;
+        return ctx.PhysicalInfo().graphicsFamily;
     } else if constexpr (QType == QueueType::Compute) {
-        return ctx.PhysicalInfo().compute_family;
+        return ctx.PhysicalInfo().computeFamily;
     } else if constexpr (QType == QueueType::Transfer) {
-        return ctx.PhysicalInfo().transfer_family;
+        return ctx.PhysicalInfo().transferFamily;
     }
 }
 

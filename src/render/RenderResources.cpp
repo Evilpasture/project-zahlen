@@ -4,9 +4,6 @@
 #include "GpuPack.hpp"
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
-#include "passes/forward/ForwardPass.hpp"
-#include "passes/gbuffer/GBufferBasePass.hpp"
-#include <ShaderBindings.hpp>
 #include "Zahlen/Core/AssetID.hpp"
 #include "Zahlen/Geometry2D.hpp"
 #include "Zahlen/GraphicsSettings.hpp"
@@ -14,10 +11,13 @@
 #include "Zahlen/Render/PresentTiming.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Vertex.hpp"
+#include "passes/forward/ForwardPass.hpp"
+#include "passes/gbuffer/GBufferBasePass.hpp"
+#include <ShaderBindings.hpp>
+#include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Core/Ranges.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,8 +30,6 @@
 #include <optional>
 #include <span>
 #include <utility>
-#include <vector>
-
 
 namespace ZHLN {
 
@@ -43,10 +41,9 @@ enum class TextureDataError : uint8_t {
     InvalidPixels ZHLN_ANNOTATION(ZHLN::Description<"RGBA pixels do not match the texture's nonzero extent"> {}) = 1,
 };
 
-}
+} // namespace ZHLN
 
 namespace ZHLN {
-
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     if (const auto found = _impl->geometry.FindMesh(id)) {
@@ -62,21 +59,25 @@ auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optiona
     return std::nullopt;
 }
 
-void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
+void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept {
+    _impl->geometry.RegisterMesh(id, mesh);
+}
 
-void RenderContext::UnregisterGPUMesh(AssetID id) noexcept { _impl->geometry.UnregisterMesh(id); }
+void RenderContext::UnregisterGPUMesh(AssetID id) noexcept {
+    _impl->geometry.UnregisterMesh(id);
+}
 
 void RenderContext::DestroyMesh(const Mesh& mesh) noexcept {
-    // Mesh is a view; callers must unregister all aliases before releasing
-    // shared buffers. DestroyBuffer ignores invalid/already-retired handles.
-    const std::array buffers = {mesh.posBuffer,   mesh.tangentFrameBuffer, mesh.surfaceBuffer,       mesh.skinBuffer,
-                                mesh.indexBuffer, mesh.meshletBuffer,      mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
-    for (const BufferHandle handle: buffers) {
+    for (const BufferHandle handle:
+         {mesh.posBuffer, mesh.tangentFrameBuffer, mesh.surfaceBuffer, mesh.skinBuffer, mesh.indexBuffer, mesh.meshletBuffer, mesh.meshletVertexBuffer,
+          mesh.meshletTriBuffer}) {
         DestroyBuffer(handle);
     }
 }
 
-void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
+void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
+    _impl->geometry.RegisterMaterial(id, mat);
+}
 
 void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     if (const auto mat = _impl->geometry.FindMaterial(id)) {
@@ -103,7 +104,11 @@ auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
 }
 
 void RenderContext::SubmitParticleEmitter(
-    BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive
+    BufferHandle               gpuBuffer,
+    uint32_t                   maxParticles,
+    const ParticleEmitterDesc& desc,
+    TextureHandle              texture,
+    bool                       additive
 ) {
     // The manager already answers a default for an unregistered handle
     // (kFallbackWhiteTextureIndex), so there is nothing to test here: a host that
@@ -111,14 +116,16 @@ void RenderContext::SubmitParticleEmitter(
     const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
 
     _impl->queues.ParticleEmitters().push_back(
-        {.gpuBuffer    = gpuBuffer,
-         .maxParticles = maxParticles,
-         .params       = GpuPack::PackParticleEmitter(desc, textureIndex, additive ? 1u : 0u)}
+        {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackParticleEmitter(desc, textureIndex, additive ? 1u : 0u)}
     );
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
-    BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
+    BufferHandle                   gpuBuffer,
+    uint32_t                       maxParticles,
+    const MeshParticleEmitterDesc& desc,
+    AssetID                        mesh,
+    MaterialID                     mat
 ) {
     _impl->queues.MeshParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackMeshParticleEmitter(desc), .meshAsset = mesh, .materialAsset = mat}
@@ -130,19 +137,11 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
         return;
     }
 
-    // The frame's batch index: it keeps two submissions of one key in one frame from
-    // sharing a slot, and so a buffer. It restarts at the frame boundary (BeginFrame,
-    // next to frameSerial) -- not from the emitter queue's state: that queue is shared
-    // with the particle submits, so its emptiness says nothing about frames, and reading
-    // it as a frame signal leaves the serial counting up forever in any scene that has
-    // an emitter in it (a new slot, and a new buffer, every frame).
     const uint32_t serial = _impl->billboardSerial++;
 
-    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture); // Invalid -> the white slot
+    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
     const uint32_t blendMode    = additive ? 1u : 0u;
 
-    // One draw per facing: the pass takes the alignment as a push constant, so a call
-    // that mixes camera-facing and ground-facing quads becomes two draws of one texture.
     for (uint32_t alignment = 0; alignment < 3; ++alignment) {
         _impl->billboardStaging.clear();
         for (const BillboardQuad& quad: billboards) {
@@ -151,8 +150,7 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             }
             Particle packed {};
             JPH::Vec4(quad.position, 1.0f).StoreFloat4(&packed.position);
-            JPH::Vec4(quad.facing == ParticleAlignment::VelocityStretched ? quad.velocity : JPH::Vec3::sZero(), 0.0f)
-                .StoreFloat4(&packed.velocity);
+            JPH::Vec4(quad.facing == ParticleAlignment::VelocityStretched ? quad.velocity : JPH::Vec3::sZero(), 0.0f).StoreFloat4(&packed.velocity);
             quad.color.StoreFloat4(&packed.color);
             // The render vertex shader reads a quad's size and rotation out of params.z
             // and params.w. This is the one place that fact is written down for billboards.
@@ -160,23 +158,20 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             _impl->billboardStaging.push_back(packed);
         }
 
-        const uint32_t count = static_cast<uint32_t>(_impl->billboardStaging.size());
+        const auto count = static_cast<uint32_t>(_impl->billboardStaging.size());
         if (count == 0) {
             continue;
         }
 
         Impl::BillboardSlot* group = nullptr;
         for (auto& candidate: _impl->billboardSlots) {
-            if (candidate.textureIndex == textureIndex && candidate.blendMode == blendMode && candidate.alignment == alignment &&
-                candidate.serial == serial) {
+            if (candidate.textureIndex == textureIndex && candidate.blendMode == blendMode && candidate.alignment == alignment && candidate.serial == serial) {
                 group = &candidate;
                 break;
             }
         }
         if (group == nullptr) {
-            _impl->billboardSlots.push_back(
-                {.textureIndex = textureIndex, .blendMode = blendMode, .alignment = alignment, .serial = serial}
-            );
+            _impl->billboardSlots.push_back({.textureIndex = textureIndex, .blendMode = blendMode, .alignment = alignment, .serial = serial});
             group = &_impl->billboardSlots.back();
         }
 
@@ -195,8 +190,6 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
         _impl->queues.ParticleEmitters().push_back(
             {.gpuBuffer    = group->buffer,
              .maxParticles = count,
-             // The pass takes the alignment as a push constant (uint); the lane's own
-             // type is the enum, so the crossings between the two are explicit.
              .params       = {.textureIndex = textureIndex, .alignment = static_cast<ParticleAlignment>(alignment), .blendMode = blendMode},
              .simulate     = false}
         );
@@ -218,7 +211,7 @@ void RenderContext::ClearGPUCaches() noexcept {
 
     _impl->geometry.ClearMeshes();
 
-    _impl->pipelines.RetireAll(); // Also retires materials that were never registered by asset ID.
+    _impl->pipelines.RetireAll();
     _impl->geometry.ClearMaterials();
 
     for (const auto& entry: _impl->renderTextures) {
@@ -226,13 +219,13 @@ void RenderContext::ClearGPUCaches() noexcept {
     }
     _impl->renderTextures.clear();
     _impl->textureManager.Clear();
-    _impl->textureManager.RetireAll(); // WaitIdle above covers all pending texture slots.
+    _impl->textureManager.RetireAll();
 
     _impl->deletionQueue.Drain();
 }
 
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {
-    Vk::Instance::UseDiagnostics({&validationErrors, &deviceLost});
+    Vk::Instance::UseDiagnostics({.validation = &validationErrors, .deviceLost = &deviceLost});
 }
 
 uint32_t RenderContext::ValidationErrorCount() noexcept {
@@ -244,7 +237,7 @@ uint32_t RenderContext::DeviceLostCount() noexcept {
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (const VkCommandBuffer cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
+    if (auto* const cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
         _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 }
@@ -288,9 +281,8 @@ void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
-
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
-    const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
+    const auto&        props      = _impl->ctx.PhysicalInfo().properties.properties;
     PhysicalDeviceType deviceType = PhysicalDeviceType::Other;
     switch (props.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
@@ -379,12 +371,13 @@ auto RenderContext::CreateIndexBuffer(std::span<const uint32_t> indices) -> Buff
         .value_or(BufferHandle::Invalid);
 }
 
-void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
+void RenderContext::DestroyBuffer(BufferHandle handle) {
+    _impl->geometry.Destroy(handle);
+}
 
 void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept {
     _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
-
 
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
@@ -406,18 +399,17 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
         flags |= Vk::MaterialFlags::DepthWrite;
     }
 
-    const bool forward = alphaBlend || additiveBlend;
-    std::expected<Material, ErrorCode> mat_res = forward
-        ? _impl->pipelines.CreateMaterial<
-              MaterialPipelineFamily::Forward,
-              Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
-              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>,
-              Passes::ForwardPass>(flags)
-        : _impl->pipelines.CreateMaterial<
-              MaterialPipelineFamily::Deferred,
-              Vk::GraphicsShaderModules<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS>,
-              Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMesh, Shaders::Modules::BasicPS>,
-              Passes::GBufferBasePass>(flags);
+    const bool                         forward = alphaBlend || additiveBlend;
+    std::expected<Material, ErrorCode> mat_res =
+        forward ?
+            _impl->pipelines.CreateMaterial<
+                MaterialPipelineFamily::Forward, Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
+                Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>, Passes::ForwardPass>(
+                flags
+            ) :
+            _impl->pipelines.CreateMaterial<
+                MaterialPipelineFamily::Deferred, Vk::GraphicsShaderModules<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS>,
+                Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMesh, Shaders::Modules::BasicPS>, Passes::GBufferBasePass>(flags);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
@@ -427,60 +419,61 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    // When two shading models are authored together, unlit wins. Keep its
-    // coverage mode independent of the forward-only optical transmission path.
     const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
     const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
+
     auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
     }
 
-    Material mat        = *basicMat;
-    mat.unlit           = desc.unlit;
-    // Transmission chooses a forward pipeline, not an alpha-as-coverage mode.
-    // Preserve MASK (or OPAQUE) so the forward shader can apply the glTF mask.
-    mat.alphaMode       = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
-    mat.alphaCutoff     = desc.alphaCutoff;
-    mat.metallicFactor  = desc.metallic;
-    mat.roughnessFactor = desc.roughness;
-    mat.albedoMap       = desc.albedoMap;
-    mat.normalMap       = desc.normalMap;
-    mat.pbrMap          = desc.pbrMap;
-    mat.emissiveMap     = desc.emissiveMap;
-    mat.transmissionFactor = desc.transmissionFactor;
-    mat.transmissionMap    = desc.transmissionMap;
-    mat.iridescenceFactor  = desc.iridescenceFactor;
-    mat.filmThicknessNm    = desc.filmThicknessNm;
-    mat.filmThicknessMinNm = desc.filmThicknessMinNm;
-    mat.volumeThicknessM   = desc.volumeThicknessM;
-    mat.ior                = desc.ior;
-    mat.normalScale        = desc.normalScale;
-    mat.filmThicknessMap   = desc.filmThicknessMap;
-    mat.iridescenceMap     = desc.iridescenceMap;
-    mat.volumeThicknessMap = desc.volumeThicknessMap;
-    mat.clearcoatFactor          = desc.clearcoatFactor;
-    mat.clearcoatRoughnessFactor = desc.clearcoatRoughnessFactor;
-    mat.clearcoatNormalScale     = desc.clearcoatNormalScale;
-    mat.clearcoatMap             = desc.clearcoatMap;
-    mat.clearcoatRoughnessMap    = desc.clearcoatRoughnessMap;
-    mat.clearcoatNormalMap       = desc.clearcoatNormalMap;
-    mat.anisotropyStrength       = desc.anisotropyStrength;
-    mat.anisotropyRotation       = desc.anisotropyRotation;
-    mat.anisotropyMap            = desc.anisotropyMap;
-    mat.sheenColorFactor        = desc.sheenColorFactor;
-    mat.sheenRoughnessFactor    = desc.sheenRoughnessFactor;
-    mat.sheenColorMap           = desc.sheenColorMap;
-    mat.sheenRoughnessMap       = desc.sheenRoughnessMap;
-    mat.occlusionMap            = desc.occlusionMap;
-    mat.occlusionStrength       = desc.occlusionStrength;
-    mat.textureSamplers          = desc.textureSamplers;
-    mat.textureTransforms        = desc.textureTransforms;
-
-    mat.baseColorFactor = desc.baseColor;
-    mat.emissiveFactor  = desc.emissive;
-
-    return mat;
+    // Material constructed immutably, pulling from both the base pipeline state and the descriptor
+    return Material {
+        .pipeline                 = basicMat->pipeline,
+        .prePassPipeline          = basicMat->prePassPipeline,
+        .resourceGroup            = basicMat->resourceGroup,
+        .constantBuffer           = basicMat->constantBuffer,
+        .albedoMap                = desc.albedoMap,
+        .normalMap                = desc.normalMap,
+        .pbrMap                   = desc.pbrMap,
+        .emissiveMap              = desc.emissiveMap,
+        .baseColorFactor          = desc.baseColor,
+        .emissiveFactor           = desc.emissive,
+        .metallicFactor           = desc.metallic,
+        .roughnessFactor          = desc.roughness,
+        .alphaCutoff              = desc.alphaCutoff,
+        .alphaMode                = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode),
+        .doubleSided              = desc.doubleSided,
+        .unlit                    = desc.unlit,
+        .transmissionFactor       = desc.transmissionFactor,
+        .transmissionMap          = desc.transmissionMap,
+        .iridescenceFactor        = desc.iridescenceFactor,
+        .filmThicknessNm          = desc.filmThicknessNm,
+        .filmThicknessMinNm       = desc.filmThicknessMinNm,
+        .volumeThicknessM         = desc.volumeThicknessM,
+        .ior                      = desc.ior,
+        .normalScale              = desc.normalScale,
+        .filmThicknessMap         = desc.filmThicknessMap,
+        .iridescenceMap           = desc.iridescenceMap,
+        .volumeThicknessMap       = desc.volumeThicknessMap,
+        .clearcoatFactor          = desc.clearcoatFactor,
+        .clearcoatRoughnessFactor = desc.clearcoatRoughnessFactor,
+        .clearcoatNormalScale     = desc.clearcoatNormalScale,
+        .clearcoatMap             = desc.clearcoatMap,
+        .clearcoatRoughnessMap    = desc.clearcoatRoughnessMap,
+        .clearcoatNormalMap       = desc.clearcoatNormalMap,
+        .anisotropyStrength       = desc.anisotropyStrength,
+        .anisotropyRotation       = desc.anisotropyRotation,
+        .anisotropyMap            = desc.anisotropyMap,
+        .sheenColorFactor         = desc.sheenColorFactor,
+        .sheenRoughnessFactor     = desc.sheenRoughnessFactor,
+        .sheenColorMap            = desc.sheenColorMap,
+        .sheenRoughnessMap        = desc.sheenRoughnessMap,
+        .occlusionMap             = desc.occlusionMap,
+        .occlusionStrength        = desc.occlusionStrength,
+        .textureSamplers          = desc.textureSamplers,
+        .textureTransforms        = desc.textureTransforms,
+    };
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
@@ -529,7 +522,7 @@ auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> 
     if (pixelsPerFace > std::numeric_limits<size_t>::max() / 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
-    const size_t bytesPerFace = static_cast<size_t>(pixelsPerFace) * 4;
+    const size_t               bytesPerFace = static_cast<size_t>(pixelsPerFace) * 4;
     std::array<const void*, 6> faceData {};
     for (size_t i = 0; i < faces.size(); ++i) {
         if (faces[i].size() != bytesPerFace) {
@@ -547,25 +540,25 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-    const size_t   bytes = Resource::blue_noise_rgba.size();
-    const size_t   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes / 4)));
+    const size_t bytes = Resource::blue_noise_rgba.size();
+    const auto   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes) / 4));
     if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
         ZHLN::Log("[BlueNoise] Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
         return std::unexpected(ErrorCode {BlueNoiseError::UnexpectedLayout});
     }
 
-    const uint32_t w = static_cast<uint32_t>(side);
-    const uint32_t h = static_cast<uint32_t>(side);
+    const auto w = static_cast<uint32_t>(side);
+    const auto h = static_cast<uint32_t>(side);
 
     const auto imageConfig = Vk::ImageConfig::Texture2D({w, h}, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled);
-    auto imageRes = Vk::Image::Create(allocator, imageConfig);
+    auto       imageRes    = Vk::Image::Create(allocator, imageConfig);
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
 
     Vk::Image image = std::move(*imageRes);
-    defer _([&] { allocator.DestroyImage(image); });
-    auto staging = stagingRingBuffer.Allocate(bytes);
+    defer     _([&] { allocator.DestroyImage(image); });
+    auto      staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
@@ -581,10 +574,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
             .bufferRowLength   = 0,
             .bufferImageHeight = 0,
             .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset       = {0, 0, 0},
+            .imageOffset       = {},
             .imageExtent       = {w, h, 1},
         };
-        Vk::CopyBufferToImage<1>(cmd, staging.slice.buffer, image.Handle(), {region});
+        Vk::CopyBufferToImage<1>(
+            cmd, staging.slice.buffer, image.Handle(), {region} // TODO(Evilpasture): Noisy boilerplate. Why am I forced to pass <1> and {region}?
+        );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
@@ -597,12 +592,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
     blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto samplerRes = blueNoiseSamplerConfig.Create(ctx.Device());
+    auto samplerRes        = blueNoiseSamplerConfig.Create(ctx.Device());
     if (!samplerRes) {
         return std::unexpected(samplerRes.error());
     }
 
-    blueNoiseSampler = std::move(*samplerRes);
+    blueNoiseSampler  = std::move(*samplerRes);
     auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
@@ -612,7 +607,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
-
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
@@ -639,14 +633,14 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     const bool creatingBlas = !scratchMesh->blas;
     if (creatingBlas) {
         auto blasBufOpt = Vk::Buffer::Create(
-            allocator, sizes.acceleration_structure_size,
-            Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+            allocator, sizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
+            Vk::MemoryUsage::GPUOnly
         );
         if (!blasBufOpt) {
             return;
         }
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
-        auto blas = Vk::CreateAccelerationStructure(
+        auto blas               = Vk::CreateAccelerationStructure(
             ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
         if (!blas) {
@@ -661,9 +655,8 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
     }
 
-    auto scratchBufOpt = Vk::Buffer::Create(
-        allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
-    );
+    auto scratchBufOpt =
+        Vk::Buffer::Create(allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
     if (!scratchBufOpt) {
         // No build was recorded: do not leave an uninitialized AS for the
         // next frame to treat as an existing, updateable BLAS.
@@ -692,7 +685,9 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
     constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
     auto mapped = nativeMesh->buffer.Map(_impl->allocator);
-    if (!mapped) return 0;
+    if (!mapped) {
+        return 0;
+    }
     char* basePtr = mapped->As<char>();
 
     const size_t count = std::min(positions.size(), static_cast<size_t>(RenderContext::Impl::kMaxDebugVertices));
@@ -725,8 +720,8 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Ma
 }
 
 auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32_t {
-    const uint32_t offset = _impl->nextMorphDeltaIndex;
-    const size_t capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
+    const uint32_t offset   = _impl->nextMorphDeltaIndex;
+    const size_t   capacity = _impl->morphDeltasBuffer.Size() / sizeof(float);
     if (deltas.size() % 4 != 0 || static_cast<size_t>(offset) * 4 > capacity || deltas.size() > capacity - static_cast<size_t>(offset) * 4) {
         ZHLN::Assert(false, "morph deltas must fit in the buffer as complete float4s");
         return offset;
@@ -746,17 +741,16 @@ auto RenderContext::AllocateMorphDeltas(std::span<const float> deltas) -> uint32
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-
 auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, ErrorCode> {
     auto* impl = _impl.get();
 
     return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
-        impl->settings.qualityPreset = impl->settings.DetectPreset();
+        impl->settings.qualityPreset      = impl->settings.DetectPreset();
     });
 }
 
-void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
+void RenderContext::Impl::ApplySettings(GraphicsSettings incoming) noexcept {
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
@@ -772,7 +766,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     }
 
     incoming.qualityPreset = incoming.DetectPreset();
-    settings               = std::move(incoming);
+    settings               = incoming;
 
     if (settings.qualityPreset != previousTier) {
         ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
@@ -780,7 +774,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
 }
 
 void RenderContext::ApplySettings(GraphicsSettings newSettings) noexcept {
-    _impl->ApplySettings(std::move(newSettings));
+    _impl->ApplySettings(newSettings);
 }
 
 const GraphicsSettings& RenderContext::GetSettings() const noexcept {
@@ -797,53 +791,68 @@ void RenderContext::SetAAState(const AAState& state) {
 
 auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto& impl = *_impl;
-    if (!impl.ctx.RayTracingSupported()) return std::unexpected(RenderFeatureError::FeatureNotSupported);
+    if (!impl.ctx.RayTracingSupported()) {
+        return std::unexpected(RenderFeatureError::FeatureNotSupported);
+    }
     // MeshBuilder and the glTF importer report this specific resolution error.
     auto* posMesh = impl.geometry.Resolve(mesh.posBuffer);
-    if (posMesh == nullptr) return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+    if (posMesh == nullptr) {
+        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+    }
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     const Vk::BlasGeometryDesc geom {
-        .vertex_data = posMesh->vboAddress,
+        .vertex_data   = posMesh->vboAddress,
         .vertex_stride = sizeof(VertexPosition),
-        .max_vertex = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
+        .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data = indexMesh != nullptr ? indexMesh->vboAddress : 0,
-        .index_type = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
+        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress : 0,
+        .index_type    = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
-    const uint32_t primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
-    const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
+    const uint32_t                       primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
+    const Vk::AccelerationStructureSizes sizes          = Vk::GetBLASSizes(impl.ctx.Device(), geom, primitiveCount);
 
     auto bufferRes = Vk::Buffer::Create(
-        impl.allocator, sizes.acceleration_structure_size,
-        Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
-    );
-    if (!bufferRes) return std::unexpected(bufferRes.error());
-    defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
-    auto blasResult = Vk::CreateAccelerationStructure(
-        impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
-    );
-    if (!blasResult) return std::unexpected(Vk::ToFrameError(blasResult.error()));
-    Vk::AccelerationStructure blas = std::move(*blasResult);
-
-    auto scratchRes = Vk::Buffer::Create(
-        impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+        impl.allocator, sizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
         Vk::MemoryUsage::GPUOnly
     );
-    if (!scratchRes) return std::unexpected(scratchRes.error());
+    if (!bufferRes) {
+        return std::unexpected(bufferRes.error());
+    }
+    defer _([&] { impl.allocator.DestroyBuffer(*bufferRes); });
+    auto  blasResult =
+        Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel);
+    if (!blasResult) {
+        return std::unexpected(Vk::ToFrameError(blasResult.error()));
+    }
+    Vk::AccelerationStructure blas = std::move(*blasResult);
+
+    auto scratchRes =
+        Vk::Buffer::Create(impl.allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
+    if (!scratchRes) {
+        return std::unexpected(scratchRes.error());
+    }
     defer _([&] { impl.allocator.DestroyBuffer(*scratchRes); });
 
-    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphics_family);
-    auto allocated = tempPool.Allocate(1);
-    if (!allocated) return std::unexpected(allocated.error());
+    Vk::CommandPool<Vk::QueueType::Graphics> tempPool(impl.ctx.Device(), impl.ctx.PhysicalInfo().graphicsFamily);
+    auto                                     allocated = tempPool.Allocate(1);
+    if (!allocated) {
+        return std::unexpected(allocated.error());
+    }
     auto recording = Vk::CommandRecorder::Begin(tempPool[0]);
-    if (!recording) return std::unexpected(recording.error());
-    const VkCommandBuffer cmd = recording->Handle();
-    Vk::MemoryBarrier(cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite,
-                      Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead);
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+    auto* const cmd = recording->Handle();
+    Vk::MemoryBarrier(
+        cmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
+        Vk::BarrierAccess::AccelerationStructureRead
+    );
     Vk::BuildBLAS(cmd, geom, blas.Get(), Vk::BufferSlice {*scratchRes, impl.ctx.BufferAddress(scratchRes->Handle())}, primitiveCount);
     auto executable = std::move(*recording).End();
-    if (!executable) return std::unexpected(executable.error());
+    if (!executable) {
+        return std::unexpected(executable.error());
+    }
 
     auto submitted = Vk::SubmitAndWait(
         impl.ctx.GraphicsQueue(), std::move(*executable), impl.transferRingBuffer.GetSemaphore(), impl.transferRingBuffer.GetCurrentValue(),
@@ -858,11 +867,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
     impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
     posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get());
-    posMesh->blasBuffer = std::move(*bufferRes);
-    posMesh->blas = std::move(blas);
+    posMesh->blasBuffer  = std::move(*bufferRes);
+    posMesh->blas        = std::move(blas);
     return {};
 }
-
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
     -> std::expected<TextureHandle, ErrorCode> {
@@ -884,9 +892,8 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D exte
 }
 
 enum class ScreenshotError : uint8_t {
-    FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
-    DestinationNotRecorded
-        ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
+    FileOpenFailed         ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
+    DestinationNotRecorded ZHLN_ANNOTATION(ZHLN::Description<"No completed frame was drawn into the headless presentation target"> {}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
@@ -901,7 +908,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             ZHLN::LogWarning("[Test Capture] No completed headless frame was drawn; capture refused.");
             return std::unexpected(ScreenshotError::DestinationNotRecorded);
         }
-        const auto& frameImage = *dest->acquired;
+        const auto&   frameImage   = *dest->acquired;
         VkImage       source       = frameImage.image.Handle();
         VkExtent2D    extent       = frameImage.image.Extent2D();
         VkImageLayout sourceLayout = Vk::ToVkImageLayout(frameImage.layout);
@@ -912,7 +919,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         if (!stagingRes) {
             return std::unexpected(stagingRes.error());
         }
-        auto stagingBuffer = std::move(*stagingRes);
+        auto  stagingBuffer = std::move(*stagingRes);
         defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
@@ -964,11 +971,11 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
         }
 
-        const auto*  rgba   = mapped->As<const uint8_t>();
-        const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
-        uint64_t     lumaSum = 0;
-        uint64_t     lit     = 0;
-        uint64_t     transparent = 0;
+        const auto*             rgba        = mapped->As<const uint8_t>();
+        const size_t            pixels      = static_cast<size_t>(extent.width) * extent.height;
+        uint64_t                lumaSum     = 0;
+        uint64_t                lit         = 0;
+        uint64_t                transparent = 0;
         std::array<uint64_t, 3> channelSum {};
         std::array<uint64_t, 3> aboveFloor {};
         std::array<uint8_t, 3>  channelMax {};
@@ -1008,7 +1015,8 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         // alone drowns the test output. Tests capture at Verbose and print
         // these statistics only when the test fails.
         ZHLN::LogDebug(
-            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB ({:.2f},{:.2f},{:.2f}); "
+            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB "
+            "({:.2f},{:.2f},{:.2f}); "
             "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
             outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
             meanOf(channelSum[2]), channelMax[0], channelMax[1], channelMax[2], aboveFloor[0], aboveFloor[1], aboveFloor[2]
@@ -1024,7 +1032,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }
-    auto stagingBuffer = std::move(*stagingRes);
+    auto  stagingBuffer = std::move(*stagingRes);
     defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
     Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
@@ -1104,4 +1112,4 @@ void RenderContext::ProvokeDeviceLost() {
     _impl->ProvokeDeviceLostInternal();
 }
 
-}
+} // namespace ZHLN

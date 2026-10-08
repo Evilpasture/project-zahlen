@@ -9,6 +9,58 @@
 
 namespace ZHLN {
 
+namespace {
+
+[[nodiscard]] auto AcquireDestinationImage(FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest) noexcept
+    -> std::expected<ZHLN::Optional<FrameDestinations::Acquired&>, ErrorCode> {
+    // 1. Already acquired earlier this frame? Return the active reference.
+    if (dest.acquired.has_value()) {
+        return *dest.acquired;
+    }
+    // 2. Headless or detached window? Benign skip.
+    if (dest.target == nullptr) {
+        return std::nullopt;
+    }
+
+    Vk::SwapchainPresenter& destPresenter = dest.Presenter();
+    const Extent2D          size          = dest.target->GetFramebufferExtent();
+    auto                    acquired      = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, !dest.IsPrimary());
+
+    // 3. Hard error (Device lost, fatal Vulkan error)
+    if (!acquired) {
+        if (acquired.error().Is(FrameResult::DeviceLost)) {
+            Vk::Instance::IncrementNumericalDeviceLoss();
+        }
+        destinations.AbortRecording(dest.id);
+        dest.cachedGeneration = destPresenter.resourceGeneration;
+        return std::unexpected(acquired.error());
+    }
+
+    // 4. Benign skip (Minimized window 0x0, out-of-date swapchain rebuilt)
+    if (!acquired->has_value()) {
+        destinations.AbortRecording(dest.id);
+        dest.cachedGeneration = destPresenter.resourceGeneration;
+        return std::nullopt;
+    }
+
+    const Vk::SwapchainTarget& image = **acquired;
+    if (dest.cachedGeneration != 0 && dest.cachedGeneration != image.generation) {
+        ZHLN::Log("[Render] Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
+    }
+    dest.cachedGeneration = image.generation;
+
+    // 5. Emplace and return the borrowed reference directly
+    return dest.acquired.emplace(
+        FrameDestinations::Acquired {
+            .image      = image.image,
+            .imageIndex = image.imageIndex,
+            .serial     = nextAcquisitionSerial++,
+        }
+    );
+}
+
+} // namespace
+
 auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto existing = destinations.Find(aux)) {
         return DestinationVend {.entry = &*existing, .created = false};
@@ -28,24 +80,24 @@ auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux,
             return std::unexpected(DestinationError::DeviceUnavailable);
         }
 
-        const Extent2D extent = aux.GetFramebufferExtent();
-        auto surfaceRes = CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
+        const Extent2D extent     = aux.GetFramebufferExtent();
+        auto           surfaceRes = CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
         if (!surfaceRes) {
             return std::unexpected(ErrorCode {surfaceRes.error()});
         }
 
-        auto owned = std::make_unique<Vk::SwapchainPresenter>();
+        auto owned     = std::make_unique<Vk::SwapchainPresenter>();
         owned->surface = Vk::Surface(ctx.Instance(), surfaceRes->Release());
         if (owned->surface.Get() == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
             return std::unexpected(DestinationError::SurfaceUnusable);
         }
-        if (auto initRes = owned->Init(ctx, allocator, extent.width, extent.height, ctx.PhysicalInfo().graphics_family, true); !initRes) {
+        if (auto initRes = owned->Init(ctx, allocator, extent.width, extent.height, ctx.PhysicalInfo().graphicsFamily, true); !initRes) {
             return std::unexpected(initRes.error());
         }
         if (owned->GetPresentFormat() != presenter.GetPresentFormat()) {
             return std::unexpected(DestinationError::PresentFormatMismatch);
         }
-        dest.presenter = owned.get();
+        dest.presenter      = owned.get();
         dest.ownedPresenter = std::move(owned);
     } else {
         dest.presenter = &presenter;
@@ -55,44 +107,6 @@ auto RenderContext::Impl::FindOrCreateDestination(const PresentationTarget& aux,
         return DestinationVend {.entry = &*entry, .created = true};
     }
     return std::unexpected(DestinationError::TooManyWindows);
-}
-
-auto RenderContext::Impl::AcquireDestinationImage(FrameDestinations::Window& dest) noexcept -> std::expected<bool, ErrorCode> {
-    if (dest.acquired.has_value()) {
-        return true;
-    }
-    if (dest.target == nullptr) {
-        return false;
-    }
-
-    Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-    const Extent2D size = dest.target->GetFramebufferExtent();
-    auto acquired = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, !dest.IsPrimary());
-    if (!acquired) {
-        if (acquired.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::IncrementNumericalDeviceLoss();
-        }
-        destinations.AbortRecording(dest.id);
-        dest.cachedGeneration = destPresenter.resourceGeneration;
-        return std::unexpected(acquired.error());
-    }
-    if (!acquired->has_value()) {
-        destinations.AbortRecording(dest.id);
-        dest.cachedGeneration = destPresenter.resourceGeneration;
-        return false;
-    }
-
-    const Vk::SwapchainTarget& image = **acquired;
-    if (dest.cachedGeneration != 0 && dest.cachedGeneration != image.generation) {
-        ZHLN::Log("[Render] Window presentation resources rebuilt (generation {} -> {}).", dest.cachedGeneration, image.generation);
-    }
-    dest.cachedGeneration = image.generation;
-    dest.acquired.emplace(FrameDestinations::Acquired {
-        .image = image.image,
-        .imageIndex = image.imageIndex,
-        .serial = nextAcquisition++,
-    });
-    return true;
 }
 
 auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) const noexcept -> std::optional<FrameTarget> {
@@ -121,25 +135,26 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
     }
     FrameDestinations::Window& dest = *found->entry;
     if (found->created) {
-        ZHLN::Log(
-            "[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0
-        );
+        ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
-    const auto acquired = AcquireDestinationImage(dest);
+
+    // Call the free function. We don't want to bloat Impl with a helper.
+    const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest);
     if (!acquired) {
         return std::unexpected(acquired.error());
     }
-    if (!*acquired) {
-        return std::nullopt;
+    if (!acquired->has_value()) {
+        return std::nullopt; // Frame skipped
     }
 
+    // Check existing command recorder or begin a new one...
     if (const auto existing = destinations.FindRecording(dest.id)) {
         if (!existing->recorder.IsRecording()) {
             return std::unexpected(DestinationError::ExpiredFrameTarget);
         }
     } else {
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        auto recording = Vk::CommandRecorder::Begin(destPresenter.SlotCommand(destPresenter.frameIndex));
+        auto                    recording     = Vk::CommandRecorder::Begin(destPresenter.SlotCommand(destPresenter.frameIndex));
         if (!recording) {
             dest.acquired.reset();
             return std::unexpected(recording.error());
@@ -179,7 +194,9 @@ auto RenderContext::Impl::ResolveTarget(const FrameTarget& target) noexcept -> s
 
 auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
     const auto active = destinations.Active();
-    if (!active) { return VK_NULL_HANDLE; }
+    if (!active) {
+        return VK_NULL_HANDLE;
+    }
     const auto recording = destinations.FindRecording(active->id);
     return recording ? recording->recorder.Handle() : VK_NULL_HANDLE;
 }
@@ -207,4 +224,4 @@ void RenderContext::Impl::DestroyDestinations() noexcept {
     renderTextures.clear();
 }
 
-}
+} // namespace ZHLN

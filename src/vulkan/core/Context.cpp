@@ -120,14 +120,14 @@ namespace {
     const VkPhysicalDeviceFeatures2*   features,
     const bool                         meshShaderRequested,
     const bool                         rayTracingRequested
-) noexcept -> std::expected<LogicalDevice, VkResult> // TODO(Evilpasture): Change E return to Error instead of VkResult.
+) noexcept -> std::expected<LogicalDevice, VkResult> // TODO(Evilpasture): Change E return to ErrorCode instead of VkResult.
 {
-    if (physical.handle == VK_NULL_HANDLE || !physical.has_graphics || physical.graphics_family == UINT32_MAX || physical.present_family == UINT32_MAX ||
-        physical.transfer_family == UINT32_MAX || physical.compute_family == UINT32_MAX) {
+    if (physical.handle == VK_NULL_HANDLE || !physical.hasGraphics || physical.graphicsFamily == UINT32_MAX || physical.presentFamily == UINT32_MAX ||
+        physical.transferFamily == UINT32_MAX || physical.computeFamily == UINT32_MAX) {
         return std::unexpected(VK_ERROR_INITIALIZATION_FAILED); // TODO(Evilpasture): This is lying to the upper stack. Remove this whenever possible.
     }
 
-    const std::array<uint32_t, 4>           candidates {physical.graphics_family, physical.present_family, physical.transfer_family, physical.compute_family};
+    const std::array<uint32_t, 4>           candidates {physical.graphicsFamily, physical.presentFamily, physical.transferFamily, physical.computeFamily};
     std::array<uint32_t, candidates.size()> unique_families {};
     uint32_t                                unique_family_count = 0;
     for (const uint32_t candidate: candidates) {
@@ -186,10 +186,10 @@ namespace {
     VkQueue present_queue  = VK_NULL_HANDLE;
     VkQueue transfer_queue = VK_NULL_HANDLE;
     VkQueue compute_queue  = VK_NULL_HANDLE;
-    vkGetDeviceQueue(handle, physical.graphics_family, 0, &graphics_queue);
-    vkGetDeviceQueue(handle, physical.present_family, 0, &present_queue);
-    vkGetDeviceQueue(handle, physical.transfer_family, 0, &transfer_queue);
-    vkGetDeviceQueue(handle, physical.compute_family, 0, &compute_queue);
+    vkGetDeviceQueue(handle, physical.graphicsFamily, 0, &graphics_queue);
+    vkGetDeviceQueue(handle, physical.presentFamily, 0, &present_queue);
+    vkGetDeviceQueue(handle, physical.transferFamily, 0, &transfer_queue);
+    vkGetDeviceQueue(handle, physical.computeFamily, 0, &compute_queue);
 
     const bool descriptor_heap_enabled = vkCmdBindResourceHeapEXT != nullptr && vkCmdBindSamplerHeapEXT != nullptr && vkCmdPushDataEXT != nullptr &&
                                          vkWriteResourceDescriptorsEXT != nullptr && vkWriteSamplerDescriptorsEXT != nullptr;
@@ -209,8 +209,8 @@ namespace {
             ZHLN::Log(
                 "[Vulkan] Mesh shader limits below engine budget (vertices={}/64, primitives={}/124, taskInvocations={}/32, meshInvocations={}/64); using "
                 "vertex pipelines.",
-                mesh_limits.max_mesh_output_vertices, mesh_limits.max_mesh_output_primitives, mesh_limits.max_task_work_group_invocations,
-                mesh_limits.max_mesh_work_group_invocations
+                mesh_limits.maxMeshOutputVertices, mesh_limits.maxMeshOutputPrimitives, mesh_limits.maxTaskWorkGroupInvocations,
+                mesh_limits.maxMeshWorkGroupInvocations
             );
         }
     }

@@ -14,15 +14,15 @@
 namespace ZHLN::Vk {
 
 struct SwapchainSupport {
-    VkSurfaceCapabilitiesKHR       capabilities {};
+    VkSurfaceCapabilitiesKHR        capabilities {};
     std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR>   present_modes;
+    std::vector<VkPresentModeKHR>   presentModes;
 
     [[nodiscard]] auto Formats() const noexcept -> std::span<const VkSurfaceFormatKHR> {
         return formats;
     }
     [[nodiscard]] auto PresentModes() const noexcept -> std::span<const VkPresentModeKHR> {
-        return present_modes;
+        return presentModes;
     }
 };
 
@@ -30,10 +30,10 @@ struct SwapchainData {
     VkSwapchainKHR           handle = VK_NULL_HANDLE;
     std::vector<VkImage>     images;
     std::vector<VkImageView> views;
-    uint32_t                 image_count = 0;
-    VkFormat                 format = VK_FORMAT_UNDEFINED;
+    uint32_t                 imageCount = 0;
+    VkFormat                 format     = VK_FORMAT_UNDEFINED;
     VkExtent2D               extent {};
-    VkPresentModeKHR         present_mode = VK_PRESENT_MODE_MAX_ENUM_KHR;
+    VkPresentModeKHR         presentMode = VK_PRESENT_MODE_MAX_ENUM_KHR;
 };
 
 class Swapchain {
@@ -58,13 +58,13 @@ class Swapchain {
     }
 
     [[nodiscard]] auto Rebuild(
-        VkDevice device,
+        VkDevice                  device,
         const PhysicalDeviceInfo& physical,
-        VkSurfaceKHR surface,
-        VkExtent2D extent,
-        bool vsync,
-        VkPresentModeKHR requestedPresentMode,
-        bool enablePresentTiming
+        VkSurfaceKHR              surface,
+        VkExtent2D                extent,
+        bool                      vsync,
+        VkPresentModeKHR          requestedPresentMode,
+        bool                      enablePresentTiming
     ) noexcept -> std::expected<void, VkResult>;
 
   private:

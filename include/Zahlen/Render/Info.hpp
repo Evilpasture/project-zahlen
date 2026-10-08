@@ -12,9 +12,8 @@
 namespace ZHLN {
 
 enum class RenderFeatureError : uint8_t {
-    FeatureNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device"> {}) = 1,
-    UnresolvedMeshHandle
-        ZHLN_ANNOTATION(ZHLN::Description<"The mesh names a buffer handle that does not resolve to a live GPU buffer"> {}) = 2,
+    FeatureNotSupported  ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device"> {})              = 1,
+    UnresolvedMeshHandle ZHLN_ANNOTATION(ZHLN::Description<"The mesh names a buffer handle that does not resolve to a live GPU buffer"> {}) = 2,
 };
 
 namespace Shadows {
@@ -23,7 +22,7 @@ inline constexpr float BaseOffset = 150.0f;
 inline constexpr float BaseDepth  = 300.0f;
 inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
-}
+} // namespace Shadows
 
 enum class PresentationMode : uint8_t {
     NativeSwapchain,
@@ -40,8 +39,8 @@ enum class PhysicalDeviceType : uint8_t {
 };
 
 struct RenderInfo {
-    std::string_view   rendererName         = {};
-    std::string_view   gpuName              = {};
+    std::string_view   rendererName;
+    std::string_view   gpuName;
     PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
     PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
     PacingPolicy       pacingPolicy         = PacingPolicy::LegacyVBlank;
@@ -52,4 +51,4 @@ struct RenderInfo {
 
 using RenderResult = std::expected<void, ErrorCode>;
 
-}
+} // namespace ZHLN

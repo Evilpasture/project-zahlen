@@ -31,10 +31,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 
     particleRenderLayout = emptyPipelineLayout;
 
-    return LoadAndCreateShaders(
-               Vk::MakeStageSource<Shaders::Modules::ParticleRenderVS>(),
-               Vk::MakeStageSource<Shaders::Modules::ParticleRenderPS>()
-    )
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::ParticleRenderVS>(), Vk::MakeStageSource<Shaders::Modules::ParticleRenderPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders.View())
@@ -62,10 +59,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
 
     meshParticleRenderLayout = emptyPipelineLayout;
 
-    return LoadAndCreateShaders(
-               Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderVS>(),
-               Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderPS>()
-    )
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderVS>(), Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders.View())
@@ -82,8 +76,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return LoadAndCreateShaders(
-                       Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowVS>(),
-                       Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowPS>()
+                       Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowVS>(), Vk::MakeStageSource<Shaders::Modules::MeshParticleShadowPS>()
             )
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
@@ -154,9 +147,7 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     linePipelineLayout = emptyPipelineLayout;
 
-    return LoadAndCreateShaders(
-               Vk::MakeStageSource<Shaders::Modules::BasicVSForward>(), Vk::MakeStageSource<Shaders::Modules::ForwardPS>()
-    )
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSForward>(), Vk::MakeStageSource<Shaders::Modules::ForwardPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
@@ -227,9 +218,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
         .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
     };
 
-    return LoadAndCreateShaders(
-               Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>()
-    )
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
                 .Shaders(shaders.View())
@@ -248,9 +237,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 }
 
 auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
-    auto shaders = LoadAndCreateShaders(
-        Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>()
-    );
+    auto shaders = LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>());
     if (!shaders) {
         return std::unexpected(shaders.error());
     }
@@ -409,7 +396,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
-            const std::array        candFamilies = {physInfo.graphics_family, physInfo.compute_family, physInfo.transfer_family};
+            const std::array        candFamilies = {physInfo.graphicsFamily, physInfo.computeFamily, physInfo.transferFamily};
             std::array<uint32_t, 3> uniqFamilies {};
             uint32_t                uniqCount = 0;
             for (uint32_t cand: candFamilies) {
@@ -522,8 +509,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
                         auto tlas = Vk::CreateAccelerationStructure(
-                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size,
-                            Vk::AccelerationStructureType::TopLevel
+                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, Vk::AccelerationStructureType::TopLevel
                         );
                         if (!tlas) {
                             return std::unexpected(Vk::ToFrameError(tlas.error()));

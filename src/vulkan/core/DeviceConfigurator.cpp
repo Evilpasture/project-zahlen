@@ -12,8 +12,7 @@ auto MeshShaderLimitsSufficient(const VkPhysicalDevice physical) noexcept -> boo
     if (!MeshShaderLimitsSufficient(limits)) {
         ZHLN::Log(
             "[Vulkan] Mesh shader limits insufficient (vertices={}, primitives={}, taskInvocations={}, meshInvocations={}); using vertex pipelines.",
-            limits.max_mesh_output_vertices, limits.max_mesh_output_primitives, limits.max_task_work_group_invocations,
-            limits.max_mesh_work_group_invocations
+            limits.maxMeshOutputVertices, limits.maxMeshOutputPrimitives, limits.maxTaskWorkGroupInvocations, limits.maxMeshWorkGroupInvocations
         );
         return false;
     }
@@ -24,11 +23,8 @@ void ReportSubgroupSupport(const VkPhysicalDevice physical, const VkSubgroupFeat
     if (physical == VK_NULL_HANDLE || vkGetPhysicalDeviceProperties2 == nullptr) {
         return;
     }
-    VkPhysicalDeviceSubgroupProperties subgroup {};
-    subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    VkPhysicalDeviceProperties2 properties {};
-    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    properties.pNext = &subgroup;
+    VkPhysicalDeviceSubgroupProperties subgroup {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+    VkPhysicalDeviceProperties2        properties {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     vkGetPhysicalDeviceProperties2(physical, &properties);
     if ((subgroup.supportedOperations & requiredOps) != requiredOps) {
         ZHLN::LogWarning(

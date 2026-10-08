@@ -64,7 +64,7 @@ void StagingContext::Abort() && noexcept {
 }
 
 auto StagingContext::Begin(Allocator& allocator, const Context& ctx) noexcept -> std::expected<StagingContext, ErrorCode> {
-    CommandPool<QueueType::Graphics> pool(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+    CommandPool<QueueType::Graphics> pool(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
     if (auto allocated = pool.Allocate(1); !allocated) [[unlikely]] {
         return std::unexpected(allocated.error());
     }
@@ -80,7 +80,7 @@ auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uin
     return Buffer::Create(*_allocator, bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
         .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
             defer _([&] { _allocator->DestroyBuffer(staging); });
-            auto mapped = staging.Map(*_allocator);
+            auto  mapped = staging.Map(*_allocator);
             if (!mapped) {
                 return std::unexpected(mapped.error());
             }
@@ -96,28 +96,29 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(_recorder.Handle(), dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
 
     const VkBufferImageCopy2 region {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-        .bufferOffset = offset,
-        .bufferRowLength = 0,
+        .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+        .bufferOffset      = offset,
+        .bufferRowLength   = 0,
         .bufferImageHeight = 0,
-        .imageSubresource = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-        .imageOffset = {0, 0, 0},
+        .imageSubresource =
+            {
+                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel       = 0,
+                .baseArrayLayer = 0,
+                .layerCount     = 1,
+            },
+        .imageOffset = {},
         .imageExtent = {w, h, 1},
     };
-    const VkCopyBufferToImageInfo2 copyInfo {
-        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-        .srcBuffer = stagingBuf,
-        .dstImage = dstImage,
+    const VkCopyBufferToImageInfo2 copy_info {
+        .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+        .srcBuffer      = stagingBuf,
+        .dstImage       = dstImage,
         .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .regionCount = 1,
-        .pRegions = &region,
+        .regionCount    = 1,
+        .pRegions       = &region,
     };
-    vkCmdCopyBufferToImage2(_recorder.Handle(), &copyInfo);
+    vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info); // TODO(Evilpasture): Don't we have an existing abstraction? Look similar to CopyBufferToImage.
 
     if (mipLevels > 1) {
         GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -157,7 +158,7 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .regionCount    = 1,
                 .pRegions       = &region,
             };
-            vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info);
+            vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info); // TODO(Evilpasture): Ditto.
         }
         current_offset += (face_size * 6);
     }
@@ -187,8 +188,10 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
     if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, fence); !result) {
         // If a submission failed partway through, keep the pool and buffers
         // alive until the queue is idle, before the recording batch is freed.
-        vkQueueWaitIdle(_ctx->GraphicsQueue());
-        vkDestroyFence(_ctx->Device(), fence, nullptr);
+        Vk::WaitIdle(
+            _ctx->GraphicsQueue()
+        ); // TODO(Evilpasture): Propagate this. Leaving this discarded so the compiler can warn and I can remember. Do not static_cast<void>.
+        vkDestroyFence(_ctx->Device(), fence, nullptr); // TODO(Evilpasture): Now I realize, we don't have an abstraction for this yet.
         return std::unexpected(result.error());
     }
     return SubmittedStagingWork {*_allocator, *_ctx, std::move(_cmdPool), std::move(_stagingBuffers), fence};

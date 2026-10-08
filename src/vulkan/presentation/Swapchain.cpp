@@ -13,7 +13,7 @@ template <typename T, typename Enumerate>
 [[nodiscard]] auto EnumerateSurfaceValues(Enumerate&& enumerate) noexcept -> std::expected<std::vector<T>, VkResult> {
     std::vector<T> values;
     for (;;) {
-        uint32_t count = 0;
+        uint32_t count  = 0;
         VkResult result = enumerate(&count, nullptr);
         if (result != VK_SUCCESS) {
             return std::unexpected(result);
@@ -34,15 +34,14 @@ template <typename T, typename Enumerate>
     }
 }
 
-[[nodiscard]] auto QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept
-    -> std::expected<SwapchainSupport, VkResult> {
+[[nodiscard]] auto QuerySwapchainSupport(const VkPhysicalDevice physical, const VkSurfaceKHR surface) noexcept -> std::expected<SwapchainSupport, VkResult> {
     if (physical == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || vkGetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr ||
         vkGetPhysicalDeviceSurfaceFormatsKHR == nullptr || vkGetPhysicalDeviceSurfacePresentModesKHR == nullptr) {
         return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
     }
 
     SwapchainSupport support {};
-    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &support.capabilities);
+    VkResult         result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, surface, &support.capabilities);
     if (result != VK_SUCCESS) {
         return std::unexpected(result);
     }
@@ -55,13 +54,13 @@ template <typename T, typename Enumerate>
     }
     support.formats = std::move(*formats);
 
-    auto presentModes = EnumerateSurfaceValues<VkPresentModeKHR>([physical, surface](uint32_t* count, VkPresentModeKHR* values) {
+    auto present_modes = EnumerateSurfaceValues<VkPresentModeKHR>([physical, surface](uint32_t* count, VkPresentModeKHR* values) {
         return vkGetPhysicalDeviceSurfacePresentModesKHR(physical, surface, count, values);
     });
-    if (!presentModes) {
-        return std::unexpected(presentModes.error());
+    if (!present_modes) {
+        return std::unexpected(present_modes.error());
     }
-    support.present_modes = std::move(*presentModes);
+    support.presentModes = std::move(*present_modes);
     return support;
 }
 
@@ -69,11 +68,8 @@ template <typename T, typename Enumerate>
     return std::ranges::contains(modes, requested);
 }
 
-[[nodiscard]] auto ChoosePresentMode(
-    const std::span<const VkPresentModeKHR> modes,
-    const VkPresentModeKHR requested,
-    const bool vsync
-) noexcept -> VkPresentModeKHR {
+[[nodiscard]] auto
+    ChoosePresentMode(const std::span<const VkPresentModeKHR> modes, const VkPresentModeKHR requested, const bool vsync) noexcept -> VkPresentModeKHR {
     if (requested != VK_PRESENT_MODE_MAX_ENUM_KHR && Advertises(modes, requested)) {
         return requested;
     }
@@ -98,17 +94,14 @@ template <typename T, typename Enumerate>
     }
     if (formats.size() == 1 && formats.front().format == VK_FORMAT_UNDEFINED) {
         return VkSurfaceFormatKHR {
-            .format = VK_FORMAT_B8G8R8A8_SRGB,
+            .format     = VK_FORMAT_B8G8R8A8_SRGB,
             .colorSpace = formats.front().colorSpace,
         };
     }
     return formats.empty() ? VkSurfaceFormatKHR {} : formats.front();
 }
 
-[[nodiscard]] auto ChooseExtent(
-    const VkSurfaceCapabilitiesKHR& capabilities,
-    const VkExtent2D requested
-) noexcept -> VkExtent2D {
+[[nodiscard]] auto ChooseExtent(const VkSurfaceCapabilitiesKHR& capabilities, const VkExtent2D requested) noexcept -> VkExtent2D {
     if (capabilities.currentExtent.width != UINT32_MAX) {
         return capabilities.currentExtent;
     }
@@ -136,7 +129,7 @@ template <typename T, typename Enumerate>
 [[nodiscard]] auto RetrieveImages(const VkDevice device, const VkSwapchainKHR swapchain) noexcept -> std::expected<std::vector<VkImage>, VkResult> {
     std::vector<VkImage> images;
     for (;;) {
-        uint32_t count = 0;
+        uint32_t count  = 0;
         VkResult result = vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr);
         if (result != VK_SUCCESS) {
             return std::unexpected(result);
@@ -163,8 +156,8 @@ Swapchain::~Swapchain() noexcept {
     Destroy();
 }
 
-Swapchain::Swapchain(Swapchain&& other) noexcept:
-    _device(std::exchange(other._device, VK_NULL_HANDLE)), _data(std::exchange(other._data, {})) {}
+Swapchain::Swapchain(Swapchain&& other) noexcept: _device(std::exchange(other._device, VK_NULL_HANDLE)), _data(std::exchange(other._data, {})) {
+}
 
 auto Swapchain::operator=(Swapchain&& other) noexcept -> Swapchain& {
     if (this != &other) {
@@ -176,137 +169,137 @@ auto Swapchain::operator=(Swapchain&& other) noexcept -> Swapchain& {
 }
 
 auto Swapchain::Rebuild(
-    const VkDevice device,
+    const VkDevice            device,
     const PhysicalDeviceInfo& physical,
-    const VkSurfaceKHR surface,
-    const VkExtent2D extent,
-    const bool vsync,
-    const VkPresentModeKHR requestedPresentMode,
-    const bool enablePresentTiming
+    const VkSurfaceKHR        surface,
+    const VkExtent2D          extent,
+    const bool                vsync,
+    const VkPresentModeKHR    requestedPresentMode,
+    const bool                enablePresentTiming
 ) noexcept -> std::expected<void, VkResult> {
-    if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE ||
-        (Valid() && _device != device)) {
+    if (device == VK_NULL_HANDLE || physical.handle == VK_NULL_HANDLE || surface == VK_NULL_HANDLE || (Valid() && _device != device)) {
         return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
     }
 
-    auto supportResult = QuerySwapchainSupport(physical.handle, surface);
-    if (!supportResult) {
-        return std::unexpected(supportResult.error());
+    auto support_result = QuerySwapchainSupport(physical.handle, surface);
+    if (!support_result) {
+        return std::unexpected(support_result.error());
     }
-    const SwapchainSupport& support = *supportResult;
-    if (support.formats.empty() || support.present_modes.empty()) {
+    const SwapchainSupport& support = *support_result;
+    if (support.formats.empty() || support.presentModes.empty()) {
         return std::unexpected(VK_ERROR_FORMAT_NOT_SUPPORTED);
     }
 
-    const VkSurfaceFormatKHR format = ChooseFormat(support.formats);
-    const VkPresentModeKHR presentMode = ChoosePresentMode(support.present_modes, requestedPresentMode, vsync);
-    if (presentMode == VK_PRESENT_MODE_MAX_ENUM_KHR) {
+    const VkSurfaceFormatKHR format       = ChooseFormat(support.formats);
+    const VkPresentModeKHR   present_mode = ChoosePresentMode(support.presentModes, requestedPresentMode, vsync);
+    if (present_mode == VK_PRESENT_MODE_MAX_ENUM_KHR) {
         return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
     }
-    const VkExtent2D chosenExtent = ChooseExtent(support.capabilities, extent);
+    const VkExtent2D chosen_extent = ChooseExtent(support.capabilities, extent);
 
-    uint32_t imageCount = support.capabilities.minImageCount;
-    if (imageCount < UINT32_MAX) {
-        ++imageCount;
+    uint32_t image_count = support.capabilities.minImageCount;
+    if (image_count < UINT32_MAX) {
+        ++image_count;
     }
-    if (support.capabilities.maxImageCount > 0 && imageCount > support.capabilities.maxImageCount) {
-        imageCount = support.capabilities.maxImageCount;
+    if (support.capabilities.maxImageCount > 0 && image_count > support.capabilities.maxImageCount) {
+        image_count = support.capabilities.maxImageCount;
     }
-    if (imageCount == 0) {
+    if (image_count == 0) {
         return std::unexpected(VK_ERROR_INITIALIZATION_FAILED);
     }
 
-    const std::array<uint32_t, 2> queueFamilies {physical.graphics_family, physical.present_family};
-    const bool sharedQueue = queueFamilies[0] == queueFamilies[1];
-    const bool supportsPresentModeChain = vkReleaseSwapchainImagesKHR != nullptr;
+    const std::array<uint32_t, 2> queue_families {physical.graphicsFamily, physical.presentFamily};
+    const bool                    shared_queue                = queue_families[0] == queue_families[1];
+    const bool                    supports_present_mode_chain = vkReleaseSwapchainImagesKHR != nullptr;
 
-    const VkSwapchainPresentModesCreateInfoKHR presentModesInfo {
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
-        .pNext = nullptr,
+    const VkSwapchainPresentModesCreateInfoKHR present_modes_info {
+        .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR,
+        .pNext            = nullptr,
         .presentModeCount = 1,
-        .pPresentModes = &presentMode,
+        .pPresentModes    = &present_mode,
     };
-    const VkSwapchainCreateInfoKHR createInfo {
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext = supportsPresentModeChain ? &presentModesInfo : nullptr,
-        .flags = enablePresentTiming
-            ? static_cast<VkSwapchainCreateFlagsKHR>(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR)
-            : VkSwapchainCreateFlagsKHR {0},
-        .surface = surface,
-        .minImageCount = imageCount,
-        .imageFormat = format.format,
-        .imageColorSpace = format.colorSpace,
-        .imageExtent = chosenExtent,
+    const VkSwapchainCreateInfoKHR create_info {
+        .sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .pNext            = supports_present_mode_chain ? &present_modes_info : nullptr,
+        .flags            = enablePresentTiming ?
+                                static_cast<VkSwapchainCreateFlagsKHR>(VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR) :
+                                VkSwapchainCreateFlagsKHR {0},
+        .surface          = surface,
+        .minImageCount    = image_count,
+        .imageFormat      = format.format,
+        .imageColorSpace  = format.colorSpace,
+        .imageExtent      = chosen_extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        .imageSharingMode = sharedQueue ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
-        .queueFamilyIndexCount = sharedQueue ? 0U : static_cast<uint32_t>(queueFamilies.size()),
-        .pQueueFamilyIndices = sharedQueue ? nullptr : queueFamilies.data(),
-        .preTransform = support.capabilities.currentTransform,
-        .compositeAlpha = ChooseCompositeAlpha(support.capabilities.supportedCompositeAlpha),
-        .presentMode = presentMode,
-        .clipped = VK_TRUE,
-        .oldSwapchain = _data.handle,
+        .imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .imageSharingMode = shared_queue ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
+        .queueFamilyIndexCount = shared_queue ? 0U : static_cast<uint32_t>(queue_families.size()),
+        .pQueueFamilyIndices   = shared_queue ? nullptr : queue_families.data(),
+        .preTransform          = support.capabilities.currentTransform,
+        .compositeAlpha        = ChooseCompositeAlpha(support.capabilities.supportedCompositeAlpha),
+        .presentMode           = present_mode,
+        .clipped               = VK_TRUE,
+        .oldSwapchain          = _data.handle,
     };
 
-    VkSwapchainKHR newHandle = VK_NULL_HANDLE;
-    const VkResult created = vkCreateSwapchainKHR(device, &createInfo, nullptr, &newHandle);
+    VkSwapchainKHR new_handle = VK_NULL_HANDLE;
+    const VkResult created    = vkCreateSwapchainKHR(device, &create_info, nullptr, &new_handle);
     if (created != VK_SUCCESS) {
         return std::unexpected(created);
     }
 
-    auto imagesResult = RetrieveImages(device, newHandle);
-    if (!imagesResult) {
-        vkDestroySwapchainKHR(device, newHandle, nullptr);
-        return std::unexpected(imagesResult.error());
+    auto images_result = RetrieveImages(device, new_handle);
+    if (!images_result) {
+        vkDestroySwapchainKHR(device, new_handle, nullptr);
+        return std::unexpected(images_result.error());
     }
 
     SwapchainData next {
-        .handle = newHandle,
-        .images = std::move(*imagesResult),
-        .views = {},
-        .image_count = 0,
-        .format = format.format,
-        .extent = chosenExtent,
-        .present_mode = presentMode,
+        .handle      = new_handle,
+        .images      = std::move(*images_result),
+        .views       = {},
+        .imageCount  = 0,
+        .format      = format.format,
+        .extent      = chosen_extent,
+        .presentMode = present_mode,
     };
-    next.image_count = static_cast<uint32_t>(next.images.size());
+    next.imageCount = static_cast<uint32_t>(next.images.size());
     next.views.resize(next.images.size(), VK_NULL_HANDLE);
 
-    const VkImageViewCreateInfo viewInfoTemplate {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .image = VK_NULL_HANDLE,
+    const VkImageViewCreateInfo view_info_template {
+        .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext    = nullptr,
+        .flags    = 0,
+        .image    = VK_NULL_HANDLE,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = format.format,
-        .components = {
-            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-        },
+        .format   = format.format,
+        .components =
+            {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
         .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
             .baseArrayLayer = 0,
-            .layerCount = 1,
+            .layerCount     = 1,
         },
     };
 
     for (size_t i = 0; i < next.images.size(); ++i) {
-        VkImageViewCreateInfo viewInfo = viewInfoTemplate;
-        viewInfo.image = next.images[i];
-        const VkResult viewCreated = vkCreateImageView(device, &viewInfo, nullptr, &next.views[i]);
-        if (viewCreated != VK_SUCCESS) {
+        VkImageViewCreateInfo view_info = view_info_template;
+        view_info.image                 = next.images[i];
+        const VkResult view_created     = vkCreateImageView(device, &view_info, nullptr, &next.views[i]);
+        if (view_created != VK_SUCCESS) {
             for (VkImageView view: next.views) {
                 if (view != VK_NULL_HANDLE) {
                     vkDestroyImageView(device, view, nullptr);
                 }
             }
-            vkDestroySwapchainKHR(device, newHandle, nullptr);
-            return std::unexpected(viewCreated);
+            vkDestroySwapchainKHR(device, new_handle, nullptr);
+            return std::unexpected(view_created);
         }
     }
 

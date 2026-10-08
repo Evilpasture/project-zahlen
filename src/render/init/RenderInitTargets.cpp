@@ -11,7 +11,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
 
     impl.targets.NameGraphTargets();
 
-    auto history = impl.accumulationHistory.begin();
+    auto* history = impl.accumulationHistory.begin();
     Vk::Debug::SetImageName(ctx, history[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, history[1].image.Handle(), "AccumHistory1");
     Vk::Debug::SetImageName(ctx, impl.presenter.depthTarget.image.Handle(), "DepthTarget");
@@ -24,7 +24,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     impl.textureManager.NameSlots();
 
     const auto& swapchain = impl.presenter.swapchain.Get();
-    for (uint32_t i = 0; i < swapchain.image_count; ++i) {
+    for (uint32_t i = 0; i < swapchain.imageCount; ++i) {
         Vk::Debug::SetImageName(ctx, swapchain.images[i], std::format("Swapchain{}", i));
     }
 }
@@ -62,7 +62,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);
 
-        Vk::ClearColorAndTransition(cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, accumulationHistory.Current(), accumulationHistory.Previous());
+        Vk::ClearColorAndTransition(cmd, Color4 {}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
             heapManager.WriteImage(decalDepthSlot, presenter.depthTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -78,9 +78,8 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
 
     WriteTransLightingToHeap();
 
-
     ApplyImageDebugNames(*this);
     return {};
 }
 
-}
+} // namespace ZHLN

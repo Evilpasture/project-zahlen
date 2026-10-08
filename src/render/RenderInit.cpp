@@ -4,12 +4,10 @@
 #include "GpuHandwritten.hpp"
 #include "RenderInternal.hpp"
 #include "pipeline/ComputePass.hpp"
-#include "Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <functional>
 #include <utility>
 
 namespace ZHLN {
@@ -35,16 +33,16 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
     const bool meshShaderQueries = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
         return f.meshShaderQueries == VK_TRUE;
     });
-    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family, meshShaderQueries); !res) {
+    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphicsFamily, meshShaderQueries); !res) {
         return std::unexpected(res.error());
     }
     if (!gpuProfiler.Enabled()) {
         ZHLN::LogWarning("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
     }
 
-    return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
-        .and_then([&]() { return transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family); })
-        .and_then([&]() { return computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family); });
+    return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphicsFamily)
+        .and_then([&]() { return transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transferFamily); })
+        .and_then([&]() { return computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().computeFamily); });
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
@@ -60,8 +58,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
         })
         .and_then([&]() {
             return shadows.CompilePunctualPipeline(
-                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(),
-                Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
             );
         })
         .and_then([&]() { return InitCSGPipelines(); });
@@ -76,7 +73,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 
     for (auto& worker: workerCmds) {
         for (auto& pool: worker.pools) {
-            pool     = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphics_family);
+            pool     = Vk::CommandPool<Vk::QueueType::Graphics>(ctx.Device(), ctx.PhysicalInfo().graphicsFamily);
             auto res = pool.AllocateSecondary(256);
             if (!res) [[unlikely]] {
                 return std::unexpected(res.error());
@@ -85,7 +82,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
     }
 
     for (auto& recorder: parallelRecorders) {
-        if (auto initialized = recorder.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); !initialized) {
+        if (auto initialized = recorder.Init(ctx.Device(), ctx.PhysicalInfo().graphicsFamily); !initialized) {
             return std::unexpected(initialized.error());
         }
     }
@@ -99,12 +96,12 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         .and_then([&]() {
             deletionQueue.Init(allocator);
             return stagingRingBuffer.Init(
-                allocator, ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphics_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+                allocator, ctx.Device(), ctx.GraphicsQueue(), ctx.PhysicalInfo().graphicsFamily, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() {
             return transferRingBuffer.Init(
-                allocator, ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transfer_family, static_cast<VkDeviceSize>(64 * 1024 * 1024)
+                allocator, ctx.Device(), ctx.TransferQueue(), ctx.PhysicalInfo().transferFamily, static_cast<VkDeviceSize>(64 * 1024 * 1024)
             );
         })
         .and_then([&]() { return InitDiagnosticsAndProfiling(); })
@@ -112,22 +109,18 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
+        .and_then([&]() { return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphicsFamily, cfg.vsync); })
         .and_then([&]() {
-            return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
-        })
-        .and_then([&]() {
-            computePools =
-                Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
+            computePools = Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute>::Create(
+                ctx.Device(), {.queueFamily = ctx.PhysicalInfo().computeFamily, .buffersPerPool = 1}
+            );
             return InitPostProcessing();
         })
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            return SetupUI();
-        })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return SetupUI(); })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
             auto fvb_res = CreatePerFrame(
-                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                Vk::MemoryUsage::CPUToGPU
+                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
             );
             if (fvb_res) {
                 frames.fogVolumesBuffer = std::move(*fvb_res);
@@ -135,4 +128,4 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         });
 }
 
-}
+} // namespace ZHLN

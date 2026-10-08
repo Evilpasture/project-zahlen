@@ -4,11 +4,10 @@
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../PresentationSurface.hpp"
 #include "../RenderInternal.hpp"
-#include "diagnostics/GpuProfiler.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
+#include "diagnostics/GpuProfiler.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <chrono>
 #include <cstdlib>
 #include <vector>
 
@@ -36,8 +35,7 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 // Required core bits stay required; drawIndirectCount, shaderInt64, and
 // pipelineStatisticsQuery are masked independently within their core structs.
 auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode validationMode) {
-    constexpr VkSubgroupFeatureFlags kUsedSubgroupOps =
-        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+    constexpr VkSubgroupFeatureFlags kUsedSubgroupOps = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
 
     return Vk::DeviceConfigurator<>(physical)
         .OptionalPresentation(present)
@@ -53,48 +51,50 @@ auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode val
             f.dynamicRendering               = VK_TRUE;
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
-        .RequireExtension<VkPhysicalDeviceMaintenance5FeaturesKHR>(
-            VK_KHR_MAINTENANCE_5_EXTENSION_NAME, [](auto& f) { f.maintenance5 = VK_TRUE; }
+        .RequireExtension<VkPhysicalDeviceMaintenance5FeaturesKHR>(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, [](auto& f) { f.maintenance5 = VK_TRUE; })
+        .RequireWithOptional<VkPhysicalDeviceVulkan12Features>(
+            [validationMode](auto& f) {
+                f.descriptorIndexing                           = VK_TRUE;
+                f.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
+                f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+                f.descriptorBindingPartiallyBound              = VK_TRUE;
+                f.runtimeDescriptorArray                       = VK_TRUE;
+                f.bufferDeviceAddress                          = VK_TRUE;
+                f.hostQueryReset                               = VK_TRUE;
+                f.timelineSemaphore                            = VK_TRUE;
+                f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
+                f.shaderFloat16                                = VK_TRUE;
+                if (validationMode == ValidationMode::GPU) {
+                    f.scalarBlockLayout            = VK_TRUE;
+                    f.storageBuffer8BitAccess      = VK_TRUE;
+                    f.shaderInt8                   = VK_TRUE;
+                    f.vulkanMemoryModel            = VK_TRUE;
+                    f.vulkanMemoryModelDeviceScope = VK_TRUE;
+                }
+            },
+            [](auto& f) { f.drawIndirectCount = VK_TRUE; }
         )
-        .RequireWithOptional<VkPhysicalDeviceVulkan12Features>([validationMode](auto& f) {
-            f.descriptorIndexing                           = VK_TRUE;
-            f.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
-            f.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-            f.descriptorBindingPartiallyBound              = VK_TRUE;
-            f.runtimeDescriptorArray                       = VK_TRUE;
-            f.bufferDeviceAddress                          = VK_TRUE;
-            f.hostQueryReset                               = VK_TRUE;
-            f.timelineSemaphore                            = VK_TRUE;
-            f.uniformAndStorageBuffer8BitAccess            = VK_TRUE;
-            f.shaderFloat16                                = VK_TRUE;
-            if (validationMode == ValidationMode::GPU) {
-                f.scalarBlockLayout            = VK_TRUE;
-                f.storageBuffer8BitAccess      = VK_TRUE;
-                f.shaderInt8                   = VK_TRUE;
-                f.vulkanMemoryModel            = VK_TRUE;
-                f.vulkanMemoryModelDeviceScope = VK_TRUE;
-            }
-        }, [](auto& f) { f.drawIndirectCount = VK_TRUE; })
         .OptionalRayTracing()
-        .RequireExtension<VkPhysicalDeviceDescriptorHeapFeaturesEXT>(
-            VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME, [](auto& f) { f.descriptorHeap = VK_TRUE; }
-        )
+        .RequireExtension<VkPhysicalDeviceDescriptorHeapFeaturesEXT>(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME, [](auto& f) { f.descriptorHeap = VK_TRUE; })
         .OptionalMeshShaders()
-        .RequireWithOptional<VkPhysicalDeviceFeatures2>([validationMode](auto& f) {
-            f.features.multiDrawIndirect         = VK_TRUE;
-            f.features.samplerAnisotropy         = VK_TRUE;
-            f.features.drawIndirectFirstInstance = VK_TRUE;
-            f.features.imageCubeArray            = VK_TRUE;
-            f.features.shaderInt16               = VK_TRUE;
-            if (validationMode == ValidationMode::GPU) {
-                f.features.robustBufferAccess             = VK_TRUE;
-                f.features.fragmentStoresAndAtomics       = VK_TRUE;
-                f.features.vertexPipelineStoresAndAtomics = VK_TRUE;
+        .RequireWithOptional<VkPhysicalDeviceFeatures2>(
+            [validationMode](auto& f) {
+                f.features.multiDrawIndirect         = VK_TRUE;
+                f.features.samplerAnisotropy         = VK_TRUE;
+                f.features.drawIndirectFirstInstance = VK_TRUE;
+                f.features.imageCubeArray            = VK_TRUE;
+                f.features.shaderInt16               = VK_TRUE;
+                if (validationMode == ValidationMode::GPU) {
+                    f.features.robustBufferAccess             = VK_TRUE;
+                    f.features.fragmentStoresAndAtomics       = VK_TRUE;
+                    f.features.vertexPipelineStoresAndAtomics = VK_TRUE;
+                }
+            },
+            [](auto& f) {
+                f.features.shaderInt64             = VK_TRUE;
+                f.features.pipelineStatisticsQuery = VK_TRUE;
             }
-        }, [](auto& f) {
-            f.features.shaderInt64           = VK_TRUE;
-            f.features.pipelineStatisticsQuery = VK_TRUE;
-        })
+        )
         .SubgroupDiagnostics(kUsedSubgroupOps)
         .Build();
 }
@@ -110,9 +110,9 @@ auto SelectPresentationMode(const PresentationTarget& target) noexcept -> Presen
     }
 }
 
-}
+} // namespace
 
-RenderContext::RenderContext(PrivateToken , std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -120,22 +120,21 @@ RenderContext::RenderContext(PrivateToken , std::unique_ptr<Impl> impl) noexcept
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Create(
-    PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher
-) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
-    auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
-    impl->appName = cfg.appName;
+auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher) noexcept
+    -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+    auto impl               = std::make_unique<Impl>(target, fileSystemWatcher);
+    impl->appName           = cfg.appName;
     impl->pipelineCachePath = cfg.pipelineCachePath;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(target);
     impl->presentationMode      = mode;
 
-    Vk::Instance            instanceObject;
-    VkInstance              instance    = VK_NULL_HANDLE;
-    VkSurfaceKHR            raw_surface = VK_NULL_HANDLE;
-    int                     width       = 0;
-    int                     height      = 0;
+    Vk::Instance           instanceObject;
+    VkInstance             instance    = VK_NULL_HANDLE;
+    VkSurfaceKHR           raw_surface = VK_NULL_HANDLE;
+    int                    width       = 0;
+    int                    height      = 0;
     Vk::PhysicalDeviceInfo physicalInfo {};
 
     return GetPlatformInstanceExtensions(target)
@@ -221,9 +220,7 @@ auto RenderContext::Create(
         .and_then([&]() -> std::expected<void, ErrorCode> {
             if constexpr (isMac) {
                 if (mode == PresentationMode::HostBlit) {
-                    const bool ok = HostBlit::Init(
-                        impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphics_family
-                    );
+                    const bool ok = HostBlit::Init(impl->ctx.Physical(), impl->ctx.Device(), impl->ctx.GraphicsQueue(), physicalInfo.graphicsFamily);
                     if (!ok) {
                         ZHLN::LogWarning("HostBlit presenter failed to initialize; continuing offscreen-only.");
                         impl->presentationMode = PresentationMode::OffscreenOnly;
@@ -239,7 +236,9 @@ auto RenderContext::Create(
         });
 }
 
-RenderContext::~RenderContext() {
+RenderContext::~RenderContext()
+// TODO(Evilpasture): Add an explicit RenderContext::Destroy method.
+{
     if (_impl && (_impl->ctx.Device() != nullptr)) {
         if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
             ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
@@ -260,4 +259,4 @@ RenderContext::~RenderContext() {
     }
 }
 
-}
+} // namespace ZHLN

@@ -46,8 +46,7 @@ enum class BufferSourceError : uint8_t {
 // the ring's other consumers (RenderResources.cpp, TextureUploader.hpp) still read
 // Allocation::mappedData; the follow-up step moves it to the source and deletes this
 // helper. See todo/TODO.md.
-[[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept
-    -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
+[[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
     auto allocation = ring.Allocate(size);
     if (allocation.mappedData == nullptr) {
         return std::unexpected(Vk::StagingError::StagingSpaceExhausted);
@@ -64,7 +63,7 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
 
     const size_t            size       = source.TotalSize();
     const auto&             familyInfo = _ctx.PhysicalInfo();
-    const std::array        candidates = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
+    const std::array        candidates = {familyInfo.graphicsFamily, familyInfo.transferFamily, familyInfo.computeFamily};
     std::array<uint32_t, 3> families {};
     uint32_t                familyCount = 0;
     for (const uint32_t candidate: candidates) {
@@ -84,35 +83,33 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
                _allocator, size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
                {families.data(), familyCount}
     )
-        .and_then(
-            [this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
-                defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
-                auto staging = AllocateStaging(_transferRing, size);
-                if (!staging) {
-                    return std::unexpected(staging.error());
-                }
-
-                if (bytes.empty()) {
-                    std::memset(staging->mappedData, 0, size);
-                } else {
-                    std::memcpy(staging->mappedData, bytes.data(), size);
-                }
-
-                Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-                    Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
-                });
-
-                const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
-                return Adopt(std::move(gpu_buf), elementCount, address);
+        .and_then([this, size, bytes = source.bytes, elementCount = source.ElementCount()](Vk::Buffer gpu_buf) -> std::expected<BufferHandle, ErrorCode> {
+            defer _([&] { _allocator.DestroyBuffer(gpu_buf); });
+            auto  staging = AllocateStaging(_transferRing, size);
+            if (!staging) {
+                return std::unexpected(staging.error());
             }
-        );
+
+            if (bytes.empty()) {
+                std::memset(staging->mappedData, 0, size);
+            } else {
+                std::memcpy(staging->mappedData, bytes.data(), size);
+            }
+
+            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
+                Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
+            });
+
+            const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
+            return Adopt(std::move(gpu_buf), elementCount, address);
+        });
 }
 
 auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
     const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
     if (handle == BufferHandle::Invalid) {
         _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the buffer, so this frame's copy is all there is. The caller's
-                                           // buffer was moved-from on the way in (Buffer is move-only), so its own DestroyBuffer is a no-op.
+                                          // buffer was moved-from on the way in (Buffer is move-only), so its own DestroyBuffer is a no-op.
     } else if (NativeMesh* mesh = _buffers.Resolve(handle)) {
         Vk::Debug::SetBufferName(_ctx, mesh->buffer.Handle(), std::format("GeometryBuffer#{}", static_cast<uint64_t>(handle)));
     }

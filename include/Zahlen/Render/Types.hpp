@@ -24,8 +24,8 @@ namespace ZHLN {
 // multiple texture objects may share the same image with different S/T modes.
 enum class TextureWrap : uint8_t { Repeat = 0, ClampToEdge = 1, MirroredRepeat = 2 };
 struct TextureSamplerAddress {
-    TextureWrap s = TextureWrap::Repeat;
-    TextureWrap t = TextureWrap::Repeat;
+    TextureWrap    s                                                       = TextureWrap::Repeat;
+    TextureWrap    t                                                       = TextureWrap::Repeat;
     constexpr bool operator==(const TextureSamplerAddress&) const noexcept = default;
 };
 
@@ -49,7 +49,7 @@ enum class MaterialTextureSlot : uint8_t {
     Count
 };
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
-using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
+using MaterialSamplerAddresses                         = std::array<TextureSamplerAddress, static_cast<size_t>(MaterialTextureSlot::Count)>;
 
 // glTF textureInfo, not the image, owns the UV transform and set selection.
 // Apply offset + rotation * scale to TEXCOORD_0 or TEXCOORD_1 per reference.
@@ -58,10 +58,10 @@ using MaterialSamplerAddresses = std::array<TextureSamplerAddress, static_cast<s
 // the pod is the storage spelling, Vec2 does not exist in Jolt, and a
 // std::array<float, 2> would be a third spelling of the same eight bytes.
 struct MaterialTextureTransform {
-    JPH::Float2 offset {0.0f, 0.0f};
-    JPH::Float2 scale {1.0f, 1.0f};
-    float rotation = 0.0f; // Radians, counter-clockwise in glTF UV space.
-    uint32_t texCoord = 0;
+    JPH::Float2    offset {0.0f, 0.0f};
+    JPH::Float2    scale {1.0f, 1.0f};
+    float          rotation                                                   = 0.0f; // Radians, counter-clockwise in glTF UV space.
+    uint32_t       texCoord                                                   = 0;
     constexpr bool operator==(const MaterialTextureTransform&) const noexcept = default;
 };
 using MaterialTextureTransforms = std::array<MaterialTextureTransform, static_cast<size_t>(MaterialTextureSlot::Count)>;
@@ -73,8 +73,8 @@ struct Mesh {
     BufferHandle surfaceBuffer      = Invalid;
     BufferHandle skinBuffer         = Invalid;
     BufferHandle indexBuffer        = Invalid;
-    uint32_t     vertexCount = 0;
-    uint32_t     indexCount  = 0;
+    uint32_t     vertexCount        = 0;
+    uint32_t     indexCount         = 0;
 
     BufferHandle meshletBuffer       = Invalid;
     BufferHandle meshletVertexBuffer = Invalid;
@@ -83,49 +83,49 @@ struct Mesh {
 };
 
 struct Material {
-    PipelineHandle      pipeline           = PipelineHandle::Invalid;
-    PipelineHandle      prePassPipeline    = PipelineHandle::Invalid;
-    ResourceGroupHandle resourceGroup      = ResourceGroupHandle::Invalid;
-    BufferHandle        constantBuffer     = BufferHandle::Invalid;
-    TextureHandle       albedoMap          = TextureHandle::Invalid;
-    TextureHandle       normalMap          = TextureHandle::Invalid;
-    TextureHandle       pbrMap             = TextureHandle::Invalid;
-    TextureHandle       emissiveMap        = TextureHandle::Invalid;
-    JPH::Float4          baseColorFactor    = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4          emissiveFactor     = {0.0f, 0.0f, 0.0f, 1.0f};
-    float               metallicFactor     = 1.0f;
-    float               roughnessFactor    = 1.0f;
-    float               alphaCutoff        = 0.5f;
-    uint32_t            alphaMode          = 0;
-    bool                doubleSided        = false;
-    bool                unlit              = false; // KHR_materials_unlit: base color without lighting.
-    float               transmissionFactor = 0.0f;
-    TextureHandle       transmissionMap    = TextureHandle::Invalid;
-    float               iridescenceFactor  = 0.0f;
-    float               filmThicknessNm    = 0.0f;
-    float               filmThicknessMinNm = 0.0f;
-    float               volumeThicknessM   = 0.0f;
-    float               ior                = 1.5f;
-    float               normalScale        = 1.0f;
-    TextureHandle       filmThicknessMap   = TextureHandle::Invalid;
-    TextureHandle       iridescenceMap     = TextureHandle::Invalid;
-    TextureHandle       volumeThicknessMap = TextureHandle::Invalid;
-    float               clearcoatFactor          = 0.0f;
-    float               clearcoatRoughnessFactor = 0.0f;
-    float               clearcoatNormalScale     = 1.0f;
-    TextureHandle       clearcoatMap             = TextureHandle::Invalid;
-    TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
-    TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
-    float               anisotropyStrength      = 0.0f;
-    float               anisotropyRotation      = 0.0f; // Radians about the surface normal, from the tangent.
-    TextureHandle       anisotropyMap           = TextureHandle::Invalid;
-    JPH::Float3         sheenColorFactor {0.0f, 0.0f, 0.0f};
-    float                sheenRoughnessFactor = 0.0f;
-    TextureHandle        sheenColorMap = TextureHandle::Invalid;
-    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
-    TextureHandle        occlusionMap = TextureHandle::Invalid;
-    float                occlusionStrength = 1.0f;
-    MaterialSamplerAddresses textureSamplers {}; // Repeat/Repeat for non-glTF materials.
+    PipelineHandle            pipeline                 = PipelineHandle::Invalid;
+    PipelineHandle            prePassPipeline          = PipelineHandle::Invalid;
+    ResourceGroupHandle       resourceGroup            = ResourceGroupHandle::Invalid;
+    BufferHandle              constantBuffer           = BufferHandle::Invalid;
+    TextureHandle             albedoMap                = TextureHandle::Invalid;
+    TextureHandle             normalMap                = TextureHandle::Invalid;
+    TextureHandle             pbrMap                   = TextureHandle::Invalid;
+    TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    JPH::Float4               baseColorFactor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4               emissiveFactor           = {0.0f, 0.0f, 0.0f, 1.0f};
+    float                     metallicFactor           = 1.0f;
+    float                     roughnessFactor          = 1.0f;
+    float                     alphaCutoff              = 0.5f;
+    uint32_t                  alphaMode                = 0;
+    bool                      doubleSided              = false;
+    bool                      unlit                    = false; // KHR_materials_unlit: base color without lighting.
+    float                     transmissionFactor       = 0.0f;
+    TextureHandle             transmissionMap          = TextureHandle::Invalid;
+    float                     iridescenceFactor        = 0.0f;
+    float                     filmThicknessNm          = 0.0f;
+    float                     filmThicknessMinNm       = 0.0f;
+    float                     volumeThicknessM         = 0.0f;
+    float                     ior                      = 1.5f;
+    float                     normalScale              = 1.0f;
+    TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
+    TextureHandle             iridescenceMap           = TextureHandle::Invalid;
+    TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;
+    float                     clearcoatFactor          = 0.0f;
+    float                     clearcoatRoughnessFactor = 0.0f;
+    float                     clearcoatNormalScale     = 1.0f;
+    TextureHandle             clearcoatMap             = TextureHandle::Invalid;
+    TextureHandle             clearcoatRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle             clearcoatNormalMap       = TextureHandle::Invalid;
+    float                     anisotropyStrength       = 0.0f;
+    float                     anisotropyRotation       = 0.0f; // Radians about the surface normal, from the tangent.
+    TextureHandle             anisotropyMap            = TextureHandle::Invalid;
+    JPH::Float3               sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                     sheenRoughnessFactor = 0.0f;
+    TextureHandle             sheenColorMap        = TextureHandle::Invalid;
+    TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle             occlusionMap         = TextureHandle::Invalid;
+    float                     occlusionStrength    = 1.0f;
+    MaterialSamplerAddresses  textureSamplers {}; // Repeat/Repeat for non-glTF materials.
     MaterialTextureTransforms textureTransforms {};
 };
 
@@ -135,8 +135,8 @@ struct Material {
 // end up -- would need a hand-written conversion for it. The pods are the same
 // size and alignment the arrays had, so this changes no struct's layout.
 static_assert(
-    sizeof(JPH::Float2) == 8 && alignof(JPH::Float2) == 4 && sizeof(JPH::Float3) == 12 && alignof(JPH::Float3) == 4 &&
-        sizeof(JPH::Float4) == 16 && alignof(JPH::Float4) == 4,
+    sizeof(JPH::Float2) == 8 && alignof(JPH::Float2) == 4 && sizeof(JPH::Float3) == 12 && alignof(JPH::Float3) == 4 && sizeof(JPH::Float4) == 16 &&
+        alignof(JPH::Float4) == 4,
     "the lane pods are the storage spelling; their geometry is the ABI"
 );
 
@@ -157,72 +157,71 @@ struct CSGModifier {
     std::string  operand_name;
 };
 
-
 struct MaterialDesc {
     bool doubleSided   = false;
     bool unlit         = false;
     bool alphaBlend    = false;
     bool additiveBlend = false;
 
-    uint32_t             alphaMode   = 0;
-    float                alphaCutoff = 0.5f;
-    float                metallic    = 1.0f;
-    float                roughness   = 1.0f;
-    JPH::Float4          baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4          emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
-    float                transmissionFactor = 0.0f;
-    TextureHandle        transmissionMap    = TextureHandle::Invalid;
-    float                iridescenceFactor  = 0.0f;
-    float                filmThicknessNm    = 0.0f;
-    float                filmThicknessMinNm = 0.0f;
-    float                volumeThicknessM   = 0.0f;
-    float                ior                = 1.5f;
-    float                normalScale        = 1.0f;
+    uint32_t      alphaMode          = 0;
+    float         alphaCutoff        = 0.5f;
+    float         metallic           = 1.0f;
+    float         roughness          = 1.0f;
+    JPH::Float4   baseColor          = {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4   emissive           = {0.0f, 0.0f, 0.0f, 1.0f};
+    float         transmissionFactor = 0.0f;
+    TextureHandle transmissionMap    = TextureHandle::Invalid;
+    float         iridescenceFactor  = 0.0f;
+    float         filmThicknessNm    = 0.0f;
+    float         filmThicknessMinNm = 0.0f;
+    float         volumeThicknessM   = 0.0f;
+    float         ior                = 1.5f;
+    float         normalScale        = 1.0f;
 
-    TextureHandle albedoMap          = TextureHandle::Invalid;
-    TextureHandle normalMap          = TextureHandle::Invalid;
-    TextureHandle pbrMap             = TextureHandle::Invalid;
-    TextureHandle emissiveMap        = TextureHandle::Invalid;
-    TextureHandle filmThicknessMap   = TextureHandle::Invalid;
-    TextureHandle iridescenceMap     = TextureHandle::Invalid;
-    TextureHandle volumeThicknessMap = TextureHandle::Invalid;
-    float         clearcoatFactor          = 0.0f;
-    float         clearcoatRoughnessFactor = 0.0f;
-    float         clearcoatNormalScale     = 1.0f;
-    TextureHandle clearcoatMap          = TextureHandle::Invalid;
-    TextureHandle clearcoatRoughnessMap = TextureHandle::Invalid;
-    TextureHandle clearcoatNormalMap    = TextureHandle::Invalid;
-    float         anisotropyStrength    = 0.0f;
-    float         anisotropyRotation    = 0.0f; // KHR_materials_anisotropy radians.
-    TextureHandle anisotropyMap         = TextureHandle::Invalid;
-    JPH::Float3   sheenColorFactor {0.0f, 0.0f, 0.0f};
-    float                sheenRoughnessFactor = 0.0f;
-    TextureHandle        sheenColorMap = TextureHandle::Invalid;
-    TextureHandle        sheenRoughnessMap = TextureHandle::Invalid;
-    TextureHandle        occlusionMap = TextureHandle::Invalid;
-    float                occlusionStrength = 1.0f;
-    MaterialSamplerAddresses textureSamplers {};
+    TextureHandle             albedoMap                = TextureHandle::Invalid;
+    TextureHandle             normalMap                = TextureHandle::Invalid;
+    TextureHandle             pbrMap                   = TextureHandle::Invalid;
+    TextureHandle             emissiveMap              = TextureHandle::Invalid;
+    TextureHandle             filmThicknessMap         = TextureHandle::Invalid;
+    TextureHandle             iridescenceMap           = TextureHandle::Invalid;
+    TextureHandle             volumeThicknessMap       = TextureHandle::Invalid;
+    float                     clearcoatFactor          = 0.0f;
+    float                     clearcoatRoughnessFactor = 0.0f;
+    float                     clearcoatNormalScale     = 1.0f;
+    TextureHandle             clearcoatMap             = TextureHandle::Invalid;
+    TextureHandle             clearcoatRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle             clearcoatNormalMap       = TextureHandle::Invalid;
+    float                     anisotropyStrength       = 0.0f;
+    float                     anisotropyRotation       = 0.0f; // KHR_materials_anisotropy radians.
+    TextureHandle             anisotropyMap            = TextureHandle::Invalid;
+    JPH::Float3               sheenColorFactor {0.0f, 0.0f, 0.0f};
+    float                     sheenRoughnessFactor = 0.0f;
+    TextureHandle             sheenColorMap        = TextureHandle::Invalid;
+    TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle             occlusionMap         = TextureHandle::Invalid;
+    float                     occlusionStrength    = 1.0f;
+    MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 };
 
 struct DrawParams {
-    JPH::Mat44           transform        = JPH::Mat44::sIdentity();
-    JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
-    float                cullRadius       = 1.0f;
-    JPH::Float3          localCenter      = {0.0f, 0.0f, 0.0f};
-    uint32_t             jointOffset      = 0;
-    uint32_t             morphOffset      = 0;
-    uint32_t             activeMorphCount = 0;
-    JPH::Float4          morphWeights     = {};
-    DrawFlags            flags            = DrawFlags::None;
+    JPH::Mat44  transform        = JPH::Mat44::sIdentity();
+    JPH::Mat44  prevTransform    = JPH::Mat44::sIdentity();
+    float       cullRadius       = 1.0f;
+    JPH::Float3 localCenter      = {0.0f, 0.0f, 0.0f};
+    uint32_t    jointOffset      = 0;
+    uint32_t    morphOffset      = 0;
+    uint32_t    activeMorphCount = 0;
+    JPH::Float4 morphWeights     = {};
+    DrawFlags   flags            = DrawFlags::None;
 
     BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
 
     float roughness = -1.0f;
     float metallic  = -1.0f;
 
-    JPH::Float4          colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
-    JPH::Float4          emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
+    JPH::Float4 colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f};
+    JPH::Float4 emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f};
 };
 
 struct CSGCutterParams {
@@ -251,7 +250,7 @@ struct DecalParams {
     float         metallic     = 0.0f;
 };
 
-}
+} // namespace ZHLN
 
 template <>
 inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::DrawFlags> = true;
