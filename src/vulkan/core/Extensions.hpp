@@ -8,7 +8,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
 #endif
 
-#include "../VkError.hpp"#include <Zahlen/Error.hpp>
+#include "../VkError.hpp"
+#include <Zahlen/Error.hpp>
 namespace ZHLN::Vk {
 
 [[nodiscard]] auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties>;
