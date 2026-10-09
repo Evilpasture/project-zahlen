@@ -195,17 +195,10 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
-    // The old context owns the old buffers. Never pass its handles to the
-    // replacement context (generational slots may reuse the same numbers).
+    // The old context owns emitter buffers now; its OnDeviceLost path retires
+    // those buffers before the replacement renderer is created. The component
+    // authoring data survives unchanged.
     auto& reg = _impl->world->GetRegistry();
-    for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
-        emitter.gpuBuffer = BufferHandle::Invalid;
-        emitter.bufferCapacity = 0;
-    }
-    for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
-        emitter.gpuBuffer = BufferHandle::Invalid;
-        emitter.bufferCapacity = 0;
-    }
     for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
         skeleton.skinnedScratch = BufferHandle::Invalid;
         skeleton.scratchVertexCount = 0;

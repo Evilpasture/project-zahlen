@@ -285,7 +285,7 @@ struct RTRPBRReflectionTestSuite {
         for (uint32_t i = 0; i < frames; ++i) {
             engine.ProcessEvents();
             const auto status = engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
-            if (ZHLN::RenderContext::DeviceLostCount() != lostBefore) {
+            if (engine.GetRenderContext().GetDeviceLostCount() != lostBefore) {
                 return false;
             }
             ZHLN::Test::ExpectEq(status, ZHLN::GameplayStatus::OK);
@@ -335,7 +335,7 @@ struct RTRPBRReflectionTestSuite {
         // suite TDR'd; that is a hang, not a colour bug.
         SetReflectionFlags(*s.engine, 1, 0);
         PlaceSunAndCamera(*s.engine);
-        s.lostBefore = ZHLN::RenderContext::DeviceLostCount();
+        s.lostBefore = s.engine->GetRenderContext().GetDeviceLostCount();
         if (!TickFrames(*s.engine, 4, s.lostBefore)) {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
@@ -355,7 +355,7 @@ struct RTRPBRReflectionTestSuite {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
         const RgbImage img = Capture(*s.engine, path);
-        if (ZHLN::RenderContext::DeviceLostCount() != s.lostBefore) {
+        if (s.engine->GetRenderContext().GetDeviceLostCount() != s.lostBefore) {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
         if (ImageIsBlank(img)) {

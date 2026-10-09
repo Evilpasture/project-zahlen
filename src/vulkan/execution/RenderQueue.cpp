@@ -26,7 +26,7 @@ std::expected<void, ErrorCode> SubmitInfos(
 
     const VkResult result = vkQueueSubmit2(queue, 1, &submit, fence);
     if (result != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(ToError(result));
     }
     return {};
 }
@@ -36,7 +36,7 @@ std::expected<void, ErrorCode> SubmitInfos(
 std::expected<void, ErrorCode> WaitIdle(const VkQueue queue) noexcept {
     const VkResult result = vkQueueWaitIdle(queue);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(ToError(result));
     }
     return {};
 }

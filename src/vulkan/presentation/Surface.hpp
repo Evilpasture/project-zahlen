@@ -15,9 +15,12 @@
 namespace ZHLN::Vk {
 
 enum class SurfaceCreationError : uint8_t {
-    WindowSurfaceUnsupported ZHLN_ANNOTATION(ZHLN::Description<"Window surface unsupported">{}) = 1,
-    WindowSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Windowed surface creation failed">{}),
-    TTYSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed">{}),
+    WindowSurfaceUnsupported    ZHLN_ANNOTATION(ZHLN::Description<"Window surface unsupported"> {}) = 1,
+    WindowSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Windowed surface creation failed"> {}),
+    IncompatibleDisplay         ZHLN_ANNOTATION(ZHLN::Description<"Could not find compatible display plane"> {}),
+    TTYSurfaceCreationFailed    ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed"> {}),
+    NoDisplayFound              ZHLN_ANNOTATION(ZHLN::Description<"No display found for surface"> {}),
+    IncompatibleModes           ZHLN_ANNOTATION(ZHLN::Description<"No compatible display modes found"> {})
 };
 
 class Surface {
@@ -43,8 +46,7 @@ class Surface {
     VkSurfaceKHR _handle   = VK_NULL_HANDLE;
 };
 
-
 [[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
     -> std::expected<Surface, ErrorCode>;
 
-}
+} // namespace ZHLN::Vk

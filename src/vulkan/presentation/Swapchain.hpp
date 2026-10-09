@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "../core/PhysicalDevice.hpp"
 #include <span>
 #include <vector>
@@ -65,7 +66,7 @@ class Swapchain {
         bool                      vsync,
         VkPresentModeKHR          requestedPresentMode,
         bool                      enablePresentTiming
-    ) noexcept -> std::expected<void, VkResult>;
+    ) noexcept -> std::expected<void, ErrorCode>;
 
   private:
     void Destroy() noexcept;

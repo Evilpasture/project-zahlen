@@ -22,6 +22,7 @@ namespace ZHLN::Vk {
 class Context;
 class Buffer;
 class Image;
+class GPUAddressTracker;
 
 struct DeferredDeletionEntry {
     enum class Type : uint8_t { Buffer, Image, AccelerationStructure, Pipeline };
@@ -82,8 +83,8 @@ class Allocator {
     Allocator(Allocator&& other) noexcept;
     auto operator=(Allocator&& other) noexcept -> Allocator&;
 
-    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ZHLN::ErrorCode>;
-    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ErrorCode>;
 
     // Synchronous destruction: only use once GPU use has finished. Explicitly
     // consumes and invalidates the handle; neither Buffer nor Image has a
@@ -114,7 +115,8 @@ class Allocator {
     static void DestroyBuffer(VmaAllocator allocator, Buffer& buffer) noexcept;
     static void DestroyImage(VmaAllocator allocator, Image& image) noexcept;
 
-    VmaAllocator _handle = nullptr;
+    VmaAllocator       _handle         = nullptr;
+    GPUAddressTracker* _addressTracker = nullptr;
 };
 
 // Engine-owned memory classification. Values are mapped to the underlying
@@ -471,7 +473,7 @@ class StagingRingBuffer {
     auto operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer&;
 
     [[nodiscard]] auto Init(Allocator& allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
-        -> std::expected<void, ZHLN::ErrorCode>;
+        -> std::expected<void, ErrorCode>;
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;

@@ -34,7 +34,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         return std::unexpected(bindless.error());
     }
 
-    const auto handle = static_cast<RenderTextureHandle>(nextRenderTextureId.fetch_add(1, std::memory_order_relaxed));
+    const auto handle = static_cast<RenderTextureHandle>(nextRenderTextureId.fetch_add(1, std::memory_order::relaxed));
     renderTextures.emplace(handle, RenderTexture {
         .image = textureManager.Slice(*bindless, {width, height}),
         .bindlessIndex = *bindless,

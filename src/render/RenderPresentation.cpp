@@ -86,7 +86,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
             if (executable.error().Is(FrameResult::DeviceLost)) {
-                Vk::Instance::IncrementNumericalDeviceLoss();
+                ctx.Instance().IncrementDeviceLost();
                 return std::unexpected(executable.error());
             }
             if (!firstError) { firstError = executable.error(); }
@@ -100,7 +100,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         );
         if (!presented) {
             if (presented.error().Is(FrameResult::DeviceLost)) {
-                Vk::Instance::IncrementNumericalDeviceLoss();
+                ctx.Instance().IncrementDeviceLost();
                 return std::unexpected(presented.error());
             }
             if (!firstError) {

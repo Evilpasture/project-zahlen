@@ -11,7 +11,7 @@
 #include "TestsFramework.hpp"
 #include <Fonts/FontBMParser.hpp>
 #include <Fonts/Fonts.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
 #include <cstdint>
 #include <expected>

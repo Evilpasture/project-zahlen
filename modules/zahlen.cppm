@@ -122,7 +122,9 @@ module;
 // Preserve the existing umbrella-module export without exposing this engine
 // graph entry through the audio library's public headers.
 #include <AudioSystem.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Audio.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
@@ -131,8 +133,10 @@ module;
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
@@ -151,22 +155,24 @@ module;
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Format.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>
@@ -176,23 +182,17 @@ module;
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Geometry2D.hpp>
-#include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Types.hpp>
-#include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/Font.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/gui/UIData.hpp>
+#include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
 
@@ -225,7 +225,7 @@ using JPH::Sin;
 using JPH::Tan;
 using JPH::Vec3;
 using JPH::Vec4;
-}
+} // namespace JPH
 
 export namespace ZHLN {
 using ZHLN::Array;
@@ -237,17 +237,6 @@ using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
 using ZHLN::ErrorCode;
-using ZHLN::FS::CatalogEntry;
-using ZHLN::FS::FileSystemWatcher;
-using ZHLN::FS::FileWatchAction;
-using ZHLN::FS::FileWatchCallback;
-using ZHLN::FS::FileWatchEvent;
-using ZHLN::FS::FileWatchHandle;
-using ZHLN::FS::LoadRequest;
-using ZHLN::FS::PakEntry;
-using ZHLN::FS::PakHeader;
-using ZHLN::FS::VirtualFileSystem;
-using ZHLN::FS::HashPath;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -273,6 +262,17 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
+using ZHLN::FS::CatalogEntry;
+using ZHLN::FS::FileSystemWatcher;
+using ZHLN::FS::FileWatchAction;
+using ZHLN::FS::FileWatchCallback;
+using ZHLN::FS::FileWatchEvent;
+using ZHLN::FS::FileWatchHandle;
+using ZHLN::FS::HashPath;
+using ZHLN::FS::LoadRequest;
+using ZHLN::FS::PakEntry;
+using ZHLN::FS::PakHeader;
+using ZHLN::FS::VirtualFileSystem;
 using ZHLN::FS::WatchDescriptor;
 
 namespace Reflect {
@@ -290,7 +290,7 @@ using ZHLN::Reflect::SetFieldByName;
 using ZHLN::Reflect::StringToEnum;
 using ZHLN::Reflect::ToDebugString;
 using ZHLN::Reflect::TypeName;
-}
+} // namespace Reflect
 
 using ZHLN::Channel;
 using ZHLN::ConditionalVariable;
@@ -314,11 +314,12 @@ using ZHLN::TaskSystem::Task;
 using ZHLN::TaskSystem::TaskFn;
 using ZHLN::TaskSystem::Wait;
 using ZHLN::TaskSystem::WakeUp;
-}
+} // namespace TaskSystem
 
 using ZHLN::AAMode;
 using ZHLN::AAState;
 using ZHLN::AssetID;
+using ZHLN::BillboardQuad;
 using ZHLN::Camera;
 using ZHLN::CSGModifier;
 using ZHLN::CSGOperation;
@@ -338,14 +339,13 @@ using ZHLN::MaterialID;
 using ZHLN::MeshParticleEmitterDesc;
 using ZHLN::Offset2D;
 using ZHLN::ParticleAlignment;
-using ZHLN::BillboardQuad;
 using ZHLN::ParticleEmitterDesc;
 using ZHLN::ScissorRect;
 using ZHLN::UIBatch;
 using ZHLN::VertexPosition;
-using ZHLN::VertexTangentFrame;
-using ZHLN::VertexSurface;
 using ZHLN::VertexSkin;
+using ZHLN::VertexSurface;
+using ZHLN::VertexTangentFrame;
 
 namespace Math {
 using ZHLN::Math::Abs;
@@ -381,7 +381,7 @@ using ZHLN::Math::Sin;
 using ZHLN::Math::Smoothstep;
 using ZHLN::Math::Sqrt;
 using ZHLN::Math::Worley;
-}
+} // namespace Math
 
 using ZHLN::BufferSync;
 using ZHLN::BufferView;
@@ -410,7 +410,7 @@ using ZHLN::ECS::SystemGraph;
 using ZHLN::ECS::SystemInfo;
 using ZHLN::ECS::SystemSignature;
 using ZHLN::ECS::Write;
-}
+} // namespace ECS
 
 using ZHLN::PhysicsContext;
 
@@ -426,7 +426,7 @@ using ZHLN::Physics::RaycastPenetrationResult;
 using ZHLN::Physics::RaycastResult;
 using ZHLN::Physics::ShapeCastResult;
 using ZHLN::Physics::ShapeType;
-}
+} // namespace Physics
 
 using ZHLN::BufferHandle;
 using ZHLN::DrawFlags;
@@ -439,25 +439,25 @@ using ZHLN::RenderContext;
 
 namespace GUI {
 using ZHLN::GUI::Alignment;
+using ZHLN::GUI::BakedFontAsset;
+using ZHLN::GUI::BakedFontLoader;
 using ZHLN::GUI::BoxConfig;
 using ZHLN::GUI::Context;
+using ZHLN::GUI::DecodeCookedFont;
 using ZHLN::GUI::Direction;
+using ZHLN::GUI::GetDefaultBakedFont;
+using ZHLN::GUI::HasBakedFontLoader;
+using ZHLN::GUI::InstallBakedFontLoader;
+using ZHLN::GUI::kDefaultFontAssetPath;
+using ZHLN::GUI::LoadBakedFont;
 using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::SetDefaultBakedFont;
 using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
 using ZHLN::GUI::UISettingsComponent;
-using ZHLN::GUI::BakedFontAsset;
-using ZHLN::GUI::BakedFontLoader;
-using ZHLN::GUI::DecodeCookedFont;
-using ZHLN::GUI::GetDefaultBakedFont;
-using ZHLN::GUI::HasBakedFontLoader;
-using ZHLN::GUI::InstallBakedFontLoader;
-using ZHLN::GUI::LoadBakedFont;
-using ZHLN::GUI::SetDefaultBakedFont;
 using ZHLN::GUI::UninstallBakedFontLoader;
-using ZHLN::GUI::kDefaultFontAssetPath;
-}
+} // namespace GUI
 
 using ZHLN::AudioConfig;
 using ZHLN::AudioContext;
@@ -468,13 +468,13 @@ using ZHLN::AudioWaveformType;
 
 using ZHLN::ScriptRunner;
 
+using ZHLN::AssetLoadRequest;
+using ZHLN::AssetManager;
 using ZHLN::Clock;
 using ZHLN::CommandHandler;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
-using ZHLN::AssetLoadRequest;
-using ZHLN::AssetManager;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
@@ -485,9 +485,9 @@ using ZHLN::ModelNode;
 using ZHLN::ModelPart;
 using ZHLN::ModelPrefab;
 using ZHLN::PhysicsConfig;
+using ZHLN::PlatformHost;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
-using ZHLN::PlatformHost;
 using ZHLN::ScopedTimer;
 using ZHLN::SystemContext;
 using ZHLN::Window;
@@ -497,14 +497,14 @@ namespace PrefabFactory {
 using ZHLN::PrefabFactory::CreateBox;
 using ZHLN::PrefabFactory::CreateBoxMesh;
 using ZHLN::PrefabFactory::CreateFontAtlasTexture;
-using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
 using ZHLN::PrefabFactory::CreatePlane;
 using ZHLN::PrefabFactory::CreatePlaneMesh;
 using ZHLN::PrefabFactory::CreateTetrahedronMesh;
 using ZHLN::PrefabFactory::InstantiatePrefab;
 using ZHLN::PrefabFactory::LoadModelPrefab;
 using ZHLN::PrefabFactory::LoadTexture;
+using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
 using ZHLN::PrefabFactory::RebuildVulkanResources;
 using ZHLN::PrefabFactory::SpawnParams;
-}
-}
+} // namespace PrefabFactory
+} // namespace ZHLN

@@ -30,6 +30,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace ZHLN {
 
@@ -44,6 +45,10 @@ enum class TextureDataError : uint8_t {
 } // namespace ZHLN
 
 namespace ZHLN {
+
+namespace {
+inline constexpr uint64_t kEmitterStorageIdleFrameLimit = 120;
+}
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     if (const auto found = _impl->geometry.FindMesh(id)) {
@@ -91,12 +96,105 @@ void RenderContext::UnregisterGPUMaterial(MaterialID id) noexcept {
     }
 }
 
-auto RenderContext::CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle {
-    return CreateStorageBuffer(static_cast<size_t>(maxParticles) * sizeof(Particle));
+auto RenderContext::Impl::EnsureEmitterStorage(
+    EmitterStorageMap& emitters,
+    const uint64_t     emitterId,
+    const uint32_t     maxParticles,
+    const size_t       particleStride
+) -> BufferHandle {
+    if (maxParticles == 0) {
+        if (auto storage = emitters.Find(emitterId)) {
+            if (storage->buffer != BufferHandle::Invalid) {
+                geometry.Destroy(storage->buffer);
+            }
+            emitters.Erase(emitterId);
+        }
+        return BufferHandle::Invalid;
+    }
+    if (particleStride == 0 || static_cast<size_t>(maxParticles) > std::numeric_limits<size_t>::max() / particleStride) {
+        ZHLN::LogWarning("[Render] Emitter {} requested an overflowing particle buffer (count={}, stride={}).", emitterId, maxParticles, particleStride);
+        return BufferHandle::Invalid;
+    }
+
+    if (!emitters.Find(emitterId)) {
+        emitters.Insert(emitterId, EmitterStorage {});
+    }
+    auto storage = emitters.Find(emitterId);
+    if (!storage) {
+        return BufferHandle::Invalid;
+    }
+
+    storage->lastSeenFrame = frameSerial;
+    if (storage->buffer != BufferHandle::Invalid && storage->capacity == maxParticles) {
+        storage->allocationWarningLogged = false;
+        return storage->buffer;
+    }
+
+    const size_t allocationSize = static_cast<size_t>(maxParticles) * particleStride;
+    auto         created        = geometry.CreateBuffer(
+        {.allocationSize = allocationSize}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+    );
+    if (!created || *created == BufferHandle::Invalid) {
+        if (!storage->allocationWarningLogged) {
+            if (!created) {
+                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): {}", emitterId, maxParticles, created.error());
+            } else {
+                ZHLN::LogWarning("[Render] Could not allocate particle storage for emitter {} ({} particles): geometry buffer pool is full.", emitterId, maxParticles);
+            }
+            storage->allocationWarningLogged = true;
+        }
+        return BufferHandle::Invalid;
+    }
+
+    if (storage->buffer != BufferHandle::Invalid) {
+        geometry.Destroy(storage->buffer);
+    }
+    storage->buffer = *created;
+    storage->capacity = maxParticles;
+    storage->allocationWarningLogged = false;
+    return storage->buffer;
 }
 
-auto RenderContext::CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle {
-    return CreateStorageBuffer(static_cast<size_t>(maxParticles) * sizeof(Particle3D));
+void RenderContext::Impl::EvictInactiveEmitters() noexcept {
+    const auto evict = [this](EmitterStorageMap& emitters) {
+        std::vector<uint64_t> idleEmitters;
+        emitters.ForEach([this, &idleEmitters](const uint64_t& emitterId, const EmitterStorage& storage) {
+            if (frameSerial >= storage.lastSeenFrame && frameSerial - storage.lastSeenFrame >= kEmitterStorageIdleFrameLimit) {
+                idleEmitters.push_back(emitterId);
+            }
+        });
+
+        for (const uint64_t emitterId: idleEmitters) {
+            if (auto storage = emitters.Find(emitterId)) {
+                if (storage->buffer != BufferHandle::Invalid) {
+                    geometry.Destroy(storage->buffer);
+                }
+                emitters.Erase(emitterId);
+            }
+        }
+    };
+    evict(particleEmitters);
+    evict(meshParticleEmitters);
+}
+
+void RenderContext::Impl::OnDeviceLost() noexcept {
+    const auto destroy = [this](EmitterStorageMap& emitters) {
+        emitters.ForEach([this](const uint64_t&, EmitterStorage& storage) {
+            if (storage.buffer != BufferHandle::Invalid) {
+                geometry.Destroy(storage.buffer);
+            }
+        });
+        emitters.Clear();
+    };
+    destroy(particleEmitters);
+    destroy(meshParticleEmitters);
+    for (auto& slot: billboardSlots) {
+        if (slot.buffer != BufferHandle::Invalid) {
+            geometry.Destroy(slot.buffer);
+        }
+        slot.buffer = BufferHandle::Invalid;
+        slot.capacity = 0;
+    }
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
@@ -104,29 +202,37 @@ auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
 }
 
 void RenderContext::SubmitParticleEmitter(
-    BufferHandle               gpuBuffer,
-    uint32_t                   maxParticles,
-    const ParticleEmitterDesc& desc,
-    TextureHandle              texture,
-    bool                       additive
+    const uint64_t                emitterId,
+    const uint32_t                maxParticles,
+    const ParticleEmitterDesc&    desc,
+    const TextureHandle           texture,
+    const bool                    additive
 ) {
-    // The manager already answers a default for an unregistered handle
-    // (kFallbackWhiteTextureIndex), so there is nothing to test here: a host that
-    // names no texture gets the white slot the sampler expects.
-    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
+    const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->particleEmitters, emitterId, maxParticles, sizeof(Particle));
+    if (gpuBuffer == BufferHandle::Invalid) {
+        return;
+    }
 
+    // The manager answers the default for an unregistered texture with its
+    // white slot, so hosts may leave this handle invalid.
+    const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
     _impl->queues.ParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackParticleEmitter(desc, textureIndex, additive ? 1u : 0u)}
     );
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
-    BufferHandle                   gpuBuffer,
-    uint32_t                       maxParticles,
+    const uint64_t                emitterId,
+    const uint32_t                maxParticles,
     const MeshParticleEmitterDesc& desc,
-    AssetID                        mesh,
-    MaterialID                     mat
+    const AssetID                 mesh,
+    const MaterialID              mat
 ) {
+    const BufferHandle gpuBuffer = _impl->EnsureEmitterStorage(_impl->meshParticleEmitters, emitterId, maxParticles, sizeof(Particle3D));
+    if (gpuBuffer == BufferHandle::Invalid) {
+        return;
+    }
+
     _impl->queues.MeshParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackMeshParticleEmitter(desc), .meshAsset = mesh, .materialAsset = mat}
     );
@@ -179,8 +285,11 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             if (group->buffer != BufferHandle::Invalid) {
                 DestroyBuffer(group->buffer);
             }
-            group->buffer   = CreateParticleBuffer(count);
-            group->capacity = count;
+            const auto created = _impl->geometry.CreateBuffer(
+                {.allocationSize = static_cast<size_t>(count) * sizeof(Particle)}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex
+            );
+            group->buffer   = created.value_or(BufferHandle::Invalid);
+            group->capacity = group->buffer != BufferHandle::Invalid ? count : 0;
         }
         if (group->buffer == BufferHandle::Invalid) {
             continue;
@@ -224,16 +333,12 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->deletionQueue.Drain();
 }
 
-void RenderContext::UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept {
-    Vk::Instance::UseDiagnostics({.validation = &validationErrors, .deviceLost = &deviceLost});
+uint32_t RenderContext::GetValidationErrorCount() const noexcept {
+    return _impl->ctx.Instance().ValidationErrorCount();
 }
 
-uint32_t RenderContext::ValidationErrorCount() noexcept {
-    return Vk::Instance::ValidationErrorCount();
-}
-
-uint32_t RenderContext::DeviceLostCount() noexcept {
-    return Vk::Instance::DeviceLostCount();
+uint32_t RenderContext::GetDeviceLostCount() const noexcept {
+    return _impl->ctx.Instance().DeviceLostCount();
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
@@ -278,6 +383,7 @@ GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
 }
 
 void RenderContext::OnDeviceLost() noexcept {
+    _impl->OnDeviceLost();
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
@@ -577,9 +683,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
             .imageOffset       = {},
             .imageExtent       = {w, h, 1},
         };
-        Vk::CopyBufferToImage<1>(
-            cmd, staging.slice.buffer, image.Handle(), {region} // TODO(Evilpasture): Noisy boilerplate. Why am I forced to pass <1> and {region}?
-        );
+        Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
@@ -823,7 +927,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto  blasResult =
         Vk::CreateAccelerationStructure(impl.ctx.Device(), bufferRes->Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel);
     if (!blasResult) {
-        return std::unexpected(Vk::ToFrameError(blasResult.error()));
+        return std::unexpected(blasResult.error());
     }
     Vk::AccelerationStructure blas = std::move(*blasResult);
 

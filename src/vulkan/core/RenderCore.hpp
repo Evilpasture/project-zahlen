@@ -9,7 +9,6 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 
 #include "../VkError.hpp"
@@ -101,12 +100,16 @@ inline void CopyBufferToImage(
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
-[[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
-    const Vk::Error error {result};
-    if (result == VK_ERROR_DEVICE_LOST) {
-        return ErrorCode {FrameResult::DeviceLost};
-    }
-    return error;
+// Single-region convenience overload: most uploads copy exactly one region, and
+// spelling out <1> plus a one-element array for that is pure noise.
+inline void CopyBufferToImage(
+    VkCommandBuffer cmd,
+    VkBuffer srcBuffer,
+    VkImage dstImage,
+    const VkBufferImageCopy2& region,
+    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+) noexcept {
+    CopyBufferToImage<1>(cmd, srcBuffer, dstImage, {region}, layout);
 }
 
 void ExecuteCommands(VkCommandBuffer primary, std::span<const VkCommandBuffer> secondaries) noexcept;

@@ -40,12 +40,12 @@ enum class BufferSourceError : uint8_t {
     return std::nullopt;
 }
 
-// The ring reports "no room for this upload" by handing back an allocation whose
+// TODO(some random AI i forgot when): The ring reports "no room for this upload" by handing back an allocation whose
 // mapped pointer is null, which every caller then has to re-test. Fold that into the
 // error channel once. It lives in this TU rather than in StagingRingBuffer because
 // the ring's other consumers (RenderResources.cpp, TextureUploader.hpp) still read
 // Allocation::mappedData; the follow-up step moves it to the source and deletes this
-// helper. See todo/TODO.md.
+// helper.
 [[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
     auto allocation = ring.Allocate(size);
     if (allocation.mappedData == nullptr) {

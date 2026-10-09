@@ -35,7 +35,11 @@ struct SwapchainTarget {
     bool       presentable = false;
 };
 
-inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB; // TODO(Evilpasture): Is this configurable? Should we hardcode this?
+// Fixed by contract, not by oversight: the headless destination's color target
+// bakes its format into RenderTarget<kHeadlessColorFormat>, and the host-blit
+// present path consumes that target in exactly this format. An 8-bit sRGB
+// target is what both sides agree on, so it stays hardcoded.
+inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
 class SwapchainPresenter {
   public:

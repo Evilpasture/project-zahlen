@@ -4,7 +4,7 @@
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>

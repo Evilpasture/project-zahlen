@@ -12,7 +12,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>

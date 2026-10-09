@@ -85,7 +85,8 @@ struct EngineOptions {
             .fullscreen     = false,
             .validationMode    = ZHLN::ValidationMode::On,
             .headless          = true,
-            .enableMeshShading = opts.enableMeshShading
+            .enableMeshShading = opts.enableMeshShading,
+            .diagnostics       = &ZHLN::Test::g_renderDiagnostics
         },
         .enableFallbackScene = false,
     };
@@ -426,7 +427,7 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
             );
         }
 
-        const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
+        const uint32_t validationBefore = engine.GetRenderContext().GetValidationErrorCount();
 
         ZHLN::RenderContext* const preWarmup = &engine.GetRenderContext();
         TickFrames(engine, warmupFrames);
@@ -438,7 +439,7 @@ RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, S
         const bool                 ok      = sceneFn(engine);
         if (ok && &engine.GetRenderContext() == preWork) {
             if (outValidationDelta != nullptr) {
-                *outValidationDelta = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
+                *outValidationDelta = engine.GetRenderContext().GetValidationErrorCount() - validationBefore;
             }
             return StableRunResult::Ok;
         }

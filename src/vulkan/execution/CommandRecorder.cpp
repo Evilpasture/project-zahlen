@@ -20,9 +20,9 @@ auto CommandRecorder::Begin(
     };
     if (const VkResult res = vkBeginCommandBuffer(cmd, &info); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed begin failed ({}).", ToFrameError(reset));
+            ZHLN::Log("[Vk] Command buffer reset after failed begin failed ({}).", ToError(reset));
         }
-        return std::unexpected(ToFrameError(res));
+        return std::unexpected(ToError(res));
     }
     return CommandRecorder {cmd};
 }
@@ -34,9 +34,9 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
     const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE);
     if (const VkResult res = vkEndCommandBuffer(cmd); res != VK_SUCCESS) {
         if (const VkResult reset = vkResetCommandBuffer(cmd, 0); reset != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset after failed end failed ({}).", ToFrameError(reset));
+            ZHLN::Log("[Vk] Command buffer reset after failed end failed ({}).", ToError(reset));
         }
-        return std::unexpected(ToFrameError(res));
+        return std::unexpected(ToError(res));
     }
     return ExecutableCommands {cmd};
 }
@@ -44,7 +44,7 @@ auto CommandRecorder::End() && noexcept -> std::expected<ExecutableCommands, Err
 void CommandRecorder::Abort() && noexcept {
     if (const VkCommandBuffer cmd = std::exchange(_cmd, VK_NULL_HANDLE); cmd != VK_NULL_HANDLE) {
         if (const VkResult res = vkResetCommandBuffer(cmd, 0); res != VK_SUCCESS) {
-            ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", ToFrameError(res));
+            ZHLN::Log("[Vk] Command buffer reset during abort failed ({}).", ToError(res));
         }
     }
 }

@@ -6,7 +6,7 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
@@ -80,6 +80,12 @@ class ZHLN_API RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
+    // Explicit teardown: drains the device, saves the pipeline cache, and
+    // releases destinations, diagnostics and pending staging work. The
+    // destructor calls this; hosts may also call it to release GPU resources
+    // before the RenderContext itself goes away.
+    void Destroy() noexcept;
+
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
@@ -122,19 +128,16 @@ class ZHLN_API RenderContext {
 
     BufferHandle CreateStorageBuffer(size_t size);
 
-    // Storage for a GPU-simulated emitter: the renderer owns what one particle occupies,
-    // so a host asks for a particle count and never for a stride.
-    [[nodiscard]] auto CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle;
-    [[nodiscard]] auto CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle;
-
-    // Descriptions, not GPU layouts: src/render/GpuPack.cpp writes the struct the
-    // update and render passes read. @p texture is the engine's own handle -- the
-    // renderer resolves it -- and @p additive picks the blend, so an emitter's
-    // presentation never rides its physics. Mesh particles have no author-side upload
-    // path: MeshParticleUpdatePass produces them on the GPU from their parameters.
-    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false);
+    // Descriptions, not GPU layouts: the renderer allocates and retains each
+    // emitter's simulation storage, keyed by a stable, per-emitter identity
+    // (normally Entity::Pack()). Keep it unique within this context and stable
+    // across submissions. Storage is evicted after 120 idle frames; use a new
+    // identity for a logically new emitter.
+    void SubmitParticleEmitter(
+        uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false
+    );
     void SubmitMeshParticleEmitter(
-        BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
+        uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
     );
 
     // Immediate-mode quads: the host describes billboards in world space for this frame,
@@ -226,11 +229,9 @@ class ZHLN_API RenderContext {
     // Morph deltas are tightly packed float4s; the count is derived from the span.
     uint32_t AllocateMorphDeltas(std::span<const float> deltas);
 
-    [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
+    [[nodiscard]] uint32_t GetValidationErrorCount() const noexcept;
 
-    [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
-
-    static void UseDiagnostics(std::atomic<uint32_t>& validationErrors, std::atomic<uint32_t>& deviceLost) noexcept;
+    [[nodiscard]] uint32_t GetDeviceLostCount() const noexcept;
 
     void WriteCheckpoint(std::string_view name) noexcept;
 

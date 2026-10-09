@@ -5,7 +5,7 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <expected>
 #include <format>
 #include <string>

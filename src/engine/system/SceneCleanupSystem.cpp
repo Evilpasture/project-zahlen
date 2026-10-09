@@ -70,8 +70,6 @@ void ReleaseOwnedResources(Engine& engine, bool all) {
     ReleaseSelected<Components::AudioSourceComponent>(engine, all);
     ReleaseSelected<Components::LoopSynthComponent>(engine, all);
     ReleaseSelected<Components::OwnedMeshComponent>(engine, all);
-    ReleaseSelected<Components::ParticleEmitterComponent>(engine, all);
-    ReleaseSelected<Components::MeshParticleEmitterComponent>(engine, all);
     ReleaseSelected<Components::SkeletalMeshComponent>(engine, all);
     engine.RunSceneCleanupPasses(all);
 }

@@ -116,7 +116,7 @@ auto CreateAccelerationStructure(
     const VkBuffer buffer,
     const VkDeviceSize size,
     const AccelerationStructureType type
-) noexcept -> std::expected<AccelerationStructure, VkResult> {
+) noexcept -> std::expected<AccelerationStructure, ErrorCode> {
     const VkAccelerationStructureCreateInfoKHR createInfo {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
         .buffer = buffer,
@@ -127,7 +127,7 @@ auto CreateAccelerationStructure(
     };
     VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
     if (const VkResult result = vkCreateAccelerationStructureKHR(device, &createInfo, nullptr, &handle); result != VK_SUCCESS) {
-        return std::unexpected(result);
+        return std::unexpected(ToError(result));
     }
     return AccelerationStructure(device, handle);
 }

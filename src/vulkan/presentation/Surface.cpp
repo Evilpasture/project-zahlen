@@ -1,13 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "Surface.hpp"
 #include <Zahlen/Log.hpp>
 #include <vector>
 
 namespace ZHLN::Vk {
-
 
 Surface::Surface(VkInstance instance, VkSurfaceKHR surface): _instance(instance), _handle(surface) {
 }
@@ -36,10 +34,7 @@ auto Surface::Get() const -> VkSurfaceKHR {
     return _handle;
 }
 
-}
-
 namespace {
-
 
 template <typename T, typename F>
 [[nodiscard]] auto FetchVulkanVector(F&& enumerator) -> std::vector<T> {
@@ -52,25 +47,22 @@ template <typename T, typename F>
     return vec;
 }
 
-[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, ZHLN::ErrorCode> {
+[[nodiscard]] auto SelectDisplay(VkPhysicalDevice physicalDevice) noexcept -> std::expected<VkDisplayPropertiesKHR, ErrorCode> {
     auto displays = FetchVulkanVector<VkDisplayPropertiesKHR>([physicalDevice](uint32_t* c, VkDisplayPropertiesKHR* d) {
         vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, c, d);
     });
     if (displays.empty()) {
-        ZHLN::LogError("[Vk::Surface] No displays found via VK_KHR_display");
-        return std::unexpected(ZHLN::Vk::SurfaceCreationError::TTYSurfaceCreationFailed);
+        return std::unexpected(ZHLN::Vk::SurfaceCreationError::NoDisplayFound);
     }
-    ZHLN::Log("[Vk::Surface] Using Display: {}", displays[0].displayName != nullptr ? displays[0].displayName : "Unknown");
     return displays[0];
 }
 
-[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ZHLN::ErrorCode> {
+[[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ErrorCode> {
     auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([physicalDevice, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
         vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
     if (modes.empty()) {
-        ZHLN::LogError("[Vk::Surface] No compatible display modes found!");
-        return std::unexpected(ZHLN::Vk::SurfaceCreationError::TTYSurfaceCreationFailed);
+        return std::unexpected(ZHLN::Vk::SurfaceCreationError::IncompatibleModes);
     }
     return modes[0];
 }
@@ -80,8 +72,8 @@ template <typename T, typename F>
         vkGetPhysicalDeviceDisplayPlanePropertiesKHR(physicalDevice, c, p);
     });
 
-    const auto planeCount = static_cast<uint32_t>(planes.size());
-    for (uint32_t i = 0; i < planeCount; ++i) {
+    const auto plane_count = static_cast<uint32_t>(planes.size());
+    for (uint32_t i = 0; i < plane_count; ++i) {
         if (planes[i].currentDisplay != VK_NULL_HANDLE && planes[i].currentDisplay != display) {
             continue;
         }
@@ -114,9 +106,7 @@ template <typename T, typename F>
     return opaque;
 }
 
-}
-
-namespace ZHLN::Vk {
+} // namespace
 
 auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
     -> std::expected<Surface, ErrorCode> {
@@ -135,23 +125,23 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
 
     outWidth  = mode->parameters.visibleRegion.width;
     outHeight = mode->parameters.visibleRegion.height;
-    ZHLN::Log("[Vk::Surface] Selected Mode: {}x{}", outWidth, outHeight);
 
-    const uint32_t planeIndex = SelectPlane(physicalDevice, display->display);
-    if (planeIndex == UINT32_MAX) {
-        ZHLN::LogError("[Vk::Surface] Could not find a compatible display plane!");
-        return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
+    const uint32_t plane_index = SelectPlane(physicalDevice, display->display);
+    if (plane_index == UINT32_MAX) {
+        return std::unexpected(SurfaceCreationError::IncompatibleDisplay);
     }
 
     VkDisplayPlaneCapabilitiesKHR capabilities {};
-    vkGetDisplayPlaneCapabilitiesKHR(physicalDevice, mode->displayMode, planeIndex, &capabilities);
+    if (const auto res = vkGetDisplayPlaneCapabilitiesKHR(physicalDevice, mode->displayMode, plane_index, &capabilities); res != VK_SUCCESS) {
+        return std::unexpected(ToError(res));
+    };
 
-    const VkDisplaySurfaceCreateInfoKHR createInfo {
+    const VkDisplaySurfaceCreateInfoKHR create_info {
         .sType           = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
         .pNext           = nullptr,
         .flags           = 0,
         .displayMode     = mode->displayMode,
-        .planeIndex      = planeIndex,
+        .planeIndex      = plane_index,
         .planeStackIndex = 0,
         .transform       = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
         .globalAlpha     = 1.0F,
@@ -159,14 +149,12 @@ auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, 
         .imageExtent     = {.width = outWidth, .height = outHeight},
     };
 
-    VkSurfaceKHR rawSurface = VK_NULL_HANDLE;
-    if (vkCreateDisplayPlaneSurfaceKHR(instance, &createInfo, nullptr, &rawSurface) != VK_SUCCESS) {
-        ZHLN::LogError("[Vk::Surface] vkCreateDisplayPlaneSurfaceKHR failed!");
+    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
+    if (vkCreateDisplayPlaneSurfaceKHR(instance, &create_info, nullptr, &raw_surface) != VK_SUCCESS) {
         return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
     }
 
-    ZHLN::Log("[Vk::Surface] Surface successfully created on Plane {}", planeIndex);
-    return Surface(instance, rawSurface);
+    return Surface(instance, raw_surface);
 }
 
-}
+} // namespace ZHLN::Vk

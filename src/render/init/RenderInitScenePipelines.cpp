@@ -13,16 +13,6 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
-    size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
-    auto   pb_res             = Vk::Buffer::Create(
-        allocator, particleBufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex,
-        Vk::MemoryUsage::GPUOnly
-    );
-    if (!pb_res) {
-        return std::unexpected(pb_res.error());
-    }
-    particleBuffer = std::move(*pb_res);
-
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
     if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get()); !built) {
@@ -512,7 +502,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                             ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, Vk::AccelerationStructureType::TopLevel
                         );
                         if (!tlas) {
-                            return std::unexpected(Vk::ToFrameError(tlas.error()));
+                            return std::unexpected(tlas.error());
                         }
                         frames.tlas[i] = std::move(*tlas);
                         if (!frames.tlas[i].Valid()) {

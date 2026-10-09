@@ -5,6 +5,8 @@
 #include "Extensions.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstddef>
+#include <optional>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -180,109 +182,37 @@ auto InspectPhysicalDevice(const VkPhysicalDevice physical, const VkSurfaceKHR s
 } // namespace
 
 auto SelectPhysicalDevice(const VkInstance instance, const VkSurfaceKHR surface, const DeviceScoreFunction score, const void* const userdata) noexcept
-    -> PhysicalDeviceInfo
-/* TODO(Evilpasture): Change to this pattern:
-auto SelectPhysicalDevice(
-    const VkInstance instance,
-    const VkSurfaceKHR surface,
-    const DeviceScoreFunction score,
-    const void* const userdata
-) noexcept -> std::optional<PhysicalDeviceInfo> {
-    const auto devices = EnumeratePhysicalDevices(instance);
+    -> std::optional<PhysicalDeviceInfo> {
+    const std::vector<VkPhysicalDevice> devices = EnumeratePhysicalDevices(instance);
     if (devices.empty()) {
         return std::nullopt;
     }
 
     const auto evaluate_device = [surface, score, userdata](const VkPhysicalDevice physical) {
-        const auto info = InspectPhysicalDevice(physical, surface);
-        const int32_t device_score = score != nullptr ? score(info, userdata) : DefaultScore(info);
-        return std::pair{info, device_score};
+        const PhysicalDeviceInfo info         = InspectPhysicalDevice(physical, surface);
+        const int32_t            device_score = score != nullptr ? score(info, userdata) : DefaultScore(info);
+        return std::pair {info, device_score};
     };
 
-    // Find the device with the highest score
+    // Find the device with the highest score.
     std::optional<PhysicalDeviceInfo> best_device = std::nullopt;
-    int32_t best_score = -1;
-
-    for (const VkPhysicalDevice physical : devices) {
+    int32_t                           best_score  = -1;
+    for (const VkPhysicalDevice physical: devices) {
         const auto [info, device_score] = evaluate_device(physical);
         if (device_score > best_score) {
-            best_score = device_score;
+            best_score  = device_score;
             best_device = info;
         }
     }
 
     if (best_score >= 0 && best_device.has_value()) {
         ZHLN::Log(
-            "[Vulkan] Selected physical device: {} ({})",
-            best_device->properties.properties.deviceName,
+            "[Vulkan] Selected physical device: {} ({})", best_device->properties.properties.deviceName,
             DeviceTypeName(best_device->properties.properties.deviceType)
         );
         return best_device;
     }
-
     return std::nullopt;
-}
-*/
-{
-    PhysicalDeviceInfo empty {};
-    if (instance == VK_NULL_HANDLE || vkEnumeratePhysicalDevices == nullptr) {
-        return empty;
-    }
-
-    std::vector<VkPhysicalDevice> devices;
-    for (;;) {
-        uint32_t count = 0;
-        if (vkEnumeratePhysicalDevices(instance, &count, nullptr) != VK_SUCCESS || count == 0) {
-            return empty;
-        }
-        devices.resize(count);
-        const VkResult result = vkEnumeratePhysicalDevices(instance, &count, devices.data());
-        if (result == VK_SUCCESS) {
-            devices.resize(count);
-            break;
-        }
-        if (result != VK_INCOMPLETE) {
-            return empty;
-        }
-    }
-
-    PhysicalDeviceInfo best {};
-    int32_t            best_score = -1;
-    for (const VkPhysicalDevice physical: devices) {
-        PhysicalDeviceInfo info {};
-        info.handle = physical;
-        if (vkGetPhysicalDeviceProperties2 != nullptr) {
-            vkGetPhysicalDeviceProperties2(physical, &info.properties);
-        }
-        if (vkGetPhysicalDeviceFeatures2 != nullptr) {
-            vkGetPhysicalDeviceFeatures2(physical, &info.features);
-        }
-        if (vkGetPhysicalDeviceMemoryProperties2 != nullptr) {
-            vkGetPhysicalDeviceMemoryProperties2(physical, &info.memory);
-        }
-
-        const std::array<uint32_t, 4> queue_families = QueryQueueFamilies(physical, surface);
-        info.graphicsFamily                          = queue_families[0];
-        info.presentFamily                           = queue_families[1];
-        info.transferFamily                          = queue_families[2];
-        info.computeFamily                           = queue_families[3];
-        info.hasGraphics                             = info.graphicsFamily != UINT32_MAX;
-        info.hasPresent                              = info.presentFamily != UINT32_MAX;
-        info.hasTransfer                             = info.transferFamily != UINT32_MAX;
-        info.hasCompute                              = info.computeFamily != UINT32_MAX;
-
-        const int32_t device_score = score != nullptr ? score(info, userdata) : DefaultScore(info);
-        if (device_score > best_score) {
-            best_score = device_score;
-            best       = info;
-        }
-    }
-
-    if (best_score >= 0) {
-        ZHLN::Log("[Vulkan] Selected physical device: {} ({})", best.properties.properties.deviceName, DeviceTypeName(best.properties.properties.deviceType));
-        return best;
-    }
-    return empty;
 }
 
 auto QueryMeshShaderLimits(const VkPhysicalDevice physical) noexcept -> MeshShaderLimits {

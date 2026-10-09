@@ -84,7 +84,7 @@ class PresentPacer {
 
     void Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept;
 
-    [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, ErrorCode>;
 
     [[nodiscard]] auto Policy() const noexcept -> PacingPolicy {
         return _policy;

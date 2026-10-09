@@ -858,7 +858,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("[Fidelity] Render host stopped before capture.");
         return EXIT_FAILURE;
     }
-    if (const uint32_t errors = ZHLN::RenderContext::ValidationErrorCount(); errors != 0) {
+    if (const uint32_t errors = engine->GetRenderContext().GetValidationErrorCount(); errors != 0) {
         ZHLN::Log("[Fidelity] {} Vulkan validation errors; refusing to publish an invalid capture.", errors);
         return EXIT_FAILURE;
     }

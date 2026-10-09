@@ -417,8 +417,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
     auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, params.skinnedVertexBuffer);
     if (!resolved) [[unlikely]] {
-        static uint32_t s_WarnCount = 0;
-        if (s_WarnCount++ < 5) {
+        if (_impl->invalidDrawWarningCount.fetch_add(1, std::memory_order_relaxed) < 5) {
             ZHLN::LogWarning("RenderContext::Draw skipped draw call with invalid mesh, material, or skinned scratch handle.");
         }
         return;

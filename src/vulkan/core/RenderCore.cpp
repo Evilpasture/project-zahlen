@@ -8,7 +8,7 @@ namespace ZHLN::Vk {
 std::expected<void, ErrorCode> WaitIdle(const VkDevice device) noexcept {
     const VkResult result = vkDeviceWaitIdle(device);
     if (result != VK_SUCCESS) {
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(ToError(result));
     }
     return {};
 }

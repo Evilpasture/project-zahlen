@@ -46,16 +46,6 @@ void Release(Engine& engine, Components::OwnedMeshComponent& component) {
     Release(engine.GetRenderContext(), component);
 }
 
-void Release(Engine& engine, Components::ParticleEmitterComponent& component) {
-    engine.GetRenderContext().DestroyBuffer(std::exchange(component.gpuBuffer, BufferHandle::Invalid));
-    component.bufferCapacity = 0;
-}
-
-void Release(Engine& engine, Components::MeshParticleEmitterComponent& component) {
-    engine.GetRenderContext().DestroyBuffer(std::exchange(component.gpuBuffer, BufferHandle::Invalid));
-    component.bufferCapacity = 0;
-}
-
 void Release(Engine& engine, Components::SkeletalMeshComponent& component) {
     engine.GetRenderContext().DestroyBuffer(std::exchange(component.skinnedScratch, BufferHandle::Invalid));
     component.scratchVertexCount = 0;

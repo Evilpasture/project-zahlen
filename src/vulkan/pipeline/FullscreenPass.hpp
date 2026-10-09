@@ -19,7 +19,7 @@ struct FullscreenPass {
     std::vector<Pipeline>         pipelines;
     HeapPassBindings              heapBindings;
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHeap(
         VkDevice                        device,
         HeapManager&                    heap,
         ShaderStagesView             shaders,
@@ -30,7 +30,7 @@ struct FullscreenPass {
         VkPipelineCache                 cache    = VK_NULL_HANDLE
     ) noexcept;
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHeapVariants(
         VkDevice                              device,
         HeapManager&                          heap,
         ShaderStagesView                   shaders,

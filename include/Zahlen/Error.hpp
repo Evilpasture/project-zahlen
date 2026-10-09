@@ -7,7 +7,7 @@
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <atomic>
 #include <cstdint>
 #include <string_view>

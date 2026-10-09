@@ -6,6 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 namespace ZHLN::Vk {
 
 
@@ -163,7 +164,7 @@ class CommandRing {
         const uint32_t slotIndex = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
         if (_pending[slotIndex]) {
             if (const VkResult waited = vkWaitForFences(_device, 1, &_fences[slotIndex], VK_TRUE, UINT64_MAX); waited != VK_SUCCESS) {
-                return std::unexpected(ToFrameError(waited));
+                return std::unexpected(ToError(waited));
             }
             _pending[slotIndex] = false;
         }
@@ -173,7 +174,7 @@ class CommandRing {
 
     [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
         if (const VkResult reset = vkResetFences(_device, 1, &slot.fence); reset != VK_SUCCESS) {
-            return std::unexpected(ToFrameError(reset));
+            return std::unexpected(ToError(reset));
         }
         auto submitted = QueueSubmit(queue, std::move(cmds), {}, {}, slot.fence);
         if (submitted) { _pending[slot.index] = true; }

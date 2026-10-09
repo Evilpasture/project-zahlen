@@ -12,6 +12,34 @@
 
 namespace ZHLN::Vk {
 
+namespace {
+
+// Owns a VkFence until it is released. SubmittedStagingWork takes over a fence
+// whose submission succeeded; every failure path lets the guard destroy it.
+class FenceGuard {
+  public:
+    FenceGuard(VkDevice device, VkFence fence) noexcept: _device(device), _fence(fence) {
+    }
+    ~FenceGuard() noexcept {
+        if (_fence != VK_NULL_HANDLE) {
+            vkDestroyFence(_device, _fence, nullptr);
+        }
+    }
+
+    FenceGuard(const FenceGuard&)                    = delete;
+    auto operator=(const FenceGuard&) -> FenceGuard& = delete;
+
+    void Release() noexcept {
+        _fence = VK_NULL_HANDLE;
+    }
+
+  private:
+    VkDevice _device = VK_NULL_HANDLE;
+    VkFence  _fence  = VK_NULL_HANDLE;
+};
+
+} // namespace
+
 SubmittedStagingWork::SubmittedStagingWork(
     Allocator&                         allocator,
     const Context&                     ctx,
@@ -110,15 +138,7 @@ void StagingContext::UploadImage2DBuffer(VkImage dstImage, uint32_t w, uint32_t 
         .imageOffset = {},
         .imageExtent = {w, h, 1},
     };
-    const VkCopyBufferToImageInfo2 copy_info {
-        .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-        .srcBuffer      = stagingBuf,
-        .dstImage       = dstImage,
-        .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .regionCount    = 1,
-        .pRegions       = &region,
-    };
-    vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info); // TODO(Evilpasture): Don't we have an existing abstraction? Look similar to CopyBufferToImage.
+    CopyBufferToImage(_recorder.Handle(), stagingBuf, dstImage, region);
 
     if (mipLevels > 1) {
         GenerateMipmaps(_recorder.Handle(), dstImage, w, h, mipLevels, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
@@ -149,16 +169,7 @@ void StagingContext::UploadPrefilteredCubeMap(VkImage dstImage, VkBuffer staging
                 .imageExtent       = {.width = mip_size, .height = mip_size, .depth = 1},
             };
 
-            VkCopyBufferToImageInfo2 copy_info = {
-                .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-                .pNext          = {},
-                .srcBuffer      = stagingBuf,
-                .dstImage       = dstImage,
-                .dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .regionCount    = 1,
-                .pRegions       = &region,
-            };
-            vkCmdCopyBufferToImage2(_recorder.Handle(), &copy_info); // TODO(Evilpasture): Ditto.
+            CopyBufferToImage(_recorder.Handle(), stagingBuf, dstImage, region);
         }
         current_offset += (face_size * 6);
     }
@@ -184,16 +195,20 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
         // Never submit untracked work whose staging buffers could be freed.
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
+    // The guard owns the fence until the submission succeeds and hands it to
+    // SubmittedStagingWork; every early return below destroys it.
+    FenceGuard fence_guard {_ctx->Device(), fence};
 
     if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, fence); !result) {
         // If a submission failed partway through, keep the pool and buffers
         // alive until the queue is idle, before the recording batch is freed.
-        Vk::WaitIdle(
-            _ctx->GraphicsQueue()
-        ); // TODO(Evilpasture): Propagate this. Leaving this discarded so the compiler can warn and I can remember. Do not static_cast<void>.
-        vkDestroyFence(_ctx->Device(), fence, nullptr); // TODO(Evilpasture): Now I realize, we don't have an abstraction for this yet.
+        const auto idle = Vk::WaitIdle(_ctx->GraphicsQueue());
+        if (!idle) {
+            return std::unexpected(idle.error());
+        }
         return std::unexpected(result.error());
     }
+    fence_guard.Release();
     return SubmittedStagingWork {*_allocator, *_ctx, std::move(_cmdPool), std::move(_stagingBuffers), fence};
 }
 

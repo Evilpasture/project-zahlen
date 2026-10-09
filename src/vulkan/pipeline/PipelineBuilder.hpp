@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include "PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
 #include <optional>
@@ -75,8 +76,8 @@ struct ComputePipelineConfig {
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping        = nullptr;
 };
 
-[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
-[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, VkResult>;
+[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode>;
+[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode>;
 
 template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
 class PipelineBuilder {
@@ -368,7 +369,7 @@ class ComputePipelineBuilder {
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
     auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
 
-    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ErrorCode>;
 
   private:
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
@@ -387,7 +388,7 @@ class PipelineLayoutBuilder {
 
     PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
 
-    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ZHLN::ErrorCode>;
+    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ErrorCode>;
 
   private:
     VkDevice                         _device;

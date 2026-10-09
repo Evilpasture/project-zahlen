@@ -97,7 +97,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
         _ctx->Device(), _ctx->PhysicalInfo(), surface.Get(), requested_extent, _vsync, _pacer.RequestedPresentMode(), _pacer.WantsPresentTiming()
     );
     if (!swapchain_result) {
-        return std::unexpected(ToFrameError(swapchain_result.error()));
+        return std::unexpected(swapchain_result.error());
     }
     _pacer.OnSwapchainRebuilt(_ctx->Device(), swapchain.Get().handle, swapchain.Get().imageCount, swapchain.Get().presentMode);
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().imageCount);
@@ -135,7 +135,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     }
 
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
-        return std::unexpected(ToFrameError(waited));
+        return std::unexpected(ToError(waited));
     }
     sync.MarkUnsubmitted(slot); // The prior submission finished; a skipped acquire does not need a fence.
     pools[slot].Reset();
@@ -164,7 +164,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         if (res == VK_ERROR_OUT_OF_DATE_KHR) {
             return std::nullopt;
         }
-        return std::unexpected(ToFrameError(res));
+        return std::unexpected(ToError(res));
     }
 
     if (_pacer.IsTimingActive()) {
@@ -227,7 +227,7 @@ auto SwapchainPresenter::Present(
     const VkSemaphoreSubmitInfo signal      = Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
 
     if (const VkResult reset = sync.ResetFence(slot); reset != VK_SUCCESS) {
-        return std::unexpected(ToFrameError(reset));
+        return std::unexpected(ToError(reset));
     }
     auto submit_res = Vk::QueueSubmit(
         graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), wait_count},
@@ -265,7 +265,7 @@ auto SwapchainPresenter::Present(
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
             return PresentSuboptimal {};
         }
-        return std::unexpected(ToFrameError(result));
+        return std::unexpected(ToError(result));
     };
     auto presented = present_frame(present_id);
     if (!presented && present_id != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {

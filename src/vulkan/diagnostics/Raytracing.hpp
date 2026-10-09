@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <cstdint>
 
 namespace ZHLN::Vk {
@@ -44,7 +45,7 @@ struct TlasGeometryDesc {
     VkBuffer buffer,
     VkDeviceSize size,
     AccelerationStructureType type
-) noexcept -> std::expected<AccelerationStructure, VkResult>;
+) noexcept -> std::expected<AccelerationStructure, ErrorCode>;
 [[nodiscard]] auto GetAccelerationStructureAddress(VkDevice device, VkAccelerationStructureKHR accelerationStructure) noexcept
     -> VkDeviceAddress;
 

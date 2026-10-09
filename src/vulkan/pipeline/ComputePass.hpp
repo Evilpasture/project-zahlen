@@ -109,7 +109,7 @@ struct ComputePass {
         return true;
     }
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHeap(
         VkDevice                                             device,
         const ShaderDesc&                               shader,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
@@ -130,7 +130,7 @@ struct ComputePass {
         return {};
     }
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHeapVariants(
         VkDevice                                             device,
         const ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
@@ -417,7 +417,7 @@ struct DoubleBufferedComputePass {
     std::array<uint32_t, 3>       threadGroupSize {};
     std::array<uint32_t, 3>       fixedDispatchSize {};
 
-    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHeap(
         VkDevice               device,
         HeapManager&           heap,
         const ShaderDesc& shader,

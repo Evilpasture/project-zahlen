@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "TextureManager.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Hash.hpp>
@@ -15,7 +14,7 @@
 namespace ZHLN {
 
 enum class TextureUploadError : uint8_t {
-    NoPixelData ZHLN_ANNOTATION(ZHLN::Description<"Texture upload was handed no pixel data"> {}) = 1,
+    NoPixelData     ZHLN_ANNOTATION(ZHLN::Description<"Texture upload was handed no pixel data"> {}) = 1,
     HandleCollision ZHLN_ANNOTATION(ZHLN::Description<"Texture name hashes to a reserved or different texture handle"> {}),
 };
 
@@ -34,8 +33,8 @@ TextureManager::TextureManager(
     Vk::StagingRingBuffer&                       staging,
     Vk::CommandRing<Vk::QueueType::Graphics, 8>& cmdRing,
     Vk::HeapManager&                             heaps
-) noexcept
-    : _ctx(ctx), _allocator(allocator), _staging(staging), _cmdRing(cmdRing), _heaps(heaps) {}
+) noexcept: _ctx(ctx), _allocator(allocator), _staging(staging), _cmdRing(cmdRing), _heaps(heaps) {
+}
 
 auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
     const auto base = _heaps.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
@@ -72,11 +71,8 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
         });
 }
 
-auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
-    -> std::expected<TextureHandle, ErrorCode> {
-    return Upload2D(pixels, width, height, format).transform([&](uint32_t slot) {
-        return RegisterAnonymous(slot, format, width, height);
-    });
+auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format) -> std::expected<TextureHandle, ErrorCode> {
+    return Upload2D(pixels, width, height, format).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -109,8 +105,8 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
             return ExistingTexture::Collision;
         }
         // After device loss the record still exists but points to white, not its old image.
-        if (existing->gpuBindlessIndex > kFallbackNormalTextureIndex && existing->format == format && existing->width == width &&
-            existing->height == height && existing->pixelHash == pixelHash) {
+        if (existing->gpuBindlessIndex > kFallbackNormalTextureIndex && existing->format == format && existing->width == width && existing->height == height &&
+            existing->pixelHash == pixelHash) {
             return ExistingTexture::Duplicate;
         }
         return ExistingTexture::Changed;
@@ -132,7 +128,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
     // registry before inserting: another caller may have uploaded this name,
     // or an anonymous handle may have claimed its hash while the GPU worked.
     std::optional<uint32_t> oldSlot;
-    const auto committedState = Lock(_mutex, [&] {
+    const auto              committedState = Lock(_mutex, [&] {
         const auto previous = _textures.Find(id);
         const auto state    = stateOf(previous);
         if (state == ExistingTexture::Collision || state == ExistingTexture::Duplicate) {
@@ -141,8 +137,8 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         if (state == ExistingTexture::Changed) {
             oldSlot = previous->gpuBindlessIndex;
             ZHLN::Log(
-                "[TextureManager] Texture '{}' re-uploaded with different contents ({}x{} -> {}x{}); retiring bindless slot {}.",
-                identifier, previous->width, previous->height, width, height, *oldSlot
+                "[TextureManager] Texture '{}' re-uploaded with different contents ({}x{} -> {}x{}); retiring bindless slot {}.", identifier, previous->width,
+                previous->height, width, height, *oldSlot
             );
         }
         _textures.Insert(
@@ -179,15 +175,7 @@ auto TextureManager::RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, 
         } while (id <= static_cast<uint64_t>(SystemTextures::FlatNormal) || _textures.Find(id).has_value());
 
         const auto handle = static_cast<TextureHandle>(id);
-        _textures.Insert(
-            id, TextureRecord {
-                    .handle           = handle,
-                    .format           = format,
-                    .width            = width,
-                    .height           = height,
-                    .gpuBindlessIndex = bindlessIndex
-                }
-        );
+        _textures.Insert(id, TextureRecord {.handle = handle, .format = format, .width = width, .height = height, .gpuBindlessIndex = bindlessIndex});
         return handle;
     });
 }
@@ -204,8 +192,7 @@ uint32_t TextureManager::GetBindlessIndex(TextureHandle handle) const noexcept {
         }
 
         if constexpr (isDev) {
-            static uint32_t s_WarnCount = 0;
-            if (s_WarnCount++ < 5) {
+            if (_missingHandleWarningCount++ < 5) {
                 ZHLN::Log(
                     "[Warning] TextureHandle {:#X} was not found in registry! "
                     "Did you pass a raw integer instead of a registered asset handle?",
@@ -223,17 +210,16 @@ void TextureManager::Unload(TextureHandle handle) {
         return;
     }
 
-    const uint64_t id = static_cast<uint64_t>(handle);
-    const auto     released =
-        Lock(_mutex, [&]() -> std::optional<uint32_t> {
-            const auto record = _textures.Find(id);
-            if (!record) {
-                return std::nullopt;
-            }
-            const uint32_t bindlessIndex = record->gpuBindlessIndex;
-            _textures.Erase(id);
-            return bindlessIndex;
-        });
+    const uint64_t id       = static_cast<uint64_t>(handle);
+    const auto     released = Lock(_mutex, [&]() -> std::optional<uint32_t> {
+        const auto record = _textures.Find(id);
+        if (!record) {
+            return std::nullopt;
+        }
+        const uint32_t bindlessIndex = record->gpuBindlessIndex;
+        _textures.Erase(id);
+        return bindlessIndex;
+    });
 
     if (released) {
         ReleaseSlot(*released);
@@ -244,9 +230,7 @@ void TextureManager::Clear() {
     ZHLN::Array<uint32_t> released;
     Lock(_mutex, [&] {
         released.reserve(_textures.Size());
-        _textures.ForEach([&](uint64_t , TextureRecord& record) {
-            released.push_back(record.gpuBindlessIndex);
-        });
+        _textures.ForEach([&](uint64_t, TextureRecord& record) { released.push_back(record.gpuBindlessIndex); });
         _textures.Clear();
     });
     for (const uint32_t bindlessIndex: released) {
@@ -254,7 +238,9 @@ void TextureManager::Clear() {
     }
 }
 
-TextureManager::~TextureManager() { DestroyAllSlots(); }
+TextureManager::~TextureManager() {
+    DestroyAllSlots();
+}
 
 void TextureManager::DestroyAllSlots() noexcept {
     // Never destroy a VMA image while any of its Vulkan views still exists.
@@ -274,26 +260,19 @@ void TextureManager::DestroyAllSlots() noexcept {
         }
         pending.clear();
     }
-    _nextSlotIndex = 0;
+    _nextSlotIndex    = 0;
     _bindlessBaseSlot = 0;
     _freeSlots.clear();
 }
 
 void TextureManager::OnDeviceLost() {
     DestroyAllSlots();
-    Lock(_mutex, [&] {
-        _textures.ForEach([&](uint64_t, TextureRecord& record) {
-            record.gpuBindlessIndex = kFallbackWhiteTextureIndex;
-        });
-    });
+    Lock(_mutex, [&] { _textures.ForEach([&](uint64_t, TextureRecord& record) { record.gpuBindlessIndex = kFallbackWhiteTextureIndex; }); });
 }
 
-auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
-    -> std::expected<TextureHandle, ErrorCode> {
+auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode> {
     const VkFormat format = view.Format();
-    return Adopt(std::move(image), std::move(view)).transform([&](uint32_t slot) {
-        return RegisterAnonymous(slot, format, width, height);
-    });
+    return Adopt(std::move(image), std::move(view)).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
 auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode> {
@@ -372,4 +351,4 @@ void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView
     _heaps.WriteImage(slot, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-}
+} // namespace ZHLN
