@@ -33,7 +33,7 @@ class GlobalVolkDispatchLease {
         Release();
     }
 
-    GlobalVolkDispatchLease(const GlobalVolkDispatchLease&) = delete;
+    GlobalVolkDispatchLease(const GlobalVolkDispatchLease&)                    = delete;
     auto operator=(const GlobalVolkDispatchLease&) -> GlobalVolkDispatchLease& = delete;
 
     [[nodiscard]] auto Acquired() const noexcept -> bool {
@@ -83,7 +83,6 @@ class GlobalVolkDispatchLease {
 } // namespace
 
 Instance::Instance() noexcept = default;
-
 
 void Instance::Destroy() noexcept {
     if (_handle != VK_NULL_HANDLE) {
@@ -230,8 +229,8 @@ auto Instance::Create(
         add_if_supported(extension, "[Vulkan] Skipping unsupported instance extension: ");
     }
 
-    const bool debug_utils_enabled         = validation != ValidationMode::Off &&
-                                             add_if_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "[Vulkan] Debug utils is unavailable: ");
+    const bool debug_utils_enabled = validation != ValidationMode::Off &&
+                                     add_if_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, "[Vulkan] Debug utils is unavailable: ");
     const bool validation_features_enabled = enable_validation && gpu_validation &&
                                              add_if_supported(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, "[Vulkan] GPU-assisted validation is unavailable: ");
     if (gpu_validation && !validation_features_enabled) {
@@ -276,20 +275,20 @@ auto Instance::Create(
     const VkBool32                         dump_to_stdout          = VK_TRUE;
     const std::array<VkLayerSettingEXT, 3> layer_settings          = {{
         {.pLayerName   = k_validation_layer_name,
-         .pSettingName = "gpuav_force_on_robustness",
-         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount   = 1,
-         .pValues      = &force_robustness},
+                  .pSettingName = "gpuav_force_on_robustness",
+                  .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+                  .valueCount   = 1,
+                  .pValues      = &force_robustness},
         {.pLayerName   = k_validation_layer_name,
-         .pSettingName = "gpu_dump_descriptors",
-         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount   = 1,
-         .pValues      = &dump_descriptors},
+                  .pSettingName = "gpu_dump_descriptors",
+                  .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+                  .valueCount   = 1,
+                  .pValues      = &dump_descriptors},
         {.pLayerName   = k_validation_layer_name,
-         .pSettingName = "gpu_dump_to_stdout",
-         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-         .valueCount   = 1,
-         .pValues      = &dump_to_stdout},
+                  .pSettingName = "gpu_dump_to_stdout",
+                  .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+                  .valueCount   = 1,
+                  .pValues      = &dump_to_stdout},
     }};
 
     VkLayerSettingsCreateInfoEXT layer_settings_info {
@@ -304,7 +303,7 @@ auto Instance::Create(
         .pNext           = nullptr,
         .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
         .messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+                       VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         .pfnUserCallback = &Instance::DebugCallback,
         .pUserData       = result._diagnostics.get(),
     };
@@ -337,7 +336,7 @@ auto Instance::Create(
     }
 
     volkLoadInstance(handle);
-    result._handle                        = handle;
+    result._handle                         = handle;
     result._diagnostics->debugUtilsEnabled = debug_utils_enabled;
 
     if (validation != ValidationMode::Off && debug_utils_enabled && vkCreateDebugUtilsMessengerEXT != nullptr) {
@@ -349,7 +348,9 @@ auto Instance::Create(
             ZHLN::LogWarning("[Vulkan] Could not create validation debug messenger: {}", static_cast<int32_t>(messenger_created));
         }
 
-        if (vkCreateDebugUtilsMessengerEXT != nullptr) {
+        if (vkCreateDebugUtilsMessengerEXT != nullptr &&
+            // Is VK_EXT_device_address_binding_report enabled?
+            std::ranges::contains(enabled_extensions, std::string_view(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME))) {
             const VkDebugUtilsMessengerCreateInfoEXT address_binding_info {
                 .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
                 .pNext           = nullptr,
