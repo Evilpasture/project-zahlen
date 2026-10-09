@@ -15,7 +15,6 @@
 
 #include "TestsFramework.hpp"
 #include <CDN/CDN.hpp>
-#include <HTTP/HTTP.hpp>
 #include <HTTP/HTTPServer.hpp>
 #include <RemoteAsset/URLResolver.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
@@ -239,7 +238,7 @@ struct CDNTestSuite {
             auto refused = cdn.Fetch("ok", RejectAll);
             ZHLN::Test::ExpectFalse(refused.has_value());
             if (!refused.has_value()) {
-                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
+                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::CDNError::Rejected));
             }
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("ok").value_or(std::string())).cacheFileName));
             return {};
@@ -323,13 +322,13 @@ struct CDNTestSuite {
             auto missing = cdn.Fetch("notfound");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing.has_value()) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
+                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::CDN::CDNError::NotFound));
             }
 
             auto broken = cdn.Load("servererror");
             ZHLN::Test::ExpectFalse(broken.has_value());
             if (!broken.has_value()) {
-                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
+                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::CDN::CDNError::HTTPStatus));
             }
 
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("notfound").value_or(std::string())).cacheFileName));

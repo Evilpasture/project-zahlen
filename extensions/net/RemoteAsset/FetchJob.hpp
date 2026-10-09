@@ -9,6 +9,7 @@
 #include <Zahlen/Error.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <string>

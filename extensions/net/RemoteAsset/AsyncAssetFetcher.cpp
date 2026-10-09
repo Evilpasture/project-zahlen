@@ -216,7 +216,7 @@ void AsyncAssetFetcher::ExecuteJob(FetchJob* job) noexcept {
     }
 
     job->lastError = detail.empty() ? std::string("no candidate answered") : std::move(detail);
-    job->result    = std::unexpected(HTTP::HTTPError::ConnectionFailed);
+    job->result    = std::unexpected(lastErrorCode);
     job->isDone.store(true, std::memory_order::release);
 }
 

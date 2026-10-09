@@ -192,7 +192,7 @@ auto CDNManager::Fetch(std::string_view relativePath, ValidatorFn validator) -> 
     }
     auto res = m_fetcher->FetchSync(*url, validator);
     if (!res) {
-        return std::unexpected(res.error());
+        return std::unexpected(TranslateRemote(res.error(), *url));
     }
     if (res->localCachePath.empty()) {
         return std::unexpected(Refuse(CDNError::CacheWrite, *url, m_cache.Root().string()));
@@ -210,7 +210,7 @@ auto CDNManager::Load(std::string_view relativePath, ValidatorFn validator) -> s
     }
     auto res = m_fetcher->FetchSync(*url, validator);
     if (!res) {
-        return std::unexpected(res.error());
+        return std::unexpected(TranslateRemote(res.error(), *url));
     }
     return std::move(res->data);
 }
