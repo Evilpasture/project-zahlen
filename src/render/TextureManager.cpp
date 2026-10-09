@@ -265,7 +265,7 @@ void TextureManager::DestroyAllSlots() noexcept {
     _freeSlots.clear();
 }
 
-void TextureManager::OnDeviceLost() {
+void TextureManager::Reset() {
     DestroyAllSlots();
     Lock(_mutex, [&] { _textures.ForEach([&](uint64_t, TextureRecord& record) { record.gpuBindlessIndex = kFallbackWhiteTextureIndex; }); });
 }

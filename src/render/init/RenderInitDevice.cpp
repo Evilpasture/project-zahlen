@@ -242,19 +242,19 @@ void RenderContext::Destroy() noexcept {
     if (!_impl) {
         return;
     }
-    // Emitter/billboard host teardown always; fault dumps only when the device
-    // actually died (a healthy vkGetDeviceFaultInfoEXT is VK_ERROR_NOT_PERMITTED).
-    _impl->OnDeviceLost();
+
+    const bool deviceLost = GetDeviceLostCount() > 0;
 
     if (_impl->ctx.Device() != nullptr) {
-        const bool lost = GetDeviceLostCount() > 0;
-        if (lost) {
+        if (deviceLost) {
             _impl->gpuDiagnostics.OnDeviceLost();
         } else {
             if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
+            Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         }
+
         _impl->DestroyDestinations();
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {
@@ -262,13 +262,6 @@ void RenderContext::Destroy() noexcept {
             }
         }
         _impl->gpuDiagnostics.Shutdown();
-        if (!lost) {
-            auto res = Vk::WaitIdle(_impl->ctx.Device());
-            if (!res) {
-                ZHLN::LogError("Failed to wait for idle on device destruction.");
-            }
-            Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
-        }
         _impl->submittedStaging.reset();
     }
 }

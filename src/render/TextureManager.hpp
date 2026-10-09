@@ -65,7 +65,7 @@ class TextureManager {
     void Clear();
     // Only after an idle wait (e.g. ClearGPUCaches): reclaim every retired slot.
     void RetireAll() noexcept;
-    void OnDeviceLost();
+    void Reset();
 
 
     // Raw slots are only for internal fallback, render-target and LUT setup.
@@ -79,7 +79,7 @@ class TextureManager {
     [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept { return _slotViews[slot]; }
     // A slice borrows the exact view metadata, including cube/array/3D shape
     // and mip/layer range. Appending slots cannot relocate a deque element;
-    // slot release/replacement, device loss, or manager destruction ends the borrow.
+    // slot release/replacement, Reset, or manager destruction ends the borrow.
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
         const Vk::ImageView& view = _slotViews[slot];
         return Vk::ImageSlice {_slotImages[slot].Handle(), view, extent, view.Format()};

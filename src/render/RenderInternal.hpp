@@ -589,7 +589,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride)
         -> BufferHandle;
     void EvictInactiveEmitters() noexcept;
-    void OnDeviceLost() noexcept;
+    void ClearEmitterBuffers() noexcept;
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
@@ -672,6 +672,7 @@ struct RenderContext::Impl {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
 
+        ClearEmitterBuffers();
         geometry.RetireAll();
         // The registry destructor runs after this body; enqueue its pipelines
         // now, before the explicit deletion-queue drain below.
@@ -683,7 +684,7 @@ struct RenderContext::Impl {
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);
         fog.DestroyNoise(allocator);
-        textureManager.OnDeviceLost();
+        textureManager.Reset();
         iblPayload.Destroy(allocator);
         ltcMatView = {};
         ltcAmpView = {};

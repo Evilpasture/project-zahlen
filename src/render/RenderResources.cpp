@@ -177,7 +177,7 @@ void RenderContext::Impl::EvictInactiveEmitters() noexcept {
     evict(meshParticleEmitters);
 }
 
-void RenderContext::Impl::OnDeviceLost() noexcept {
+void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     const auto destroy = [this](EmitterStorageMap& emitters) {
         emitters.ForEach([this](const uint64_t&, EmitterStorage& storage) {
             if (storage.buffer != BufferHandle::Invalid) {
