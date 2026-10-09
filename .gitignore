@@ -3,6 +3,7 @@
 # ==========================================
 
 .git/
+.wrangler/
 
 # --- Compiled Shaders (Vulkan) ---
 *.spv
@@ -16,6 +17,7 @@ build/
 dist/
 target/
 bin/
+import/
 obj/
 out/
 *.exe
