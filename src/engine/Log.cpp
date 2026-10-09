@@ -1,10 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "diagnostics/DiagnosticsInternal.hpp"
-#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <atomic>
@@ -49,26 +48,34 @@ std::atomic<LogLevel> s_LogLevel {LogLevel::Moderate};
 // formatted I/O the non-suppressed path already does.
 std::mutex               s_CaptureMutex;
 std::vector<std::string> s_Captured;
-bool                     s_Capturing      = false;
-bool                     s_SuppressOutput = false;
+bool                     s_Capturing       = false;
+bool                     s_SuppressOutput  = false;
 constexpr size_t         kMaxCapturedLines = 512;
 
 constexpr auto SeverityTag(LogSeverity severity) noexcept -> std::string_view {
     switch (severity) {
-        case LogSeverity::Debug:   return "DEBUG";
-        case LogSeverity::Info:    return "INFO";
-        case LogSeverity::Warning: return "WARN";
-        case LogSeverity::Error:   return "ERROR";
+        case LogSeverity::Debug:
+            return "DEBUG";
+        case LogSeverity::Info:
+            return "INFO";
+        case LogSeverity::Warning:
+            return "WARN";
+        case LogSeverity::Error:
+            return "ERROR";
     }
     return "INFO";
 }
 
 constexpr auto SeverityColor(LogSeverity severity) noexcept -> const char* {
     switch (severity) {
-        case LogSeverity::Debug:   return Color::Gray;
-        case LogSeverity::Info:    return "";
-        case LogSeverity::Warning: return Color::Yellow;
-        case LogSeverity::Error:   return Color::Red;
+        case LogSeverity::Debug:
+            return Color::Gray;
+        case LogSeverity::Info:
+            return "";
+        case LogSeverity::Warning:
+            return Color::Yellow;
+        case LogSeverity::Error:
+            return Color::Red;
     }
     return "";
 }
@@ -87,7 +94,7 @@ auto ShouldColorize(FILE* stream) noexcept -> bool {
 #endif
 }
 
-}
+} // namespace
 
 void SetLogLevel(LogLevel level) noexcept {
     s_LogLevel.store(level, std::memory_order::release);
@@ -139,7 +146,7 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
         return;
     }
 
-    std::string_view file_name = file;
+    std::string_view file_name = (file != nullptr) ? file : "unknown";
     if (auto pos = file_name.find_last_of("/\\"); pos != std::string_view::npos) {
         file_name.remove_prefix(pos + 1);
     }
@@ -161,7 +168,7 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
     // at Verbose and suppress per-test instead of going Quiet, so a failure
     // dump keeps even debug-level lines.
     {
-        const auto capturedSeverity = static_cast<LogSeverity>(severity);
+        const auto  capturedSeverity = static_cast<LogSeverity>(severity);
         std::string plain;
         if (capturedSeverity == LogSeverity::Info) {
             plain = std::format("[{}:{}] [Fiber:{}] {}", file_name, line, fiberTag, message);
@@ -201,9 +208,7 @@ void InternalWriteLog(uint8_t channel, uint8_t severity, const char* file, uint3
         std::println(outStream, "[{}:{}] [Fiber:{}] [{}] {}", file_name, line, fiberTag, SeverityTag(level), message);
         return;
     }
-    std::println(
-        outStream, "[{}:{}] [Fiber:{}] [{}{}{}] {}", file_name, line, fiberTag, SeverityColor(level), SeverityTag(level), Color::Reset, message
-    );
+    std::println(outStream, "[{}:{}] [Fiber:{}] [{}{}{}] {}", file_name, line, fiberTag, SeverityColor(level), SeverityTag(level), Color::Reset, message);
 }
 
 [[noreturn]] void InternalPanic(const char* file, uint32_t line, std::string_view message) {
@@ -231,7 +236,7 @@ void LogManual(std::string_view file, int line, std::string_view message, const 
     }
 }
 
-}
+} // namespace ZHLN
 
 namespace ZHLN::Diagnostics {
 
@@ -257,4 +262,4 @@ void WriteToChannel(uint8_t channel, std::string_view msg) noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Diagnostics
