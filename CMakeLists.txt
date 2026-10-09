@@ -15,38 +15,27 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-project(zahlen LANGUAGES C CXX ASM)
+# Must run BEFORE project() so platform modules don't bake -isystem into CXX module scanners
+if(APPLE)
+    execute_process(
+    COMMAND xcrun --show-sdk-path
+    OUTPUT_VARIABLE _ZHLN_MAC_SDK
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-# CMake's Apple platform setup may pass the SDK's usr/include directory as an
-# explicit -isystem path. GCC's libstdc++ cstdlib uses #include_next <stdlib.h>,
-# and that explicit path can make GCC skip the SDK header. On Darwin, GCC already
-# finds it through --sysroot, so keep the SDK C headers implicit for GNU targets.
-if(APPLE AND IS_ABSOLUTE "${CMAKE_OSX_SYSROOT}")
-  set(_zhln_apple_sdk_usr_include "${CMAKE_OSX_SYSROOT}/usr/include")
-  cmake_path(NORMAL_PATH _zhln_apple_sdk_usr_include)
-  foreach(_zhln_lang IN ITEMS C CXX)
-    set(_zhln_compiler_id_var "CMAKE_${_zhln_lang}_COMPILER_ID")
-    set(_zhln_standard_include_var "CMAKE_${_zhln_lang}_STANDARD_INCLUDE_DIRECTORIES")
-    if("${${_zhln_compiler_id_var}}" STREQUAL "GNU" AND DEFINED ${_zhln_standard_include_var})
-      set(_zhln_standard_includes "${${_zhln_standard_include_var}}")
-      set(_zhln_filtered_standard_includes "")
-      foreach(_zhln_include IN LISTS _zhln_standard_includes)
-        set(_zhln_normalized_include "${_zhln_include}")
-        cmake_path(NORMAL_PATH _zhln_normalized_include)
-        if(NOT _zhln_normalized_include STREQUAL _zhln_apple_sdk_usr_include)
-          list(APPEND _zhln_filtered_standard_includes "${_zhln_include}")
-        endif()
-      endforeach()
-      if(NOT "${_zhln_standard_includes}" STREQUAL "${_zhln_filtered_standard_includes}")
-        set(${_zhln_standard_include_var} "${_zhln_filtered_standard_includes}")
-        message(STATUS "GNU ${_zhln_lang}: relying on --sysroot for the Apple SDK's usr/include")
-      endif()
-    endif()
-  endforeach()
+    # Tell CMake NEVER to pass the SDK's usr/include as -isystem
+    list(APPEND CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES "${_ZHLN_MAC_SDK}/usr/include")
+    list(APPEND CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES "${_ZHLN_MAC_SDK}/usr/include")
+
+    # Extra safety: prevent CMake target dependency scanners from auto-system-promoting SDK directories
+    set(CMAKE_NO_SYSTEM_FROM_IMPORTED ON)
 endif()
 
+
+project(zahlen LANGUAGES C CXX ASM)
+
+
 if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-  message(
+    message(
     FATAL_ERROR
       "zahlen requires a GNU-style toolchain (gcc/g++, or clang/clang++ with "
       "the GNU driver). MSVC and clang-cl cannot build C++26 static "
@@ -68,51 +57,51 @@ check_symbol_exists(WSAStartup "winsock2.h" ZHLN_HAVE_WINSOCK)
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE
+    set(CMAKE_BUILD_TYPE
       "Release"
       CACHE STRING "Choose the type of build." FORCE)
 endif()
 
 if(ZHLN_HAS_QUNUSED_ARGUMENTS)
-  add_compile_options(-Qunused-arguments)
-  add_link_options(-Qunused-arguments)
+    add_compile_options(-Qunused-arguments)
+    add_link_options(-Qunused-arguments)
 endif()
 
 if(NOT CMAKE_CXX_FLAGS_RELEASE MATCHES "(^| )-g")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
 endif()
 if(NOT CMAKE_C_FLAGS_RELEASE MATCHES "(^| )-g")
-  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
 endif()
 
 if(UNIX OR APPLE)
-  set(CMAKE_ASM_COMPILE_OBJECT
+    set(CMAKE_ASM_COMPILE_OBJECT
       "<CMAKE_ASM_COMPILER> <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> -c <SOURCE>"
       CACHE STRING "ASM compile command" FORCE)
 endif()
 
 if(APPLE)
-  enable_language(OBJCXX)
-  set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
-  execute_process(
+    enable_language(OBJCXX)
+    set(CMAKE_OBJCXX_FLAGS "${CMAKE_OBJCXX_FLAGS} -fno-rtti -fno-exceptions")
+    execute_process(
     COMMAND xcrun --show-sdk-path
     OUTPUT_VARIABLE MACOS_SDK_PATH
     OUTPUT_STRIP_TRAILING_WHITESPACE)
-  set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
+    set(CMAKE_SYSROOT ${MACOS_SDK_PATH})
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT WIN32)
-  file(CREATE_LINK "${CMAKE_BINARY_DIR}/compile_commands.json"
+    file(CREATE_LINK "${CMAKE_BINARY_DIR}/compile_commands.json"
        "${CMAKE_SOURCE_DIR}/compile_commands.json" SYMBOLIC
        RESULT _zhln_compdb_link)
-  if(_zhln_compdb_link)
-    message(
+    if(_zhln_compdb_link)
+        message(
       STATUS
         "clangd: could not symlink compile_commands.json (${_zhln_compdb_link})"
     )
-  endif()
+    endif()
 endif()
 
 include(CompilerWarnings)
@@ -126,7 +115,7 @@ include(ReflectionConfig)
 
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
-  add_compile_definitions(ZHLN_DEV_MODE)
+    add_compile_definitions(ZHLN_DEV_MODE)
 endif()
 
 string(REPLACE "\\" "/" ZHLN_PROJECT_ROOT_FWD "${PROJECT_SOURCE_DIR}")
@@ -134,14 +123,14 @@ add_compile_definitions(ZHLN_PROJECT_ROOT="${ZHLN_PROJECT_ROOT_FWD}")
 
 option(ZHLN_IN_DOCKER "Build running inside a Docker container" OFF)
 if(ZHLN_IN_DOCKER)
-  add_compile_definitions(ZHLN_IN_DOCKER=1)
-  message(STATUS "Docker container build mode enabled.")
+    add_compile_definitions(ZHLN_IN_DOCKER=1)
+    message(STATUS "Docker container build mode enabled.")
 endif()
 
 option(ZHLN_NO_ANNOTATION_EXTRACT
        "Disable compile-time reflection annotation extraction" OFF)
 if(ZHLN_NO_ANNOTATION_EXTRACT)
-  add_compile_definitions(ZHLN_NO_ANNOTATION_EXTRACT)
+    add_compile_definitions(ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
 
 option(ZHLN_GRAPH_VISUALIZE
@@ -153,7 +142,7 @@ option(ZHLN_BUILD_EXTRAS
        "Build optional asset plugins, engine extensions, and gameplay systems" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_definitions(ZHLN_DEBUG=1)
+    add_compile_definitions(ZHLN_DEBUG=1)
 endif()
 
 include(ThirdParty)
@@ -169,11 +158,11 @@ add_subdirectory(src/gui)
 
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
 if(CMAKE_BUILD_TYPE)
-  string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
-  set(COMPILER_FLAGS_LIST
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
+    set(COMPILER_FLAGS_LIST
       "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_${UPPER_BUILD_TYPE}}")
 else()
-  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} ${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
 set(COMPILER_FLAGS_LIST
@@ -181,12 +170,12 @@ set(COMPILER_FLAGS_LIST
 )
 
 if(COMPILER_HAS_REFLECTION)
-  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection")
 endif()
 if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
-  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -fparameter-reflection")
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -fparameter-reflection")
 elseif(COMPILER_HAS_REFLECTION_LATEST_FLAG)
-  set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection-latest")
+    set(COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST} -freflection-latest")
 endif()
 
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
@@ -201,32 +190,32 @@ include(ShaderCompilation)
 add_subdirectory(src/render)
 
 if(UNIX AND NOT APPLE)
-  target_link_options(
+    target_link_options(
     zahlen_engine PRIVATE
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/zahlen_engine.map")
 endif()
 
 if(MINGW)
-  # PE side of the question the version script above answers for ELF: what does
-  # the engine's shared library export?
-  #
-  # On ELF the map says `global: *` and localizes the renderer's internals only,
-  # an exception that exists for symbol preemption -- something PE does not have,
-  # since a DLL binds intra-image by default. What PE does have is a much
-  # narrower export set: GNU ld stops auto-exporting as soon as one object carries
-  # __declspec(dllexport), which every ZHLN_API declaration does. Only the
-  # annotated public API would be exported, and the engine's own consumers call
-  # more than that on purpose -- the header-inline Panic<> reaches InternalPanic,
-  # the ECS Registry holds a Mutex whose slow paths are out of line,
-  # EntityCommandBuffer::Playback, Fiber and TaskSystem are non-public by design
-  # and all reachable from a test. They link on Linux because the .so exports
-  # everything; without this flag the Windows test executables fail with
-  # `undefined reference to ZHLN::Mutex::LockSlow()`.
-  #
-  # Exporting the whole image restores the ELF behaviour. The DLL is a private
-  # build artifact and its import library is what consumers link, so the wider
-  # export table costs nothing.
-  target_link_options(zahlen_engine PRIVATE -Wl,--export-all-symbols)
+    # PE side of the question the version script above answers for ELF: what does
+    # the engine's shared library export?
+    #
+    # On ELF the map says `global: *` and localizes the renderer's internals only,
+    # an exception that exists for symbol preemption -- something PE does not have,
+    # since a DLL binds intra-image by default. What PE does have is a much
+    # narrower export set: GNU ld stops auto-exporting as soon as one object carries
+    # __declspec(dllexport), which every ZHLN_API declaration does. Only the
+    # annotated public API would be exported, and the engine's own consumers call
+    # more than that on purpose -- the header-inline Panic<> reaches InternalPanic,
+    # the ECS Registry holds a Mutex whose slow paths are out of line,
+    # EntityCommandBuffer::Playback, Fiber and TaskSystem are non-public by design
+    # and all reachable from a test. They link on Linux because the .so exports
+    # everything; without this flag the Windows test executables fail with
+    # `undefined reference to ZHLN::Mutex::LockSlow()`.
+    #
+    # Exporting the whole image restores the ELF behaviour. The DLL is a private
+    # build artifact and its import library is what consumers link, so the wider
+    # export table costs nothing.
+    target_link_options(zahlen_engine PRIVATE -Wl,--export-all-symbols)
 endif()
 
 set_target_properties(zahlen_engine PROPERTIES CXX_STANDARD 26
@@ -305,7 +294,7 @@ foreach(ZHLN_ENGINE_LIB_TARGET
         zahlen_render  zahlen_vulkan  zahlen_window   zahlen_physics
         zahlen_threading  zahlen_filesystem  zahlen_ecs  zahlen_audio
         zahlen_gui)
-  target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
+    target_compile_definitions(${ZHLN_ENGINE_LIB_TARGET} PRIVATE ZHLN_ENGINE_BUILD)
 endforeach()
 
 # Windows: the MinGW link surface the engine's own sources need.
@@ -330,11 +319,11 @@ target_link_libraries(
   zahlen_engine
   PUBLIC $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>)
 if(MINGW)
-  target_link_libraries(zahlen_engine PRIVATE dbghelp atomic)
+    target_link_libraries(zahlen_engine PRIVATE dbghelp atomic)
 endif()
 
 if(APPLE)
-  target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
+    target_link_libraries(zahlen_engine PRIVATE HostBlitSwapchain)
 endif()
 
 target_link_libraries(zahlen_engine PUBLIC Jolt)
@@ -357,11 +346,11 @@ target_compile_options(
   PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
   PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 if(WIN32)
-  # -Wno-microsoft-anon-tag and -Wno-microsoft-enum-forward-reference are clang
-  # diagnostics and now come from the probe in cmake/CompilerWarnings.cmake, so a
-  # GNU driver is not handed flags it does not know. -Wno-unused-parameter is
-  # already probed there too, for every target that links zahlen_warnings.
-  target_compile_options(zahlen_engine PRIVATE -Wno-unknown-pragmas -D_CRT_SECURE_NO_WARNINGS)
+    # -Wno-microsoft-anon-tag and -Wno-microsoft-enum-forward-reference are clang
+    # diagnostics and now come from the probe in cmake/CompilerWarnings.cmake, so a
+    # GNU driver is not handed flags it does not know. -Wno-unused-parameter is
+    # already probed there too, for every target that links zahlen_warnings.
+    target_compile_options(zahlen_engine PRIVATE -Wno-unknown-pragmas -D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 add_executable(zahlen app/main.cpp)
@@ -378,15 +367,15 @@ set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED
                                                         ON)
 
 if(ZHLN_BUILD_EXTRAS)
-  add_executable(zahlen_ui_editor app/UIEditor.cpp)
-  target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
-  target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+    add_executable(zahlen_ui_editor app/UIEditor.cpp)
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+    target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 
-  zahlen_add_runtime_dlls(zahlen_ui_editor)
-  set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
+    zahlen_add_runtime_dlls(zahlen_ui_editor)
+    set_target_properties(zahlen_ui_editor PROPERTIES CXX_STANDARD 26
                                                     CXX_STANDARD_REQUIRED ON)
 else()
-  message(
+    message(
     STATUS
       "Skipping zahlen_ui_editor: the UI document schema is an optional extension (ZHLN_BUILD_EXTRAS=OFF)"
   )
@@ -397,7 +386,7 @@ include(FennelCompiler)
 include(AssetPipeline)
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-  zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
+    zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 add_custom_target(
@@ -410,11 +399,11 @@ add_custom_target(
 
 add_dependencies(zahlen link_resources)
 if(TARGET zahlen_ui_editor)
-  add_dependencies(zahlen_ui_editor link_resources)
+    add_dependencies(zahlen_ui_editor link_resources)
 endif()
 
 if(USE_SANITIZERS)
-  zahlen_install_sanitizer_runtime(zahlen)
+    zahlen_install_sanitizer_runtime(zahlen)
 endif()
 
 zahlen_enable_reflection(zahlen_window)
@@ -436,26 +425,26 @@ zahlen_enable_reflection(zshader)
 zahlen_enable_reflection(HostBlitSwapchain)
 
 if(ZHLN_BUILD_EXTRAS)
-  # Keep the optional layers distinct in both the source tree and build graph.
-  # Plugins establish the shared serializer first; extensions then provide the
-  # reusable runtime/network systems; gameplay composes those targets. Lua's
-  # ProjectLight bindings need DataModel, so its runtime is configured last.
-  add_subdirectory(plugins)
-  add_subdirectory(extensions)
-  add_subdirectory(gameplay)
-  if(TARGET zahlen_scripting AND TARGET zahlen_datamodel)
-    add_subdirectory(extensions/Scripting/Lua)
-  endif()
+    # Keep the optional layers distinct in both the source tree and build graph.
+    # Plugins establish the shared serializer first; extensions then provide the
+    # reusable runtime/network systems; gameplay composes those targets. Lua's
+    # ProjectLight bindings need DataModel, so its runtime is configured last.
+    add_subdirectory(plugins)
+    add_subdirectory(extensions)
+    add_subdirectory(gameplay)
+    if(TARGET zahlen_scripting AND TARGET zahlen_datamodel)
+        add_subdirectory(extensions/Scripting/Lua)
+    endif()
 
-  # UITOML's public surface names GUI::UINode, so serialization publishes the
-  # schema after both sibling targets exist. Keep the longstanding aggregate
-  # target as a downstream compatibility surface; in-tree targets link the
-  # specific capability they use.
-  if(TARGET zahlen_serialization AND TARGET zahlen_ui_schema)
-    target_link_libraries(zahlen_serialization PUBLIC zahlen_ui_schema)
-  endif()
-  add_library(zahlen_extras INTERFACE)
-  target_link_libraries(zahlen_extras INTERFACE
+    # UITOML's public surface names GUI::UINode, so serialization publishes the
+    # schema after both sibling targets exist. Keep the longstanding aggregate
+    # target as a downstream compatibility surface; in-tree targets link the
+    # specific capability they use.
+    if(TARGET zahlen_serialization AND TARGET zahlen_ui_schema)
+        target_link_libraries(zahlen_serialization PUBLIC zahlen_ui_schema)
+    endif()
+    add_library(zahlen_extras INTERFACE)
+    target_link_libraries(zahlen_extras INTERFACE
     zahlen_animation
     zahlen_network
     zahlen_datamodel
@@ -473,69 +462,69 @@ if(ZHLN_BUILD_EXTRAS)
     zahlen_ragdoll_authoring
   )
 
-  if(TARGET zahlen_scripting_lua)
-    target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
-  endif()
-
-  if(TARGET zahlen_editor)
-    target_link_libraries(zahlen PRIVATE zahlen_editor)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_EDITOR=1)
-  endif()
-
-  if(TARGET zahlen_serialization)
-    target_link_libraries(zahlen PRIVATE zahlen_serialization)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
-    target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
-    if(TARGET zahlen_ui_schema)
-      target_link_libraries(zahlen_ui_editor PRIVATE zahlen_ui_schema)
+    if(TARGET zahlen_scripting_lua)
+        target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
     endif()
-  endif()
 
-  if(TARGET zahlen_character_controller)
-    target_link_libraries(zahlen PRIVATE zahlen_character_controller)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
-  endif()
-  if(TARGET zahlen_camera)
-    target_link_libraries(zahlen PRIVATE zahlen_camera)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CAMERA=1)
-  endif()
-  if(TARGET zahlen_interaction)
-    target_link_libraries(zahlen PRIVATE zahlen_interaction)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)
-  endif()
-  if(TARGET zahlen_terrain)
-    target_link_libraries(zahlen PRIVATE zahlen_terrain)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
-  endif()
-  if(TARGET zahlen_animation)
-    target_link_libraries(zahlen PRIVATE zahlen_animation)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
-  endif()
-  if(TARGET zahlen_fallback_scene)
-    target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
-  endif()
+    if(TARGET zahlen_editor)
+        target_link_libraries(zahlen PRIVATE zahlen_editor)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_EDITOR=1)
+    endif()
 
-  if(TARGET zahlen_fonts)
-    target_link_libraries(zahlen PRIVATE zahlen_fonts)
-    target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
-    target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
-  endif()
-  # Keep the default Zahlen composition root untouched. The project-light
-  # bridge gets its own opt-in application entrypoint and CLI/config lifecycle.
-  if(TARGET zahlen_project_light_client)
-    add_executable(zahlen_project_light_app EXCLUDE_FROM_ALL app/ProjectLightClientMain.cpp)
-    set_target_properties(zahlen_project_light_app PROPERTIES
+    if(TARGET zahlen_serialization)
+        target_link_libraries(zahlen PRIVATE zahlen_serialization)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
+        if(TARGET zahlen_ui_schema)
+            target_link_libraries(zahlen_ui_editor PRIVATE zahlen_ui_schema)
+        endif()
+    endif()
+
+    if(TARGET zahlen_character_controller)
+        target_link_libraries(zahlen PRIVATE zahlen_character_controller)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+    endif()
+    if(TARGET zahlen_camera)
+        target_link_libraries(zahlen PRIVATE zahlen_camera)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CAMERA=1)
+    endif()
+    if(TARGET zahlen_interaction)
+        target_link_libraries(zahlen PRIVATE zahlen_interaction)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)
+    endif()
+    if(TARGET zahlen_terrain)
+        target_link_libraries(zahlen PRIVATE zahlen_terrain)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
+    endif()
+    if(TARGET zahlen_animation)
+        target_link_libraries(zahlen PRIVATE zahlen_animation)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
+    endif()
+    if(TARGET zahlen_fallback_scene)
+        target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
+    endif()
+
+    if(TARGET zahlen_fonts)
+        target_link_libraries(zahlen PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
+    endif()
+    # Keep the default Zahlen composition root untouched. The project-light
+    # bridge gets its own opt-in application entrypoint and CLI/config lifecycle.
+    if(TARGET zahlen_project_light_client)
+        add_executable(zahlen_project_light_app EXCLUDE_FROM_ALL app/ProjectLightClientMain.cpp)
+        set_target_properties(zahlen_project_light_app PROPERTIES
       CXX_STANDARD 26
       CXX_STANDARD_REQUIRED ON
       CXX_EXTENSIONS OFF
       OUTPUT_NAME "project-light-client"
     )
-    target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
-    target_link_libraries(zahlen_project_light_app PRIVATE
+        target_compile_definitions(zahlen_project_light_app PRIVATE JPH_DOUBLE_PRECISION)
+        target_link_libraries(zahlen_project_light_app PRIVATE
       zahlen_engine
       Jolt
       zahlen_project_light_client
@@ -543,25 +532,25 @@ if(ZHLN_BUILD_EXTRAS)
       zahlen_camera
       zahlen_warnings
     )
-    add_dependencies(zahlen_project_light_app link_resources)
-    zahlen_add_runtime_dlls(zahlen_project_light_app)
-    zahlen_enable_reflection(zahlen_project_light_app)
-    if(USE_SANITIZERS)
-      zahlen_install_sanitizer_runtime(zahlen_project_light_app)
+        add_dependencies(zahlen_project_light_app link_resources)
+        zahlen_add_runtime_dlls(zahlen_project_light_app)
+        zahlen_enable_reflection(zahlen_project_light_app)
+        if(USE_SANITIZERS)
+            zahlen_install_sanitizer_runtime(zahlen_project_light_app)
+        endif()
     endif()
-  endif()
 endif()
 
 if(ZHLN_BUILD_TESTS)
-  enable_testing()
-  add_subdirectory(tests)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
 
 if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
-  add_subdirectory(samples)
+    add_subdirectory(samples)
 endif()
 
 if(TARGET zahlen_serialization AND EXISTS
                                    "${CMAKE_CURRENT_SOURCE_DIR}/tools/fidelity")
-  add_subdirectory(tools/fidelity tools/fidelity)
+    add_subdirectory(tools/fidelity tools/fidelity)
 endif()
