@@ -195,9 +195,8 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
-    // The old context owns emitter buffers now; its OnDeviceLost path retires
-    // those buffers before the replacement renderer is created. The component
-    // authoring data survives unchanged.
+    // Dropping the old RenderContext retires emitter buffers in Destroy(); the
+    // replacement renderer is created after that. Component authoring data survives.
     auto& reg = _impl->world->GetRegistry();
     for (auto& skeleton: reg.GetRawArray<Components::SkeletalMeshComponent>()) {
         skeleton.skinnedScratch = BufferHandle::Invalid;

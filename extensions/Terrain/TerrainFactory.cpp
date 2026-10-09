@@ -420,7 +420,7 @@ auto CreateTerrainFromData(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res        = ctx.CreateBasicMaterial(false, false, false);
+        auto mat_res        = ctx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
         mat.roughnessFactor = 0.85f;
         mat.metallicFactor  = 0.05f;
@@ -505,7 +505,7 @@ auto CreateTerrain(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res        = ctx.CreateBasicMaterial(false, false, false);
+        auto mat_res        = ctx.CreateMaterial(MaterialDesc::Basic());
         mat                 = mat_res.value_or(Material {});
         mat.roughnessFactor = 0.85f;
         mat.metallicFactor  = 0.05f;

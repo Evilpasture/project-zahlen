@@ -1668,7 +1668,7 @@ void ClientSession::SpawnOrUpdatePartEntity(Engine& engine, ReplicatedObject& ob
         params.roughness        = object.roughness;
         params.metallic         = object.metallic;
 
-        auto material = engine.GetRenderContext().CreateBasicMaterial(false, blendMaterial, false, false);
+        auto material = engine.GetRenderContext().CreateMaterial(blendMaterial ? ZHLN::MaterialDesc::Transparent() : ZHLN::MaterialDesc::Basic());
         if (material) {
             material->baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
             material->roughnessFactor = object.roughness;

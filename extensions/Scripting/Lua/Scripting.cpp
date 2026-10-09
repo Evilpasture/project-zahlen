@@ -597,7 +597,7 @@ void RegisterCreativeWorkCommands() {
                 }));
 
     RegisterCmd("CreateBasicMaterial", MakeCmd<CreateMaterialArgs>([](ZHLN::Engine* engine, const CreateMaterialArgs& a) -> uint64_t {
-                    auto mat_res = engine->GetRenderContext().CreateBasicMaterial(false, a.a < 1.0f);
+                    auto mat_res = engine->GetRenderContext().CreateMaterial(a.a < 1.0f ? ZHLN::MaterialDesc::Transparent({a.r, a.g, a.b, a.a}) : ZHLN::MaterialDesc::Basic({a.r, a.g, a.b, a.a}));
                     if (!mat_res) {
                         ZHLN::LogError("CreateBasicMaterial from Lua failed: {}", mat_res.error());
                         return 0;
@@ -646,7 +646,7 @@ void RegisterCreativeWorkCommands() {
             float      cullRadius    = a.p1 * 2.0f;
             bool       isTransparent = (a.a < 1.0f);
 
-            auto mat_res = rc.CreateBasicMaterial(false, isTransparent);
+            auto mat_res = rc.CreateMaterial(isTransparent ? ZHLN::MaterialDesc::Transparent({a.r, a.g, a.b, a.a}) : ZHLN::MaterialDesc::Basic({a.r, a.g, a.b, a.a}));
             if (!mat_res) {
                 ZHLN::Panic("Failed to create basic material inside SpawnEntity: {}", mat_res.error());
             }

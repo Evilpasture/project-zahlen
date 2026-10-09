@@ -102,7 +102,7 @@ constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debu
     if (auto existing = rc.GetGPUMaterial(kPhysicsDebugMaterialID)) {
         return existing;
     }
-    auto created = rc.CreateBasicMaterial(true, true);
+    auto created = rc.CreateMaterial(MaterialDesc::Transparent({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f, true));
     if (!created) {
         ZHLN::Log("[RenderSystem] Physics debug material creation failed: {}", created.error());
         return std::nullopt;
@@ -371,8 +371,6 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
         return {};
     }
 
-    RenderDebug(engine, physicsDrawMode);
-
     auto& rc      = engine.GetRenderContext();
     auto  end_res = rc.EndFrame();
     if (!end_res) {
@@ -515,6 +513,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
+    // Queue debug lines/triangles before RenderScene records the graph; EndFrame
+    // clears the queues, so a post-scene RenderDebug never reaches the GPU.
+    RenderDebug(engine, outPhysicsDrawMode);
 
     if (auto sim_res = rc.DispatchSimulations(dt); !sim_res) {
         return std::unexpected(sim_res.error());
@@ -600,21 +601,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 debugSurface.push_back({.uv = Math::PackUV(0.0f, 0.0f), .color = {.data = jv.color}});
             }
 
-            const uint32_t uploadedVertices = rc.UploadDebugVertices(std::span {debugPos}, std::span {debugSurface});
-
-            Mesh debugMesh = {
-                .posBuffer     = rc.GetDebugMeshBuffer(),
-                .surfaceBuffer = rc.GetDebugMeshBuffer(),
-                .skinBuffer    = BufferHandle::Invalid,
-                .indexBuffer   = BufferHandle::Invalid,
-                .vertexCount   = uploadedVertices,
-                .indexCount    = 0
-            };
-
-            rc.Draw(
-                *debugMat, debugMesh,
-                {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
-            );
+            rc.DrawDebugTriangles(std::span {debugPos}, std::span {debugSurface}, *debugMat);
         }
     }
 }

@@ -382,10 +382,7 @@ GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
     return std::exchange(_impl->pendingPipelineCounters, GpuPipelineCounters {});
 }
 
-void RenderContext::OnDeviceLost() noexcept {
-    _impl->OnDeviceLost();
-    _impl->gpuDiagnostics.OnDeviceLost();
-}
+
 
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto&        props      = _impl->ctx.PhysicalInfo().properties.properties;
@@ -491,23 +488,27 @@ static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_count == 1);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::color_formats[0] == VK_FORMAT_R16G16B16A16_SFLOAT);
 static_assert(Vk::PassAttachmentFormats<Passes::ForwardPass>::depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT);
 
-auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
+auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
+    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
+    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
+    const bool alphaBlend   = forward && !desc.additiveBlend;
+    const bool depthWrite   = transmission;
+
     Vk::MaterialFlags flags = Vk::MaterialFlags::None;
-    if (doubleSided) {
+    if (desc.doubleSided) {
         flags |= Vk::MaterialFlags::DoubleSided;
     }
-    if (additiveBlend) {
+    if (desc.additiveBlend) {
         flags |= Vk::MaterialFlags::AdditiveBlend;
     } else if (alphaBlend) {
         flags |= Vk::MaterialFlags::TranslucentBlend;
     }
-    if (depthWrite && (alphaBlend || additiveBlend)) {
+    if (depthWrite && (alphaBlend || desc.additiveBlend)) {
         flags |= Vk::MaterialFlags::DepthWrite;
     }
 
-    const bool                         forward = alphaBlend || additiveBlend;
     std::expected<Material, ErrorCode> mat_res =
-        forward ?
+        (alphaBlend || desc.additiveBlend) ?
             _impl->pipelines.CreateMaterial<
                 MaterialPipelineFamily::Forward, Vk::GraphicsShaderModules<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS>,
                 Vk::GraphicsShaderModules<Shaders::Modules::BasicTask, Shaders::Modules::BasicMeshForward, Shaders::Modules::ForwardPS>, Passes::ForwardPass>(
@@ -519,26 +520,14 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
-    Material mat  = *mat_res;
-    mat.albedoMap = TextureHandle::Invalid;
-    return mat;
-}
-
-auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    const bool transmission = !desc.unlit && desc.transmissionFactor > 0.0f;
-    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
-
-    auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
-    if (!basicMat) {
-        return std::unexpected(basicMat.error());
-    }
+    auto basicMat = *mat_res;
 
     // Material constructed immutably, pulling from both the base pipeline state and the descriptor
     return Material {
-        .pipeline                 = basicMat->pipeline,
-        .prePassPipeline          = basicMat->prePassPipeline,
-        .resourceGroup            = basicMat->resourceGroup,
-        .constantBuffer           = basicMat->constantBuffer,
+        .pipeline                 = basicMat.pipeline,
+        .prePassPipeline          = basicMat.prePassPipeline,
+        .resourceGroup            = basicMat.resourceGroup,
+        .constantBuffer           = basicMat.constantBuffer,
         .albedoMap                = desc.albedoMap,
         .normalMap                = desc.normalMap,
         .pbrMap                   = desc.pbrMap,
@@ -548,7 +537,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
         .metallicFactor           = desc.metallic,
         .roughnessFactor          = desc.roughness,
         .alphaCutoff              = desc.alphaCutoff,
-        .alphaMode                = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode),
+        .alphaMode                = transmission ? desc.alphaMode : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat.alphaMode),
         .doubleSided              = desc.doubleSided,
         .unlit                    = desc.unlit,
         .transmissionFactor       = desc.transmissionFactor,
@@ -776,21 +765,23 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
 }
 
-uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces) noexcept {
+void RenderContext::DrawDebugTriangles(
+    std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material
+) noexcept {
     if (positions.size() != surfaces.size()) {
         ZHLN::Assert(false, "debug vertex positions and surfaces must have the same count");
-        return 0;
+        return;
     }
     auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
-        return 0;
+        return;
     }
 
     constexpr size_t maxPosSize = RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
 
     auto mapped = nativeMesh->buffer.Map(_impl->allocator);
     if (!mapped) {
-        return 0;
+        return;
     }
     char* basePtr = mapped->As<char>();
 
@@ -800,11 +791,20 @@ uint32_t RenderContext::UploadDebugVertices(std::span<const VertexPosition> posi
         std::memcpy(basePtr + maxPosSize, surfaces.data(), count * sizeof(VertexSurface));
     }
     nativeMesh->vertexCount = static_cast<uint32_t>(count);
-    return nativeMesh->vertexCount;
-}
+    if (nativeMesh->vertexCount == 0) {
+        return;
+    }
 
-auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
+    const BufferHandle buffer = _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
+    Mesh               debugMesh {
+        .posBuffer     = buffer,
+        .surfaceBuffer = buffer,
+        .skinBuffer    = BufferHandle::Invalid,
+        .indexBuffer   = BufferHandle::Invalid,
+        .vertexCount   = nativeMesh->vertexCount,
+        .indexCount    = 0
+    };
+    Draw(material, debugMesh, {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f});
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, std::span<const JPH::Mat44> matrices) {

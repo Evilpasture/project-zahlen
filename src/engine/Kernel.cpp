@@ -223,7 +223,6 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
 
 auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->assetManager->InvalidateGPUMeshes();
-    _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
     auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, *_impl->fileSystemWatcher);

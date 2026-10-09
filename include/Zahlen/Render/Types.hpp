@@ -202,6 +202,20 @@ struct MaterialDesc {
     float                     occlusionStrength    = 1.0f;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
+
+    static MaterialDesc Basic(
+        JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.5f, float metallic = 0.0f, bool twoSided = false
+    ) {
+        return MaterialDesc {.doubleSided = twoSided, .metallic = metallic, .roughness = roughness, .baseColor = color};
+    }
+    static MaterialDesc Transparent(JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}, float roughness = 0.1f, bool twoSided = false) {
+        return MaterialDesc {
+            .doubleSided = twoSided, .alphaBlend = true, .alphaMode = 2, .metallic = 0.0f, .roughness = roughness, .baseColor = color
+        };
+    }
+    static MaterialDesc Unlit(JPH::Float4 color = {1.0f, 1.0f, 1.0f, 1.0f}) {
+        return MaterialDesc {.unlit = true, .baseColor = color};
+    }
 };
 
 struct DrawParams {

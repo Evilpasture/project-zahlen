@@ -205,7 +205,7 @@ void TerrainSystem::Update(ECS::Query<const TerrainComponent, Components::MeshCo
 
         // 3. Lazy bake or re-bake GPU material if invalidated
         if (!rc.GetGPUMaterial(meshComp->materialAsset).has_value()) {
-            auto mat            = rc.CreateBasicMaterial().value_or(Material {});
+            auto mat            = rc.CreateMaterial(MaterialDesc::Basic()).value_or(Material {});
             mat.roughnessFactor = terrain.roughness;
             mat.metallicFactor  = terrain.metallic;
             rc.RegisterGPUMaterial(meshComp->materialAsset, mat);

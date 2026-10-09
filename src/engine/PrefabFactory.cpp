@@ -453,7 +453,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
+        auto mat_res           = ctx.CreateMaterial(MaterialDesc::Basic());
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor    = JPH::Float4 {boxColor.GetX(), boxColor.GetY(), boxColor.GetZ(), boxColor.GetW()};
         mat.roughnessFactor    = 0.3f;
@@ -520,7 +520,7 @@ auto SpawnPrimitive(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
+        auto mat_res           = ctx.CreateMaterial(MaterialDesc::Basic());
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor    = JPH::Float4 {shapeColor.GetX(), shapeColor.GetY(), shapeColor.GetZ(), shapeColor.GetW()};
         mat.roughnessFactor    = params.roughness;
@@ -615,7 +615,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsC
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
+        auto mat_res           = ctx.CreateMaterial(MaterialDesc::Basic());
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor    = JPH::Float4 {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         mat.roughnessFactor    = 0.35f;
@@ -774,7 +774,7 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
         // data-driven materials are restored by their own asset systems.
         const auto meshComp = reg.Get<Components::MeshComponent>(entities[i]);
         if (meshComp && !ctx.GetGPUMaterial(meshComp->materialAsset).has_value()) {
-            if (auto created = ctx.CreateBasicMaterial(false, owned.color.GetW() < 1.0f)) {
+            if (auto created = ctx.CreateMaterial(owned.color.GetW() < 1.0f ? MaterialDesc::Transparent({owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()}) : MaterialDesc::Basic({owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()}))) {
                 Material mat = *created;
                 mat.baseColorFactor = {owned.color.GetX(), owned.color.GetY(), owned.color.GetZ(), owned.color.GetW()};
                 if (const auto pbr = reg.Get<Components::PBRComponent>(entities[i])) {

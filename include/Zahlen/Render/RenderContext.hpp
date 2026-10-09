@@ -168,13 +168,13 @@ class ZHLN_API RenderContext {
         UpdateBuffer(handle, std::as_bytes(elements));
     }
     auto CreateConstantBuffer(size_t size) -> BufferHandle;
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false, bool depthWrite = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
-    [[nodiscard]] uint32_t     UploadDebugVertices(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces) noexcept;
-    [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
+    // Immediate-mode debug triangles (physics debug draw). Storage stays inside
+    // the context; callers do not assemble a Mesh from scratch buffers.
+    void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
 
 
     [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget>;
@@ -236,8 +236,6 @@ class ZHLN_API RenderContext {
     void WriteCheckpoint(std::string_view name) noexcept;
 
     [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
-
-    void OnDeviceLost() noexcept;
 
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 

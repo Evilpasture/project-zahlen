@@ -127,12 +127,12 @@ struct RenderPipelinesTestSuite {
 
                 // A pipeline with no asset ID still belongs to the registry.
                 // Cache clearing must retire it and invalidate its slot.
-                auto loose = rc.CreateBasicMaterial();
+                auto loose = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
                 if (!loose) {
                     return std::unexpected(loose.error());
                 }
                 rc.ClearGPUCaches(); // waits idle, then drains deferred pipeline destruction
-                auto recreated = rc.CreateBasicMaterial();
+                auto recreated = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
                 if (!recreated) {
                     return std::unexpected(recreated.error());
                 }
@@ -417,7 +417,7 @@ struct RenderPipelinesTestSuite {
             }
 
             auto& rc = engine->GetRenderContext();
-            auto material = rc.CreateBasicMaterial();
+            auto material = rc.CreateMaterial(ZHLN::MaterialDesc::Basic());
             if (!ZHLN::Test::ExpectTrue(material.has_value())) {
                 return {};
             }
