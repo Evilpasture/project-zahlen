@@ -23,11 +23,10 @@
 
 #pragma once
 
-#include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Error.hpp>
 #include <RemoteAsset/AsyncAssetFetcher.hpp>
 #include <RemoteAsset/DiskCache.hpp>
-
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -69,12 +68,12 @@ struct CDNConfig {
 // it has (the URL, the status) through ZHLN::Reflect::FormatEnumMessage, so the
 // wording lives in one place and the log line carries the specifics.
 enum class CDNError : uint8_t {
-    InvalidConfig ZHLN_ANNOTATION(ZHLN::Description<"CDN base URL '{}' is not an absolute http or https URL with a host.">{}) = 1,
-    InvalidPath   ZHLN_ANNOTATION(ZHLN::Description<"asset path '{}' is empty, escapes the base URL, or has a character a URL should not carry.">{}),
-    NotFound      ZHLN_ANNOTATION(ZHLN::Description<"the CDN has no asset at '{}' (HTTP 404).">{}),
-    HTTPStatus    ZHLN_ANNOTATION(ZHLN::Description<"the CDN answered HTTP {} for '{}'.">{}),
-    Rejected      ZHLN_ANNOTATION(ZHLN::Description<"'{}' arrived as {} byte(s) that the validator refused.">{}),
-    CacheWrite    ZHLN_ANNOTATION(ZHLN::Description<"'{}' was downloaded, but could not be written to '{}'.">{}),
+    InvalidConfig ZHLN_ANNOTATION(ZHLN::Description<"CDN base URL '{}' is not an absolute http or https URL with a host."> {}) = 1,
+    InvalidPath   ZHLN_ANNOTATION(ZHLN::Description<"asset path '{}' is empty, escapes the base URL, or has a character a URL should not carry."> {}),
+    NotFound      ZHLN_ANNOTATION(ZHLN::Description<"the CDN has no asset at '{}' (HTTP 404)."> {}),
+    HTTPStatus    ZHLN_ANNOTATION(ZHLN::Description<"the CDN answered HTTP {} for '{}'."> {}),
+    Rejected      ZHLN_ANNOTATION(ZHLN::Description<"'{}' arrived as {} byte(s) that the validator refused."> {}),
+    CacheWrite    ZHLN_ANNOTATION(ZHLN::Description<"'{}' was downloaded, but could not be written to '{}'."> {}),
 };
 
 class CDNManager {
@@ -108,20 +107,17 @@ class CDNManager {
         return m_cache;
     }
 
-    auto RequestAsset(std::string_view relativePath, ValidatorFn validator = nullptr)
-        -> std::optional<ZHLN::Remote::FetchHandle>;
+    auto RequestAsset(std::string_view relativePath, ValidatorFn validator = nullptr) -> std::optional<ZHLN::Remote::FetchHandle>;
 
-    auto Poll(ZHLN::Remote::FetchHandle handle)
-        -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>>;
+    auto Poll(ZHLN::Remote::FetchHandle handle) -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>>;
 
     void Cancel(ZHLN::Remote::FetchHandle handle);
 
   private:
-    CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache,
-               std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
+    CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
 
     std::string                                      m_baseURL;
-    ZHLN::Remote::DiskCache                          m_cache;
+    ZHLN::Remote::DiskCache                          m_cache; // TODO(Evilpasture): add cache invalidation
     std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> m_fetcher;
 };
 

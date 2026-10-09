@@ -48,7 +48,7 @@
 namespace {
 
 inline constexpr std::string_view kBaseURL = "https://pub-59179c82c36c49338ceec8b7926c93cd.r2.dev";
-inline constexpr std::string_view kAsset   = "MD_Map.glb";
+inline constexpr std::string_view kAsset   = "MD_Map_Lights.glb";
 inline constexpr uint32_t         kTimeout = 180;
 
 [[nodiscard]] auto NodeModelTransform(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex) -> JPH::Mat44 {

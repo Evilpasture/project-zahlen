@@ -18,8 +18,8 @@
 // and no function pointer is installed anywhere.
 
 #include <Zahlen/Core/Optional.hpp>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <array>
 #include <cstdint>
 #include <span>
@@ -36,10 +36,10 @@ enum class CapabilityKind : uint8_t { Core, Extension };
 enum class CapabilitySupport : uint8_t { Supported, Partial };
 
 struct Capability {
-    std::string_view name;
-    CapabilityKind kind;
+    std::string_view  name;
+    CapabilityKind    kind;
     CapabilitySupport support = CapabilitySupport::Supported;
-    std::string_view limitation = {};
+    std::string_view  limitation;
 };
 
 // What the importer actually consumes (not everything cgltf can parse).
@@ -47,26 +47,32 @@ struct Capability {
 // is pixel-identical to a reference glTF viewer. Partial capabilities emit a
 // yellow warning. Undeclared extensions are *not* implicitly supported.
 static constexpr std::array kCapabilities {
-    Capability {"glTF 2.0 nodes, transforms and meshes", CapabilityKind::Core},
-    Capability {"TRIANGLES primitives", CapabilityKind::Core},
-    Capability {"pbrMetallicRoughness", CapabilityKind::Core},
-    Capability {"TEXCOORD_0/1", CapabilityKind::Core},
-    Capability {"COLOR_0", CapabilityKind::Core},
-    Capability {"JOINTS_0/WEIGHTS_0", CapabilityKind::Core},
-    Capability {"POSITION morph targets (first four)", CapabilityKind::Core},
-    Capability {"STEP animation", CapabilityKind::Core},
-    Capability {"LINEAR animation", CapabilityKind::Core, CapabilitySupport::Partial, "playback eases between keys"},
-    Capability {"KHR_mesh_quantization", CapabilityKind::Extension},
-    Capability {"KHR_texture_transform", CapabilityKind::Extension},
-    Capability {"KHR_materials_unlit", CapabilityKind::Extension},
-    Capability {"KHR_materials_emissive_strength", CapabilityKind::Extension},
-    Capability {"KHR_materials_clearcoat", CapabilityKind::Extension},
-    Capability {"KHR_materials_transmission", CapabilityKind::Extension},
-    Capability {"KHR_materials_ior", CapabilityKind::Extension},
-    Capability {"KHR_materials_volume", CapabilityKind::Extension, CapabilitySupport::Partial, "attenuation color/distance are ignored"},
-    Capability {"KHR_materials_iridescence", CapabilityKind::Extension},
-    Capability {"KHR_materials_sheen", CapabilityKind::Extension},
-    Capability {"KHR_materials_anisotropy", CapabilityKind::Extension},
+    Capability {.name = "glTF 2.0 nodes, transforms and meshes", .kind = CapabilityKind::Core},
+    Capability {.name = "TRIANGLES primitives", .kind = CapabilityKind::Core},
+    Capability {.name = "pbrMetallicRoughness", .kind = CapabilityKind::Core},
+    Capability {.name = "TEXCOORD_0/1", .kind = CapabilityKind::Core},
+    Capability {.name = "COLOR_0", .kind = CapabilityKind::Core},
+    Capability {.name = "JOINTS_0/WEIGHTS_0", .kind = CapabilityKind::Core},
+    Capability {.name = "POSITION morph targets (first four)", .kind = CapabilityKind::Core},
+    Capability {.name = "STEP animation", .kind = CapabilityKind::Core},
+    Capability {.name = "LINEAR animation", .kind = CapabilityKind::Core, .support = CapabilitySupport::Partial, .limitation = "playback eases between keys"},
+    Capability {.name = "KHR_mesh_quantization", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_texture_transform", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_unlit", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_emissive_strength", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_clearcoat", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_transmission", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_ior", .kind = CapabilityKind::Extension},
+    Capability {
+        .name       = "KHR_materials_volume",
+        .kind       = CapabilityKind::Extension,
+        .support    = CapabilitySupport::Partial,
+        .limitation = "attenuation color/distance are ignored"
+    },
+    Capability {.name = "KHR_materials_iridescence", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_sheen", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_materials_anisotropy", .kind = CapabilityKind::Extension},
+    Capability {.name = "KHR_lights_punctual", .kind = CapabilityKind::Extension},
 };
 
 // Validation is advisory: even an unsupported *required* extension does not
@@ -101,19 +107,19 @@ auto LoadGLBPrefabFromMemory(
     std::span<const uint8_t> bytes,
     std::string_view         virtualPath,
     std::string_view         bytesPath = {},
-    ImportOptions            options = {}
+    ImportOptions            options   = {}
 ) -> ZHLN::Optional<ModelPrefab&>;
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab);
 
 // Import straight from a byte buffer and spawn it in one call. Core has no
 // equivalent because reading bytes is the importer's job.
 auto InstantiatePrefabFromMemory(
-    Engine&                          engine,
-    std::span<const uint8_t>         bytes,
-    std::string_view                 virtualPath,
+    Engine&                           engine,
+    std::span<const uint8_t>          bytes,
+    std::string_view                  virtualPath,
     const PrefabFactory::SpawnParams& params,
-    Entity*                          outBuffer = nullptr,
-    uint32_t                         maxCount  = 0
+    Entity*                           outBuffer = nullptr,
+    uint32_t                          maxCount  = 0
 ) -> uint32_t;
 
 // Re-imports every cached prefab and re-registers its meshes and materials

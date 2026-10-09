@@ -18,11 +18,11 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -51,18 +51,18 @@
 #include <vector>
 
 enum class GLTFImportError : uint8_t {
-    AssetUnavailable ZHLN_ANNOTATION(ZHLN::Description<"The base rig GLB could not be read from the source tree.">{}) = 1,
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through.">{}),
-    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"PrefabFactory returned no prefab for a valid in-memory GLB.">{}),
-    NodeGraphMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported node names, parents or transforms disagree with the source document.">{}),
-    SkeletonMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document.">{}),
-    AnimationMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported animation channels disagree with the source document.">{}),
-    PartMismatch ZHLN_ANNOTATION(ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them.">{}),
-    PrefabCacheMismatch ZHLN_ANNOTATION(ZHLN::Description<"Reloading the same virtual path did not return the cached prefab.">{}),
-    ExtensionMismatch ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it.">{}),
-    EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for.">{}),
-    TangentFrameMismatch ZHLN_ANNOTATION(ZHLN::Description<"Missing glTF tangents were not generated from the UV orientation and handedness.">{}),
-    NegativeScaleMismatch ZHLN_ANNOTATION(ZHLN::Description<"NegativeScaleTest lost its authored single-/double-sided flags or shared mesh instances.">{}),
+    AssetUnavailable      ZHLN_ANNOTATION(ZHLN::Description<"The base rig GLB could not be read from the source tree."> {}) = 1,
+    EngineInitFailed      ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize the headless Engine the importer uploads through."> {}),
+    PrefabLoadFailed      ZHLN_ANNOTATION(ZHLN::Description<"PrefabFactory returned no prefab for a valid in-memory GLB."> {}),
+    NodeGraphMismatch     ZHLN_ANNOTATION(ZHLN::Description<"Imported node names, parents or transforms disagree with the source document."> {}),
+    SkeletonMismatch      ZHLN_ANNOTATION(ZHLN::Description<"Imported skin joints, parents or inverse bind matrices disagree with the source document."> {}),
+    AnimationMismatch     ZHLN_ANNOTATION(ZHLN::Description<"Imported animation channels disagree with the source document."> {}),
+    PartMismatch          ZHLN_ANNOTATION(ZHLN::Description<"Imported mesh parts do not reference the nodes and skins that carry them."> {}),
+    PrefabCacheMismatch   ZHLN_ANNOTATION(ZHLN::Description<"Reloading the same virtual path did not return the cached prefab."> {}),
+    ExtensionMismatch     ZHLN_ANNOTATION(ZHLN::Description<"A Khronos glTF extension was not applied the way the importer documents it."> {}),
+    EmissiveLightMismatch ZHLN_ANNOTATION(ZHLN::Description<"Emissive virtual point lights did not follow the prefab they were spawned for."> {}),
+    TangentFrameMismatch  ZHLN_ANNOTATION(ZHLN::Description<"Missing glTF tangents were not generated from the UV orientation and handedness."> {}),
+    NegativeScaleMismatch ZHLN_ANNOTATION(ZHLN::Description<"NegativeScaleTest lost its authored single-/double-sided flags or shared mesh instances."> {}),
 };
 
 namespace {
@@ -198,7 +198,7 @@ struct GltfSpecGlossExtensions {
     KhrSpecGloss KHR_materials_pbrSpecularGlossiness;
 };
 struct GltfSpecGlossMaterial {
-    std::string_view name = "SpecGlossOnly";
+    std::string_view        name = "SpecGlossOnly";
     GltfSpecGlossExtensions extensions;
 };
 
@@ -213,9 +213,9 @@ struct GltfUnlitExtensions {
     std::map<std::string_view, int> KHR_materials_unlit;
 };
 struct GltfUnlitMaterial {
-    std::string_view      name;
-    GltfUnlitPbr          pbrMetallicRoughness;
-    GltfUnlitExtensions   extensions;
+    std::string_view    name;
+    GltfUnlitPbr        pbrMetallicRoughness;
+    GltfUnlitExtensions extensions;
 };
 
 // Sidedness is a plain bool, so one shape covers the single-sided check/X
@@ -241,17 +241,17 @@ struct GltfAnisotropyExtensions {
 };
 
 struct GltfAnisotropyPbr {
-    std::array<float, 4>     baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-    float                    metallicFactor  = 0.0f;
-    float                    roughnessFactor = 1.0f;
+    std::array<float, 4>      baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    float                     metallicFactor  = 0.0f;
+    float                     roughnessFactor = 1.0f;
     GltfAnisotropyTextureInfo baseColorTexture {.index = 1};
     GltfAnisotropyTextureInfo metallicRoughnessTexture {.index = 2};
 };
 
 struct GltfAnisotropyMaterial {
-    std::string_view           name;
-    GltfAnisotropyPbr          pbrMetallicRoughness;
-    std::array<float, 3>       emissiveFactor {0.0f, 1.0f, 0.0f};
+    std::string_view          name;
+    GltfAnisotropyPbr         pbrMetallicRoughness;
+    std::array<float, 3>      emissiveFactor {0.0f, 1.0f, 0.0f};
     GltfAnisotropyTextureInfo emissiveTexture;
     GltfAnisotropyExtensions  extensions;
 };
@@ -384,17 +384,17 @@ struct GltfSpecGlossDocument {
 };
 
 struct GltfUnlitDocument {
-    GltfAsset                     asset;
-    std::vector<std::string_view> extensionsUsed {"KHR_materials_unlit"};
-    std::vector<std::string_view> extensionsRequired {"KHR_materials_unlit"};
-    int32_t                       scene = 0;
-    std::vector<GltfScene>        scenes;
-    std::vector<GltfMeshNode>     nodes;
-    std::vector<GltfMesh>         meshes;
+    GltfAsset                      asset;
+    std::vector<std::string_view>  extensionsUsed {"KHR_materials_unlit"};
+    std::vector<std::string_view>  extensionsRequired {"KHR_materials_unlit"};
+    int32_t                        scene = 0;
+    std::vector<GltfScene>         scenes;
+    std::vector<GltfMeshNode>      nodes;
+    std::vector<GltfMesh>          meshes;
     std::vector<GltfUnlitMaterial> materials;
-    std::vector<GltfAccessor>     accessors;
-    std::vector<GltfBufferView>   bufferViews;
-    std::vector<GltfBuffer>       buffers;
+    std::vector<GltfAccessor>      accessors;
+    std::vector<GltfBufferView>    bufferViews;
+    std::vector<GltfBuffer>        buffers;
 };
 
 [[nodiscard]] constexpr auto FindExtensionCapability(std::string_view name) -> const ZHLN::GLTF::Capability* {
@@ -408,7 +408,7 @@ struct GltfUnlitDocument {
 static_assert(FindExtensionCapability("KHR_materials_unlit") != nullptr);
 static_assert(FindExtensionCapability("KHR_texture_transform") != nullptr);
 static_assert(FindExtensionCapability("KHR_materials_volume")->support == ZHLN::GLTF::CapabilitySupport::Partial);
-static_assert(FindExtensionCapability("KHR_lights_punctual") == nullptr);
+static_assert(FindExtensionCapability("KHR_lights_punctual") != nullptr);
 static_assert(FindExtensionCapability("KHR_materials_pbrSpecularGlossiness") == nullptr);
 
 struct GltfAnisotropyDocument {
@@ -431,9 +431,9 @@ struct GltfAnisotropyDocument {
 // use different matrices, UV sets and color spaces.
 struct GltfTextureTransform {
     std::array<float, 2> offset {0.0f, 0.0f};
-    float rotation = 0.0f;
+    float                rotation = 0.0f;
     std::array<float, 2> scale {1.0f, 1.0f};
-    int32_t texCoord = 1;
+    int32_t              texCoord = 1;
 };
 
 struct GltfTextureInfoExtensions {
@@ -441,30 +441,28 @@ struct GltfTextureInfoExtensions {
 };
 
 struct GltfTransformedTextureInfo {
-    int32_t index = 0;
-    int32_t texCoord = 0;
+    int32_t                   index    = 0;
+    int32_t                   texCoord = 0;
     GltfTextureInfoExtensions extensions;
 };
 
 struct GltfOcclusionTextureInfo {
-    int32_t index = 0;
-    float strength = 0.4f;
-    GltfTextureInfoExtensions extensions {.KHR_texture_transform = {
-        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {1.0f, 1.0f}, .texCoord = 0
-    }};
+    int32_t                   index    = 0;
+    float                     strength = 0.4f;
+    GltfTextureInfoExtensions extensions {.KHR_texture_transform = {.offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {1.0f, 1.0f}, .texCoord = 0}};
 };
 
 struct GltfUv1TextureInfo {
-    int32_t index = 0;
+    int32_t index    = 0;
     int32_t texCoord = 1;
 };
 
 struct KhrMaterialsSheen {
-    std::array<float, 3> sheenColorFactor {0.25f, 0.5f, 0.75f};
-    GltfTransformedTextureInfo sheenColorTexture {.extensions = {.KHR_texture_transform = {
-        .offset = {0.1f, 0.3f}, .rotation = 0.0f, .scale = {4.0f, -5.0f}, .texCoord = 0
-    }}};
-    float sheenRoughnessFactor = 0.35f;
+    std::array<float, 3>       sheenColorFactor {0.25f, 0.5f, 0.75f};
+    GltfTransformedTextureInfo sheenColorTexture {
+        .extensions = {.KHR_texture_transform = {.offset = {0.1f, 0.3f}, .rotation = 0.0f, .scale = {4.0f, -5.0f}, .texCoord = 0}}
+    };
+    float              sheenRoughnessFactor = 0.35f;
     GltfUv1TextureInfo sheenRoughnessTexture;
 };
 
@@ -473,76 +471,77 @@ struct GltfSheenExtensions {
 };
 
 struct GltfSheenPbr {
-    float metallicFactor = 0.0f;
-    float roughnessFactor = 0.8f;
-    GltfTransformedTextureInfo baseColorTexture {.extensions = {.KHR_texture_transform = {
-        .offset = {0.2f, 0.4f}, .rotation = 1.5707963f, .scale = {2.0f, -3.0f}, .texCoord = 1
-    }}};
-    GltfTransformedTextureInfo metallicRoughnessTexture {.extensions = {.KHR_texture_transform = {
-        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0
-    }}};
+    float                      metallicFactor  = 0.0f;
+    float                      roughnessFactor = 0.8f;
+    GltfTransformedTextureInfo baseColorTexture {
+        .extensions = {.KHR_texture_transform = {.offset = {0.2f, 0.4f}, .rotation = 1.5707963f, .scale = {2.0f, -3.0f}, .texCoord = 1}}
+    };
+    GltfTransformedTextureInfo metallicRoughnessTexture {
+        .extensions = {.KHR_texture_transform = {.offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0}}
+    };
 };
 
 struct GltfSheenMaterial {
-    std::string_view name = "Sheen/UV transform";
-    GltfSheenPbr pbrMetallicRoughness;
-    GltfTransformedTextureInfo normalTexture {.extensions = {.KHR_texture_transform = {
-        .offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0
-    }}};
+    std::string_view           name = "Sheen/UV transform";
+    GltfSheenPbr               pbrMetallicRoughness;
+    GltfTransformedTextureInfo normalTexture {
+        .extensions = {.KHR_texture_transform = {.offset = {0.0f, 0.0f}, .rotation = 0.0f, .scale = {30.0f, -30.0f}, .texCoord = 0}}
+    };
     GltfOcclusionTextureInfo occlusionTexture;
-    GltfSheenExtensions extensions;
+    GltfSheenExtensions      extensions;
 };
 
 struct GltfSheenAttributes {
-    int32_t POSITION = 0;
+    int32_t POSITION   = 0;
     int32_t TEXCOORD_0 = 1;
     int32_t TEXCOORD_1 = 2;
 };
 
 struct GltfSheenPrimitive {
     GltfSheenAttributes attributes;
-    int32_t indices = 3;
-    int32_t material = 0;
+    int32_t             indices  = 3;
+    int32_t             material = 0;
 };
 
 struct GltfSheenMesh {
-    std::string_view name = "UV sets";
+    std::string_view                name = "UV sets";
     std::vector<GltfSheenPrimitive> primitives {GltfSheenPrimitive {}};
 };
 
 struct GltfSheenImage {
-    int32_t bufferView = 4;
-    std::string_view mimeType = "image/png";
+    int32_t          bufferView = 4;
+    std::string_view mimeType   = "image/png";
 };
 
 struct GltfSheenDocument {
-    GltfAsset asset;
-    std::vector<std::string_view> extensionsUsed {"KHR_texture_transform", "KHR_materials_sheen"};
-    std::vector<std::string_view> extensionsRequired {"KHR_texture_transform"};
-    int32_t scene = 0;
-    std::vector<GltfScene> scenes {GltfScene {.nodes = {0}}};
-    std::vector<GltfMeshNode> nodes {GltfMeshNode {.name = "SheenTriangle"}};
-    std::vector<GltfSheenMesh> meshes {GltfSheenMesh {}};
-    std::vector<GltfSheenMaterial> materials {GltfSheenMaterial {}};
-    std::vector<GltfAccessor> accessors;
+    GltfAsset                             asset;
+    std::vector<std::string_view>         extensionsUsed {"KHR_texture_transform", "KHR_materials_sheen"};
+    std::vector<std::string_view>         extensionsRequired {"KHR_texture_transform"};
+    int32_t                               scene = 0;
+    std::vector<GltfScene>                scenes {GltfScene {.nodes = {0}}};
+    std::vector<GltfMeshNode>             nodes {GltfMeshNode {.name = "SheenTriangle"}};
+    std::vector<GltfSheenMesh>            meshes {GltfSheenMesh {}};
+    std::vector<GltfSheenMaterial>        materials {GltfSheenMaterial {}};
+    std::vector<GltfAccessor>             accessors;
     std::vector<GltfAnisotropyBufferView> bufferViews;
-    std::vector<GltfBuffer> buffers;
-    std::vector<GltfSheenImage> images {GltfSheenImage {}};
-    std::vector<GltfAnisotropyTexture> textures {GltfAnisotropyTexture {}};
+    std::vector<GltfBuffer>               buffers;
+    std::vector<GltfSheenImage>           images {GltfSheenImage {}};
+    std::vector<GltfAnisotropyTexture>    textures {GltfAnisotropyTexture {}};
 };
 
 struct GltfTransmissionPbr {
-    std::array<float, 4> baseColorFactor {0.8f, 0.4f, 0.2f, 0.75f};
-    float metallicFactor = 0.25f;
-    float roughnessFactor = 0.35f;
+    std::array<float, 4>      baseColorFactor {0.8f, 0.4f, 0.2f, 0.75f};
+    float                     metallicFactor  = 0.25f;
+    float                     roughnessFactor = 0.35f;
     GltfAnisotropyTextureInfo baseColorTexture {.index = 0};
 };
 
 struct KhrMaterialsTransmission {
-    float transmissionFactor = 0.625f;
-    GltfTransformedTextureInfo transmissionTexture {.index = 1, .extensions = {.KHR_texture_transform = {
-        .offset = {0.25f, -0.25f}, .rotation = 1.5707963f, .scale = {2.0f, 0.5f}, .texCoord = 1
-    }}};
+    float                      transmissionFactor = 0.625f;
+    GltfTransformedTextureInfo transmissionTexture {
+        .index      = 1,
+        .extensions = {.KHR_texture_transform = {.offset = {0.25f, -0.25f}, .rotation = 1.5707963f, .scale = {2.0f, 0.5f}, .texCoord = 1}}
+    };
 };
 
 struct GltfTransmissionExtensions {
@@ -550,28 +549,27 @@ struct GltfTransmissionExtensions {
 };
 
 struct GltfTransmissionMaterial {
-    std::string_view name = "Masked transmitting glass";
-    std::string_view alphaMode = "MASK";
-    float alphaCutoff = 0.37f;
-    GltfTransmissionPbr pbrMetallicRoughness;
+    std::string_view           name        = "Masked transmitting glass";
+    std::string_view           alphaMode   = "MASK";
+    float                      alphaCutoff = 0.37f;
+    GltfTransmissionPbr        pbrMetallicRoughness;
     GltfTransmissionExtensions extensions;
 };
 
 struct GltfTransmissionDocument {
-    GltfAsset asset;
-    std::vector<std::string_view> extensionsUsed {"KHR_materials_transmission", "KHR_texture_transform"};
-    int32_t scene = 0;
-    std::vector<GltfScene> scenes {GltfScene {.nodes = {0}}};
-    std::vector<GltfMeshNode> nodes {GltfMeshNode {.name = "TransmissionTriangle"}};
-    std::vector<GltfSheenMesh> meshes {GltfSheenMesh {}};
+    GltfAsset                             asset;
+    std::vector<std::string_view>         extensionsUsed {"KHR_materials_transmission", "KHR_texture_transform"};
+    int32_t                               scene = 0;
+    std::vector<GltfScene>                scenes {GltfScene {.nodes = {0}}};
+    std::vector<GltfMeshNode>             nodes {GltfMeshNode {.name = "TransmissionTriangle"}};
+    std::vector<GltfSheenMesh>            meshes {GltfSheenMesh {}};
     std::vector<GltfTransmissionMaterial> materials {GltfTransmissionMaterial {}};
-    std::vector<GltfAccessor> accessors;
+    std::vector<GltfAccessor>             accessors;
     std::vector<GltfAnisotropyBufferView> bufferViews;
-    std::vector<GltfBuffer> buffers;
-    std::vector<GltfSheenImage> images {GltfSheenImage {}};
-    std::vector<GltfAnisotropyTexture> textures {GltfAnisotropyTexture {.sampler = 0}, GltfAnisotropyTexture {.sampler = 1}};
-    std::vector<GltfSamplerWrap> samplers {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648},
-                                           GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}};
+    std::vector<GltfBuffer>               buffers;
+    std::vector<GltfSheenImage>           images {GltfSheenImage {}};
+    std::vector<GltfAnisotropyTexture>    textures {GltfAnisotropyTexture {.sampler = 0}, GltfAnisotropyTexture {.sampler = 1}};
+    std::vector<GltfSamplerWrap>          samplers {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648}, GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}};
 };
 
 // Same document with a root `extensions` object. A separate type rather than
@@ -681,9 +679,9 @@ constexpr float                kEmissiveStrength = 4.0f;
         .nodes          = {GltfMeshNode {.name = "EmissiveTriangle"}},
         .meshes         = TriangleMeshes(),
         .materials      = {GltfEmissiveStrengthMaterial {
-                 .name              = "Emissive",
-                 .emissiveFactor    = kAuthoredEmissive,
-                 .extensions        = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
+            .name           = "Emissive",
+            .emissiveFactor = kAuthoredEmissive,
+            .extensions     = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
         }},
         .accessors      = TriangleAccessors(),
         .bufferViews    = TriangleBufferViews(),
@@ -723,13 +721,16 @@ constexpr float                kEmissiveStrength = 4.0f;
 // the required extension and the authored base colors on each part.
 [[nodiscard]] auto MakeUnlitTriangleFixture() -> std::vector<uint8_t> {
     const GltfUnlitDocument document {
-        .scenes    = {GltfScene {.nodes = {0, 1}}},
-        .nodes     = {GltfMeshNode {.name = "Orange Object", .translation = {-1.2f, 0.0f, 0.0f}},
-                      GltfMeshNode {.name = "Blue Object", .mesh = 1, .translation = {1.2f, 0.0f, 0.0f}}},
-        .meshes    = {GltfMesh {.name = "Orange Mesh", .primitives = {GltfPrimitive {.material = 0}}},
-                      GltfMesh {.name = "Blue Mesh", .primitives = {GltfPrimitive {.material = 1}}}},
-        .materials = {GltfUnlitMaterial {.name = "Orange", .pbrMetallicRoughness = {.baseColorFactor = {1.0f, 0.21763764f, 0.0f, 1.0f}}},
-                      GltfUnlitMaterial {.name = "Blue", .pbrMetallicRoughness = {.baseColorFactor = {0.0f, 0.21763764f, 1.0f, 1.0f}}}},
+        .scenes = {GltfScene {.nodes = {0, 1}}},
+        .nodes =
+            {GltfMeshNode {.name = "Orange Object", .translation = {-1.2f, 0.0f, 0.0f}},
+             GltfMeshNode {.name = "Blue Object", .mesh = 1, .translation = {1.2f, 0.0f, 0.0f}}},
+        .meshes =
+            {GltfMesh {.name = "Orange Mesh", .primitives = {GltfPrimitive {.material = 0}}},
+             GltfMesh {.name = "Blue Mesh", .primitives = {GltfPrimitive {.material = 1}}}},
+        .materials =
+            {GltfUnlitMaterial {.name = "Orange", .pbrMetallicRoughness = {.baseColorFactor = {1.0f, 0.21763764f, 0.0f, 1.0f}}},
+             GltfUnlitMaterial {.name = "Blue", .pbrMetallicRoughness = {.baseColorFactor = {0.0f, 0.21763764f, 1.0f, 1.0f}}}},
         .accessors   = TriangleAccessors(),
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
@@ -745,16 +746,17 @@ constexpr float                kEmissiveStrength = 4.0f;
 // leak into materials, and spawned worlds must match source parity.
 [[nodiscard]] auto MakeNegativeScaleFixture() -> std::vector<uint8_t> {
     const GltfDocument<GltfScaledMeshNode, GltfSidedMaterial> document {
-        .scenes    = {GltfScene {.nodes = {0, 1, 2, 4}}},
-        .nodes     = {GltfScaledMeshNode {.name = "Front", .translation = {-1.2f, 0.0f, 0.0f}, .scale = {-1.0f, 1.0f, 1.0f}},
-                      GltfScaledMeshNode {.name = "Back", .translation = {1.2f, 0.0f, 0.0f}, .rotation = {0.0f, 1.0f, 0.0f, 0.0f}},
-                      GltfScaledMeshNode {.name = "MirrorParent", .mesh = 1, .scale = {-1.0f, 1.0f, 1.0f}, .children = {3}},
-                      GltfScaledMeshNode {.name = "Child", .mesh = 1, .translation = {0.0f, 0.85f, 0.0f}},
-                      GltfScaledMeshNode {.name = "Plain", .mesh = 1, .translation = {0.0f, -0.85f, 0.0f}}},
-        .meshes    = {GltfMesh {.name = "Panel", .primitives = {GltfPrimitive {.material = 0}}},
-                      GltfMesh {.name = "Sphere", .primitives = {GltfPrimitive {.material = 1}}}},
-        .materials = {GltfSidedMaterial {.name = "Check"},
-                      GltfSidedMaterial {.name = "NotShiny", .doubleSided = true}},
+        .scenes = {GltfScene {.nodes = {0, 1, 2, 4}}},
+        .nodes =
+            {GltfScaledMeshNode {.name = "Front", .translation = {-1.2f, 0.0f, 0.0f}, .scale = {-1.0f, 1.0f, 1.0f}},
+             GltfScaledMeshNode {.name = "Back", .translation = {1.2f, 0.0f, 0.0f}, .rotation = {0.0f, 1.0f, 0.0f, 0.0f}},
+             GltfScaledMeshNode {.name = "MirrorParent", .mesh = 1, .scale = {-1.0f, 1.0f, 1.0f}, .children = {3}},
+             GltfScaledMeshNode {.name = "Child", .mesh = 1, .translation = {0.0f, 0.85f, 0.0f}},
+             GltfScaledMeshNode {.name = "Plain", .mesh = 1, .translation = {0.0f, -0.85f, 0.0f}}},
+        .meshes =
+            {GltfMesh {.name = "Panel", .primitives = {GltfPrimitive {.material = 0}}},
+             GltfMesh {.name = "Sphere", .primitives = {GltfPrimitive {.material = 1}}}},
+        .materials   = {GltfSidedMaterial {.name = "Check"}, GltfSidedMaterial {.name = "NotShiny", .doubleSided = true}},
         .accessors   = TriangleAccessors(),
         .bufferViews = TriangleBufferViews(),
         .buffers     = TriangleBuffers(),
@@ -767,20 +769,18 @@ constexpr float                kEmissiveStrength = 4.0f;
 // color slots need sRGB views, data slots need linear views, and sampler modes
 // differ per texture object rather than per image.
 [[nodiscard]] auto MakeAnisotropyFixture() -> std::vector<uint8_t> {
-    constexpr std::array<float, 9> normals {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
-    constexpr std::array<float, 12> tangents {1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f};
-    constexpr std::array<float, 6> uvs {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
-    constexpr std::array<uint8_t, 70> png {
-        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
-        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
-        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
-        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
-        0x60u, 0x82u
-    };
-    constexpr int32_t normalBytes  = static_cast<int32_t>(sizeof(normals));
-    constexpr int32_t tangentBytes = static_cast<int32_t>(sizeof(tangents));
-    constexpr int32_t uvBytes      = static_cast<int32_t>(sizeof(uvs));
-    constexpr int32_t imageOffset  = kPositionBytes + normalBytes + tangentBytes + uvBytes + kIndexBytes;
+    constexpr std::array<float, 9>    normals {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 12>   tangents {1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6>    uvs {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<uint8_t, 70> png {0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u,
+                                           0x44u, 0x52u, 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u,
+                                           0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u,
+                                           0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u, 0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u,
+                                           0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u, 0x60u, 0x82u};
+    constexpr int32_t                 normalBytes  = static_cast<int32_t>(sizeof(normals));
+    constexpr int32_t                 tangentBytes = static_cast<int32_t>(sizeof(tangents));
+    constexpr int32_t                 uvBytes      = static_cast<int32_t>(sizeof(uvs));
+    constexpr int32_t                 imageOffset  = kPositionBytes + normalBytes + tangentBytes + uvBytes + kIndexBytes;
 
     std::vector<uint8_t> bin(static_cast<size_t>(imageOffset) + png.size());
     std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
@@ -792,31 +792,27 @@ constexpr float                kEmissiveStrength = 4.0f;
 
     const GltfAnisotropyDocument document {
         .extensionsUsed = {"KHR_materials_anisotropy"},
-        .scenes = {GltfScene {.nodes = {0}}},
-        .nodes = {GltfMeshNode {.name = "AnisotropicTriangle"}},
-        .meshes = {GltfAnisotropyMesh {.name = "Tri", .primitives = {GltfAnisotropyPrimitive {}}}},
-        .materials = {GltfAnisotropyMaterial {
-            .name = "Anisotropic",
-            .pbrMetallicRoughness = {.metallicFactor = 1.0f, .roughnessFactor = 0.15f},
-            .extensions = {.KHR_materials_anisotropy = {}}
+        .scenes         = {GltfScene {.nodes = {0}}},
+        .nodes          = {GltfMeshNode {.name = "AnisotropicTriangle"}},
+        .meshes         = {GltfAnisotropyMesh {.name = "Tri", .primitives = {GltfAnisotropyPrimitive {}}}},
+        .materials      = {GltfAnisotropyMaterial {
+            .name = "Anisotropic", .pbrMetallicRoughness = {.metallicFactor = 1.0f, .roughnessFactor = 0.15f}, .extensions = {.KHR_materials_anisotropy = {}}
         }},
-        .accessors = {
-            GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
-            GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 1.0f}, .max = {0.0f, 0.0f, 1.0f}},
-            GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC4", .min = {1.0f, 0.0f, 0.0f, 1.0f}, .max = {1.0f, 0.0f, 0.0f, 1.0f}},
-            GltfAccessor {.bufferView = 3, .count = 3, .type = "VEC2", .min = {0.0f, 0.0f}, .max = {1.0f, 1.0f}},
-            GltfAccessor {.bufferView = 4, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
-        },
-        .bufferViews = {
-            {.byteOffset = 0, .byteLength = kPositionBytes},
-            {.byteOffset = kPositionBytes, .byteLength = normalBytes},
-            {.byteOffset = kPositionBytes + normalBytes, .byteLength = tangentBytes},
-            {.byteOffset = kPositionBytes + normalBytes + tangentBytes, .byteLength = uvBytes},
-            {.byteOffset = imageOffset - kIndexBytes, .byteLength = kIndexBytes},
-            {.byteOffset = imageOffset, .byteLength = static_cast<int32_t>(png.size())}
-        },
-        .buffers = {{.byteLength = static_cast<int32_t>(bin.size())}},
-        .images = {GltfAnisotropyImage {}},
+        .accessors =
+            {GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
+             GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 1.0f}, .max = {0.0f, 0.0f, 1.0f}},
+             GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC4", .min = {1.0f, 0.0f, 0.0f, 1.0f}, .max = {1.0f, 0.0f, 0.0f, 1.0f}},
+             GltfAccessor {.bufferView = 3, .count = 3, .type = "VEC2", .min = {0.0f, 0.0f}, .max = {1.0f, 1.0f}},
+             GltfAccessor {.bufferView = 4, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}},
+        .bufferViews =
+            {{.byteOffset = 0, .byteLength = kPositionBytes},
+             {.byteOffset = kPositionBytes, .byteLength = normalBytes},
+             {.byteOffset = kPositionBytes + normalBytes, .byteLength = tangentBytes},
+             {.byteOffset = kPositionBytes + normalBytes + tangentBytes, .byteLength = uvBytes},
+             {.byteOffset = imageOffset - kIndexBytes, .byteLength = kIndexBytes},
+             {.byteOffset = imageOffset, .byteLength = static_cast<int32_t>(png.size())}},
+        .buffers  = {{.byteLength = static_cast<int32_t>(bin.size())}},
+        .images   = {GltfAnisotropyImage {}},
         .textures = {GltfAnisotropyTexture {}, GltfAnisotropyTexture {.sampler = 0}, GltfAnisotropyTexture {.sampler = 1}},
         .samplers = {GltfSamplerWrap {.wrapS = 33071, .wrapT = 33648}, GltfSamplerWrap {.wrapS = 33648, .wrapT = 33071}}
     };
@@ -829,19 +825,17 @@ constexpr float                kEmissiveStrength = 4.0f;
 // Reusing one image in both color and data slots also checks color-space-aware
 // upload (one sRGB handle and one linear handle, not a merged format).
 [[nodiscard]] auto MakeSheenTransformFixture() -> std::vector<uint8_t> {
-    constexpr std::array<float, 6> uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
-    constexpr std::array<float, 6> uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
-    constexpr std::array<uint8_t, 70> png {
-        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
-        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
-        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
-        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
-        0x60u, 0x82u
-    };
-    constexpr int32_t uvSize = static_cast<int32_t>(sizeof(uv0));
-    constexpr int32_t indexOffset = kPositionBytes + uvSize * 2;
-    constexpr int32_t pngOffset = indexOffset + kIndexBytes;
-    std::vector<uint8_t> bin(static_cast<size_t>(pngOffset) + png.size());
+    constexpr std::array<float, 6>    uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6>    uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
+    constexpr std::array<uint8_t, 70> png {0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u,
+                                           0x44u, 0x52u, 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u,
+                                           0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u,
+                                           0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u, 0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u,
+                                           0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u, 0x60u, 0x82u};
+    constexpr int32_t                 uvSize      = static_cast<int32_t>(sizeof(uv0));
+    constexpr int32_t                 indexOffset = kPositionBytes + uvSize * 2;
+    constexpr int32_t                 pngOffset   = indexOffset + kIndexBytes;
+    std::vector<uint8_t>              bin(static_cast<size_t>(pngOffset) + png.size());
     std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
     std::memcpy(bin.data() + kPositionBytes, uv0.data(), uvSize);
     std::memcpy(bin.data() + kPositionBytes + uvSize, uv1.data(), uvSize);
@@ -851,8 +845,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     GltfSheenDocument document {};
     document.accessors = {
         GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
-        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"},
-        GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"}, GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
         GltfAccessor {.bufferView = 3, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
     };
     document.bufferViews = {
@@ -870,18 +863,16 @@ constexpr float                kEmissiveStrength = 4.0f;
 // (linear R). The two textureInfo objects have independent samplers and UV
 // transforms, as in Khronos TransmissionTest's blue masked spheres.
 [[nodiscard]] auto MakeTransmissionFixture(std::string_view alphaMode) -> std::vector<uint8_t> {
-    constexpr std::array<float, 6> uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
-    constexpr std::array<float, 6> uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
-    constexpr std::array<uint8_t, 70> png {
-        0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u, 0x44u, 0x52u, 0x00u,
-        0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u, 0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u,
-        0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u, 0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u,
-        0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u, 0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u,
-        0x60u, 0x82u
-    };
-    constexpr int32_t uvBytes = static_cast<int32_t>(sizeof(uv0));
-    constexpr int32_t indexOffset = kPositionBytes + uvBytes * 2;
-    constexpr int32_t imageOffset = indexOffset + kIndexBytes;
+    constexpr std::array<float, 6>    uv0 {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+    constexpr std::array<float, 6>    uv1 {0.5f, 0.2f, 0.75f, 0.2f, 0.5f, 0.8f};
+    constexpr std::array<uint8_t, 70> png {0x89u, 0x50u, 0x4Eu, 0x47u, 0x0Du, 0x0Au, 0x1Au, 0x0Au, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x48u,
+                                           0x44u, 0x52u, 0x00u, 0x00u, 0x00u, 0x01u, 0x00u, 0x00u, 0x00u, 0x01u, 0x08u, 0x06u, 0x00u, 0x00u,
+                                           0x00u, 0x1Fu, 0x15u, 0xC4u, 0x89u, 0x00u, 0x00u, 0x00u, 0x0Du, 0x49u, 0x44u, 0x41u, 0x54u, 0x78u,
+                                           0x9Cu, 0x63u, 0xF8u, 0xDFu, 0xE0u, 0xF0u, 0x1Fu, 0x00u, 0x07u, 0x00u, 0x02u, 0xBFu, 0x2Bu, 0xD7u,
+                                           0xC7u, 0xE2u, 0x00u, 0x00u, 0x00u, 0x00u, 0x49u, 0x45u, 0x4Eu, 0x44u, 0xAEu, 0x42u, 0x60u, 0x82u};
+    constexpr int32_t                 uvBytes     = static_cast<int32_t>(sizeof(uv0));
+    constexpr int32_t                 indexOffset = kPositionBytes + uvBytes * 2;
+    constexpr int32_t                 imageOffset = indexOffset + kIndexBytes;
 
     std::vector<uint8_t> bin(static_cast<size_t>(imageOffset) + png.size());
     std::memcpy(bin.data(), kTrianglePositions, kPositionBytes);
@@ -892,10 +883,9 @@ constexpr float                kEmissiveStrength = 4.0f;
 
     GltfTransmissionDocument document {};
     document.materials[0].alphaMode = alphaMode;
-    document.accessors = {
+    document.accessors              = {
         GltfAccessor {.bufferView = 0, .count = 3, .type = "VEC3", .min = {0.0f, 0.0f, 0.0f}, .max = {1.0f, 1.0f, 0.0f}},
-        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"},
-        GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
+        GltfAccessor {.bufferView = 1, .count = 3, .type = "VEC2"}, GltfAccessor {.bufferView = 2, .count = 3, .type = "VEC2"},
         GltfAccessor {.bufferView = 3, .componentType = 5125, .count = 3, .type = "SCALAR", .min = {0.0f}, .max = {2.0f}}
     };
     document.bufferViews = {
@@ -919,9 +909,9 @@ constexpr float                kEmissiveStrength = 4.0f;
         .nodes          = {GltfMeshNodeWithLight {.name = "LitTriangle", .translation = {1.0f, 2.0f, 3.0f}}},
         .meshes         = TriangleMeshes(),
         .materials      = {GltfEmissiveStrengthMaterial {
-                 .name              = "Emissive",
-                 .emissiveFactor    = kAuthoredEmissive,
-                 .extensions        = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
+            .name           = "Emissive",
+            .emissiveFactor = kAuthoredEmissive,
+            .extensions     = {.KHR_materials_emissive_strength = {.emissiveStrength = kEmissiveStrength}},
         }},
         .accessors      = TriangleAccessors(),
         .bufferViews    = TriangleBufferViews(),
@@ -1094,8 +1084,8 @@ struct GLTFImportTestSuite {
                 bool sourceHasJointWeights = false;
                 for (size_t primitive = 0; primitive < owner.mesh->primitives_count; ++primitive) {
                     for (size_t attribute = 0; attribute < owner.mesh->primitives[primitive].attributes_count; ++attribute) {
-                        sourceHasJointWeights =
-                            sourceHasJointWeights || owner.mesh->primitives[primitive].attributes[attribute].type == cgltf_attribute_type_joints;
+                        sourceHasJointWeights = sourceHasJointWeights ||
+                                                owner.mesh->primitives[primitive].attributes[attribute].type == cgltf_attribute_type_joints;
                     }
                 }
                 if (part.skeletonIndex != expectedSkeleton || part.isSkinned != (owner.skin != nullptr && sourceHasJointWeights)) {
@@ -1144,7 +1134,8 @@ struct GLTFImportTestSuite {
             // The prefab cache lives on the pooled engine and outlives the
             // test, so the distinct virtual path is what keeps the two imports
             // apart in the engine log.
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
+            const auto prefab =
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ProceduralAnimationBaseRig_Skins.glb");
             if (!prefab) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1301,7 +1292,7 @@ struct GLTFImportTestSuite {
             //    emissiveStrength = 1 must import identically to one that omits
             //    the extension, rather than 100x darker.
             const std::vector<uint8_t> plainBytes = MakePlainEmissiveFixture();
-            const auto                 plain      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), plainBytes, "ext_emissive_plain.glb");
+            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), plainBytes, "ext_emissive_plain.glb");
             if (!plain || plain->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1317,38 +1308,31 @@ struct GLTFImportTestSuite {
                 }
             }
 
-            // 3. An unread extension on a mesh-bearing node must not disturb the
-            //    node it sits on, the part it produces, or the extension that is
-            //    read from the same document.
+            // 3. Lit mesh fixture: now imports both the emissive material AND the light
             const std::vector<uint8_t> litBytes = MakeLitMeshFixture();
-            const auto                 litMesh  = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), litBytes, "ext_lit_mesh.glb");
+            const auto litMesh = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), litBytes, "ext_lit_mesh.glb");
             if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
-            const ZHLN::ModelNode& litNode = litMesh->nodes[0];
-            if (std::string_view(litNode.name) != "LitTriangle" || !litNode.hasMesh || litNode.parentIndex != -1 ||
-                !litNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f) || litMesh->parts[0].nodeIndex != 0) {
+            // Check that the punctual light was imported:
+            if (litMesh->lights.size() != 1 || std::string_view(litMesh->lights[0].name) != "TestPoint" || litMesh->lights[0].intensity != 42.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
-            for (size_t channel = 0; channel < 3; ++channel) {
-                const float expected = kAuthoredEmissive[channel] * kEmissiveStrength * ZHLN::kGLTFEmissiveDisplayScale;
-                if (std::abs(litMesh->parts[0].defaultMaterial.emissiveFactor[channel] - expected) > 0.01f) {
-                    return std::unexpected(GLTFImportError::ExtensionMismatch);
-                }
-            }
 
-            // 4. A geometry-free light document -- what zcook emits for a scene
-            //    light -- imports as a bare transform node. The light itself is
-            //    dropped: ModelPrefab has nowhere to put it. Pinning that keeps
-            //    the gap visible instead of implied.
+            // 4. Geometry-free light document: imports the transform node AND the light
             const std::vector<uint8_t> lightOnlyBytes = MakeLightOnlyFixture();
-            const auto                 lightOnly      = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), lightOnlyBytes, "ext_light_only.glb");
+            const auto                 lightOnly =
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), lightOnlyBytes, "ext_light_only.glb");
             if (!lightOnly || lightOnly->nodes.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const ZHLN::ModelNode& lightNode = lightOnly->nodes[0];
             if (std::string_view(lightNode.name) != "PunctualLight" || lightNode.hasMesh || lightNode.parentIndex != -1 ||
                 !lightNode.localTransform.GetTranslation().IsClose(JPH::Vec3(1.0f, 2.0f, 3.0f), 0.0001f)) {
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
+            }
+            // Formerly checked that lights were dropped; now verify the light is present:
+            if (lightOnly->lights.size() != 1 || std::string_view(lightOnly->lights[0].name) != "TestPoint" || lightOnly->lights[0].intensity != 42.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             if (!lightOnly->parts.empty() || !lightOnly->skeletons.empty() || !lightOnly->animations.empty()) {
@@ -1368,17 +1352,16 @@ struct GLTFImportTestSuite {
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
-            auto& rc = engine->GetRenderContext();
-            auto& assets = engine->GetAssetManager();
+            auto&                               rc     = engine->GetRenderContext();
+            auto&                               assets = engine->GetAssetManager();
             constexpr ZHLN::GLTF::ImportOptions conformant {.emissiveFactorScale = 1.0f};
 
-            const auto plainBytes = MakePlainEmissiveFixture();
-            const auto plain = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
+            const auto plainBytes    = MakePlainEmissiveFixture();
+            const auto plain         = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
             const auto strengthBytes = MakeEmissiveStrengthFixture();
-            const auto strong = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
-            if (!plain || !strong || plain->parts.size() != 1 || strong->parts.size() != 1 ||
-                plain->emissiveFactorScale != 1.0f || strong->emissiveFactorScale != 1.0f ||
-                plain->maxTextureDimension != ZHLN::kGLTFDefaultMaxTextureDimension) {
+            const auto strong        = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, strengthBytes, "fidelity_emissive_strength.glb", {}, conformant);
+            if (!plain || !strong || plain->parts.size() != 1 || strong->parts.size() != 1 || plain->emissiveFactorScale != 1.0f ||
+                strong->emissiveFactorScale != 1.0f || plain->maxTextureDimension != ZHLN::kGLTFDefaultMaxTextureDimension) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             for (size_t channel = 0; channel < 3; ++channel) {
@@ -1391,14 +1374,13 @@ struct GLTFImportTestSuite {
             // An emissive image and albedo share a source image. Both must
             // sample sRGB; a PBR data reference to the same image must not.
             const auto texturedBytes = MakeAnisotropyFixture();
-            const auto textured = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
+            const auto textured      = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_texture.glb", {}, conformant);
             if (!textured || textured->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = textured->parts[0].defaultMaterial;
-            if (material.emissiveFactor != JPH::Float4 {0.0f, 1.0f, 0.0f, 1.0f} ||
-                material.emissiveMap == ZHLN::TextureHandle::Invalid || material.emissiveMap != material.albedoMap ||
-                material.emissiveMap == material.pbrMap || rc.GetBindlessIndex(material.emissiveMap) <= 2u) {
+            if (material.emissiveFactor != JPH::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureHandle::Invalid ||
+                material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || rc.GetBindlessIndex(material.emissiveMap) <= 2u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
 
@@ -1406,14 +1388,16 @@ struct GLTFImportTestSuite {
             // prefab cache identity. Fidelity can retain 2048px images while
             // other import clients continue using the default 1024px cap.
             constexpr ZHLN::GLTF::ImportOptions detailed {.emissiveFactorScale = 1.0f, .maxTextureDimension = 2048};
-            const auto highRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
+            const auto highRes       = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
             const auto cachedHighRes = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, detailed);
             const auto cachedPlain   = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb", {}, conformant);
-            if (!highRes || highRes->maxTextureDimension != 2048 ||
-                !cachedHighRes || &*cachedHighRes != &*highRes ||
+            if (!highRes || highRes->maxTextureDimension != 2048 || !cachedHighRes || &*cachedHighRes != &*highRes ||
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {}, conformant).has_value() ||
-                ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {},
-                                                    ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}).has_value() ||
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(
+                    rc, assets, texturedBytes, "fidelity_emissive_highres.glb", {},
+                    ZHLN::GLTF::ImportOptions {.emissiveFactorScale = 1.0f, .maxTextureDimension = 0}
+                )
+                    .has_value() ||
                 !cachedPlain || &*cachedPlain != &*plain ||
                 ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, plainBytes, "fidelity_emissive_plain.glb").has_value()) {
                 return std::unexpected(GLTFImportError::PrefabCacheMismatch);
@@ -1432,17 +1416,16 @@ struct GLTFImportTestSuite {
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
-            const auto bytes = MakeAnisotropyFixture();
+            const auto     bytes = MakeAnisotropyFixture();
             SourceDocument source;
-            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_anisotropy ||
-                source.data->textures_count != 3 || source.data->samplers_count != 2 || source.data->textures[0].sampler != nullptr ||
-                source.data->textures[1].sampler == nullptr || source.data->textures[2].sampler == nullptr ||
-                source.data->textures[0].image == nullptr || source.data->textures[0].image != source.data->textures[1].image ||
-                source.data->textures[0].image != source.data->textures[2].image) {
+            if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_anisotropy || source.data->textures_count != 3 ||
+                source.data->samplers_count != 2 || source.data->textures[0].sampler != nullptr || source.data->textures[1].sampler == nullptr ||
+                source.data->textures[2].sampler == nullptr || source.data->textures[0].image == nullptr ||
+                source.data->textures[0].image != source.data->textures[1].image || source.data->textures[0].image != source.data->textures[2].image) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto& rc = engine->GetRenderContext();
+            auto&      rc     = engine->GetRenderContext();
             const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, engine->GetAssetManager(), bytes, "ext_anisotropy.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
@@ -1450,25 +1433,24 @@ struct GLTFImportTestSuite {
             const auto& expected = source.data->materials[0].anisotropy;
             const auto& material = prefab->parts[0].defaultMaterial;
             if (std::abs(material.anisotropyStrength - expected.anisotropy_strength) > 1e-5f ||
-                std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f ||
-                material.anisotropyMap == ZHLN::TextureHandle::Invalid || rc.GetBindlessIndex(material.anisotropyMap) <= 2u ||
-                material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f || material.clearcoatFactor != 0.0f) {
+                std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f || material.anisotropyMap == ZHLN::TextureHandle::Invalid ||
+                rc.GetBindlessIndex(material.anisotropyMap) <= 2u || material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f ||
+                material.clearcoatFactor != 0.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             using ZHLN::MaterialTextureSlot;
             using ZHLN::TextureWrap;
             ZHLN::MaterialSamplerAddresses expectedSamplers {};
             expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Albedo)] = {TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat};
-            expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Pbr)] = {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge};
+            expectedSamplers[static_cast<size_t>(MaterialTextureSlot::Pbr)]    = {TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge};
             // Albedo is sRGB; PBR and anisotropy are linear data, even when
             // all three texture objects reference the same image bytes.
-            if (material.albedoMap == material.pbrMap || material.pbrMap != material.anisotropyMap ||
-                material.textureSamplers != expectedSamplers) {
+            if (material.albedoMap == material.pbrMap || material.pbrMap != material.anisotropyMap || material.textureSamplers != expectedSamplers) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f ||
-                defaults.anisotropyMap != ZHLN::TextureHandle::Invalid || defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
+            if (defaults.anisotropyStrength != 0.0f || defaults.anisotropyRotation != 0.0f || defaults.anisotropyMap != ZHLN::TextureHandle::Invalid ||
+                defaults.textureSamplers != ZHLN::MaterialSamplerAddresses {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};
@@ -1486,35 +1468,33 @@ struct GLTFImportTestSuite {
         std::expected<void, ZHLN::ErrorCode> missing_tangents_follow_rotated_and_mirrored_uvs() {
             constexpr std::array<ZHLN::VertexPosition, 3> positions {{{{0.0f, 0.0f, 0.0f}}, {{1.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 0.0f}}}};
             constexpr std::array<std::array<float, 3>, 3> normals {{{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}};
-            constexpr std::array<uint32_t, 3> indices {0, 1, 2};
+            constexpr std::array<uint32_t, 3>             indices {0, 1, 2};
             const auto check = [&](const std::array<std::array<float, 2>, 3>& uv, float tx, float ty, float bx, float by, float handedness,
                                    bool sampleConvex = true) {
                 const auto tangents = ZHLN::GLTF::GenerateTangents(positions, normals, uv, indices);
-                if (tangents.size() != positions.size()) return false;
+                if (tangents.size() != positions.size())
+                    return false;
                 // At world (0.25, 0.75), sample a radial normal map centered at
                 // UV (0.5, 0.5). R points toward +U; G points toward image-UP
                 // (-V). All differently rotated UV charts must yield the same
                 // world-space normal (-0.25, +0.25, z), not a concave sphere.
-                const float u = 0.25f * uv[1][0] + 0.75f * uv[2][0];
-                const float v = 0.25f * uv[1][1] + 0.75f * uv[2][1];
+                const float u    = 0.25f * uv[1][0] + 0.75f * uv[2][0];
+                const float v    = 0.25f * uv[1][1] + 0.75f * uv[2][1];
                 const float mapX = u - 0.5f, mapY = 0.5f - v;
                 for (const auto& t: tangents) {
                     const float actualBx = -t[1] * t[3], actualBy = t[0] * t[3];
-                    if (std::abs(t[0] - tx) > 0.01f || std::abs(t[1] - ty) > 0.01f || std::abs(t[2]) > 0.01f ||
-                        t[3] != handedness || std::abs(actualBx - bx) > 0.01f || std::abs(actualBy - by) > 0.01f ||
-                        (sampleConvex && (std::abs(mapX * t[0] + mapY * actualBx + 0.25f) > 0.01f ||
-                                          std::abs(mapX * t[1] + mapY * actualBy - 0.25f) > 0.01f))) {
+                    if (std::abs(t[0] - tx) > 0.01f || std::abs(t[1] - ty) > 0.01f || std::abs(t[2]) > 0.01f || t[3] != handedness ||
+                        std::abs(actualBx - bx) > 0.01f || std::abs(actualBy - by) > 0.01f ||
+                        (sampleConvex &&
+                         (std::abs(mapX * t[0] + mapY * actualBx + 0.25f) > 0.01f || std::abs(mapX * t[1] + mapY * actualBy - 0.25f) > 0.01f))) {
                         return false;
                     }
                 }
                 return true;
             };
-            if (!check({{{0, 1}, {1, 1}, {0, 0}}}, 1, 0, 0, 1, 1) ||
-                !check({{{0, 0}, {0, 1}, {1, 0}}}, 0, 1, -1, 0, 1) ||
-                !check({{{1, 0}, {0, 0}, {1, 1}}}, -1, 0, 0, -1, 1) ||
-                !check({{{1, 1}, {1, 0}, {0, 1}}}, 0, -1, 1, 0, 1) ||
-                !check({{{1, 1}, {0, 1}, {1, 0}}}, -1, 0, 0, 1, -1) ||
-                !check({{{0, 0}, {0, 0}, {0, 0}}}, 1, 0, 0, 1, 1, false)) {
+            if (!check({{{0, 1}, {1, 1}, {0, 0}}}, 1, 0, 0, 1, 1) || !check({{{0, 0}, {0, 1}, {1, 0}}}, 0, 1, -1, 0, 1) ||
+                !check({{{1, 0}, {0, 0}, {1, 1}}}, -1, 0, 0, -1, 1) || !check({{{1, 1}, {1, 0}, {0, 1}}}, 0, -1, 1, 0, 1) ||
+                !check({{{1, 1}, {0, 1}, {1, 0}}}, -1, 0, 0, 1, -1) || !check({{{0, 0}, {0, 0}, {0, 0}}}, 1, 0, 0, 1, 1, false)) {
                 return std::unexpected(GLTFImportError::TangentFrameMismatch);
             }
             return {};
@@ -1526,17 +1506,16 @@ struct GLTFImportTestSuite {
          * fallback PBR fields to get a flat image is not implementing unlit.
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_required_unlit_materials() {
-            const auto bytes = MakeUnlitTriangleFixture();
+            const auto     bytes = MakeUnlitTriangleFixture();
             SourceDocument source;
             if (bytes.empty() || !source.Parse(bytes) || source.data->materials_count != 2 || source.data->meshes_count != 2 ||
                 !source.data->materials[0].unlit || !source.data->materials[1].unlit) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Unlit");
-            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "KHR_materials_unlit.glb"
-            );
+            if (engine == nullptr)
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "KHR_materials_unlit.glb");
             if (!prefab || prefab->parts.size() != 2) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1555,7 +1534,8 @@ struct GLTFImportTestSuite {
                 }
             }
             const ZHLN::Material defaults {};
-            if (defaults.unlit) return std::unexpected(GLTFImportError::ExtensionMismatch);
+            if (defaults.unlit)
+                return std::unexpected(GLTFImportError::ExtensionMismatch);
             return {};
         }
 
@@ -1565,24 +1545,23 @@ struct GLTFImportTestSuite {
          * primitive still renders but keeps the renderer's gray defaults.
          */
         std::expected<void, ZHLN::ErrorCode> unsupported_required_specular_glossiness_keeps_gray_fallback() {
-            const auto bytes = MakeRequiredSpecGlossFixture();
+            const auto     bytes = MakeRequiredSpecGlossFixture();
             SourceDocument source;
             if (!source.Parse(bytes) || source.data->extensions_required_count != 1 || source.data->materials_count != 1 ||
                 !source.data->materials[0].has_pbr_specular_glossiness || source.data->materials[0].has_pbr_metallic_roughness) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Required SpecGloss");
-            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "required_specular_glossiness.glb"
-            );
+            if (engine == nullptr)
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto prefab =
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "required_specular_glossiness.glb");
             if (!prefab || prefab->nodes.size() != 1 || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
             const auto& material = prefab->parts[0].defaultMaterial;
-            if (material.baseColorFactor != JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f ||
-                material.roughnessFactor != 1.0f || material.albedoMap != ZHLN::TextureHandle::Invalid ||
-                material.pipeline == ZHLN::PipelineHandle::Invalid) {
+            if (material.baseColorFactor != JPH::Float4 {1.0f, 1.0f, 1.0f, 1.0f} || material.metallicFactor != 1.0f || material.roughnessFactor != 1.0f ||
+                material.albedoMap != ZHLN::TextureHandle::Invalid || material.pipeline == ZHLN::PipelineHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};
@@ -1596,18 +1575,19 @@ struct GLTFImportTestSuite {
          * material (or the authored doubleSided flag).
          */
         std::expected<void, ZHLN::ErrorCode> negative_scale_keeps_authored_sidedness_on_shared_meshes() {
-            const auto bytes = MakeNegativeScaleFixture();
+            const auto     bytes = MakeNegativeScaleFixture();
             SourceDocument source;
             if (bytes.empty() || !source.Parse(bytes) || source.data->nodes_count != 5 || source.data->materials_count != 2) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless NegativeScale Sidedness");
-            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
+            if (engine == nullptr)
+                return std::unexpected(GLTFImportError::EngineInitFailed);
 
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "negative_scale_sidedness.glb"
-            );
-            if (!prefab || prefab->parts.size() != 5) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            const auto prefab =
+                ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "negative_scale_sidedness.glb");
+            if (!prefab || prefab->parts.size() != 5)
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
             const auto findPart = [prefab](std::string_view name) -> const ZHLN::ModelPart* {
                 const auto found = std::ranges::find_if(prefab->parts, [name](const auto& part) { return std::string_view(part.name) == name; });
@@ -1649,35 +1629,39 @@ struct GLTFImportTestSuite {
                 }
                 const bool aMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(a->nodeIndex)]).GetDeterminant3x3() < 0.0f;
                 const bool bMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(b->nodeIndex)]).GetDeterminant3x3() < 0.0f;
-                if (aMirrored == bMirrored) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                if (aMirrored == bMirrored)
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
             }
 
             std::array<ZHLN::Entity, 8> spawned {};
-            const auto count = ZHLN::PrefabFactory::InstantiatePrefab(
-                *engine, *prefab, {.createPhysics = false, .emissiveVirtualLights = false},
-                spawned.data(), static_cast<uint32_t>(spawned.size())
+            const auto                  count = ZHLN::PrefabFactory::InstantiatePrefab(
+                *engine, *prefab, {.createPhysics = false, .emissiveVirtualLights = false}, spawned.data(), static_cast<uint32_t>(spawned.size())
             );
-            if (count != prefab->parts.size() + 1) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+            if (count != prefab->parts.size() + 1)
+                return std::unexpected(GLTFImportError::NegativeScaleMismatch);
             ZHLN::Test::Headless::TickFrames(*engine, 1);
 
             // The renderer derives the raster-winding flag from the *actual*
             // draw world matrix. Check the spawned hierarchy as well as cgltf's
             // source hierarchy, especially the negatively scaled sphere parents.
-            auto& registry = engine->GetRegistry();
-            size_t matched = 0;
+            auto&  registry = engine->GetRegistry();
+            size_t matched  = 0;
             for (uint32_t i = 1; i < count; ++i) { // outBuffer[0] is the prefab root, not a mesh part.
                 const auto name  = registry.Get<ZHLN::Components::NameComponent>(spawned[i]);
                 const auto world = registry.Get<ZHLN::Components::WorldTransformComponent>(spawned[i]);
-                if (!name || !world) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                if (!name || !world)
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const auto* part = findPart(std::string_view(name->name));
-                if (part == nullptr) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+                if (part == nullptr)
+                    return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 const bool sourceMirrored = SourceWorld(source.data->nodes[static_cast<size_t>(part->nodeIndex)]).GetDeterminant3x3() < 0.0f;
                 if ((world->world.GetDeterminant3x3() < 0.0f) != sourceMirrored) {
                     return std::unexpected(GLTFImportError::NegativeScaleMismatch);
                 }
                 ++matched;
             }
-            if (matched != prefab->parts.size()) return std::unexpected(GLTFImportError::NegativeScaleMismatch);
+            if (matched != prefab->parts.size())
+                return std::unexpected(GLTFImportError::NegativeScaleMismatch);
             return {};
         }
 
@@ -1688,47 +1672,45 @@ struct GLTFImportTestSuite {
          */
         std::expected<void, ZHLN::ErrorCode> importer_preserves_transmission_texture_and_alpha_coverage() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Transmission");
-            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto maskedBytes = MakeTransmissionFixture("MASK");
-            const auto opaqueBytes = MakeTransmissionFixture("OPAQUE");
+            if (engine == nullptr)
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto     maskedBytes = MakeTransmissionFixture("MASK");
+            const auto     opaqueBytes = MakeTransmissionFixture("OPAQUE");
             SourceDocument source;
             if (!source.Parse(maskedBytes) || source.data->materials_count != 1 || !source.data->materials[0].has_transmission ||
-                source.data->materials[0].alpha_mode != cgltf_alpha_mode_mask ||
-                !source.data->materials[0].transmission.transmission_texture.has_transform ||
+                source.data->materials[0].alpha_mode != cgltf_alpha_mode_mask || !source.data->materials[0].transmission.transmission_texture.has_transform ||
                 source.data->textures_count != 2 || source.data->textures[0].image != source.data->textures[1].image) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
 
-            auto& rc = engine->GetRenderContext();
-            auto& assets = engine->GetAssetManager();
+            auto&      rc     = engine->GetRenderContext();
+            auto&      assets = engine->GetAssetManager();
             const auto masked = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, maskedBytes, "masked_transmission.glb");
             const auto opaque = ZHLN::GLTF::LoadGLBPrefabFromMemory(rc, assets, opaqueBytes, "opaque_transmission.glb");
             if (!masked || !opaque || masked->parts.size() != 1 || opaque->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
 
-            const auto& expected = source.data->materials[0];
-            const auto& mat = masked->parts[0].defaultMaterial;
+            const auto& expected  = source.data->materials[0];
+            const auto& mat       = masked->parts[0].defaultMaterial;
             const auto& opaqueMat = opaque->parts[0].defaultMaterial;
             if (mat.alphaMode != 1u || opaqueMat.alphaMode != 0u || std::abs(mat.alphaCutoff - expected.alpha_cutoff) > 1e-5f ||
                 std::abs(mat.baseColorFactor[3] - expected.pbr_metallic_roughness.base_color_factor[3]) > 1e-5f ||
                 std::abs(mat.metallicFactor - expected.pbr_metallic_roughness.metallic_factor) > 1e-5f ||
-                std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f ||
-                mat.albedoMap == ZHLN::TextureHandle::Invalid || mat.transmissionMap == ZHLN::TextureHandle::Invalid ||
-                mat.albedoMap == mat.transmissionMap || rc.GetBindlessIndex(mat.transmissionMap) <= 2u ||
+                std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f || mat.albedoMap == ZHLN::TextureHandle::Invalid ||
+                mat.transmissionMap == ZHLN::TextureHandle::Invalid || mat.albedoMap == mat.transmissionMap || rc.GetBindlessIndex(mat.transmissionMap) <= 2u ||
                 opaqueMat.transmissionMap == ZHLN::TextureHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto albedoSlot = static_cast<size_t>(ZHLN::MaterialTextureSlot::Albedo);
-            const auto transSlot = static_cast<size_t>(ZHLN::MaterialTextureSlot::Transmission);
+            const auto transSlot  = static_cast<size_t>(ZHLN::MaterialTextureSlot::Transmission);
             if (mat.textureSamplers[albedoSlot] != ZHLN::TextureSamplerAddress {ZHLN::TextureWrap::ClampToEdge, ZHLN::TextureWrap::MirroredRepeat} ||
                 mat.textureSamplers[transSlot] != ZHLN::TextureSamplerAddress {ZHLN::TextureWrap::MirroredRepeat, ZHLN::TextureWrap::ClampToEdge}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const auto& transform = mat.textureTransforms[transSlot];
-            if (transform.texCoord != 1u || transform.offset != JPH::Float2 {0.25f, -0.25f} ||
-                transform.scale != JPH::Float2 {2.0f, 0.5f} || std::abs(transform.rotation - 1.5707963f) > 1e-5f ||
-                mat.textureTransforms[albedoSlot].texCoord != 0u) {
+            if (transform.texCoord != 1u || transform.offset != JPH::Float2 {0.25f, -0.25f} || transform.scale != JPH::Float2 {2.0f, 0.5f} ||
+                std::abs(transform.rotation - 1.5707963f) > 1e-5f || mat.textureTransforms[albedoSlot].texCoord != 0u) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};
@@ -1736,34 +1718,31 @@ struct GLTFImportTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> importer_preserves_texture_transforms_and_sheen() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Sheen UV transform");
-            if (engine == nullptr) return std::unexpected(GLTFImportError::EngineInitFailed);
-            const auto bytes = MakeSheenTransformFixture();
+            if (engine == nullptr)
+                return std::unexpected(GLTFImportError::EngineInitFailed);
+            const auto     bytes = MakeSheenTransformFixture();
             SourceDocument source;
             if (!source.Parse(bytes) || source.data->materials_count != 1 || !source.data->materials[0].has_sheen ||
                 !source.data->materials[0].pbr_metallic_roughness.base_color_texture.has_transform ||
                 source.data->meshes[0].primitives[0].attributes_count != 3) {
                 return std::unexpected(GLTFImportError::AssetUnavailable);
             }
-            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-                engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ext_sheen_transform.glb"
-            );
-            if (!prefab || prefab->parts.size() != 1) return std::unexpected(GLTFImportError::PrefabLoadFailed);
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "ext_sheen_transform.glb");
+            if (!prefab || prefab->parts.size() != 1)
+                return std::unexpected(GLTFImportError::PrefabLoadFailed);
 
             const auto& material = prefab->parts[0].defaultMaterial;
             using ZHLN::MaterialTextureSlot;
-            const auto& albedo = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Albedo)];
-            const auto& pbr = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Pbr)];
-            const auto& normal = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Normal)];
-            const auto& sheenColor = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
+            const auto& albedo         = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Albedo)];
+            const auto& pbr            = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Pbr)];
+            const auto& normal         = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Normal)];
+            const auto& sheenColor     = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenColor)];
             const auto& sheenRoughness = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::SheenRoughness)];
-            const auto& occlusion = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
-            if (albedo.texCoord != 1u || albedo.offset != JPH::Float2 {0.2f, 0.4f} ||
-                albedo.scale != JPH::Float2 {2.0f, -3.0f} || std::abs(albedo.rotation - 1.5707963f) > 1e-5f ||
-                pbr.texCoord != 0u || pbr.scale != JPH::Float2 {30.0f, -30.0f} ||
-                normal != pbr || sheenColor.texCoord != 0u ||
-                sheenColor.scale != JPH::Float2 {4.0f, -5.0f} ||
-                sheenRoughness.texCoord != 1u || sheenRoughness.scale != JPH::Float2 {1.0f, 1.0f} ||
-                occlusion.scale != JPH::Float2 {1.0f, 1.0f}) {
+            const auto& occlusion      = material.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)];
+            if (albedo.texCoord != 1u || albedo.offset != JPH::Float2 {0.2f, 0.4f} || albedo.scale != JPH::Float2 {2.0f, -3.0f} ||
+                std::abs(albedo.rotation - 1.5707963f) > 1e-5f || pbr.texCoord != 0u || pbr.scale != JPH::Float2 {30.0f, -30.0f} || normal != pbr ||
+                sheenColor.texCoord != 0u || sheenColor.scale != JPH::Float2 {4.0f, -5.0f} || sheenRoughness.texCoord != 1u ||
+                sheenRoughness.scale != JPH::Float2 {1.0f, 1.0f} || occlusion.scale != JPH::Float2 {1.0f, 1.0f}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             // A positive rotation in top-left-origin UV space moves +U toward
@@ -1771,31 +1750,29 @@ struct GLTFImportTestSuite {
             // shader against the untransformed Sample column.
             auto apply = [](const ZHLN::MaterialTextureTransform& t, std::array<float, 2> uv) {
                 const float u = uv[0] * t.scale.x, v = uv[1] * t.scale.y;
-                return std::array<float, 2> {t.offset.x + std::cos(t.rotation) * u + std::sin(t.rotation) * v,
-                                              t.offset.y - std::sin(t.rotation) * u + std::cos(t.rotation) * v};
+                return std::array<float, 2> {
+                    t.offset.x + std::cos(t.rotation) * u + std::sin(t.rotation) * v, t.offset.y - std::sin(t.rotation) * u + std::cos(t.rotation) * v
+                };
             };
             const auto transformed = apply(albedo, {0.5f, 0.2f}); // TEXCOORD_1, not TEXCOORD_0.
-            const auto tiled = apply(pbr, {0.25f, 0.5f});
-            if (std::abs(transformed[0] + 0.4f) > 1e-4f || std::abs(transformed[1] + 0.6f) > 1e-4f ||
-                std::abs(tiled[0] - 7.5f) > 1e-4f || std::abs(tiled[1] + 15.0f) > 1e-4f) {
+            const auto tiled       = apply(pbr, {0.25f, 0.5f});
+            if (std::abs(transformed[0] + 0.4f) > 1e-4f || std::abs(transformed[1] + 0.6f) > 1e-4f || std::abs(tiled[0] - 7.5f) > 1e-4f ||
+                std::abs(tiled[1] + 15.0f) > 1e-4f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             auto& rc = engine->GetRenderContext();
-            if (material.sheenColorFactor != JPH::Float3 {0.25f, 0.5f, 0.75f} ||
-                std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
-                material.sheenColorMap == ZHLN::TextureHandle::Invalid ||
-                material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
-                material.occlusionMap == ZHLN::TextureHandle::Invalid ||
-                material.albedoMap != material.sheenColorMap || material.pbrMap != material.sheenRoughnessMap ||
-                material.sheenRoughnessMap != material.occlusionMap ||
+            if (material.sheenColorFactor != JPH::Float3 {0.25f, 0.5f, 0.75f} || std::abs(material.sheenRoughnessFactor - 0.35f) > 1e-5f ||
+                material.sheenColorMap == ZHLN::TextureHandle::Invalid || material.sheenRoughnessMap == ZHLN::TextureHandle::Invalid ||
+                material.occlusionMap == ZHLN::TextureHandle::Invalid || material.albedoMap != material.sheenColorMap ||
+                material.pbrMap != material.sheenRoughnessMap || material.sheenRoughnessMap != material.occlusionMap ||
                 std::abs(material.occlusionStrength - 0.4f) > 1e-5f || material.albedoMap == material.pbrMap ||
                 rc.GetBindlessIndex(material.sheenColorMap) <= 2 || rc.GetBindlessIndex(material.sheenRoughnessMap) <= 2 ||
                 rc.GetBindlessIndex(material.albedoMap) == rc.GetBindlessIndex(material.pbrMap)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};
-            if (defaults.sheenColorFactor != JPH::Float3 {0.0f, 0.0f, 0.0f} ||
-                defaults.sheenRoughnessFactor != 0.0f || defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
+            if (defaults.sheenColorFactor != JPH::Float3 {0.0f, 0.0f, 0.0f} || defaults.sheenRoughnessFactor != 0.0f ||
+                defaults.textureTransforms != ZHLN::MaterialTextureTransforms {}) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             return {};
@@ -1825,8 +1802,8 @@ struct GLTFImportTestSuite {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
             }
 
-            const std::vector<uint8_t> bytes  = MakeEmissiveStrengthFixture();
-            const auto                 prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "emissive_spawn.glb");
+            const std::vector<uint8_t> bytes = MakeEmissiveStrengthFixture();
+            const auto prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(engine->GetRenderContext(), engine->GetAssetManager(), bytes, "emissive_spawn.glb");
             if (!prefab || prefab->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
@@ -1839,21 +1816,19 @@ struct GLTFImportTestSuite {
 
             // 1. The default spawn adds no lights: the glow comes from the
             //    material, exactly as it would in any other glTF viewer.
-            std::array<ZHLN::Entity, 8>                  defaultEntities {};
+            std::array<ZHLN::Entity, 8>            defaultEntities {};
             const ZHLN::PrefabFactory::SpawnParams defaultParams {.position = JPH::RVec3(0.0f, 0.0f, 0.0f)};
-            const uint32_t                               defaultSpawned = ZHLN::PrefabFactory::InstantiatePrefab(
-                *engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size())
-            );
+            const uint32_t                         defaultSpawned =
+                ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, defaultParams, defaultEntities.data(), static_cast<uint32_t>(defaultEntities.size()));
             if (defaultSpawned == 0 || lightCount() != lightsBefore) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }
 
             // 2. Opting in adds exactly one light for the one emissive part.
-            std::array<ZHLN::Entity, 8>                  entities {};
-            const JPH::Vec3                              spawnPosition(4.0f, 1.0f, -2.0f);
+            std::array<ZHLN::Entity, 8>            entities {};
+            const JPH::Vec3                        spawnPosition(4.0f, 1.0f, -2.0f);
             const ZHLN::PrefabFactory::SpawnParams params {.position = JPH::RVec3(spawnPosition), .emissiveVirtualLights = true};
-            const uint32_t                               spawned =
-                ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
+            const uint32_t spawned = ZHLN::PrefabFactory::InstantiatePrefab(*engine, *prefab, params, entities.data(), static_cast<uint32_t>(entities.size()));
             if (spawned < 3 || lightCount() != lightsBefore + 1) {
                 return std::unexpected(GLTFImportError::EmissiveLightMismatch);
             }

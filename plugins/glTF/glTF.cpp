@@ -23,18 +23,18 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/Render/GpuEnums.hpp>
-#include <Zahlen/Render/Types.hpp>
 
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
@@ -316,20 +316,17 @@ void DrawModelNodeRows(
 [[nodiscard]] bool SameMaterial(const ZHLN::Material& a, const ZHLN::Material& b) noexcept {
     const bool sameMaps    = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
     const bool sameFactors = (a.baseColorFactor == b.baseColorFactor) && (a.emissiveFactor == b.emissiveFactor);
-    return sameMaps && sameFactors && (a.unlit == b.unlit) && (a.metallicFactor == b.metallicFactor) &&
-           (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
-           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.transmissionMap == b.transmissionMap) &&
-           (a.iridescenceFactor == b.iridescenceFactor) &&
-           (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&
-           (a.ior == b.ior) && (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
+    return sameMaps && sameFactors && (a.unlit == b.unlit) && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) &&
+           (a.alphaMode == b.alphaMode) && (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) &&
+           (a.transmissionMap == b.transmissionMap) && (a.iridescenceFactor == b.iridescenceFactor) && (a.filmThicknessNm == b.filmThicknessNm) &&
+           (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) && (a.ior == b.ior) &&
+           (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
            (a.volumeThicknessMap == b.volumeThicknessMap) && (a.clearcoatFactor == b.clearcoatFactor) &&
            (a.clearcoatRoughnessFactor == b.clearcoatRoughnessFactor) && (a.clearcoatNormalScale == b.clearcoatNormalScale) &&
-           (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) &&
-           (a.clearcoatNormalMap == b.clearcoatNormalMap) && (a.anisotropyStrength == b.anisotropyStrength) &&
-           (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap) &&
-           (a.sheenColorFactor == b.sheenColorFactor) && (a.sheenRoughnessFactor == b.sheenRoughnessFactor) &&
-           (a.sheenColorMap == b.sheenColorMap) && (a.sheenRoughnessMap == b.sheenRoughnessMap) &&
-           (a.occlusionMap == b.occlusionMap) && (a.occlusionStrength == b.occlusionStrength) &&
+           (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) && (a.clearcoatNormalMap == b.clearcoatNormalMap) &&
+           (a.anisotropyStrength == b.anisotropyStrength) && (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap) &&
+           (a.sheenColorFactor == b.sheenColorFactor) && (a.sheenRoughnessFactor == b.sheenRoughnessFactor) && (a.sheenColorMap == b.sheenColorMap) &&
+           (a.sheenRoughnessMap == b.sheenRoughnessMap) && (a.occlusionMap == b.occlusionMap) && (a.occlusionStrength == b.occlusionStrength) &&
            (a.textureSamplers == b.textureSamplers) && (a.textureTransforms == b.textureTransforms);
 }
 
@@ -523,6 +520,31 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
                     playing ? "stop" : "play"
                 ),
                 playing ? ThemePlaying() : ThemeText(), static_cast<int32_t>(c)
+            );
+        }
+    }
+
+    // ---- LIGHTS ----
+    const std::string lightsPath = modelPath + "/lights";
+    const bool        lightsOpen = state.expanded.contains(lightsPath);
+    TreeRow(
+        ui, state, lightsPath, depth, std::format("Lights ({})", prefab.lights.size()), !prefab.lights.empty(), "Lights",
+        std::format("{} punctual light(s) defined in model.", prefab.lights.size()), ThemeAccent()
+    );
+
+    if (lightsOpen) {
+        for (size_t i = 0; i < prefab.lights.size(); ++i) {
+            const auto&       light = prefab.lights[i];
+            const std::string lPath = std::format("{}/l{}", lightsPath, i);
+            const std::string lName = (light.name.size() > 0) ? light.name.c_str() : std::format("Light {}", i);
+
+            TreeRow(
+                ui, state, lPath, depth + 1, lName, false, std::format("Light: {}", lName),
+                std::format(
+                    "Type: {}\nColor: ({:.2f}, {:.2f}, {:.2f})\nIntensity: {:.1f}\nRange: {:.1f}", static_cast<int>(light.type), light.color.GetX(),
+                    light.color.GetY(), light.color.GetZ(), light.intensity, light.range
+                ),
+                ThemeText()
             );
         }
     }

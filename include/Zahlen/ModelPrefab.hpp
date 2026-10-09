@@ -3,11 +3,12 @@
 
 #pragma once
 
+#include "SkeletalAnimation.hpp"
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/Render/Types.hpp>
-#include "SkeletalAnimation.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -19,7 +20,7 @@ namespace ZHLN {
 
 // Artistic boost for the engine's low-exposure scene preset, not a glTF
 // requirement. Conformance imports use an explicit scale of 1 instead.
-inline constexpr float kGLTFEmissiveDisplayScale = 100.0f;
+inline constexpr float    kGLTFEmissiveDisplayScale       = 100.0f;
 inline constexpr uint32_t kGLTFDefaultMaxTextureDimension = 1024;
 
 struct ModelNode {
@@ -59,6 +60,17 @@ struct ModelPart {
     std::vector<CSGModifier> csgModifiers;
 };
 
+struct ModelLight {
+    String64  name;
+    int32_t   nodeIndex      = -1;
+    LightType type           = LightType::Point;
+    JPH::Vec3 color          = JPH::Vec3::sReplicate(1.0f);
+    float     intensity      = 1.0f;                // Candela (lm/sr) for point/spot, lux (lm/m^2) for directional
+    float     range          = 0.0f;                // 0.0f = infinite / default inverse-square falloff
+    float     innerConeAngle = 0.0f;                // For spot lights (radians)
+    float     outerConeAngle = JPH::JPH_PI * 0.25f; // For spot lights (radians)
+};
+
 struct ModelPrefab {
     String256 virtualPath;
 
@@ -74,6 +86,7 @@ struct ModelPrefab {
     std::vector<ModelNode>     nodes;
     std::vector<Skeleton>      skeletons;
     std::vector<AnimationClip> animations;
+    std::vector<ModelLight>    lights;
 
     ModelPrefab()  = default;
     ~ModelPrefab() = default;
@@ -84,4 +97,4 @@ struct ModelPrefab {
     ModelPrefab& operator=(ModelPrefab&&)      = default;
 };
 
-}
+} // namespace ZHLN

@@ -6,12 +6,12 @@
 #include "TangentGenerator.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
-#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -76,8 +76,9 @@ void WarnImport(std::string_view path, std::string_view detail) {
 
 void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path) {
     if (data.asset.version == nullptr || std::string_view(data.asset.version) != "2.0") {
-        WarnImport(path, std::format("glTF version '{}' is not 2.0; continuing best effort.",
-                                     data.asset.version != nullptr ? data.asset.version : "(missing)"));
+        WarnImport(
+            path, std::format("glTF version '{}' is not 2.0; continuing best effort.", data.asset.version != nullptr ? data.asset.version : "(missing)")
+        );
     }
     if (data.asset.min_version != nullptr && std::string_view(data.asset.min_version) != "2.0") {
         WarnImport(path, std::format("glTF minVersion '{}' differs from our supported 2.0; continuing best effort.", data.asset.min_version));
@@ -85,7 +86,7 @@ void ValidateDeclaredExtensions(const cgltf_data& data, std::string_view path) {
 
     auto report = [path](std::string_view name, bool required) {
         const auto* capability = FindExtensionCapability(name);
-        const char* status = required ? "Required" : "Used";
+        const char* status     = required ? "Required" : "Used";
         if (capability == nullptr) {
             WarnImport(path, std::format("{} extension '{}' is unsupported; attempting the core/fallback data anyway.", status, name));
         } else if (capability->support == CapabilitySupport::Partial) {
@@ -119,16 +120,20 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
     for (cgltf_size m = 0; m < data.materials_count; ++m) {
         const auto& mat = data.materials[m];
         if (mat.has_pbr_specular_glossiness && !mat.has_pbr_metallic_roughness) {
-            WarnImport(path, std::format("Material '{}' has only KHR_materials_pbrSpecularGlossiness; no core PBR fallback, so it renders gray/default.",
-                                         mat.name != nullptr ? mat.name : "(unnamed)"));
+            WarnImport(
+                path, std::format(
+                          "Material '{}' has only KHR_materials_pbrSpecularGlossiness; no core PBR fallback, so it renders gray/default.",
+                          mat.name != nullptr ? mat.name : "(unnamed)"
+                      )
+            );
         }
     }
 
     for (cgltf_size m = 0; m < data.meshes_count; ++m) {
         const auto& mesh = data.meshes[m];
         for (cgltf_size p = 0; p < mesh.primitives_count; ++p) {
-            const auto& prim = mesh.primitives[p];
-            const auto meshName = mesh.name != nullptr ? mesh.name : "(unnamed)";
+            const auto& prim     = mesh.primitives[p];
+            const auto  meshName = mesh.name != nullptr ? mesh.name : "(unnamed)";
             if (prim.type != cgltf_primitive_type_triangles) {
                 WarnImport(path, std::format("Mesh '{}' primitive {} is not TRIANGLES; drawing with triangle topology best effort.", meshName, p));
             }
@@ -136,20 +141,26 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
                 WarnImport(path, std::format("Mesh '{}' primitive {} has no POSITION; skipping this primitive, but importing the rest.", meshName, p));
             }
             if (prim.targets_count > kMaxMorphTargets) {
-                WarnImport(path, std::format("Mesh '{}' primitive {} has {} morph targets; only the first {} POSITION deltas are used.",
-                                             meshName, p, prim.targets_count, kMaxMorphTargets));
+                WarnImport(
+                    path, std::format(
+                              "Mesh '{}' primitive {} has {} morph targets; only the first {} POSITION deltas are used.", meshName, p, prim.targets_count,
+                              kMaxMorphTargets
+                          )
+                );
             }
             for (cgltf_size a = 0; a < prim.attributes_count; ++a) {
                 const auto& attr = prim.attributes[a];
-                const bool ignored = (attr.type == cgltf_attribute_type_texcoord && attr.index > 1) ||
-                                     ((attr.type == cgltf_attribute_type_color || attr.type == cgltf_attribute_type_joints ||
-                                       attr.type == cgltf_attribute_type_weights) && attr.index > 0);
+                const bool  ignored =
+                    (attr.type == cgltf_attribute_type_texcoord && attr.index > 1) ||
+                    ((attr.type == cgltf_attribute_type_color || attr.type == cgltf_attribute_type_joints || attr.type == cgltf_attribute_type_weights) &&
+                     attr.index > 0);
                 if (ignored) {
-                    WarnImport(path, std::format("Mesh '{}' primitive {} ignores attribute '{}'.", meshName, p,
-                                                 attr.name != nullptr ? attr.name : "(unnamed)"));
+                    WarnImport(
+                        path, std::format("Mesh '{}' primitive {} ignores attribute '{}'.", meshName, p, attr.name != nullptr ? attr.name : "(unnamed)")
+                    );
                 }
             }
-            bool ignoresMorphNormals = false;
+            bool ignoresMorphNormals  = false;
             bool ignoresMorphTangents = false;
             for (cgltf_size t = 0; t < std::min<cgltf_size>(prim.targets_count, kMaxMorphTargets); ++t) {
                 const auto& target = prim.targets[t];
@@ -159,8 +170,14 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
                 }
             }
             if (ignoresMorphNormals || ignoresMorphTangents) {
-                WarnImport(path, std::format("Mesh '{}' primitive {} ignores morph {} deltas; only POSITION is imported.", meshName, p,
-                                             ignoresMorphNormals && ignoresMorphTangents ? "NORMAL/TANGENT" : ignoresMorphNormals ? "NORMAL" : "TANGENT"));
+                WarnImport(
+                    path, std::format(
+                              "Mesh '{}' primitive {} ignores morph {} deltas; only POSITION is imported.", meshName, p,
+                              ignoresMorphNormals && ignoresMorphTangents ? "NORMAL/TANGENT" :
+                              ignoresMorphNormals                         ? "NORMAL" :
+                                                                            "TANGENT"
+                          )
+                );
             }
         }
     }
@@ -184,9 +201,12 @@ void ValidateFeatureUsage(const cgltf_data& data, std::string_view path) {
 
 [[nodiscard]] TextureWrap DecodeWrap(cgltf_wrap_mode mode) noexcept {
     switch (mode) {
-        case cgltf_wrap_mode_clamp_to_edge: return TextureWrap::ClampToEdge;
-        case cgltf_wrap_mode_mirrored_repeat: return TextureWrap::MirroredRepeat;
-        default: return TextureWrap::Repeat; // glTF default (also for an absent sampler).
+        case cgltf_wrap_mode_clamp_to_edge:
+            return TextureWrap::ClampToEdge;
+        case cgltf_wrap_mode_mirrored_repeat:
+            return TextureWrap::MirroredRepeat;
+        default:
+            return TextureWrap::Repeat; // glTF default (also for an absent sampler).
     }
 }
 
@@ -216,8 +236,8 @@ struct CPUPrimitiveJob {
     std::vector<VertexTangentFrame> tangentFrames;
     std::vector<VertexSurface>      surfaces;
     std::vector<VertexSkin>         skins;
-    std::vector<uint32_t>         indices;
-    uint32_t                      indexCount = 0;
+    std::vector<uint32_t>           indices;
+    uint32_t                        indexCount = 0;
 
     float localMin[3]    = {0.0f, 0.0f, 0.0f};
     float localMax[3]    = {0.0f, 0.0f, 0.0f};
@@ -239,32 +259,32 @@ struct CPUPrimitiveJob {
     float    ior                = 1.5f;
     float    normalScale        = 1.0f;
 
-    cgltf_image* albedoImage          = nullptr;
-    cgltf_image* normalImage          = nullptr;
-    cgltf_image* pbrImage             = nullptr;
-    cgltf_image* emissiveImage        = nullptr;
-    cgltf_image* transmissionImage    = nullptr;
-    cgltf_image* filmThicknessImage   = nullptr;
-    cgltf_image* iridescenceImage     = nullptr;
-    cgltf_image* volumeThicknessImage = nullptr;
-    float        clearcoatFactor          = 0.0f;
-    float        clearcoatRoughnessFactor = 0.0f;
-    float        clearcoatNormalScale     = 1.0f;
-    cgltf_image* clearcoatImage           = nullptr;
-    cgltf_image* clearcoatRoughnessImage  = nullptr;
-    cgltf_image* clearcoatNormalImage     = nullptr;
-    float        anisotropyStrength       = 0.0f;
-    float        anisotropyRotation       = 0.0f;
-    cgltf_image* anisotropyImage          = nullptr;
-    float        sheenColorFactor[3]     = {0.0f, 0.0f, 0.0f};
-    float        sheenRoughnessFactor    = 0.0f;
-    cgltf_image* sheenColorImage         = nullptr;
-    cgltf_image* sheenRoughnessImage     = nullptr;
-    cgltf_image* occlusionImage          = nullptr;
-    float        occlusionStrength       = 1.0f;
-    MaterialSamplerAddresses textureSamplers {};
+    cgltf_image*              albedoImage              = nullptr;
+    cgltf_image*              normalImage              = nullptr;
+    cgltf_image*              pbrImage                 = nullptr;
+    cgltf_image*              emissiveImage            = nullptr;
+    cgltf_image*              transmissionImage        = nullptr;
+    cgltf_image*              filmThicknessImage       = nullptr;
+    cgltf_image*              iridescenceImage         = nullptr;
+    cgltf_image*              volumeThicknessImage     = nullptr;
+    float                     clearcoatFactor          = 0.0f;
+    float                     clearcoatRoughnessFactor = 0.0f;
+    float                     clearcoatNormalScale     = 1.0f;
+    cgltf_image*              clearcoatImage           = nullptr;
+    cgltf_image*              clearcoatRoughnessImage  = nullptr;
+    cgltf_image*              clearcoatNormalImage     = nullptr;
+    float                     anisotropyStrength       = 0.0f;
+    float                     anisotropyRotation       = 0.0f;
+    cgltf_image*              anisotropyImage          = nullptr;
+    float                     sheenColorFactor[3]      = {0.0f, 0.0f, 0.0f};
+    float                     sheenRoughnessFactor     = 0.0f;
+    cgltf_image*              sheenColorImage          = nullptr;
+    cgltf_image*              sheenRoughnessImage      = nullptr;
+    cgltf_image*              occlusionImage           = nullptr;
+    float                     occlusionStrength        = 1.0f;
+    MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
-    float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float                     emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
     uint32_t           activeMorphCount       = 0;
@@ -335,10 +355,9 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
     unsigned char* pixels   = nullptr;
 
     if (job.image->buffer_view != nullptr) {
-        const auto* view = job.image->buffer_view;
-        const bool inBounds = view->data != nullptr ||
-                              (view->buffer != nullptr && view->buffer->data != nullptr && view->offset <= view->buffer->size &&
-                               view->size <= view->buffer->size - view->offset);
+        const auto* view     = job.image->buffer_view;
+        const bool  inBounds = view->data != nullptr || (view->buffer != nullptr && view->buffer->data != nullptr && view->offset <= view->buffer->size &&
+                                                         view->size <= view->buffer->size - view->offset);
         if (inBounds && view->size <= static_cast<cgltf_size>(std::numeric_limits<int>::max())) {
             if (const auto* bufferData = cgltf_buffer_view_data(view); bufferData != nullptr) {
                 pixels = stbi_load_from_memory(bufferData, static_cast<int>(view->size), &job.width, &job.height, &channels, 4);
@@ -411,14 +430,22 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
 // Extra targets beyond the shader's kMaxMorphTargets are dropped.
 [[nodiscard]] constexpr size_t AccessorFloatCount(cgltf_type type) noexcept {
     switch (type) {
-        case cgltf_type_scalar: return 1;
-        case cgltf_type_vec2: return 2;
-        case cgltf_type_vec3: return 3;
-        case cgltf_type_vec4: return 4;
-        case cgltf_type_mat2: return 4;
-        case cgltf_type_mat3: return 9;
-        case cgltf_type_mat4: return 16;
-        default: return 1;
+        case cgltf_type_scalar:
+            return 1;
+        case cgltf_type_vec2:
+            return 2;
+        case cgltf_type_vec3:
+            return 3;
+        case cgltf_type_vec4:
+            return 4;
+        case cgltf_type_mat2:
+            return 4;
+        case cgltf_type_mat3:
+            return 9;
+        case cgltf_type_mat4:
+            return 16;
+        default:
+            return 1;
     }
 }
 
@@ -427,14 +454,14 @@ void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t 
         return;
     }
 
-    const auto available = static_cast<uint32_t>(prim.targets_count);
+    const auto     available  = static_cast<uint32_t>(prim.targets_count);
     const uint32_t numTargets = std::min(available, kMaxMorphTargets);
-    job.activeMorphCount = numTargets;
+    job.activeMorphCount      = numTargets;
     job.tempDeltas.assign(numTargets * vertexCount * 4, 0.0f);
 
     for (uint32_t t = 0; t < numTargets; ++t) {
-        const cgltf_morph_target& target = prim.targets[t];
-        const cgltf_accessor* targetPosAcc = nullptr;
+        const cgltf_morph_target& target       = prim.targets[t];
+        const cgltf_accessor*     targetPosAcc = nullptr;
         for (cgltf_size a = 0; a < target.attributes_count; ++a) {
             if (target.attributes[a].type == cgltf_attribute_type_position) {
                 targetPosAcc = target.attributes[a].data;
@@ -454,9 +481,9 @@ void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t 
 
             // Bounds must contain weight 1, not only the default weight. A
             // later animation can drive the target fully on.
-            const float x = job.positions[vIdx].position[0] + delta[0];
-            const float y = job.positions[vIdx].position[1] + delta[1];
-            const float z = job.positions[vIdx].position[2] + delta[2];
+            const float x   = job.positions[vIdx].position[0] + delta[0];
+            const float y   = job.positions[vIdx].position[1] + delta[1];
+            const float z   = job.positions[vIdx].position[2] + delta[2];
             job.localMin[0] = std::min(job.localMin[0], x);
             job.localMin[1] = std::min(job.localMin[1], y);
             job.localMin[2] = std::min(job.localMin[2], z);
@@ -467,7 +494,7 @@ void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t 
     }
 
     const float* weightsSource = nullptr;
-    size_t numWeights = 0;
+    size_t       numWeights    = 0;
     if (job.node != nullptr && job.node->weights != nullptr && job.node->weights_count > 0) {
         weightsSource = job.node->weights;
         numWeights    = job.node->weights_count;
@@ -568,7 +595,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         // alphaMode: MASK must still discard holes in the surface.
         if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
             job.transmissionFactor = prim.material->transmission.transmission_factor;
-            if (!job.unlit) job.alphaBlend = true;
+            if (!job.unlit)
+                job.alphaBlend = true;
         }
         if (prim.material->has_ior) {
             job.ior = prim.material->ior.ior;
@@ -596,8 +624,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         if (job.transmissionFactor > 0.0f) {
             const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
             ZHLN::Log(
-                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f}-{:.0f} nm, volume {:.3f} m, ior {:.2f}.", matName,
-                job.transmissionFactor, job.iridescenceFactor, job.filmThicknessMinNm, job.filmThicknessNm, job.volumeThicknessM, job.ior
+                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f}-{:.0f} nm, volume {:.3f} m, ior {:.2f}.", matName, job.transmissionFactor,
+                job.iridescenceFactor, job.filmThicknessMinNm, job.filmThicknessNm, job.volumeThicknessM, job.ior
             );
         }
 
@@ -659,13 +687,16 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         }
         if (prim.material->has_sheen) {
             const auto& sheen = prim.material->sheen;
-            for (uint32_t i = 0; i < 3; ++i) job.sheenColorFactor[i] = sheen.sheen_color_factor[i];
+            for (uint32_t i = 0; i < 3; ++i)
+                job.sheenColorFactor[i] = sheen.sheen_color_factor[i];
             job.sheenRoughnessFactor = sheen.sheen_roughness_factor;
-            if (sheen.sheen_color_texture.texture != nullptr) job.sheenColorImage = sheen.sheen_color_texture.texture->image;
-            if (sheen.sheen_roughness_texture.texture != nullptr) job.sheenRoughnessImage = sheen.sheen_roughness_texture.texture->image;
+            if (sheen.sheen_color_texture.texture != nullptr)
+                job.sheenColorImage = sheen.sheen_color_texture.texture->image;
+            if (sheen.sheen_roughness_texture.texture != nullptr)
+                job.sheenRoughnessImage = sheen.sheen_roughness_texture.texture->image;
         }
         if (prim.material->occlusion_texture.texture != nullptr) {
-            job.occlusionImage = prim.material->occlusion_texture.texture->image;
+            job.occlusionImage    = prim.material->occlusion_texture.texture->image;
             job.occlusionStrength = prim.material->occlusion_texture.scale;
         }
         if (prim.material->has_anisotropy) {
@@ -695,8 +726,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     } else if (prim.material != nullptr && prim.material->has_clearcoat && prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
         tangentUvSet = job.textureTransforms[static_cast<size_t>(MaterialTextureSlot::ClearcoatNormal)].texCoord;
     }
-    const cgltf_accessor* tangentUvAcc = tangentUvSet == 0 ? uvAcc : tangentUvSet == 1 ? uv1Acc : nullptr;
-    const bool generateTangents = tangentAcc == nullptr && prim.type == cgltf_primitive_type_triangles && tangentUvAcc != nullptr;
+    const cgltf_accessor*             tangentUvAcc     = tangentUvSet == 0 ? uvAcc : tangentUvSet == 1 ? uv1Acc : nullptr;
+    const bool                        generateTangents = tangentAcc == nullptr && prim.type == cgltf_primitive_type_triangles && tangentUvAcc != nullptr;
     std::vector<std::array<float, 3>> tangentNormals;
     std::vector<std::array<float, 2>> tangentUVs;
     if (generateTangents) {
@@ -736,7 +767,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
         }
         if (generateTangents) {
             tangentNormals[vIdx] = {rawNorm[0], rawNorm[1], rawNorm[2]};
-            tangentUVs[vIdx] = tangentUvSet == 0 ? std::array {uv[0], uv[1]} : std::array {uv1[0], uv1[1]};
+            tangentUVs[vIdx]     = tangentUvSet == 0 ? std::array {uv[0], uv[1]} : std::array {uv1[0], uv1[1]};
         }
 
         float rawColor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -785,7 +816,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     if (generateTangents) {
         const auto generated = GenerateTangents(std::span {job.positions}, std::span {tangentNormals}, std::span {tangentUVs}, std::span {job.indices});
         for (size_t vIdx = 0; vIdx < generated.size(); ++vIdx) {
-            const auto& tangent = generated[vIdx];
+            const auto& tangent             = generated[vIdx];
             job.tangentFrames[vIdx].tangent = Math::PackNormal(tangent[0], tangent[1], tangent[2], tangent[3]);
         }
     }
@@ -795,8 +826,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
     const JPH::Vec3 localCenter(
         (job.localMax[0] + job.localMin[0]) * 0.5f, (job.localMax[1] + job.localMin[1]) * 0.5f, (job.localMax[2] + job.localMin[2]) * 0.5f
     );
-    float maxD2 = 0.0f;
-    auto Consider = [&](float x, float y, float z) {
+    float maxD2    = 0.0f;
+    auto  Consider = [&](float x, float y, float z) {
         const float dx = x - localCenter.GetX();
         const float dy = y - localCenter.GetY();
         const float dz = z - localCenter.GetZ();
@@ -834,8 +865,8 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
 }
 
 struct ImportedTextureRef {
-    cgltf_image* image = nullptr;
-    bool srgb = false;
+    cgltf_image*   image                                                = nullptr;
+    bool           srgb                                                 = false;
     constexpr bool operator==(const ImportedTextureRef&) const noexcept = default;
 };
 
@@ -843,8 +874,8 @@ struct ImportedTextureRef {
     MaterialTextureTransform result {};
     result.texCoord = static_cast<uint32_t>(view.has_transform && view.transform.has_texcoord ? view.transform.texcoord : view.texcoord);
     if (view.has_transform) {
-        result.offset = {view.transform.offset[0], view.transform.offset[1]};
-        result.scale = {view.transform.scale[0], view.transform.scale[1]};
+        result.offset   = {view.transform.offset[0], view.transform.offset[1]};
+        result.scale    = {view.transform.scale[0], view.transform.scale[1]};
         result.rotation = view.transform.rotation;
     }
     return result;
@@ -856,10 +887,10 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
         if (texture == nullptr) {
             return;
         }
-        image = texture->image;
-        job.textureSamplers[static_cast<size_t>(slot)] = SamplerAddress(texture);
+        image                                            = texture->image;
+        job.textureSamplers[static_cast<size_t>(slot)]   = SamplerAddress(texture);
         job.textureTransforms[static_cast<size_t>(slot)] = DecodeTextureTransform(view);
-        const bool srgb = slot == MaterialTextureSlot::Albedo || slot == MaterialTextureSlot::Emissive || slot == MaterialTextureSlot::SheenColor;
+        const bool               srgb = slot == MaterialTextureSlot::Albedo || slot == MaterialTextureSlot::Emissive || slot == MaterialTextureSlot::SheenColor;
         const ImportedTextureRef ref {image, srgb};
         if (image != nullptr && std::ranges::find(outUniqueImages, ref) == outUniqueImages.end()) {
             outUniqueImages.push_back(ref);
@@ -895,10 +926,7 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
                 }
                 if (prim.material->has_iridescence) {
                     RegisterTexture(job, prim.material->iridescence.iridescence_texture, job.iridescenceImage, MaterialTextureSlot::Iridescence);
-                    RegisterTexture(
-                        job, prim.material->iridescence.iridescence_thickness_texture, job.filmThicknessImage,
-                        MaterialTextureSlot::FilmThickness
-                    );
+                    RegisterTexture(job, prim.material->iridescence.iridescence_thickness_texture, job.filmThicknessImage, MaterialTextureSlot::FilmThickness);
                 }
                 if (prim.material->has_volume) {
                     RegisterTexture(job, prim.material->volume.thickness_texture, job.volumeThicknessImage, MaterialTextureSlot::VolumeThickness);
@@ -906,8 +934,7 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
                 if (prim.material->has_clearcoat) {
                     RegisterTexture(job, prim.material->clearcoat.clearcoat_texture, job.clearcoatImage, MaterialTextureSlot::Clearcoat);
                     RegisterTexture(
-                        job, prim.material->clearcoat.clearcoat_roughness_texture, job.clearcoatRoughnessImage,
-                        MaterialTextureSlot::ClearcoatRoughness
+                        job, prim.material->clearcoat.clearcoat_roughness_texture, job.clearcoatRoughnessImage, MaterialTextureSlot::ClearcoatRoughness
                     );
                     RegisterTexture(job, prim.material->clearcoat.clearcoat_normal_texture, job.clearcoatNormalImage, MaterialTextureSlot::ClearcoatNormal);
                 }
@@ -926,18 +953,17 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
 }
 
 void ProcessCPUTasks(
-    const std::string&               textureSearchPath,
+    const std::string&                     textureSearchPath,
     const std::vector<ImportedTextureRef>& uniqueImages,
-    std::vector<CPUPrimitiveJob>&    primitiveJobs,
-    JPH::Array<CPUTextureJob>&       outTextureJobs,
-    float                            emissiveFactorScale,
-    uint32_t                         maxTextureDimension
+    std::vector<CPUPrimitiveJob>&          primitiveJobs,
+    JPH::Array<CPUTextureJob>&             outTextureJobs,
+    float                                  emissiveFactorScale,
+    uint32_t                               maxTextureDimension
 ) {
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
         outTextureJobs[i] = {
-            .image = uniqueImages[i].image, .glbPath = textureSearchPath,
-            .isSRGB = uniqueImages[i].srgb, .maxTextureDimension = maxTextureDimension
+            .image = uniqueImages[i].image, .glbPath = textureSearchPath, .isSRGB = uniqueImages[i].srgb, .maxTextureDimension = maxTextureDimension
         };
     }
 
@@ -967,7 +993,7 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
         auto& texJob = textureJobs[i];
         if (texJob.decodedPixels != nullptr) {
             const std::string texName = std::format("{}#tex_{}", virtualPath, i);
-            const auto tex_res = ctx.CreateTexture(
+            const auto        tex_res = ctx.CreateTexture(
                 texName, std::span {texJob.decodedPixels, static_cast<size_t>(texJob.width) * texJob.height * 4},
                 {static_cast<uint32_t>(texJob.width), static_cast<uint32_t>(texJob.height)}, texJob.isSRGB
             );
@@ -982,8 +1008,12 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
             }
             imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = tex_res.value_or(TextureHandle::Invalid);
         } else {
-            WarnImport(virtualPath, std::format("Image '{}' could not be decoded; rendering without this texture.",
-                                                 texJob.image->name != nullptr ? texJob.image->name : "(unnamed)"));
+            WarnImport(
+                virtualPath,
+                std::format(
+                    "Image '{}' could not be decoded; rendering without this texture.", texJob.image->name != nullptr ? texJob.image->name : "(unnamed)"
+                )
+            );
             imageToHandle[texJob.image][texJob.isSRGB ? 1 : 0] = TextureHandle::Invalid;
         }
     }
@@ -992,22 +1022,20 @@ auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::
 }
 
 auto GetOrCreateCompiledPrimitive(
-    RenderContext&                                                 ctx,
-    const CPUPrimitiveJob&                                         primJob,
+    RenderContext&                                                        ctx,
+    const CPUPrimitiveJob&                                                primJob,
     const std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>>& imageToHandle,
-    std::unordered_map<const cgltf_primitive*, CompiledPrimitive>& primCache
+    std::unordered_map<const cgltf_primitive*, CompiledPrimitive>&        primCache
 ) -> CompiledPrimitive {
     if (const auto it = primCache.find(primJob.prim); it != primCache.end()) {
         return it->second;
     }
 
-    const BufferHandle posVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
+    const BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
     const BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
     const BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
 
-    const BufferHandle skinVbo = !primJob.skins.empty() ?
-                                     ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) :
-                                     BufferHandle::Invalid;
+    const BufferHandle skinVbo = !primJob.skins.empty() ? ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) : BufferHandle::Invalid;
 
     const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
                                                         BufferHandle::Invalid;
@@ -1015,19 +1043,17 @@ auto GetOrCreateCompiledPrimitive(
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
     // BDA by the task/mesh shaders; the vertex/index buffers above stay live
     // for BLAS builds and for the legacy vertex pipeline.
-    const bool hasMeshlets = !primJob.meshlets.Empty();
+    const bool hasMeshlets    = !primJob.meshlets.Empty();
     const auto packedMeshlets = PackMeshlets(primJob.meshlets.meshlets);
 
     BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes}) :
-                      BufferHandle::Invalid;
-    BufferHandle meshletVertexVbo =
-        hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.vertices}) :
-                      BufferHandle::Invalid;
-    BufferHandle meshletTriVbo =
-        hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
-    const bool completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid &&
-                                  meshletVertexVbo != BufferHandle::Invalid && meshletTriVbo != BufferHandle::Invalid;
+        hasMeshlets ?
+            ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes}) :
+            BufferHandle::Invalid;
+    BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.vertices}) : BufferHandle::Invalid;
+    BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
+    const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
+                                    meshletTriVbo != BufferHandle::Invalid;
     if (hasMeshlets && !completeMeshlets) {
         ctx.DestroyBuffer(meshletVbo);
         ctx.DestroyBuffer(meshletVertexVbo);
@@ -1057,59 +1083,57 @@ auto GetOrCreateCompiledPrimitive(
         }
     }
 
-    const uint32_t finalMorphOffset =
-        (primJob.activeMorphCount > 0) ?
-            ctx.AllocateMorphDeltas(std::span {primJob.tempDeltas}) :
-            0;
+    const uint32_t finalMorphOffset = (primJob.activeMorphCount > 0) ? ctx.AllocateMorphDeltas(std::span {primJob.tempDeltas}) : 0;
 
     const auto textureHandle = [&](cgltf_image* image, bool srgb = false) -> TextureHandle {
-        if (image == nullptr) return TextureHandle::Invalid;
+        if (image == nullptr)
+            return TextureHandle::Invalid;
         const auto found = imageToHandle.find(image);
         return found != imageToHandle.end() ? found->second[srgb ? 1 : 0] : TextureHandle::Invalid;
     };
 
     const Material subMaterial =
-        ctx.CreateMaterial({.doubleSided        = primJob.doubleSided,
-                            .unlit              = primJob.unlit,
-                            .alphaBlend         = primJob.alphaBlend,
-                            .alphaMode          = primJob.alphaMode,
-                            .alphaCutoff        = primJob.alphaCutoff,
-                            .metallic           = primJob.metallicFactor,
-                            .roughness          = primJob.roughnessFactor,
-                            .baseColor          = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
-                            .emissive           = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
-                            .transmissionFactor = primJob.transmissionFactor,
-                            .transmissionMap    = textureHandle(primJob.transmissionImage),
-                            .iridescenceFactor  = primJob.iridescenceFactor,
-                            .filmThicknessNm    = primJob.filmThicknessNm,
-                            .filmThicknessMinNm = primJob.filmThicknessMinNm,
-                            .volumeThicknessM   = primJob.volumeThicknessM,
-                            .ior                = primJob.ior,
-                            .normalScale        = primJob.normalScale,
-                            .albedoMap          = textureHandle(primJob.albedoImage, true),
-                            .normalMap          = textureHandle(primJob.normalImage),
-                            .pbrMap             = textureHandle(primJob.pbrImage),
-                            .emissiveMap        = textureHandle(primJob.emissiveImage, true),
-                            .filmThicknessMap   = textureHandle(primJob.filmThicknessImage),
-                            .iridescenceMap     = textureHandle(primJob.iridescenceImage),
-                            .volumeThicknessMap = textureHandle(primJob.volumeThicknessImage),
+        ctx.CreateMaterial({.doubleSided = primJob.doubleSided,
+                            .unlit       = primJob.unlit,
+                            .alphaBlend  = primJob.alphaBlend,
+                            .alphaMode   = primJob.alphaMode,
+                            .alphaCutoff = primJob.alphaCutoff,
+                            .metallic    = primJob.metallicFactor,
+                            .roughness   = primJob.roughnessFactor,
+                            .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
+                            .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+                            .transmissionFactor       = primJob.transmissionFactor,
+                            .transmissionMap          = textureHandle(primJob.transmissionImage),
+                            .iridescenceFactor        = primJob.iridescenceFactor,
+                            .filmThicknessNm          = primJob.filmThicknessNm,
+                            .filmThicknessMinNm       = primJob.filmThicknessMinNm,
+                            .volumeThicknessM         = primJob.volumeThicknessM,
+                            .ior                      = primJob.ior,
+                            .normalScale              = primJob.normalScale,
+                            .albedoMap                = textureHandle(primJob.albedoImage, true),
+                            .normalMap                = textureHandle(primJob.normalImage),
+                            .pbrMap                   = textureHandle(primJob.pbrImage),
+                            .emissiveMap              = textureHandle(primJob.emissiveImage, true),
+                            .filmThicknessMap         = textureHandle(primJob.filmThicknessImage),
+                            .iridescenceMap           = textureHandle(primJob.iridescenceImage),
+                            .volumeThicknessMap       = textureHandle(primJob.volumeThicknessImage),
                             .clearcoatFactor          = primJob.clearcoatFactor,
                             .clearcoatRoughnessFactor = primJob.clearcoatRoughnessFactor,
                             .clearcoatNormalScale     = primJob.clearcoatNormalScale,
                             .clearcoatMap             = textureHandle(primJob.clearcoatImage),
                             .clearcoatRoughnessMap    = textureHandle(primJob.clearcoatRoughnessImage),
                             .clearcoatNormalMap       = textureHandle(primJob.clearcoatNormalImage),
-                            .anisotropyStrength      = primJob.anisotropyStrength,
-                            .anisotropyRotation      = primJob.anisotropyRotation,
-                            .anisotropyMap           = textureHandle(primJob.anisotropyImage),
-                            .sheenColorFactor       = {primJob.sheenColorFactor[0], primJob.sheenColorFactor[1], primJob.sheenColorFactor[2]},
-                            .sheenRoughnessFactor   = primJob.sheenRoughnessFactor,
-                            .sheenColorMap          = textureHandle(primJob.sheenColorImage, true),
-                            .sheenRoughnessMap      = textureHandle(primJob.sheenRoughnessImage),
-                            .occlusionMap           = textureHandle(primJob.occlusionImage),
-                            .occlusionStrength      = primJob.occlusionStrength,
-                            .textureSamplers         = primJob.textureSamplers,
-                            .textureTransforms       = primJob.textureTransforms})
+                            .anisotropyStrength       = primJob.anisotropyStrength,
+                            .anisotropyRotation       = primJob.anisotropyRotation,
+                            .anisotropyMap            = textureHandle(primJob.anisotropyImage),
+                            .sheenColorFactor         = {primJob.sheenColorFactor[0], primJob.sheenColorFactor[1], primJob.sheenColorFactor[2]},
+                            .sheenRoughnessFactor     = primJob.sheenRoughnessFactor,
+                            .sheenColorMap            = textureHandle(primJob.sheenColorImage, true),
+                            .sheenRoughnessMap        = textureHandle(primJob.sheenRoughnessImage),
+                            .occlusionMap             = textureHandle(primJob.occlusionImage),
+                            .occlusionStrength        = primJob.occlusionStrength,
+                            .textureSamplers          = primJob.textureSamplers,
+                            .textureTransforms        = primJob.textureTransforms})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {
@@ -1132,8 +1156,14 @@ auto GetOrCreateCompiledPrimitive(
  * @brief Common builder that constructs and caches a ModelPrefab from loaded cgltf_data.
  * Adheres strictly to aggregate initialization and DRY across disk & memory pathways.
  */
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath,
-                      ImportOptions options) -> ZHLN::Optional<ModelPrefab&> {
+auto BuildModelPrefab(
+    RenderContext&   ctx,
+    AssetManager&    cwMgr,
+    cgltf_data*      data,
+    std::string_view virtualPath,
+    std::string_view textureSearchPath,
+    ImportOptions    options
+) -> ZHLN::Optional<ModelPrefab&> {
     // RAII guard ensures cgltf_data is cleanly freed on function exit
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> dataGuard(data, &cgltf_free);
 
@@ -1276,14 +1306,14 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
                 duration = std::max(duration, keyTimes[k]);
             }
 
-            const size_t outputCount = chan.sampler->output->count;
+            const size_t       outputCount = chan.sampler->output->count;
             std::vector<float> keyValues;
             if (pathType == AnimationPathType::Weights) {
                 // A weights output is one scalar per target per key, not a
                 // vec3. Cubic spline stores in-tangent, value, out-tangent;
                 // the sampler reads values only.
-                const size_t elemComps   = AccessorFloatCount(chan.sampler->output->type);
-                const size_t totalFloats = outputCount * elemComps;
+                const size_t       elemComps   = AccessorFloatCount(chan.sampler->output->type);
+                const size_t       totalFloats = outputCount * elemComps;
                 std::vector<float> raw(totalFloats, 0.0f);
                 for (size_t k = 0; k < outputCount; ++k) {
                     cgltf_accessor_read_float(chan.sampler->output, k, &raw[k * elemComps], elemComps);
@@ -1326,10 +1356,42 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
     }
 
     // ------------------------------------------------------------------------
+    // Extract KHR_lights_punctual
+    // ------------------------------------------------------------------------
+    for (cgltf_size i = 0; i < data->nodes_count; ++i) {
+        const auto* node = &data->nodes[i];
+        if (node->light == nullptr) {
+            continue;
+        }
+
+        const auto* gltfLight = node->light;
+
+        if (gltfLight->type != cgltf_light_type_directional && gltfLight->type != cgltf_light_type_point && gltfLight->type != cgltf_light_type_spot) {
+            continue; // Still need a guard for unknown types anyway, lol. I could use a simple switch case but screw that.
+        }
+
+        const ModelLight light {
+            .name      = (gltfLight->name != nullptr) ? String64(gltfLight->name) : String64("Light"),
+            .nodeIndex = nodeMap[node],
+            .type      = (gltfLight->type == cgltf_light_type_directional) ? LightType::Directional :
+                         (gltfLight->type == cgltf_light_type_point)       ? LightType::Point :
+                                                                             LightType::Spot,
+
+            .color          = JPH::Vec3(gltfLight->color[0], gltfLight->color[1], gltfLight->color[2]),
+            .intensity      = gltfLight->intensity,
+            .range          = gltfLight->range,
+            .innerConeAngle = (gltfLight->type == cgltf_light_type_spot) ? gltfLight->spot_inner_cone_angle : 0.0f,
+            .outerConeAngle = (gltfLight->type == cgltf_light_type_spot) ? gltfLight->spot_outer_cone_angle : 0.0f,
+        };
+
+        prefab->lights.push_back(light);
+    }
+
+    // ------------------------------------------------------------------------
     // 4. Process GPU Textures & Geometry
     // ------------------------------------------------------------------------
     std::vector<ImportedTextureRef> uniqueImages;
-    std::vector<CPUPrimitiveJob> primitiveJobs;
+    std::vector<CPUPrimitiveJob>    primitiveJobs;
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
@@ -1411,7 +1473,7 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
     }
 
     std::vector<ImportedTextureRef> uniqueImages;
-    std::vector<CPUPrimitiveJob> primitiveJobs;
+    std::vector<CPUPrimitiveJob>    primitiveJobs;
     GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
 
     JPH::Array<CPUTextureJob> textureJobs;
@@ -1433,9 +1495,7 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
 }
 
 [[nodiscard]] auto NeedsGPURefresh(const ModelPrefab& prefab) noexcept -> bool {
-    return std::any_of(prefab.parts.begin(), prefab.parts.end(), [](const ModelPart& part) {
-        return part.mesh.posBuffer == BufferHandle::Invalid;
-    });
+    return std::any_of(prefab.parts.begin(), prefab.parts.end(), [](const ModelPart& part) { return part.mesh.posBuffer == BufferHandle::Invalid; });
 }
 
 [[nodiscard]] bool MatchesCachedImportOptions(ZHLN::Optional<const ModelPrefab&> cached, std::string_view path, ImportOptions options) {
@@ -1597,12 +1657,12 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
 }
 
 auto InstantiatePrefabFromMemory(
-    Engine&                                  engine,
-    std::span<const uint8_t>                 bytes,
-    std::string_view                         virtualPath,
+    Engine&                           engine,
+    std::span<const uint8_t>          bytes,
+    std::string_view                  virtualPath,
     const PrefabFactory::SpawnParams& params,
-    Entity*                                  outBuffer,
-    uint32_t                                 maxCount
+    Entity*                           outBuffer,
+    uint32_t                          maxCount
 ) -> uint32_t {
     const auto prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
     if (!prefab) {
@@ -1630,11 +1690,7 @@ void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr) {
 }
 
 void InstallDeviceLostHandler(Engine& engine) {
-    engine.AddDeviceLostCallback(
-        [](Engine& e) {
-            RebuildCachedPrefabs(e.GetRenderContext(), e.GetAssetManager());
-        }
-    );
+    engine.AddDeviceLostCallback([](Engine& e) { RebuildCachedPrefabs(e.GetRenderContext(), e.GetAssetManager()); });
 }
 
 } // namespace ZHLN::GLTF
