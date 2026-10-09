@@ -118,7 +118,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     return {};
 }
 
-auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget> {
+auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> PresentationOutcome<SwapchainTarget> {
     if (_ctx == nullptr) {
         return std::unexpected(PresentationError::ContextInvalid);
     }
@@ -204,7 +204,7 @@ auto SwapchainPresenter::Present(
     ExecutableCommands                     cmds,
     uint32_t                               imageIndex,
     std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> FrameOutcome<PresentSuboptimal> {
+    ) noexcept -> PresentationOutcome<PresentSuboptimal> {
     if (!cmds) {
         return std::unexpected(CommandRecordingError::NotExecutable);
     }
@@ -248,7 +248,7 @@ auto SwapchainPresenter::Present(
         timed_chain.emplace(*prediction);
         present_id = &timed_chain->presentId;
     }
-    const auto present_frame = [&](const VkPresentId2KHR* id) -> FrameOutcome<PresentSuboptimal> {
+    const auto present_frame = [&](const VkPresentId2KHR* id) -> PresentationOutcome<PresentSuboptimal> {
         const VkPresentInfoKHR info {
             .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext              = id,

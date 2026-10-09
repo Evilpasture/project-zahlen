@@ -6,7 +6,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Render/PresentTiming.hpp>
+#include <Zahlen/Core/PresentTiming.hpp>
 #include <volk.h>
 #include <array>
 #include <cstdint>

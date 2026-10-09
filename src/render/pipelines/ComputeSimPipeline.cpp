@@ -114,12 +114,12 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     );
 
     if (!submitted) [[unlikely]] {
-        if (submitted.error().Is(FrameResult::DeviceLost)) {
+        if (Vk::IsDeviceLost(submitted.error())) {
             impl.ctx.Instance().IncrementDeviceLost();
         } else {
             ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());
         }
-        return std::unexpected(submitted.error());
+        return std::unexpected(AsFrameError(submitted.error()));
     }
 
     impl.presenter.sync.MarkComputeSubmitted(slot);

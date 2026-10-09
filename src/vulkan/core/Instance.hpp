@@ -10,7 +10,7 @@
 #include "../diagnostics/GPUAddressTracker.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Render/Diagnostics.hpp>
+#include <Zahlen/Core/Diagnostics.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>

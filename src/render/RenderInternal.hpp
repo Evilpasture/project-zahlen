@@ -102,6 +102,10 @@ struct IBLPayload {
 
 namespace ZHLN {
 
+[[nodiscard]] inline auto AsFrameError(ErrorCode code) noexcept -> ErrorCode {
+    return Vk::IsDeviceLost(code) ? ErrorCode {FrameResult::DeviceLost} : code;
+}
+
 void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 
 namespace Diag {

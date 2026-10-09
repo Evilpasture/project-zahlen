@@ -30,12 +30,12 @@ namespace {
 
     // 3. Hard error (Device lost, fatal Vulkan error)
     if (!acquired) {
-        if (acquired.error().Is(FrameResult::DeviceLost)) {
+        if (Vk::IsDeviceLost(acquired.error())) {
             instance.IncrementDeviceLost();
         }
         destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
-        return std::unexpected(acquired.error());
+        return std::unexpected(AsFrameError(acquired.error()));
     }
 
     // 4. Benign skip (Minimized window 0x0, out-of-date swapchain rebuilt)
@@ -209,7 +209,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
         return;
     }
     if (ctx.Device() != VK_NULL_HANDLE) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
             ctx.Instance().IncrementDeviceLost();
         }
     }
@@ -218,7 +218,7 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && Vk::IsDeviceLost(waited.error())) {
             ctx.Instance().IncrementDeviceLost();
         }
     }

@@ -85,11 +85,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         destPresenter.PreparePresent(recording->recorder, dest.acquired->imageIndex, currentLayout);
         auto executable = std::move(recording->recorder).End();
         if (!executable) {
-            if (executable.error().Is(FrameResult::DeviceLost)) {
+            if (Vk::IsDeviceLost(executable.error())) {
                 ctx.Instance().IncrementDeviceLost();
-                return std::unexpected(executable.error());
+                return std::unexpected(AsFrameError(executable.error()));
             }
-            if (!firstError) { firstError = executable.error(); }
+            if (!firstError) { firstError = AsFrameError(executable.error()); }
             dest.acquired.reset();
             destPresenter.AdvanceFrame();
             continue;
@@ -99,9 +99,9 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount}
         );
         if (!presented) {
-            if (presented.error().Is(FrameResult::DeviceLost)) {
+            if (Vk::IsDeviceLost(presented.error())) {
                 ctx.Instance().IncrementDeviceLost();
-                return std::unexpected(presented.error());
+                return std::unexpected(AsFrameError(presented.error()));
             }
             if (!firstError) {
                 firstError = presented.error();

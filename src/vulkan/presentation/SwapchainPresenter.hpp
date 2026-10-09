@@ -6,10 +6,10 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "PresentationOutcome.hpp"
 #include "PresentPacer.hpp"
+#include <Zahlen/Core/PresentTiming.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render/FrameResult.hpp>
-#include <Zahlen/Render/PresentTiming.hpp>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -72,7 +72,7 @@ class SwapchainPresenter {
     // Destruction requires all submitted frames to have completed.
     void Cleanup() noexcept;
 
-    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
+    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> PresentationOutcome<SwapchainTarget>;
 
     // The swapchain transition must be recorded BEFORE the recorder is ended.
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
@@ -83,7 +83,7 @@ class SwapchainPresenter {
         ExecutableCommands                     cmds,
         uint32_t                               imageIndex,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
-    ) noexcept -> FrameOutcome<PresentSuboptimal>;
+    ) noexcept -> PresentationOutcome<PresentSuboptimal>;
 
     void AdvanceFrame() noexcept {
         frameIndex = NextFrameSlot(frameIndex);

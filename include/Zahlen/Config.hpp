@@ -5,7 +5,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Render/Diagnostics.hpp>
+#include <Zahlen/Core/Diagnostics.hpp>
 #include <bit>
 #include <cstdint>
 #include <string>

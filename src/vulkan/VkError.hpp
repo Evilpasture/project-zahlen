@@ -6,7 +6,7 @@
  * src/vulkan included. VkResult is a foreign code (it has a 0 enumerator,
  * which ErrorCode forbids), so raw VkResults convert through ToError at the
  * point of the Vulkan call; a device-lost result is reported as
- * FrameResult::DeviceLost, where the render layer expects it.
+ * DeviceFault::Lost. The render layer maps that to FrameResult::DeviceLost.
  */
 
 #pragma once
@@ -17,8 +17,8 @@
 
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
+#include "PresentationOutcome.hpp"
 #include <Zahlen/Core/ErrorCode.hpp>
-#include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 #include <string_view>
 #include <vulkan/vulkan_core.h>
@@ -34,7 +34,7 @@ inline constexpr ErrorCategory kCategory     = {
 
 [[nodiscard]] constexpr auto ToError(VkResult result) noexcept -> ErrorCode {
     if (result == VK_ERROR_DEVICE_LOST) {
-        return ErrorCode{FrameResult::DeviceLost};
+        return ErrorCode {DeviceFault::Lost};
     }
     if !consteval {
         ZHLN::RegisterErrorCategory(kCategoryHash, &kCategory);

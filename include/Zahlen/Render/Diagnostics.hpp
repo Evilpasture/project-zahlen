@@ -3,20 +3,4 @@
 
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-
-namespace ZHLN {
-
-// Explicit diagnostics sink: the caller owns the counters, the renderer
-// writes to them. Passed through RenderConfig; never ambient state.
-struct DiagnosticsSink {
-    std::atomic<uint32_t>* validation = nullptr;
-    std::atomic<uint32_t>* deviceLost = nullptr;
-
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return validation != nullptr && deviceLost != nullptr;
-    }
-};
-
-} // namespace ZHLN
+#include <Zahlen/Core/Diagnostics.hpp>
