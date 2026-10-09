@@ -10,6 +10,7 @@
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Input.hpp"
+#include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 
@@ -79,7 +80,7 @@ void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) 
     auto& reg = engine.GetRegistry();
 
     Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
-    if (camEnt != Entity::Null() && reg.Get<Components::FreeCamTagComponent>(camEnt)) {
+    if (camEnt != Entity::Null() && reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
         // Zero out player intent so they stand frozen in an Idle pose
         for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
             if (auto move = reg.Get<MovementComponent>(e)) {

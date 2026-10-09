@@ -175,7 +175,6 @@ struct RayTracedNoiseStabilityTestSuite {
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Remove<ZHLN::Components::FreeCamTagComponent>(e);
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [mode](auto& aa) {
                 aa.state.mode        = mode;
                 aa.state.jitterX     = 0.0f;

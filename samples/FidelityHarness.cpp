@@ -752,7 +752,6 @@ auto main(int argc, char* argv[]) -> int {
         auto&              registry = engine->GetRegistry();
         const ZHLN::Entity camera   = registry.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
-            registry.Remove<ZHLN::Components::FreeCamTagComponent>(camera);
         }
         // Before the import, so a light the default scene attached cannot
         // light the first frames. The import is stripped again below.

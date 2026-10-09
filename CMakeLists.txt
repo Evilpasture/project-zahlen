@@ -459,6 +459,7 @@ if(ZHLN_BUILD_EXTRAS)
     zahlen_fonts
     zahlen_ui_schema
     zahlen_camera
+    zahlen_freecam
     zahlen_ragdoll_authoring
   )
 
@@ -489,6 +490,10 @@ if(ZHLN_BUILD_EXTRAS)
     if(TARGET zahlen_camera)
         target_link_libraries(zahlen PRIVATE zahlen_camera)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CAMERA=1)
+    endif()
+    if(TARGET zahlen_freecam)
+        target_link_libraries(zahlen PRIVATE zahlen_freecam)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FREECAM=1)
     endif()
     if(TARGET zahlen_interaction)
         target_link_libraries(zahlen PRIVATE zahlen_interaction)

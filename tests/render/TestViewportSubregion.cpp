@@ -151,7 +151,6 @@ void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
         // is inert when no sibling suite installed the rig, and when the rig
         // is present its frame step re-seeds the boot default -- a Null
         // target that takes no drive anyway.
-        reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnt);
         reg.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
     }

@@ -19,9 +19,14 @@
 namespace ZHLN::FreeCam {
 namespace {
 
+struct FreeCamOptOutComponent {};
+
 void Drive(Components::CameraComponent& cc, const Components::InputStateComponent& input, const FreeCamComponent& knobs, float dt) {
-    Camera&           cam  = cc.camera;
-    const float       look = knobs.lookSensitivity;
+    if (!knobs.enabled) {
+        return;
+    }
+    Camera&     cam  = cc.camera;
+    const float look = knobs.lookSensitivity;
     if (input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
         cam.yaw += input.GetMouseDeltaX() * look;
         cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * look), -89.0f, 89.0f);
@@ -30,7 +35,7 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     const float yawRad   = JPH::DegreesToRadians(cam.yaw);
     const float pitchRad = JPH::DegreesToRadians(cam.pitch);
     JPH::Vec3   forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-    forward = forward.Normalized();
+    forward         = forward.Normalized();
     JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY());
     if (right.LengthSq() > 1e-8f) {
         right = right.Normalized();
@@ -57,24 +62,55 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     if (input.IsKeyDown(static_cast<uint8_t>(KeyCode::Q))) {
         move -= up;
     }
-    if (move.LengthSq() > 0.0f) {
+    if (move.LengthSq() > 0.0f && dt > 0.0f) {
         cam.position += move.Normalized() * speed * dt;
     }
 }
 
-void FreeCamStep(Engine& engine, float dt, FrameContext&) {
+Entity MainCamera(ECS::Registry& reg) {
+    return reg.SingletonEntity<Components::MainCameraTagComponent>();
+}
+
+void SeedBootCamera(ECS::Registry& reg) {
+    const Entity camera = MainCamera(reg);
+    if (camera == Entity::Null()) {
+        return;
+    }
+    if (reg.Get<FreeCamOptOutComponent>(camera)) {
+        return;
+    }
+    if (!reg.Get<FreeCamTagComponent>(camera)) {
+        reg.Add(camera, FreeCamTagComponent {});
+    }
+    if (!reg.Get<FreeCamComponent>(camera)) {
+        reg.Add(camera, FreeCamComponent {});
+    }
+}
+
+} // namespace
+
+void Apply(Engine& engine, float dt) {
     auto& reg   = engine.GetRegistry();
     auto  input = reg.GetSingleton<Components::InputStateComponent>();
     if (!input) {
         return;
     }
-
-    for (Entity e: reg.GetEntitiesWith<Components::FreeCamTagComponent>()) {
-        auto knobs = reg.Get<FreeCamComponent>(e);
+    for (Entity e: reg.GetEntitiesWith<FreeCamTagComponent>()) {
+        auto                   knobs = reg.Get<FreeCamComponent>(e);
         const FreeCamComponent defaults {};
         const FreeCamComponent& cfg = knobs ? *knobs : defaults;
         reg.Patch<Components::CameraComponent>(e, [&](auto& cc) -> auto { Drive(cc, *input, cfg, dt); });
     }
+}
+
+namespace {
+
+void FreeCamStep(Engine& engine, float dt, FrameContext&) {
+    SeedBootCamera(engine.GetRegistry());
+    if (dt <= 0.0f) {
+        return;
+    }
+    Apply(engine, dt);
 }
 
 void AddFrameStep(FrameScheduler& scheduler) {
@@ -91,22 +127,39 @@ void AddFrameStep(FrameScheduler& scheduler) {
 } // namespace
 
 void Install(Engine& engine) {
-    engine.GetRegistry().RegisterComponent<FreeCamComponent>();
+    auto& reg = engine.GetRegistry();
+    reg.RegisterComponent<FreeCamTagComponent>();
+    reg.RegisterComponent<FreeCamComponent>();
+    reg.RegisterComponent<FreeCamOptOutComponent>();
     engine.AddFrameSchedulerExtension(&AddFrameStep);
 }
 
 void Attach(Engine& engine, float speed) {
-    auto&              reg    = engine.GetRegistry();
-    const ZHLN::Entity camera = reg.SingletonEntity<Components::MainCameraTagComponent>();
+    auto&        reg    = engine.GetRegistry();
+    const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
         return;
     }
-    if (!reg.Get<Components::FreeCamTagComponent>(camera)) {
-        reg.Add(camera, Components::FreeCamTagComponent {});
+    reg.Remove<FreeCamOptOutComponent>(camera);
+    if (!reg.Get<FreeCamTagComponent>(camera)) {
+        reg.Add(camera, FreeCamTagComponent {});
     }
     if (!reg.Patch<FreeCamComponent>(camera, [speed](auto& fc) -> auto { fc.speed = speed; })) {
         reg.Add(camera, FreeCamComponent {.speed = speed});
     }
+}
+
+void Detach(Engine& engine) {
+    auto&        reg    = engine.GetRegistry();
+    const Entity camera = MainCamera(reg);
+    if (camera == Entity::Null()) {
+        return;
+    }
+    if (!reg.Get<FreeCamOptOutComponent>(camera)) {
+        reg.Add(camera, FreeCamOptOutComponent {});
+    }
+    reg.Remove<FreeCamTagComponent>(camera);
+    reg.Remove<FreeCamComponent>(camera);
 }
 
 } // namespace ZHLN::FreeCam

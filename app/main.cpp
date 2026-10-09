@@ -71,6 +71,9 @@
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
 #endif
+#if defined(ZHLN_HAS_FREECAM)
+#include <FreeCam/FreeCam.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -142,6 +145,9 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // position and subscribes the preset's teardown hook.
     ZHLN::FallbackScene::Install(engine);
 #endif
+#if defined(ZHLN_HAS_FREECAM)
+    ZHLN::FreeCam::Install(engine);
+#endif
 }
 
 #if defined(ZHLN_HAS_EDITOR)
@@ -204,74 +210,6 @@ void SaveScene(ZHLN::Engine& engine) {
 
 constexpr float kLeftPanelWidth  = 260.0f;
 constexpr float kRightPanelWidth = 320.0f;
-
-void UpdateEditorCamera(ZHLN::Camera& cam, const ZHLN::Components::InputStateComponent& state, float dt, bool transformActive) {
-    // A modal transform owns the pointer and the axis keys; the fly camera
-    // would otherwise fight the manipulation for the same input. The flag is
-    // the pre-update sample: on the frame an LMB/Esc ends the mode the camera
-    // must not also act on whatever movement keys happen to be down.
-    if (transformActive) {
-        return;
-    }
-    const float sensitivity = 0.15f;
-
-    // TEMP-DIAG (camera jump investigation): record the pre-state so an
-    // uncaused move can be logged below.
-    const JPH::Vec3 camPos0 = cam.position;
-    const float     camYaw0 = cam.yaw;
-    const float     camPit0 = cam.pitch;
-
-    const bool uiCapturesMouse    = state.wantCaptureMouse;
-    const bool uiCapturesKeyboard = state.wantCaptureKeyboard;
-
-    if (state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton)) && !uiCapturesMouse) {
-        cam.yaw += state.mouseDeltaX * sensitivity;
-        cam.pitch = std::clamp(cam.pitch - (state.mouseDeltaY * sensitivity), -89.0f, 89.0f);
-    }
-
-    if (uiCapturesKeyboard) {
-        return;
-    }
-
-    float yawRad   = JPH::DegreesToRadians(cam.yaw);
-    float pitchRad = JPH::DegreesToRadians(cam.pitch);
-
-    JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-    forward         = forward.Normalized();
-    JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
-
-    float moveSpeed = state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LShift)) ? (s_EditorState.freeCamSpeed * 2.5f) : s_EditorState.freeCamSpeed;
-
-    JPH::Vec3 moveDirection = JPH::Vec3::sZero();
-    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::W))) {
-        moveDirection += forward;
-    }
-    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S))) {
-        moveDirection -= forward;
-    }
-    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::A))) {
-        moveDirection -= right;
-    }
-    if (state.IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::D))) {
-        moveDirection += right;
-    }
-
-    if (moveDirection.LengthSq() > 0.0f) {
-        cam.position += moveDirection.Normalized() * moveSpeed * dt;
-    }
-
-    // TEMP-DIAG (camera jump investigation): the reported jump is a camera
-    // move with no RMB orbit and no WASD; dump the full input state then.
-    const bool camMoved = (cam.position - camPos0).LengthSq() > 0.0f || cam.yaw != camYaw0 || cam.pitch != camPit0;
-    const bool rmbHeld  = state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton));
-    if (camMoved && !rmbHeld && moveDirection.LengthSq() == 0.0f) {
-        ZHLN::Log(
-            "[DIAG-cam] uncaused move: pos ({},{},{}) -> ({},{},{})  yaw {} -> {}  pitch {} -> {}  delta=({},{}) lmb={} capM={} capK={}", camPos0.GetX(),
-            camPos0.GetY(), camPos0.GetZ(), cam.position.GetX(), cam.position.GetY(), cam.position.GetZ(), camYaw0, cam.yaw, camPit0, cam.pitch,
-            state.mouseDeltaX, state.mouseDeltaY, state.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton)), uiCapturesMouse, uiCapturesKeyboard
-        );
-    }
-}
 
 ZHLN::Physics::RaycastResult CastPickingRay(ZHLN::Engine& engine, const ZHLN::Camera& cam, const ZHLN::RenderContext::ViewportRect& vp) {
     auto& reg    = engine.GetRegistry();
@@ -604,6 +542,14 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             continue;
         }
 
+        #if defined(ZHLN_HAS_FREECAM)
+        {
+            const ZHLN::Entity camEnt = engine.GetRegistry().SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+            if (camEnt != ZHLN::Entity::Null()) {
+                engine.GetRegistry().Patch<ZHLN::FreeCam::FreeCamComponent>(camEnt, [&](auto& fc) -> auto { fc.enabled = !transformActive; });
+            }
+        }
+#endif
         if (s_EditorState.simulationRunning) {
             ZHLN::GameplayStatus status = engine.Tick(frameTime, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
@@ -611,10 +557,11 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
                 break;
             }
         } else {
-            if (state) {
-                UpdateEditorCamera(cam, *state, frameTime, transformActive);
+#if defined(ZHLN_HAS_FREECAM)
+            if (!transformActive) {
+                ZHLN::FreeCam::Apply(engine, frameTime);
             }
-
+#endif
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
                 engine.GetPlatformHost().Close();

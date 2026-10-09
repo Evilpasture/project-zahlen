@@ -1869,7 +1869,6 @@ void ClientSession::UpdateLocalController(Engine& engine) {
     auto bindCamera = [&](Entity target) -> void {
         if (target == Entity::Null()) return;
         for (Entity camera: registry.GetEntitiesWith<Components::MainCameraTagComponent>()) {
-            registry.Remove<Components::FreeCamTagComponent>(camera);
             registry.Patch<CameraRig::TargetCameraComponent>(camera, [&](auto& rig) {
                 if (rig.target != target) {
                     rig.target = target;

@@ -200,7 +200,6 @@ struct RTRPBRReflectionTestSuite {
     static void DisableTAAAndFreeCam(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-            reg.Remove<ZHLN::Components::FreeCamTagComponent>(e);
             reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
                 aa.state.mode        = ZHLN::AAMode::None;
                 aa.state.jitterX     = 0.0f;

@@ -247,7 +247,6 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.thirdPersonSaved  = true;
         state.lookYawOffset     = 0.0f;
         state.lookPitchOffset   = 0.0f;
-        registry.Remove<ZHLN::Components::FreeCamTagComponent>(state.cameraEntity);
         registry.Remove<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
         if (auto lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
             state.thirdPersonLookAtWeight = lookAt->weight;

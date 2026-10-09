@@ -787,13 +787,6 @@ void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
     engine.InitializeDefaultScene();
-    {
-        auto& reg     = engine.GetRegistry();
-        auto  camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
-        if (!camEnts.empty()) {
-            reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnts[0]);
-        }
-    }
 
     auto* state   = new InspectorState();
     state->engine = &engine;

@@ -62,7 +62,6 @@ struct PpmImage {
 
 void DisableJitterAndVignette(ZHLN::ECS::Registry& reg) {
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-        reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnt);
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
     }
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();

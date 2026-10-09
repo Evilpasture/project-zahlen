@@ -226,7 +226,6 @@ struct PBRTestSuite {
             auto& rc  = engine->GetRenderContext();
 
             for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-                reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnt);
                 reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
             }
 
@@ -435,7 +434,6 @@ struct PBRTestSuite {
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
             for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
-                reg.Remove<ZHLN::Components::FreeCamTagComponent>(camera);
             }
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
                 pp.giMode = 0;
@@ -584,7 +582,6 @@ struct PBRTestSuite {
             const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
             if (settings == ZHLN::Entity::Null()) return std::unexpected(PBRTestError::EngineInitFailed);
             for (const ZHLN::Entity camera: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>())
-                reg.Remove<ZHLN::Components::FreeCamTagComponent>(camera);
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [](auto& pp) {
                 pp.giMode = 0;
                 pp.ambientExposure = 1.0f;

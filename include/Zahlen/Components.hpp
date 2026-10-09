@@ -194,7 +194,6 @@ struct Components {
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
     struct SunTagComponent {};
-    struct FreeCamTagComponent {};
     struct GlobalSettingsTagComponent {};
     struct AASettingsComponent {
         AAState state {};

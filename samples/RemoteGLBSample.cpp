@@ -1539,7 +1539,6 @@ auto main(int argc, char* argv[]) -> int {
         auto&              reg    = engine->GetRegistry();
         const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
         if (camera != ZHLN::Entity::Null()) {
-            reg.Remove<ZHLN::Components::FreeCamTagComponent>(camera);
         }
     }
 

@@ -196,8 +196,7 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
     reg.Create(
-        Components::MainCameraTagComponent {}, Components::CameraComponent {},
-        Components::AASettingsComponent {}, Components::FreeCamTagComponent {}
+        Components::MainCameraTagComponent {}, Components::CameraComponent {}, Components::AASettingsComponent {}
     );
 
     // A scene reset clears the registry, so the engine-level singletons World::Create()

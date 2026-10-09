@@ -34,6 +34,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # scheduler extension seam.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_freecam
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

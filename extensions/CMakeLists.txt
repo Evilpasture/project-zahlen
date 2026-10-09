@@ -8,9 +8,9 @@
 # The order below is intentional where one target publishes another's API.
 # CharacterController and Camera precede Animation; networking follows the
 # Plugins serializer so GitHub can use JSON; scripting precedes Console.
+add_subdirectory(FreeCam)
 add_subdirectory(CharacterController)
 add_subdirectory(Camera)
-add_subdirectory(FreeCam)
 add_subdirectory(Animation)
 
 add_subdirectory(net)

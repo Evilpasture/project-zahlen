@@ -19,6 +19,7 @@ module;
 #include <Zahlen/Components.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
+#include <FreeCam/FreeCam.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -264,9 +265,8 @@ auto SpawnCharacter(
     // component lives in extensions/Camera: this is gameplay camera policy the
     // spawner authors explicitly (a host that wants no follow camera removes
     // the component afterwards; nothing in core re-creates one it was given).
+    FreeCam::Detach(engine);
     for (Entity camEnt: reg.GetEntitiesWith<Components::MainCameraTagComponent>()) {
-        reg.Remove<Components::FreeCamTagComponent>(camEnt);
-
         reg.Add(
             camEnt,
             CameraRig::TargetCameraComponent {

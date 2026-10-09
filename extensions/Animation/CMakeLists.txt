@@ -79,6 +79,7 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
     zahlen_character_controller
     zahlen_camera
+    zahlen_freecam
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

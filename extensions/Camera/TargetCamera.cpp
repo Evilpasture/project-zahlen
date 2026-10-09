@@ -10,6 +10,7 @@
 #include "Zahlen/FrameScheduler.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
+#include <FreeCam/FreeCam.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
@@ -47,6 +48,7 @@ namespace ZHLN::CameraRig {
 void TargetCameraSystem::Update(
     ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity)
 ) noexcept {
+    (void)speedQuery;
     auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
@@ -55,59 +57,8 @@ void TargetCameraSystem::Update(
     Entity camEnt = cameraEntities[0];
 
     reg.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
-        // 1. FREE-CAM INTERCEPTION BRANCH
-        if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
-            auto state = reg.GetSingleton<Components::InputStateComponent>();
-            if (!state) {
-                return;
-            }
-
-            // The tracked entity's configured movement speed is reported by
-            // the installed speed query (the character controller provides
-            // it when present). No query (or a nullopt answer) keeps the
-            // 12 m/s default.
-            float baseSpeed = 12.0f;
-            if (speedQuery != nullptr && reg.IsAlive(camComp.target)) {
-                if (auto queried = speedQuery(reg, camComp.target)) {
-                    baseSpeed = *queried;
-                }
-            }
-
-            const float speed       = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (baseSpeed * 2.0f) : baseSpeed;
-            const float sensitivity = 0.15f;
-
-            if (state->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
-                cam.yaw += state->GetMouseDeltaX() * sensitivity;
-                cam.pitch = std::clamp(cam.pitch - (state->GetMouseDeltaY() * sensitivity), -89.0f, 89.0f);
-            }
-
-            float     yawRad   = JPH::DegreesToRadians(cam.yaw);
-            float     pitchRad = JPH::DegreesToRadians(cam.pitch);
-            JPH::Vec3 forward(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));
-            forward         = forward.Normalized();
-            JPH::Vec3 right = forward.Cross(JPH::Vec3::sAxisY()).Normalized();
-
-            JPH::Vec3 moveDirection = JPH::Vec3::sZero();
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
-                moveDirection += forward;
-            }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::S))) {
-                moveDirection -= forward;
-            }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::A))) {
-                moveDirection -= right;
-            }
-            if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::D))) {
-                moveDirection += right;
-            }
-
-            if (moveDirection.LengthSq() > 0.0f) {
-                cam.position += moveDirection.Normalized() * speed * dt;
-            }
-
-            camComp.yaw             = cam.yaw;
-            camComp.pitch           = cam.pitch;
-            camComp.smoothTargetPos = cam.position;
+        // Fly-cam owns pose while the tag is present; skip the orbit.
+        if (reg.Get<FreeCam::FreeCamTagComponent>(camEnt)) {
             return;
         }
 

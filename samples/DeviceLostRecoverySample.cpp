@@ -40,6 +40,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <FreeCam/FreeCam.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
@@ -205,6 +206,7 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::LogWarning("Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
+    ZHLN::FreeCam::Install(*engine);
     engine->InitializeDefaultScene();
 
     std::vector<ZHLN::Entity> arena;
@@ -246,12 +248,6 @@ auto main(int argc, char* argv[]) -> int {
                 if (st.needsResize) {
                     engine->GetRenderContext().SetResolution(st.newSize);
                     st.needsResize = false;
-                }
-                if (st.IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
-                    if (auto cameraComp = registry.GetSingleton<ZHLN::Components::CameraComponent>()) {
-                        cameraComp->camera.yaw += st.GetMouseDeltaX() * 0.15f;
-                        cameraComp->camera.pitch = std::clamp(cameraComp->camera.pitch - (st.GetMouseDeltaY() * 0.15f), -85.0f, 85.0f);
-                    }
                 }
             });
         }
