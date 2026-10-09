@@ -133,9 +133,6 @@ if(ZHLN_NO_ANNOTATION_EXTRACT)
     add_compile_definitions(ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
 
-option(ZHLN_GRAPH_VISUALIZE
-       "Compile the render-graph dump behind --print-graph into the engine" OFF)
-
 option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
 option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
 option(ZHLN_BUILD_EXTRAS

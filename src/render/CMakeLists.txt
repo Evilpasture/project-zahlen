@@ -12,6 +12,7 @@ set(RAW_RENDER_SOURCES
     RenderPresentation.cpp
     FrameDestinations.cpp
     RenderGraphBuilder.cpp
+    RenderGraphDump.cpp
     RenderDrawCommands.cpp
     DrawQueueManager.cpp
     TargetManager.cpp
@@ -116,10 +117,6 @@ target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_
 add_dependencies(zahlen_render zahlen_gpu_types)
 
 target_compile_definitions(zahlen_render PRIVATE ZHLN_GPU_ABI_MODULE="${SHADER_GPU_ABI_CS_PATH}")
-
-if(ZHLN_GRAPH_VISUALIZE)
-  target_compile_definitions(zahlen_render PRIVATE ZHLN_GRAPH_VISUALIZE=1)
-endif()
 
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 

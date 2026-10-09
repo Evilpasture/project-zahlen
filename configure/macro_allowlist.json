@@ -35,7 +35,6 @@
         "ZHLN_Clamp",
         "ZHLN_COMPILER_FLAGS",
         "ZHLN_GIT_COMMIT_HASH",
-        "ZHLN_GRAPH_VISUALIZE",
         "ZHLN_HAS_ZSTD",
         "ZHLN_LINKER_NAME",
         "ZHLN_META_BUILDER",

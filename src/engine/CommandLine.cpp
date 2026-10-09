@@ -5,6 +5,7 @@
 #include "Zahlen/Config.hpp"
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/RenderGraphDump.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -18,7 +19,6 @@
 #include <vector>
 
 namespace ZHLN {
-extern std::string_view GetRenderGraphDump(AAMode currentMode) noexcept;
 
 auto GetGitCommitHash() noexcept -> std::string_view {
     return ZHLN_GIT_COMMIT_HASH;
