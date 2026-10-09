@@ -11,7 +11,11 @@
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
 #include "Zahlen/Profiler.hpp"
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Render/SceneData.hpp>
+#include <span>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -246,7 +250,8 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
         queues.Draws().resize(kGpuCullingMaxInstances);
     }
 
-    FlushLineQueue();
+    FlushLineQueue(pendingLines);
+    pendingLines = {};
     queues.Sort();
 
     auto drawCount = queues.Draws().size();
@@ -351,7 +356,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 }
 
 
-auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
+auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     // The two-state accumulation, shadow-map and voxel histories can be reused
     // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
     // independently indexed, but increasing N alone does not permit additional
@@ -441,7 +446,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
-            return FrameSkipped {};
+            return std::optional<FrameScope> {};
         }
 
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
@@ -453,7 +458,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         resized = false;
     }
 
-    return {};
+    return FrameScope {*this};
 }
 
 auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
@@ -545,6 +550,118 @@ auto RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexc
 
 auto RenderContext::DispatchSimulations(float dt) noexcept -> RenderResult {
     return Pipelines::ComputeSimPipeline::Submit(*_impl, dt);
+}
+
+void RenderContext::ApplySimulationData(const SceneData& scene) noexcept {
+    for (const ParticleEmitterSubmission& em: scene.particleEmitters) {
+        SubmitParticleEmitter(em.emitterId, em.maxParticles, em.desc, em.texture, em.additive);
+    }
+    for (const MeshParticleEmitterSubmission& em: scene.meshParticleEmitters) {
+        SubmitMeshParticleEmitter(em.emitterId, em.maxParticles, em.desc, em.mesh, em.mat);
+    }
+}
+
+void RenderContext::ApplyDrawData(const SceneData& scene) noexcept {
+    _impl->pendingLines = std::span<const LineSegment> {scene.lines.data(), scene.lines.size()};
+    for (const BillboardBatch& batch: scene.billboards) {
+        DrawBillboards(batch.texture, std::span<const BillboardQuad> {batch.quads.data(), batch.quads.size()}, batch.additive);
+    }
+    if (!scene.debugTriPositions.empty()) {
+        constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debug_solid_material");
+        Material             mat {};
+        if (auto existing = GetGPUMaterial(kPhysicsDebugMaterialID)) {
+            mat = *existing;
+        } else if (auto created = CreateMaterial(MaterialDesc::Transparent({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f, true))) {
+            mat = *created;
+            RegisterGPUMaterial(kPhysicsDebugMaterialID, mat);
+        } else {
+            return;
+        }
+        DrawDebugTriangles(
+            std::span<const VertexPosition> {scene.debugTriPositions.data(), scene.debugTriPositions.size()},
+            std::span<const VertexSurface> {scene.debugTriSurfaces.data(), scene.debugTriSurfaces.size()}, mat
+        );
+    }
+}
+
+void RenderContext::AbortFrame() noexcept {
+    if (!_impl) {
+        return;
+    }
+    _impl->destinations.AbortRecordings();
+    _impl->frameOpen = false;
+    _impl->pendingLines = {};
+    _impl->queues.Clear();
+    _impl->frameState.Reset();
+    _impl->sceneTarget.reset();
+    _impl->destinations.SetActive(0);
+}
+
+FrameScope::FrameScope(RenderContext& rc) noexcept: _rc(&rc) {
+}
+
+FrameScope::FrameScope(FrameScope&& other) noexcept: _rc(other._rc), _ended(other._ended) {
+    other._rc    = nullptr;
+    other._ended = true;
+}
+
+auto FrameScope::operator=(FrameScope&& other) noexcept -> FrameScope& {
+    if (this == &other) {
+        return *this;
+    }
+    if (_rc != nullptr && !_ended) {
+        _rc->AbortFrame();
+    }
+    _rc          = other._rc;
+    _ended       = other._ended;
+    other._rc    = nullptr;
+    other._ended = true;
+    return *this;
+}
+
+FrameScope::~FrameScope() {
+    Cancel();
+}
+
+void FrameScope::Cancel() noexcept {
+    if (_rc != nullptr && !_ended) {
+        _rc->AbortFrame();
+        _ended = true;
+    }
+}
+
+auto FrameScope::DispatchSimulations(const SceneData& scene, float dt) noexcept -> RenderResult {
+    if (_rc == nullptr) {
+        return {};
+    }
+    _rc->ApplySimulationData(scene);
+    return _rc->DispatchSimulations(dt);
+}
+
+auto FrameScope::RenderScene(const SceneRenderPass& pass, const SceneData& scene) noexcept -> FrameOutcome<FrameSkipped> {
+    if (_rc == nullptr) {
+        return FrameSkipped {};
+    }
+    _rc->SetFrameData(
+        pass.camera, pass.frame, pass.shadowProjView, std::span<const LightDesc> {scene.lights.data(), scene.lights.size()}, scene.dt
+    );
+    _rc->ApplyDrawData(scene);
+    return _rc->RenderScene(pass.view, pass.settings);
+}
+
+auto FrameScope::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
+    if (_rc == nullptr) {
+        return FrameSkipped {};
+    }
+    return _rc->RenderUI(view, uiData);
+}
+
+auto FrameScope::End() && noexcept -> FrameOutcome<PresentSuboptimal> {
+    if (_rc == nullptr || _ended) {
+        return {};
+    }
+    _ended = true;
+    return _rc->EndFrame();
 }
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {

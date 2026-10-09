@@ -542,7 +542,7 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
+void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session, ZHLN::FrameScope& gpuFrame) {
     if (!session.previewWindow) {
         return;
     }
@@ -580,7 +580,7 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
         if (!target->has_value()) {
             return;
         }
-        if (const auto drawn = rc.RenderUI(
+        if (const auto drawn = gpuFrame.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
                     .target     = **target,
@@ -696,7 +696,7 @@ void LoadTree(Session& session, std::string_view path) {
 }
 #endif
 
-void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
+void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session, ZHLN::FrameScope& gpuFrame) {
     // The registry-only Context ctor: the editor window size replaces the
     // Engine-backed viewport lookup, and no Engine* is stored in GUI state.
     GUI::Context gui(reg, kernel.GetPlatformHost().GetSize());
@@ -854,7 +854,7 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
     if (!target->has_value()) {
         return;
     }
-    if (const auto drawn = rc.RenderUI(
+    if (const auto drawn = gpuFrame.RenderUI(
             ZHLN::UIView {
                 .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
                 .target     = **target,
@@ -1026,19 +1026,18 @@ auto main(int argc, char* argv[]) -> int {
             }
             continue;
         }
-        if (begin->has_value()) {
-            // FrameSkipped: a minimised (or momentarily zero-sized) window, so
-            // there is nothing to draw into and nothing wrong. Skip the frame
-            // silently -- logging it would be noise.
+        if (!begin->has_value()) {
+            // Minimised (or momentarily zero-sized) window: nothing to draw into.
             continue;
         }
+        ZHLN::FrameScope gpuFrame = std::move(**begin);
 
-        DrawFrame(*kernel, registry, session);
+        DrawFrame(*kernel, registry, session, gpuFrame);
         if (session.previewWindow) {
-            DrawPreview(*kernel, registry, session);
+            DrawPreview(*kernel, registry, session, gpuFrame);
         }
 
-        auto end = rc.EndFrame();
+        auto end = std::move(gpuFrame).End();
         if (!end) {
             using enum ZHLN::FrameResult;
             if (end.error().Is(DeviceLost)) {

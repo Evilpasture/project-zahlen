@@ -113,6 +113,7 @@ void LOD(Engine& engine, float , FrameContext& ) {
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext& ) {
+    engine.GetSceneData().Clear();
     engine.ResetWorkerScratch();
     const Frame frame = engine.MakeFrame(dt);
     engine.GetRenderGraph().Execute(frame);

@@ -414,8 +414,9 @@ struct RenderContext::Impl {
 
     VkPipelineLayout linePipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline     linePipeline;
-    uint32_t         activeLineVertexCount = 0;
-    uint32_t         lineInstanceId        = 0;
+    uint32_t                  activeLineVertexCount = 0;
+    uint32_t                  lineInstanceId        = 0;
+    std::span<const LineSegment> pendingLines {};
 
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
@@ -425,7 +426,7 @@ struct RenderContext::Impl {
         PerFrame<VkDeviceAddress>& addrs,
         Vk::BufferUsage            extraFlags = Vk::BufferUsage::None
     ) noexcept;
-    void FlushLineQueue();
+    void FlushLineQueue(std::span<const LineSegment> lines);
 
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     void               BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;

@@ -8,5 +8,7 @@
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/RenderContext.hpp>
+#include <Zahlen/Render/SceneData.hpp>
+#include <Zahlen/Render/FrameScope.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>

@@ -1083,7 +1083,7 @@ void RegisterSystemCommands() {
                 }));
 
     RegisterCmd("DrawLine", MakeCmd<DrawLineArgs>([](ZHLN::Engine* engine, const DrawLineArgs& a) -> uint64_t {
-                    engine->GetRenderContext().DrawLine(
+                    engine->GetSceneData().AddLine(
                         JPH::Vec3(a.ox, a.oy, a.oz), JPH::Vec3(a.dx, a.dy, a.dz), JPH::Vec4(a.r1, a.g1, a.b1, a.a1), JPH::Vec4(a.r2, a.g2, a.b2, a.a2)
                     );
                     return 1;

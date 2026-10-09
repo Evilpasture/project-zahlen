@@ -117,13 +117,6 @@ struct DecalDrawCommand {
     float      metallic;
 };
 
-struct LineSegment {
-    JPH::Vec3 start      = JPH::Vec3::sZero();
-    JPH::Vec3 end        = JPH::Vec3::sZero();
-    JPH::Vec4 colorStart = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Vec4 colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f};
-};
-
 struct MeshParticleEmitterCommand {
     BufferHandle              gpuBuffer;
     uint32_t                  maxParticles;
@@ -139,7 +132,6 @@ struct RenderQueues {
     ZHLN::Array<ParticleEmitterCommand>     particleEmittersQueue;
     ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
     ZHLN::Array<DecalDrawCommand>           decalQueue;
-    ZHLN::Array<LineSegment>                lineQueue;
 };
 
 }

@@ -347,10 +347,11 @@ struct UITestSuite {
             // test is about to hand-drive a frame, so "there was nothing to draw
             // into" is its own failure here, as it was when a skip was an
             // out-of-date code.
-            const auto began = rc.BeginFrame();
-            if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
+            auto began = rc.BeginFrame();
+            if (!ZHLN::Test::ExpectTrue(began.has_value() && began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
+            ZHLN::FrameScope gpuFrame = std::move(**began);
             // The query answers only what the frame has already acquired: before
             // the acquisition below, it has nothing to say about this window.
             // Both verbs are the engine's, not the renderer's: which target a
@@ -376,16 +377,16 @@ struct UITestSuite {
             const uint32_t frameIndex = rc.GetFrameIndex();
             // Both halves must DRAW into the acquired window: the pixel checks
             // below read what these calls recorded. nullopt means drawn.
-            const auto greenDrawn = rc.RenderUI(
+            const auto greenDrawn = gpuFrame.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
             );
-            const auto blueDrawn = rc.RenderUI(
+            const auto blueDrawn = gpuFrame.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 320, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, blue.View()
             );
             if (!ZHLN::Test::ExpectTrue(greenDrawn.has_value() && !greenDrawn->has_value() && blueDrawn.has_value() && !blueDrawn->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(std::move(gpuFrame).End().has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
 
@@ -455,10 +456,11 @@ struct UITestSuite {
             const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 
             // As above: the frame has to have begun, not merely to not have failed.
-            const auto began = rc.BeginFrame();
-            if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
+            auto began = rc.BeginFrame();
+            if (!ZHLN::Test::ExpectTrue(began.has_value() && began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
+            ZHLN::FrameScope gpuFrame = std::move(**began);
             const auto target = engine->AcquireTarget();
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
@@ -467,11 +469,11 @@ struct UITestSuite {
             const uint32_t               frameIndex = rc.GetFrameIndex();
             // All destinations must draw. A silent skip would make the window
             // test pass without exercising either offscreen pipeline variant.
-            const auto windowDrawn = rc.RenderUI(
+            const auto windowDrawn = gpuFrame.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},
                 windowPayload.View()
             );
-            const auto otherDrawn = rc.RenderUI(
+            const auto otherDrawn = gpuFrame.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
                     .target     = attachment.ForTexture(texture),
@@ -479,7 +481,7 @@ struct UITestSuite {
                 },
                 otherPayload.View()
             );
-            const auto hdrDrawn = rc.RenderUI(
+            const auto hdrDrawn = gpuFrame.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
                     .target     = attachment.ForTexture(hdrTexture),
@@ -493,7 +495,7 @@ struct UITestSuite {
                 )) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
+            if (!ZHLN::Test::ExpectTrue(std::move(gpuFrame).End().has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
 
@@ -531,25 +533,29 @@ struct UITestSuite {
             }
             const ZHLN::ViewportRect viewport {.x = 0, .y = 0, .width = 320, .height = 240};
 
-            if (const auto began = rc.BeginFrame(); !began || began->has_value()) {
+            auto began = rc.BeginFrame();
+            if (!began || !*began) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
+            ZHLN::FrameScope firstFrame = std::move(**began);
             const auto first = engine->AcquireTarget();
             if (!first || !first->has_value()) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             const ZHLN::FrameTarget stale = **first;
-            if (!rc.EndFrame()) {
+            if (!std::move(firstFrame).End()) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             if (!ZHLN::Test::ExpectTrue(!engine->GetAcquiredTarget().has_value())) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
-            if (const auto began = rc.BeginFrame(); !began || began->has_value()) {
+            began = rc.BeginFrame();
+            if (!began || !*began) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto invalidResult = rc.RenderUI(ZHLN::UIView {.viewport = viewport}, payload.View());
+            ZHLN::FrameScope secondFrame = std::move(**began);
+            const auto invalidResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport}, payload.View());
             if (!ZHLN::Test::ExpectTrue(!invalidResult)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
@@ -559,8 +565,8 @@ struct UITestSuite {
             }
             // A new acquisition is already live. Neither pass may quietly
             // adopt it when handed the previous frame's capability.
-            const auto staleUI = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = stale}, payload.View());
-            const auto staleScene = rc.RenderScene(ZHLN::SceneView {.target = stale}, rc.GetSettings());
+            const auto staleUI = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = stale}, payload.View());
+            const auto staleScene = secondFrame.RenderScene(ZHLN::SceneRenderPass {.view = {.target = stale}}, ZHLN::SceneData {});
             if (!ZHLN::Test::ExpectTrue(!staleUI && !staleScene)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
@@ -570,12 +576,12 @@ struct UITestSuite {
             }
             const ZHLN::FrameTarget retiredTexture = (**second).ForTexture(*texture);
             rc.DestroyRenderTexture(*texture);
-            const auto retiredResult = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
+            const auto retiredResult = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = retiredTexture}, payload.View());
             if (!ZHLN::Test::ExpectTrue(!retiredResult)) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto drawn = rc.RenderUI(ZHLN::UIView {.viewport = viewport, .target = **second}, payload.View());
-            const auto ended = rc.EndFrame();
+            const auto drawn = secondFrame.RenderUI(ZHLN::UIView {.viewport = viewport, .target = **second}, payload.View());
+            const auto ended = std::move(secondFrame).End();
             if (!ZHLN::Test::ExpectTrue(drawn.has_value() && !drawn->has_value() && ended.has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }

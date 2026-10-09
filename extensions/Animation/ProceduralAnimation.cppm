@@ -711,7 +711,7 @@ size_t MaskFirstPersonPalette(
 ) noexcept;
 size_t SyncNonSkinnedAttachments(ECS::Registry& registry, Entity rootEntity, const RigBoneMap& boneMap) noexcept;
 void   DrawDebugRig(
-    RenderContext&                       renderContext,
+    SceneData&                           scene,
     JPH::Vec3Arg                         rootPosition,
     JPH::QuatArg                         rootRotation,
     const RigBoneMap&                    boneMap,

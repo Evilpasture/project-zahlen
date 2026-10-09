@@ -8,11 +8,11 @@
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 #include <utility>
 
 namespace ZHLN {
-class RenderContext;
 
 class LightingSystem {
   public:
@@ -28,7 +28,7 @@ class LightingSystem {
 
     static void Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
                                   const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
-                       ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<RenderContext> render);
+                       ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<SceneData> scene);
 
     static SunLight GetSun(SunQuery reg) noexcept;
     static std::pair<JPH::Vec3, float> GetSunDirectionAndIntensity(SunQuery reg) noexcept;

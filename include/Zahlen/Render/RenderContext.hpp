@@ -17,6 +17,8 @@
 #include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
+#include <Zahlen/Render/SceneData.hpp>
+#include <Zahlen/Render/FrameScope.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/UIData.hpp>
@@ -57,18 +59,6 @@ struct EnvironmentRadianceDesc {
 };
 
 
-// One immediate-mode quad, in scene terms: where it is, how big it is, how it is
-// turned, what it is coloured, and which way it faces. Everything the renderer's
-// particle vertex shader needs, and nothing about how it is stored.
-struct BillboardQuad {
-    JPH::Vec3         position {};                    // world-space centre
-    float             size     = 1.0f;                // world units, the quad's edge
-    float             rotation = 0.0f;                // radians, in the quad's own plane
-    JPH::Vec4         color {1.0f, 1.0f, 1.0f, 1.0f}; // straight RGBA, multiplied with the texture
-    ParticleAlignment facing = ParticleAlignment::CameraBillboard;
-    JPH::Vec3         velocity {}; // facing == VelocityStretched: the axis it stretches along
-};
-
 class ZHLN_API RenderContext {
   private:
     struct PrivateToken {
@@ -95,9 +85,8 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
 
-    [[nodiscard]] FrameOutcome<FrameSkipped> BeginFrame() noexcept;
-
-    [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
+    // Empty optional = skipped (minimized). A FrameScope = this frame is open.
+    [[nodiscard]] FrameOutcome<FrameScope> BeginFrame() noexcept;
 
     void SetResolution(const Extent2D& resolution);
 
@@ -128,25 +117,6 @@ class ZHLN_API RenderContext {
 
     BufferHandle CreateStorageBuffer(size_t size);
 
-    // Descriptions, not GPU layouts: the renderer allocates and retains each
-    // emitter's simulation storage, keyed by a stable, per-emitter identity
-    // (normally Entity::Pack()). Keep it unique within this context and stable
-    // across submissions. Storage is evicted after 120 idle frames; use a new
-    // identity for a logically new emitter.
-    void SubmitParticleEmitter(
-        uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false
-    );
-    void SubmitMeshParticleEmitter(
-        uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
-    );
-
-    // Immediate-mode quads: the host describes billboards in world space for this frame,
-    // and the renderer packs, buffers and draws them. Nothing is retained, so a host
-    // keeps no BufferHandle, resolves no bindless slot and knows no stride -- which is
-    // what a gameplay effect wants when it has positions and colours and no business
-    // with a storage layout.
-    void DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive = false);
-
     // Raw byte streams declare their element stride; typed spans derive it.
     [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
     [[nodiscard]] auto CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
@@ -172,11 +142,6 @@ class ZHLN_API RenderContext {
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
-    // Immediate-mode debug triangles (physics debug draw). Storage stays inside
-    // the context; callers do not assemble a Mesh from scratch buffers.
-    void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
-
-
     [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget>;
 
     [[nodiscard]] std::optional<FrameTarget> GetAcquiredTarget(const PresentationTarget& target) noexcept;
@@ -186,15 +151,6 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<RenderTextureHandle, ErrorCode>;
     void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
 
-
-    [[nodiscard]] auto RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
-    [[nodiscard]] auto RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
-    [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
-
-    void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
-    void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
-        DrawLine(start, end, color, color);
-    }
 
     // Only draw submission needs the GPU descriptor index; resource creation
     // and lifetime use TextureHandle throughout.
@@ -250,13 +206,6 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
-    void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
-    // The scene state, and the lights that go with it. Both are the engine's
-    // terms (include/Zahlen/Render/FrameData.hpp); the renderer packs them into
-    // the shader's structs, so neither call makes a caller name a GPU layout.
-    void SetFrameData(const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
-
-    void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
     void ClearDrawQueues() noexcept;
 
     void ApplySettings(GraphicsSettings newSettings) noexcept;
@@ -265,12 +214,31 @@ class ZHLN_API RenderContext {
 
     void SetGISettings(const GISettings& settings) noexcept;
     void SetAAState(const AAState& state);
-    void SetLights(std::span<const LightDesc> lights) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
     void DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, const CSGDrawParams& params) noexcept;
     void DrawDecal(const DecalParams& params) noexcept;
 
   private:
+    friend class FrameScope;
+    void SubmitParticleEmitter(
+        uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive
+    );
+    void SubmitMeshParticleEmitter(
+        uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
+    );
+    void DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive);
+    [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
+    void SetFrameData(
+        const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
+    ) noexcept;
+    void ApplySimulationData(const SceneData& scene) noexcept;
+    void ApplyDrawData(const SceneData& scene) noexcept;
+    [[nodiscard]] auto RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
+    void AbortFrame() noexcept;
+    void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
+
     std::unique_ptr<Impl> _impl;
 };
 

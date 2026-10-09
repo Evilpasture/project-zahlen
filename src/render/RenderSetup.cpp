@@ -9,62 +9,25 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 
 namespace ZHLN {
-
-void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept {
-    _impl->current_view_proj    = viewProj;
-    _impl->unjittered_view_proj = unjitteredViewProj;
-}
-
-void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
-    const float      aspect     = (viewSize.height > 0) ? static_cast<float>(viewSize.width) / static_cast<float>(viewSize.height) : 1.777f;
-    const JPH::Mat44 view       = cam.GetViewMatrix();
-    const JPH::Mat44 proj       = cam.GetProjectionMatrix(aspect);
-    const JPH::Mat44 unjittered = proj * view;
-    _impl->current_view_proj                  = unjittered;
-    _impl->unjittered_view_proj               = unjittered;
-    _impl->currentUniforms.viewProj           = unjittered;
-    _impl->currentUniforms.unjitteredViewProj = unjittered;
-    _impl->currentUniforms.invViewProj        = unjittered.Inversed();
-    _impl->currentUniforms.invProj            = proj.Inversed();
-    _impl->currentUniforms.nearZ              = cam.nearZ;
-    _impl->currentUniforms.farZ               = cam.farZ;
-    _impl->currentUniforms.camPos.x = cam.position.GetX();
-    _impl->currentUniforms.camPos.y = cam.position.GetY();
-    _impl->currentUniforms.camPos.z = cam.position.GetZ();
-
-    auto mapped = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
-    if (!mapped) return;
-    auto* const gpu = mapped->As<FrameUniforms>();
-    gpu->viewProj           = unjittered;
-    gpu->unjitteredViewProj = unjittered;
-    gpu->invViewProj        = unjittered.Inversed();
-    gpu->invProj            = proj.Inversed();
-    gpu->nearZ              = cam.nearZ;
-    gpu->farZ               = cam.farZ;
-    gpu->camPos.x = cam.position.GetX();
-    gpu->camPos.y = cam.position.GetY();
-    gpu->camPos.z = cam.position.GetZ();
-}
 
 void RenderContext::ClearDrawQueues() noexcept {
     _impl->queues.Draws().clear();
     _impl->queues.CsgDraws().clear();
 }
 
-void RenderContext::SetFrameData(const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, float dt) noexcept {
-    // The engine authored scene terms; this is the boundary that packs them into
-    // the shader's struct. What follows fills the lanes only the renderer knows --
-    // resolution, light count, the cascade matrices, the SH payload, the viewmodel
-    // matrix -- into a local copy that is what actually reaches the GPU.
-    _impl->shadowProjView  = shadowProjView;
-    _impl->view_matrix     = cam.GetViewMatrix();
-    _impl->currentUniforms = GpuPack::PackFrameData(frame);
-    _impl->currentDt       = std::clamp(dt, 0.0001f, 0.1f);
-
-    // The lights this frame submitted, packed now that the view matrix above is
-    // this frame's -- and before the light count goes into the uniforms below.
+void RenderContext::SetFrameData(
+    const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
+) noexcept {
+    _impl->shadowProjView       = shadowProjView;
+    _impl->view_matrix          = cam.GetViewMatrix();
+    _impl->current_view_proj    = frame.viewProj;
+    _impl->unjittered_view_proj = frame.unjitteredViewProj;
+    _impl->currentUniforms      = GpuPack::PackFrameData(frame);
+    _impl->currentDt            = std::clamp(dt, 0.0001f, 0.1f);
+    _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {128})).end());
     _impl->UploadSubmittedLights();
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
@@ -129,17 +92,7 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
-void RenderContext::SetLights(std::span<const LightDesc> lights) noexcept {
-    // Delivery, not packing: the scene's lights are described here and packed into
-    // the shader's struct in SetFrameData, where the frame's view matrix is in hand
-    // (a light's view-space position needs it, and the systems that submit lights
-    // run before the frame is handed over).
-    _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {128})).end());
-}
-
-// The lights of the frame SetFrameData just received, packed and uploaded. Called
-// from SetFrameData: this is the point in the frame where every term the pack needs
-// exists -- the world positions from the engine, the view matrix from the camera.
+// Packed from SetFrameData once the view matrix and light list exist.
 void RenderContext::Impl::UploadSubmittedLights() noexcept {
     if (submittedLights.empty()) {
         mappedLights.clear();

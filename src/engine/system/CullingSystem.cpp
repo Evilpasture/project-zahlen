@@ -320,7 +320,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
     const std::array<JPH::Vec3, 8> corners = FrustumCornersFromViewProj(camComp->frozenViewProj);
 
-    auto& rc = engine.GetRenderContext();
+    auto& scene = engine.GetSceneData();
 
     struct FrustumEdge {
         int start;
@@ -343,7 +343,7 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 
     JPH::Vec4 cyanColor(0.0f, 1.0f, 1.0f, 1.0f);
     for (auto edge: frustumEdges) {
-        rc.DrawLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
+        scene.AddLine(corners[edge.start], corners[edge.end], cyanColor, cyanColor);
     }
 }
 

@@ -172,7 +172,7 @@ struct EllipsoidDesc {
     int   segments = 36;
 };
 
-auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
+auto DrawWireframeEllipsoid(SceneData& scene, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
     // 1. Latitudinal Parallel Rings
     for (int lat = 1; lat < desc.latRings; ++lat) {
         const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
@@ -186,7 +186,7 @@ auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, const El
             const JPH::Vec3 p0(center.GetX() + (std::cos(t0) * ringRadius), ringY, center.GetZ() + (std::sin(t0) * ringRadius));
             const JPH::Vec3 p1(center.GetX() + (std::cos(t1) * ringRadius), ringY, center.GetZ() + (std::sin(t1) * ringRadius));
 
-            rc.DrawLine(p0, p1, color);
+            scene.AddLine(p0, p1, color);
         }
     }
 
@@ -208,13 +208,13 @@ auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, const El
             const JPH::Vec3 p0(center.GetX() + (r0 * cosLon), y0, center.GetZ() + (r0 * sinLon));
             const JPH::Vec3 p1(center.GetX() + (r1 * cosLon), y1, center.GetZ() + (r1 * sinLon));
 
-            rc.DrawLine(p0, p1, color);
+            scene.AddLine(p0, p1, color);
         }
     }
 }
 
 auto DrawWireframeSphere(
-    RenderContext&   rc,
+    SceneData&       scene,
     const JPH::Vec3& center,
     float            radius,
     const JPH::Vec4& color,
@@ -222,7 +222,7 @@ auto DrawWireframeSphere(
     int              lonRings = 10,
     int              segments = 36
 ) noexcept -> void {
-    DrawWireframeEllipsoid(rc, center, {.radiusXZ = radius, .radiusY = radius, .latRings = latRings, .lonRings = lonRings, .segments = segments}, color);
+    DrawWireframeEllipsoid(scene, center, {.radiusXZ = radius, .radiusY = radius, .latRings = latRings, .lonRings = lonRings, .segments = segments}, color);
 }
 
 struct DebugPalette {
@@ -295,7 +295,7 @@ auto SpawnCharacter(
 auto
     RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
     auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto& scene = engine.GetSceneData();
 
     if (!reg.IsAlive(playerEntity)) {
         return;
@@ -311,11 +311,11 @@ auto
     const JPH::Vec3 finalBumperCenter = pos + JPH::Vec3(0.0f, config.GetBumperOffsetY(), 0.0f);
 
     // 1. Draw Upper Bumper Oval (Green)
-    DrawWireframeEllipsoid(rc, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
+    DrawWireframeEllipsoid(scene, finalBumperCenter, {.radiusXZ = config.bumperRadiusXZ, .radiusY = config.bumperRadiusY}, palette.colorBumper);
 
     // 2. Draw Lower Lifter Sphere (White). Its bottom is the character
     // origin, which rests on the supporting surface after settling.
-    DrawWireframeSphere(rc, finalLifterCenter, config.lifterRadius, palette.colorLifter);
+    DrawWireframeSphere(scene, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector
     const auto move = reg.Get<Character::MovementComponent>(playerEntity);
@@ -323,7 +323,7 @@ auto
         const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
         const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);
         if (vel.LengthSq() > 0.01f) {
-            rc.DrawLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
+            scene.AddLine(finalBumperCenter, finalBumperCenter + (vel * 0.25f), palette.colorVelocityDebug);
         }
     }
 }

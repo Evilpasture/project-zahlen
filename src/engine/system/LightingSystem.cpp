@@ -68,8 +68,8 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery
 
 void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
                                        const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
-                            ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<RenderContext> render) {
-    auto& rc = *render;
+                            ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<SceneData> scene) {
+    auto& sceneData = *scene;
 
     // The view camera is world data now: lighting sorts and packs relative to
     // the main camera entity's pose, the same state the renderer projects.
@@ -168,7 +168,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         });
     }
 
-    rc.SetLights(std::span {sceneLights});
+    sceneData.lights = std::move(sceneLights);
 }
 
 }

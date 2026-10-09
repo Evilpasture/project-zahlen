@@ -88,6 +88,7 @@ struct EngineImpl {
     // The simulation -> renderer channel for skinning poses. Engine-owned, so
     // both graphs reach the same queue through services.
     PoseUploadQueue poseUploads;
+    SceneData       sceneData;
 
     std::unique_ptr<SimServices>    simServices;
     std::unique_ptr<RenderServices> renderServices;
@@ -452,6 +453,7 @@ void Engine::EnsureSystemGraphs() {
     _impl->renderServices = std::make_unique<RenderServices>(
         RenderServices {
             .render  = render,
+            .scene   = _impl->sceneData,
             .assets  = _impl->kernel->GetAssetManager(),
             .visible = VisibleEntities {_impl->world->GetVisibleEntities()},
             .shadow  = VisibleShadowEntities {_impl->world->GetVisibleShadowEntities()},
@@ -490,6 +492,9 @@ auto Engine::GetPhysicsContext() -> PhysicsContext& {
 }
 auto Engine::GetRenderContext() -> RenderContext& {
     return _impl->kernel->GetRenderContext();
+}
+auto Engine::GetSceneData() -> SceneData& {
+    return _impl->sceneData;
 }
 auto Engine::GetAssetManager() -> AssetManager& {
     return _impl->kernel->GetAssetManager();

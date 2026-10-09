@@ -571,10 +571,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     };
 }
 
-void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
-    _impl->queues.Lines().push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
-}
-
 void RenderContext::Impl::BeginShaderObservation() {
     if constexpr (isDev) {
         if (fileSystemWatcher && shaderDirectoryWatch == 0) {

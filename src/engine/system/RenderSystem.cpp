@@ -96,26 +96,11 @@ namespace {
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
-constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debug_solid_material");
-
-[[nodiscard]] auto GetOrCreatePhysicsDebugMaterial(RenderContext& rc) -> std::optional<Material> {
-    if (auto existing = rc.GetGPUMaterial(kPhysicsDebugMaterialID)) {
-        return existing;
-    }
-    auto created = rc.CreateMaterial(MaterialDesc::Transparent({1.0f, 1.0f, 1.0f, 1.0f}, 0.1f, true));
-    if (!created) {
-        ZHLN::Log("[RenderSystem] Physics debug material creation failed: {}", created.error());
-        return std::nullopt;
-    }
-    rc.RegisterGPUMaterial(kPhysicsDebugMaterialID, *created);
-    return *created;
-}
-
 // The simulation description stays in ECS; only a stable emitter identity crosses
 // the API. Persistent particle buffers are private to the RenderContext.
 void SubmitParticleEmitters(Engine& engine) {
-    auto& rc  = engine.GetRenderContext();
-    auto& reg = engine.GetRegistry();
+    auto& scene = engine.GetSceneData();
+    auto& reg   = engine.GetRegistry();
     // The frame's camera, when the world has one: an attachment is a scene decision
     // made against the view, so a world without a camera has none to submit and the
     // render path reports NoMainCamera on its own.
@@ -136,7 +121,9 @@ void SubmitParticleEmitters(Engine& engine) {
         if (emitter->attachToCamera) {
             desc.spawnOrigin = cam.position;
         }
-        rc.SubmitParticleEmitter(entity.Pack(), emitter->maxParticles, desc, emitter->textureAsset, emitter->additive);
+        scene.particleEmitters.push_back(
+            {.emitterId = entity.Pack(), .maxParticles = emitter->maxParticles, .desc = desc, .texture = emitter->textureAsset, .additive = emitter->additive}
+        );
     }
 
     for (const Entity entity: reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>()) {
@@ -144,7 +131,13 @@ void SubmitParticleEmitters(Engine& engine) {
         if (!emitter || !emitter->active) {
             continue;
         }
-        rc.SubmitMeshParticleEmitter(entity.Pack(), emitter->maxParticles, emitter->params, emitter->meshAsset, emitter->materialAsset);
+        scene.meshParticleEmitters.push_back(
+            {.emitterId    = entity.Pack(),
+             .maxParticles = emitter->maxParticles,
+             .desc         = emitter->params,
+             .mesh         = emitter->meshAsset,
+             .mat          = emitter->materialAsset}
+        );
     }
 }
 
@@ -371,12 +364,6 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
         return {};
     }
 
-    auto& rc      = engine.GetRenderContext();
-    auto  end_res = rc.EndFrame();
-    if (!end_res) {
-        return std::unexpected(end_res.error());
-    }
-
     return {};
 }
 
@@ -406,15 +393,27 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 
     const GraphicsSettings gfx = SyncGraphicsSettings(engine);
 
+    outPhysicsDrawMode = 0;
+    if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
+        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
+            outPhysicsDrawMode = dbg->physicsDrawMode;
+        }
+    }
+
+    auto& scene = engine.GetSceneData();
+    scene.dt = dt;
+    SubmitParticleEmitters(engine);
+    RenderDebug(engine, outPhysicsDrawMode);
+
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
         return std::unexpected(begin_res.error());
     }
-    if (begin_res->has_value()) {
+    if (!begin_res->has_value()) {
         return FrameSkipped {};
     }
+    FrameScope gpuFrame = std::move(**begin_res);
     if (auto env = SyncEnvironmentMap(engine); !env) {
-        (void)rc.EndFrame();
         return std::unexpected(env.error());
     }
     Entity cameraEntity = cameraEntities[0];
@@ -425,13 +424,6 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
     } else {
         return std::unexpected(RenderSystemError::NoMainCamera);
-    }
-
-    outPhysicsDrawMode = 0;
-    if (auto settingsEntities = reg.GetEntitiesWith<Components::GlobalSettingsTagComponent>(); !settingsEntities.empty()) {
-        if (auto dbg = reg.Get<Components::DebugSettingsComponent>(settingsEntities[0])) {
-            outPhysicsDrawMode = dbg->physicsDrawMode;
-        }
     }
 
     auto sun = LightingSystem::GetSun(LightingSystem::SunQuery {reg});
@@ -502,22 +494,15 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.skyGround =
         JPH::Vec4 {gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]};
 
-    rc.SetFrameData(cam, frame, outShadowProjView, dt);
-    rc.SetMatrices(vp, unjitteredVp);
+    scene.dt = dt;
 
-    // Everything the simulation produced for the GPU goes in before the passes
-    // read it: this frame's poses, then the emitters that consume them.
     UploadPosePalettes(engine);
-    SubmitParticleEmitters(engine);
 
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
-    // Queue debug lines/triangles before RenderScene records the graph; EndFrame
-    // clears the queues, so a post-scene RenderDebug never reaches the GPU.
-    RenderDebug(engine, outPhysicsDrawMode);
 
-    if (auto sim_res = rc.DispatchSimulations(dt); !sim_res) {
+    if (auto sim_res = gpuFrame.DispatchSimulations(scene, dt); !sim_res) {
         return std::unexpected(sim_res.error());
     }
 
@@ -534,12 +519,18 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (!sceneView) {
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
-    if (auto scene_res = rc.RenderScene(*sceneView, gfx); !scene_res) {
+    if (auto scene_res = gpuFrame.RenderScene(
+            SceneRenderPass {
+                .view = *sceneView, .camera = cam, .frame = frame, .shadowProjView = outShadowProjView, .settings = gfx
+            },
+            scene
+        );
+        !scene_res) {
         return std::unexpected(scene_res.error());
     }
 
     if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
-        if (auto ui_res = rc.RenderUI(
+        if (auto ui_res = gpuFrame.RenderUI(
                 UIView {
                     .viewport   = viewport,
                     .target     = attachment,
@@ -553,6 +544,10 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         engine.SetPendingUIData(UIDrawData {});
     }
 
+    if (auto end_res = std::move(gpuFrame).End(); !end_res) {
+        return std::unexpected(end_res.error());
+    }
+
     auto& cstats = engine.GetWorld().GetCullingStats();
     cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
     cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
@@ -561,7 +556,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
 }
 
 void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
-    auto& rc = engine.GetRenderContext();
+    auto& scene = engine.GetSceneData();
 
     CullingSystem::DrawDebugFrustum(engine);
 
@@ -583,14 +578,9 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             for (size_t i = 0; i + 1 < debugData.lineCount; i += 2) {
                 const auto& v0 = debugData.lines[i];
                 const auto& v1 = debugData.lines[i + 1];
-                rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
+                scene.AddLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (debugData.triangleCount > 0) {
-            auto debugMat = GetOrCreatePhysicsDebugMaterial(rc);
-            if (!debugMat) {
-                return;
-            }
-
             std::vector<VertexPosition> debugPos;
             std::vector<VertexSurface>  debugSurface;
             debugPos.reserve(debugData.triangleCount);
@@ -600,8 +590,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 debugPos.push_back({.position = {jv.x, jv.y, jv.z}});
                 debugSurface.push_back({.uv = Math::PackUV(0.0f, 0.0f), .color = {.data = jv.color}});
             }
-
-            rc.DrawDebugTriangles(std::span {debugPos}, std::span {debugSurface}, *debugMat);
+            scene.AddDebugTriangles(std::span {debugPos}, std::span {debugSurface});
         }
     }
 }

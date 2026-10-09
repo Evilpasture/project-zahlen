@@ -30,6 +30,7 @@ namespace ZHLN {
 class Kernel;
 class World;
 class RenderContext;
+struct SceneData;
 class PhysicsContext;
 class AudioContext;
 class AssetManager;
@@ -115,6 +116,7 @@ class ZHLN_API Engine {
 
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;
+    auto               GetSceneData() -> SceneData&;
     auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
     auto               GetScriptRunner() -> ScriptRunner&;

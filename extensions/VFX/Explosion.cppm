@@ -347,8 +347,8 @@ export struct ExplosionComponent {
     bool   craterSpawned = false;
 
     // No GPU storage: the particles above are the simulation's own state, and
-    // rendering them is RenderBatchGPU describing world-space quads for the
-    // renderer (RenderContext::DrawBillboards), which owns the buffers.
+    // rendering them is RenderBatchGPU describing world-space quads for
+    // SceneData (ApplyDrawData flushes them after BeginFrame).
 };
 
 export struct CraterDecalComponent {
@@ -555,7 +555,7 @@ export class ExplosionSystem {
 
         auto& reg = engine.GetRegistry();
         auto& ecb = engine.GetMainECB();
-        auto& rc  = engine.GetRenderContext();
+        auto& scene = engine.GetSceneData();
 
         // --------------------------------------------------------------------
         // 1. UPDATE ACTIVE EXPLOSIONS (Fireball, Flash, Shockwaves)
@@ -621,7 +621,7 @@ export class ExplosionSystem {
                 // Update Particle Emitters
                 UpdateGroup(exp.fireball, dt, false);
                 UpdateGroup(exp.soilSmoke, dt, true);
-                RenderBatchGPU(rc, exp);
+                RenderBatchGPU(scene, exp);
 
                 // Clean up explosion particle root and children when particles finish
                 if (exp.age > exp.duration) {
@@ -812,12 +812,10 @@ export class ExplosionSystem {
         }
     }
 
-    static void RenderBatchGPU(RenderContext& rc, ExplosionComponent& exp) {
+    static void RenderBatchGPU(SceneData& scene, ExplosionComponent& exp) {
         // The simulation above is the CPU's; this describes what it produced in
-        // world-space quads and hands them over. The renderer owns the storage,
-        // the stride and the bindless slot, so nothing here allocates, packs a
-        // lane or resolves a texture index -- the effect asks for a texture it
-        // holds and the blend it wants, and that is all it knows.
+        // world-space quads and hands them over. SceneData holds the batches until
+        // ApplyDrawData; the renderer owns GPU storage after BeginFrame.
         thread_local std::vector<BillboardQuad> t_quads;
 
         // 1. FIREBALL
@@ -842,7 +840,7 @@ export class ExplosionSystem {
                 );
             }
 
-            rc.DrawBillboards(s_FireTexHandle, std::span {t_quads}, true);
+            scene.AddBillboards(s_FireTexHandle, std::span {t_quads}, true);
         }
 
         // 2. SOIL SMOKE
@@ -870,7 +868,7 @@ export class ExplosionSystem {
                 );
             }
 
-            rc.DrawBillboards(s_SoilTexHandle, std::span {t_quads}, false);
+            scene.AddBillboards(s_SoilTexHandle, std::span {t_quads}, false);
         }
 
         // 3. SHOCKWAVE AIR & GROUND FRONTS
@@ -901,7 +899,7 @@ export class ExplosionSystem {
                     );
                 }
 
-                rc.DrawBillboards(s_ShockwaveTexHandle, std::span {t_quads}, true);
+                scene.AddBillboards(s_ShockwaveTexHandle, std::span {t_quads}, true);
             }
 
             // Ground Dust Flat Front (1 Plane)
@@ -926,7 +924,7 @@ export class ExplosionSystem {
                     .color    = JPH::Vec4(color, opacity),
                     .facing   = ParticleAlignment::GroundFlat,
                 };
-                rc.DrawBillboards(s_GroundRingHandle, std::span {&quad, 1}, true);
+                scene.AddBillboards(s_GroundRingHandle, std::span {&quad, 1}, true);
             }
         }
     }

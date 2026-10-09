@@ -308,7 +308,7 @@ class System {
      * @brief Simulates active effects and submits GPU batches.
      */
     void Update(Engine& engine, float dt) {
-        auto& rc = engine.GetRenderContext();
+        auto& scene = engine.GetSceneData();
 
         // 1. Advance and Render Tracers via Zero-Allocation Line Pipeline (rc.DrawLine)
         for (auto& tracer: m_tracers) {
@@ -321,7 +321,7 @@ class System {
                 JPH::Vec3 pHead = tracer.start + (tracer.direction * head);
 
                 // Draws line segment with HDR emissive boost into line queue
-                rc.DrawLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
+                scene.AddLine(pTail, pHead, tracer.colorEnd, tracer.colorStart);
             }
         }
         ZHLN::Ranges::EraseIf(m_tracers, [](const auto& t) -> auto { return (t.traveled - t.length) >= t.totalDistance; });
@@ -345,7 +345,7 @@ class System {
             for (int i = 1; i <= kSegments; ++i) {
                 float     theta = (static_cast<float>(i) / kSegments) * 2.0f * std::numbers::pi_v<float>;
                 JPH::Vec3 p     = ring.position + (u * std::cos(theta) + v * std::sin(theta)) * currentRadius;
-                rc.DrawLine(prevP, p, col, col);
+                scene.AddLine(prevP, p, col, col);
                 prevP = p;
             }
         }
@@ -365,7 +365,7 @@ class System {
                 float     alpha      = std::max(0.0f, 1.0f - (p.age / p.maxLife)) * p.color.GetW();
                 JPH::Vec4 col(p.color.GetX(), p.color.GetY(), p.color.GetZ(), alpha);
 
-                rc.DrawLine(streakTail, p.position, col, col);
+                scene.AddLine(streakTail, p.position, col, col);
             }
         }
         ZHLN::Ranges::EraseIf(m_particles, [](const auto& p) -> auto { return p.age >= p.maxLife; });

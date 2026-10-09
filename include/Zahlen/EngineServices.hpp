@@ -28,6 +28,7 @@
 namespace ZHLN {
 
 class RenderContext;
+struct SceneData;
 class AssetManager;
 class PhysicsContext;
 class AudioContext;
@@ -77,6 +78,7 @@ struct SimServices {
 // simulation system cannot name it, which is the point.
 struct RenderServices {
     RenderContext& render;
+    SceneData&     scene;
     AssetManager&  assets;
 
     VisibleEntities       visible;

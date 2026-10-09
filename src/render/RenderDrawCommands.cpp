@@ -339,15 +339,15 @@ uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses,
     return EncodeMaterialSamplerWord(addresses, first);
 }
 
-void RenderContext::Impl::FlushLineQueue() {
+void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     activeLineVertexCount = 0;
 
-    if (queues.Lines().empty() || !linePipeline.Valid()) {
+    if (lines.empty() || !linePipeline.Valid()) {
         return;
     }
 
     constexpr uint32_t maxLineVerts   = kMaxLineVertices;
-    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.Lines().size() * 2), maxLineVerts);
+    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(lines.size() * 2), maxLineVerts);
 
     auto mappedRegion = frames.lineVbos[presenter.frameIndex].Map(allocator);
     if (!mappedRegion) return;
@@ -355,7 +355,7 @@ void RenderContext::Impl::FlushLineQueue() {
     auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(basePosPtr + maxLineVerts);
 
     uint32_t vertIdx = 0;
-    for (const auto& line: queues.Lines()) {
+    for (const auto& line: lines) {
         if (vertIdx + 2 > totalLineVerts) {
             break;
         }
@@ -407,7 +407,6 @@ void RenderContext::Impl::FlushLineQueue() {
         }
     );
 
-    queues.Lines().clear();
 }
 
 

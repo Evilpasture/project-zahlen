@@ -856,7 +856,7 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::Locomotion::RenderDebugRig(*engine, player, dualShapeConfig);
             registry.Patch<ZHLN::Components::TransformComponent, ZHLN::RigBoneMap>(player, [&](const auto& trans, const auto& rig) -> auto {
                 const auto gait = registry.Get<ZHLN::ProceduralLocomotionComponent>(player);
-                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetRenderContext(), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
+                ZHLN::ProceduralAnimation::DrawDebugRig(engine->GetSceneData(), trans.position, trans.rotation, rig, gait ? &*gait : nullptr);
             });
         }
     }

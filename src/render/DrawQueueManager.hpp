@@ -34,10 +34,6 @@ class DrawQueueManager {
     [[nodiscard]] auto Decals() noexcept -> ZHLN::Array<DecalDrawCommand>& { return _queues.decalQueue; }
     [[nodiscard]] auto Decals() const noexcept -> const ZHLN::Array<DecalDrawCommand>& { return _queues.decalQueue; }
 
-    [[nodiscard]] auto Lines() noexcept -> ZHLN::Array<LineSegment>& { return _queues.lineQueue; }
-    [[nodiscard]] auto Lines() const noexcept -> const ZHLN::Array<LineSegment>& { return _queues.lineQueue; }
-
-
     void Sort();
 
     void Clear() noexcept {
@@ -46,12 +42,11 @@ class DrawQueueManager {
         _queues.particleEmittersQueue.clear();
         _queues.meshParticleQueue.clear();
         _queues.decalQueue.clear();
-        _queues.lineQueue.clear();
     }
 
     [[nodiscard]] bool Empty() const noexcept {
         return _queues.drawQueue.empty() && _queues.csgDrawQueue.empty() && _queues.particleEmittersQueue.empty() && _queues.meshParticleQueue.empty() &&
-               _queues.decalQueue.empty() && _queues.lineQueue.empty();
+               _queues.decalQueue.empty();
     }
 
   private:
