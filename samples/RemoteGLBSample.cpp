@@ -85,6 +85,7 @@
 // G hide/show the floor, H hide/show the subject, S toggle screen-space
 // reflections, R re-download, C re-crawl the model list.
 
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -1045,7 +1046,7 @@ struct SampleState {
     // is the join): the pointer keeps the state a plain struct, and main
     // declares it before this one, so it is destroyed after.
     ZHLN::Remote::AsyncAssetFetcher* fetcher = nullptr;
-    uint32_t                         activeRequest = 0;
+    ZHLN::Remote::FetchHandle        activeRequest {};
     std::string                      assetUrl;
     double                           fetchStartedAt = 0.0;
 
@@ -1577,7 +1578,8 @@ auto main(int argc, char* argv[]) -> int {
     // dangling pointer that no code between the two destructions dereferences.
     ZHLN::Remote::DiskCache         diskCache;
     ZHLN::Remote::AsyncAssetFetcher fetcher(diskCache, timeoutSeconds);
-    state.fetcher                   = &fetcher;
+    state.fetcher = &fetcher;
+    engine->GetAssetManager().SetRemoteFetcher(&fetcher);
 
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
@@ -1626,6 +1628,7 @@ auto main(int argc, char* argv[]) -> int {
     // below, asks them to retire and joins them. A transfer already inside
     // libcurl runs to its own timeout, which is the one thing that can delay
     // shutdown either way.
+    engine->GetAssetManager().SetRemoteFetcher(nullptr);
     state.catalog.worker.request_stop();
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();

@@ -5,14 +5,13 @@
 
 #include <CDN/CDN.hpp>
 
-#include <HTTP/HTTP.hpp>
 #include <RemoteAsset/URLResolver.hpp>
+#include <memory>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Log.hpp>
 
 #include <cstddef>
-#include <format>
 #include <utility>
 
 namespace ZHLN::CDN {
@@ -28,8 +27,6 @@ template <typename... Args>
     return error;
 }
 
-inline constexpr char kUserAgent[]   = "project-zahlen";
-inline constexpr char kAcceptAny[]   = "*/*";
 inline constexpr char kCacheSubdir[] = "cdn";
 
 // Characters a relative asset path may carry without an escape: the RFC 3986
@@ -119,39 +116,11 @@ inline constexpr char kCacheSubdir[] = "cdn";
     return url;
 }
 
-// One GET of @p url, decoded body on success. A transfer failure keeps the
-// HTTPError it already has. A 404 is NotFound, any other non-2xx status is
-// HTTPStatus, and a body the validator refuses is Rejected. The status and the
-// URL go to the log, because the code cannot carry them.
-[[nodiscard]] auto Download(const std::string& url, ValidatorFn validator, uint32_t timeoutSeconds) -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
-    const ZHLN::HTTP::Request request {
-        .url            = url,
-        .headers        = {ZHLN::HTTP::Header {.name = "User-Agent", .value = std::string(kUserAgent)},
-                           ZHLN::HTTP::Header {.name = "Accept", .value = std::string(kAcceptAny)}},
-        .timeoutSeconds = timeoutSeconds,
-    };
-
-    // ZHLN::HTTP::Fetch has already logged the transfer failure in detail.
-    auto response = ZHLN::HTTP::Fetch(request);
-    if (!response) {
-        return std::unexpected(response.error());
-    }
-    if (response->statusCode == 404) {
-        return std::unexpected(Refuse(CDNError::NotFound, url));
-    }
-    if ((response->statusCode < 200) || (response->statusCode >= 300)) {
-        return std::unexpected(Refuse(CDNError::HTTPStatus, response->statusCode, url));
-    }
-    if (!validator(response->body)) {
-        return std::unexpected(Refuse(CDNError::Rejected, url, response->body.size()));
-    }
-    return std::move(response->body);
-}
-
 } // namespace
 
-CDNManager::CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, uint32_t timeoutSeconds)
-: m_baseURL(std::move(baseURL)), m_cache(std::move(cache)), m_timeoutSeconds(timeoutSeconds) {
+CDNManager::CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache,
+                       std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher)
+: m_baseURL(std::move(baseURL)), m_cache(std::move(cache)), m_fetcher(std::move(fetcher)) {
 }
 
 auto CDNManager::Create(const CDNConfig& config) -> std::expected<CDNManager, ZHLN::ErrorCode> {
@@ -161,7 +130,48 @@ auto CDNManager::Create(const CDNConfig& config) -> std::expected<CDNManager, ZH
     }
 
     std::filesystem::path root = config.cacheDir.empty() ? (ZHLN::FS::Paths::CacheDir() / kCacheSubdir) : config.cacheDir;
-    return CDNManager(std::move(*base), ZHLN::Remote::DiskCache(std::move(root)), config.timeoutSeconds);
+    ZHLN::Remote::DiskCache cache(std::move(root));
+    auto                    fetcher = std::make_unique<ZHLN::Remote::AsyncAssetFetcher>(cache, config.timeoutSeconds);
+    return CDNManager(std::move(*base), std::move(cache), std::move(fetcher));
+}
+
+auto CDNManager::RequestAsset(std::string_view relativePath, ValidatorFn validator) -> std::optional<ZHLN::Remote::FetchHandle> {
+    auto url = GetURL(relativePath);
+    if (!url || m_fetcher == nullptr) {
+        return std::nullopt;
+    }
+    const ZHLN::Remote::FetchHandle handle = m_fetcher->Request(*url, validator);
+    if (!handle.IsValid()) {
+        return std::nullopt;
+    }
+    return handle;
+}
+
+auto CDNManager::Poll(ZHLN::Remote::FetchHandle handle)
+    -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>> {
+    if (m_fetcher == nullptr) {
+        return std::nullopt;
+    }
+    return m_fetcher->PollResult(handle);
+}
+
+void CDNManager::Cancel(ZHLN::Remote::FetchHandle handle) {
+    if (m_fetcher != nullptr) {
+        m_fetcher->Cancel(handle);
+    }
+}
+
+[[nodiscard]] auto TranslateRemote(ZHLN::ErrorCode code, std::string_view url) -> ZHLN::ErrorCode {
+    if (code.Is(ZHLN::Remote::FetchError::NotFound)) {
+        return Refuse(CDNError::NotFound, url);
+    }
+    if (code.Is(ZHLN::Remote::FetchError::HTTPStatus)) {
+        return Refuse(CDNError::HTTPStatus, 0, url);
+    }
+    if (code.Is(ZHLN::Remote::FetchError::Rejected)) {
+        return Refuse(CDNError::Rejected, url, 0);
+    }
+    return code;
 }
 
 auto CDNManager::GetURL(std::string_view relativePath) const -> std::expected<std::string, ZHLN::ErrorCode> {
@@ -173,50 +183,36 @@ auto CDNManager::GetURL(std::string_view relativePath) const -> std::expected<st
 }
 
 auto CDNManager::Fetch(std::string_view relativePath, ValidatorFn validator) -> std::expected<std::filesystem::path, ZHLN::ErrorCode> {
-    // A null validator means "anything non-empty". DiskCache::Read treats a
-    // null validator as a refusal, so the default has to be a real function.
-    const ValidatorFn check = (validator != nullptr) ? validator : ZHLN::Remote::Validators::AnyNonEmpty;
-
-    auto path = NormalizePath(relativePath);
-    if (!path) {
-        return std::unexpected(path.error());
+    auto url = GetURL(relativePath);
+    if (!url) {
+        return std::unexpected(url.error());
     }
-    const std::string url      = JoinURL(m_baseURL, *path);
-    const std::string fileName = ZHLN::Remote::ResolveURL(url).cacheFileName;
-
-    if (m_cache.Exists(fileName)) {
-        if (m_cache.Read(fileName, check).has_value()) {
-            return m_cache.Root() / fileName;
-        }
-        // Present but not what it claims to be: a truncated or foreign file.
-        // Remove it, so the download below is the file the next run finds.
-        m_cache.Invalidate(fileName);
+    if (m_fetcher == nullptr) {
+        return std::unexpected(Refuse(CDNError::InvalidConfig, m_baseURL));
     }
-
-    auto bytes = Download(url, check, m_timeoutSeconds);
-    if (!bytes) {
-        return std::unexpected(bytes.error());
+    auto res = m_fetcher->FetchSync(*url, validator);
+    if (!res) {
+        return std::unexpected(res.error());
     }
-    if (!m_cache.WriteAtomic(fileName, *bytes)) {
-        return std::unexpected(Refuse(CDNError::CacheWrite, url, (m_cache.Root() / fileName).string()));
+    if (res->localCachePath.empty()) {
+        return std::unexpected(Refuse(CDNError::CacheWrite, *url, m_cache.Root().string()));
     }
-    return m_cache.Root() / fileName;
+    return res->localCachePath;
 }
 
 auto CDNManager::Load(std::string_view relativePath, ValidatorFn validator) -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
-    const ValidatorFn check = (validator != nullptr) ? validator : ZHLN::Remote::Validators::AnyNonEmpty;
-
-    auto path = NormalizePath(relativePath);
-    if (!path) {
-        return std::unexpected(path.error());
+    auto url = GetURL(relativePath);
+    if (!url) {
+        return std::unexpected(url.error());
     }
-    const std::string url      = JoinURL(m_baseURL, *path);
-    const std::string fileName = ZHLN::Remote::ResolveURL(url).cacheFileName;
-
-    if (auto cached = m_cache.Read(fileName, check)) {
-        return std::move(*cached);
+    if (m_fetcher == nullptr) {
+        return std::unexpected(Refuse(CDNError::InvalidConfig, m_baseURL));
     }
-    return Download(url, check, m_timeoutSeconds);
+    auto res = m_fetcher->FetchSync(*url, validator);
+    if (!res) {
+        return std::unexpected(res.error());
+    }
+    return std::move(res->data);
 }
 
 } // namespace ZHLN::CDN

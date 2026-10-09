@@ -112,7 +112,16 @@ struct NativeRequest {
     std::span<const uint8_t> body;
     uint32_t                 timeoutSeconds  = 0;
     bool                     followRedirects = true;
+    const ZHLN::Atomic<bool>* cancelSignal    = nullptr;
 };
+
+int CurlProgressCallback(void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept {
+    const auto* cancelSignal = static_cast<const ZHLN::Atomic<bool>*>(clientp);
+    if (cancelSignal != nullptr && cancelSignal->load(std::memory_order::relaxed)) {
+        return 1;
+    }
+    return 0;
+}
 
 struct NativeResponse {
     int32_t              statusCode = 0;
@@ -227,6 +236,9 @@ auto MapCURLError(CURLcode code) noexcept -> HTTPError {
 
         case CURLE_OPERATION_TIMEDOUT:
             return HTTPError::Timeout;
+
+        case CURLE_ABORTED_BY_CALLBACK:
+            return HTTPError::TransferFailed;
 
         case CURLE_TOO_MANY_REDIRECTS:
             return HTTPError::TooManyRedirects;
@@ -448,6 +460,12 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
         apply(curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headerList.list));
     }
 
+    if (request.cancelSignal != nullptr) {
+        apply(curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L));
+        apply(curl_easy_setopt(easy, CURLOPT_XFERINFOFUNCTION, &CurlProgressCallback));
+        apply(curl_easy_setopt(easy, CURLOPT_XFERINFODATA, const_cast<ZHLN::Atomic<bool>*>(request.cancelSignal)));
+    }
+
     if (setup != CURLE_OK) {
         detail = curl_easy_strerror(setup);
         return setup;
@@ -500,6 +518,7 @@ auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode
         .body            = request.body,
         .timeoutSeconds  = request.timeoutSeconds,
         .followRedirects = request.followRedirects,
+        .cancelSignal    = request.cancelSignal,
     };
 
     NativeResponse transferred;

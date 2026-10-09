@@ -5,13 +5,8 @@
 //
 // A base URL, a disk cache, and the two verbs an asset loader needs:
 //
-//   Fetch(path)  -- a local file path for the asset. Served from the cache when
-//                   the cache holds a valid copy; otherwise downloaded, written
-//                   to the cache, and returned from there.
-//   Load(path)   -- the asset's bytes. Served from the cache when it holds a
-//                   valid copy; otherwise the raw content is downloaded into
-//                   memory. Load never writes the cache; Fetch is the call that
-//                   persists.
+//   Fetch(path)  -- a local file path for the asset via AsyncAssetFetcher::FetchSync.
+//   Load(path)   -- the asset's bytes, same transfer; the fetcher writes the cache.
 //
 // The base URL is configuration, not code. It arrives in a CDNConfig that the
 // caller fills from wherever it keeps settings (a file, the command line, an
@@ -30,11 +25,14 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <RemoteAsset/AsyncAssetFetcher.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -110,12 +108,21 @@ class CDNManager {
         return m_cache;
     }
 
-  private:
-    CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, uint32_t timeoutSeconds);
+    auto RequestAsset(std::string_view relativePath, ValidatorFn validator = nullptr)
+        -> std::optional<ZHLN::Remote::FetchHandle>;
 
-    std::string                m_baseURL;
-    ZHLN::Remote::DiskCache    m_cache;
-    uint32_t                   m_timeoutSeconds;
+    auto Poll(ZHLN::Remote::FetchHandle handle)
+        -> std::optional<std::expected<ZHLN::Remote::FetchPayload, ZHLN::ErrorCode>>;
+
+    void Cancel(ZHLN::Remote::FetchHandle handle);
+
+  private:
+    CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache,
+               std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
+
+    std::string                                      m_baseURL;
+    ZHLN::Remote::DiskCache                          m_cache;
+    std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> m_fetcher;
 };
 
 } // namespace ZHLN::CDN

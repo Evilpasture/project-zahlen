@@ -109,3 +109,4 @@ NSightAftermath/
 *_diff.md 
 *_snapshot.md
 repomix-output.*
+*.rej

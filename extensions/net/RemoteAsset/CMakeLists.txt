@@ -48,9 +48,9 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 # Core is a public dependency: DiskCache.hpp names ZHLN::FS::Paths in a
-# default argument and AsyncAssetFetcher.hpp names ZHLN::Remote::Validators in
-# its signatures, so a consumer needs core's include path, not just this
-# archive.
+# default argument, AsyncAssetFetcher.hpp names Validators / FetchHandle, and
+# the workers run on TaskSystem (ObjectPool lives in core). A consumer needs
+# core's include path, not just this archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )

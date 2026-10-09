@@ -47,6 +47,7 @@
 // and not the wire bytes. That is also why Content-Length in
 // Response::headers can disagree with body.size().
 
+#include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cctype>
@@ -141,6 +142,10 @@ struct Request {
     std::vector<uint8_t> body            = {};
     uint32_t             timeoutSeconds  = 30;
     bool                 followRedirects = true;
+    // When non-null, libcurl polls this each progress tick and aborts with
+    // CURLE_ABORTED_BY_CALLBACK (mapped to HTTPError::TransferFailed) as soon
+    // as it is true. The pointed-to atomic must outlive the Fetch call.
+    const ZHLN::Atomic<bool>* cancelSignal = nullptr;
 };
 
 // What came back. Engaged whenever the transfer completed, so statusCode is

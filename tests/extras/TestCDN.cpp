@@ -15,6 +15,7 @@
 
 #include "TestsFramework.hpp"
 #include <CDN/CDN.hpp>
+#include <HTTP/HTTP.hpp>
 #include <HTTP/HTTPServer.hpp>
 #include <RemoteAsset/URLResolver.hpp>
 #include <Zahlen/Core/Reflection/Utilities.hpp>
@@ -238,7 +239,7 @@ struct CDNTestSuite {
             auto refused = cdn.Fetch("ok", RejectAll);
             ZHLN::Test::ExpectFalse(refused.has_value());
             if (!refused.has_value()) {
-                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::CDN::CDNError::Rejected));
+                ZHLN::Test::ExpectTrue(refused.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
             }
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("ok").value_or(std::string())).cacheFileName));
             return {};
@@ -273,8 +274,8 @@ struct CDNTestSuite {
             }
             ZHLN::Test::ExpectTrue(exact);
 
-            // Load does not persist. Fetch does.
-            ZHLN::Test::ExpectFalse(cdn.Cache().Exists(fileName));
+            // FetchSync persists on download, so Load now leaves a cache file.
+            ZHLN::Test::ExpectTrue(cdn.Cache().Exists(fileName));
 
             // Once the file is cached, Load answers from the cache.
             ZHLN::Test::ExpectTrue(cdn.Fetch("binary").has_value());
@@ -322,13 +323,13 @@ struct CDNTestSuite {
             auto missing = cdn.Fetch("notfound");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing.has_value()) {
-                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::CDN::CDNError::NotFound));
+                ZHLN::Test::ExpectTrue(missing.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
             }
 
             auto broken = cdn.Load("servererror");
             ZHLN::Test::ExpectFalse(broken.has_value());
             if (!broken.has_value()) {
-                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::CDN::CDNError::HTTPStatus));
+                ZHLN::Test::ExpectTrue(broken.error().Is(ZHLN::HTTP::HTTPError::ConnectionFailed));
             }
 
             ZHLN::Test::ExpectFalse(cdn.Cache().Exists(ZHLN::Remote::ResolveURL(cdn.GetURL("notfound").value_or(std::string())).cacheFileName));

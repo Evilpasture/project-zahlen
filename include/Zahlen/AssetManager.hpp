@@ -24,6 +24,10 @@ namespace ZHLN {
 
 class RenderContext;
 
+namespace Remote {
+class AsyncAssetFetcher;
+}
+
 // Borrowed linear RGBA pixels from AssetManager's cache. The view remains
 // valid until ClearCache or the manager's destruction; never hold it across
 // either operation (or concurrently with a cache clear).
@@ -177,12 +181,21 @@ class AssetManager {
     [[nodiscard]] auto VFS() noexcept -> FS::VirtualFileSystem& { return _vfs; }
     [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem& { return _vfs; }
 
+    void SetRemoteFetcher(Remote::AsyncAssetFetcher* fetcher) noexcept {
+        _remoteFetcher = fetcher;
+    }
+
+    [[nodiscard]] auto RemoteFetcher() const noexcept -> Remote::AsyncAssetFetcher* {
+        return _remoteFetcher;
+    }
+
   private:
     void ReleaseCachedMeshBuffers() noexcept;
 
     // Borrowed from Kernel/GLTF's upload context, never a renderer-owned
     // mesh ledger. Cleared before the context is replaced on device loss.
     RenderContext* _renderContext = nullptr;
+    Remote::AsyncAssetFetcher* _remoteFetcher = nullptr;
     FS::VirtualFileSystem _vfs;
 
     FS::AssetCache<ModelPrefab> _prefabCache;

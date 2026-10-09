@@ -27,6 +27,7 @@
 #include <RemoteAsset/AsyncAssetFetcher.hpp>
 #include <RemoteAsset/DiskCache.hpp>
 #include <RemoteAsset/URLResolver.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -87,7 +88,7 @@ auto MakeGLB(size_t contentBytes) -> std::vector<uint8_t> {
 }
 
 // Polls @p fetcher until @p id is terminal or the budget runs out.
-auto WaitTerminal(ZHLN::Remote::AsyncAssetFetcher& fetcher, uint32_t id, int milliseconds = 10000) -> FetchStatus {
+auto WaitTerminal(ZHLN::Remote::AsyncAssetFetcher& fetcher, ZHLN::Remote::FetchHandle id, int milliseconds = 10000) -> FetchStatus {
     for (int waited = 0; waited < milliseconds; waited += 10) {
         const FetchStatus status = fetcher.Status(id);
         if (status == FetchStatus::Succeeded || status == FetchStatus::Failed) {
@@ -304,7 +305,7 @@ struct RemoteAssetTestSuite {
             ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
             const std::string            url   = server.Url("/ok");
 
-            const uint32_t id = fetcher.Request(url, AnyNonEmpty, false);
+            const auto        id     = fetcher.Request(url, AnyNonEmpty, false);
             const FetchStatus status = WaitTerminal(fetcher, id);
             ZHLN::Test::ExpectEq(status, FetchStatus::Succeeded);
             if (status != FetchStatus::Succeeded) {
@@ -331,7 +332,7 @@ struct RemoteAssetTestSuite {
 
             const auto                   dir     = ScratchDir("reap");
             ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
-            const uint32_t               id      = fetcher.Request(server.Url("/ok"), AnyNonEmpty, false);
+            const auto                   id      = fetcher.Request(server.Url("/ok"), AnyNonEmpty, false);
             const FetchStatus            status  = WaitTerminal(fetcher, id);
             ZHLN::Test::ExpectEq(status, FetchStatus::Succeeded);
             if (status != FetchStatus::Succeeded) {
@@ -363,12 +364,12 @@ struct RemoteAssetTestSuite {
             ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
             const std::string            url   = server.Url("/ok");
 
-            const uint32_t first = fetcher.Request(url, AnyNonEmpty, false);
+            const auto first = fetcher.Request(url, AnyNonEmpty, false);
             ZHLN::Test::ExpectEq(WaitTerminal(fetcher, first), FetchStatus::Succeeded);
             ZHLN::Test::ExpectTrue(fetcher.Take(first).has_value()); // drain the slot
 
             const uint64_t requestsBefore = server.Requests();
-            const uint32_t second         = fetcher.Request(url, AnyNonEmpty, false);
+            const auto     second         = fetcher.Request(url, AnyNonEmpty, false);
             ZHLN::Test::ExpectEq(fetcher.Status(second), FetchStatus::Succeeded); // synchronous: no worker, no Poll
             ZHLN::Test::ExpectEq(server.Requests(), requestsBefore);              // and nothing went on the wire
             auto result = fetcher.Take(second);
@@ -389,7 +390,7 @@ struct RemoteAssetTestSuite {
             ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
             const std::string           url   = server.Url("/ok");
 
-            const uint32_t id = fetcher.Request(url, AnyNonEmpty, false);
+            const auto id = fetcher.Request(url, AnyNonEmpty, false);
             ZHLN::Test::ExpectEq(WaitTerminal(fetcher, id), FetchStatus::Succeeded);
             auto first = fetcher.Take(id);
             ZHLN::Test::ExpectTrue(first.has_value());
@@ -399,8 +400,8 @@ struct RemoteAssetTestSuite {
             ZHLN::Test::ExpectFalse(fetcher.Take(id).has_value());
 
             // Unknown ids are Idle, not an out-of-bounds.
-            ZHLN::Test::ExpectEq(fetcher.Status(9999), FetchStatus::Idle);
-            ZHLN::Test::ExpectFalse(fetcher.Take(9999).has_value());
+            ZHLN::Test::ExpectEq(fetcher.Status(ZHLN::Remote::FetchHandle {}), FetchStatus::Idle);
+            ZHLN::Test::ExpectFalse(fetcher.Take(ZHLN::Remote::FetchHandle {}).has_value());
             return {};
         }
 
@@ -415,7 +416,7 @@ struct RemoteAssetTestSuite {
 
             // /notfound answers 404; a plain URL has no fallback, so the
             // request fails with the status in its report.
-            const uint32_t id = fetcher.Request(server.Url("/notfound"), AnyNonEmpty, false);
+            const auto     id = fetcher.Request(server.Url("/notfound"), AnyNonEmpty, false);
             ZHLN::Test::ExpectEq(WaitTerminal(fetcher, id), FetchStatus::Failed);
             auto result = fetcher.Take(id);
             ZHLN::Test::ExpectTrue(result.has_value());
@@ -436,12 +437,12 @@ struct RemoteAssetTestSuite {
             ZHLN::Remote::AsyncAssetFetcher fetcher(ZHLN::Remote::DiskCache(dir), 10);
             const std::string            url   = server.Url("/ok");
 
-            const uint32_t first = fetcher.Request(url, AnyNonEmpty, false);
+            const auto first = fetcher.Request(url, AnyNonEmpty, false);
             ZHLN::Test::ExpectEq(WaitTerminal(fetcher, first), FetchStatus::Succeeded);
             ZHLN::Test::ExpectTrue(fetcher.Take(first).has_value()); // drain the slot
 
             const uint64_t before = server.Requests();
-            const uint32_t second = fetcher.Request(url, AnyNonEmpty, true);
+            const auto     second = fetcher.Request(url, AnyNonEmpty, true);
             ZHLN::Test::ExpectEq(WaitTerminal(fetcher, second), FetchStatus::Succeeded);
             ZHLN::Test::ExpectTrue(server.Requests() > before); // it went on the wire
             auto result = fetcher.Take(second);
@@ -457,6 +458,7 @@ struct RemoteAssetTestSuite {
 // The extras test binaries are one suite per process (see
 // tests/extras/CMakeLists.txt), so this owns its own entry point.
 int main() {
+    ZHLN::TaskSystem::Scope taskScope;
     // The fetcher's workers go out to 127.0.0.1: a proxy in the environment
     // would send them somewhere else, and the suite would report failures
     // that are about the machine it ran on rather than about the fetcher.
