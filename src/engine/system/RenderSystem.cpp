@@ -46,7 +46,7 @@ namespace {
         skeleton.scratchVertexCount = 0;
     }
     if (skeleton.skinnedScratch == BufferHandle::Invalid && vertexCount != 0) {
-        skeleton.skinnedScratch = rc.CreateSkinnedScratchBuffer(vertexCount);
+        skeleton.skinnedScratch = rc.CreateBuffer<BufferUsage::SkinScratch>(vertexCount);
         if (skeleton.skinnedScratch != BufferHandle::Invalid) {
             skeleton.scratchVertexCount = vertexCount;
         }

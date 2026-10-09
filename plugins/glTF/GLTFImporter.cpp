@@ -1001,15 +1001,15 @@ auto GetOrCreateCompiledPrimitive(
         return it->second;
     }
 
-    const BufferHandle posVbo = ctx.CreateVertexBuffer(std::span {primJob.positions});
-    const BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {primJob.tangentFrames});
-    const BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {primJob.surfaces});
+    const BufferHandle posVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.positions});
+    const BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.tangentFrames});
+    const BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.surfaces});
 
     const BufferHandle skinVbo = !primJob.skins.empty() ?
-                                     ctx.CreateVertexBuffer(std::span {primJob.skins}) :
+                                     ctx.CreateBuffer<BufferUsage::Vertex>(std::span {primJob.skins}) :
                                      BufferHandle::Invalid;
 
-    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateIndexBuffer(std::span {primJob.indices}.first(primJob.indexCount)) :
+    const BufferHandle ibo = (primJob.indexCount > 0) ? ctx.CreateBuffer<BufferUsage::Index>(std::span {primJob.indices}.first(primJob.indexCount)) :
                                                         BufferHandle::Invalid;
 
     // VK_EXT_mesh_shader streams. They are plain storage buffers read through
@@ -1019,13 +1019,13 @@ auto GetOrCreateCompiledPrimitive(
     const auto packedMeshlets = PackMeshlets(primJob.meshlets.meshlets);
 
     BufferHandle meshletVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), kMeshletPackedBytes) :
+        hasMeshlets ? ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes}) :
                       BufferHandle::Invalid;
     BufferHandle meshletVertexVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.vertices}) :
+        hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.vertices}) :
                       BufferHandle::Invalid;
     BufferHandle meshletTriVbo =
-        hasMeshlets ? ctx.CreateStorageBuffer(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
+        hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {primJob.meshlets.triangles}) : BufferHandle::Invalid;
     const bool completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid &&
                                   meshletVertexVbo != BufferHandle::Invalid && meshletTriVbo != BufferHandle::Invalid;
     if (hasMeshlets && !completeMeshlets) {

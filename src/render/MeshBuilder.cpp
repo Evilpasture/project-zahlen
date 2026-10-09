@@ -58,9 +58,9 @@ void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPositi
 
     const auto packedMeshlets = PackMeshlets(built.meshlets);
 
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), kMeshletPackedBytes);
-    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
-    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
+    mesh.meshletBuffer       = ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes});
+    mesh.meshletVertexBuffer = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    mesh.meshletTriBuffer    = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
         ctx.DestroyBuffer(mesh.meshletBuffer);
@@ -90,10 +90,10 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
         streams.Push(n, t, Math::PackUV(0.0f, 0.0f), c);
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateIndexBuffer(std::span {indices});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer          = posVbo,
@@ -131,9 +131,9 @@ auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -
     streams.Push(n, t, Math::PackUV(0.0f, 0.0f), c);
     streams.Push(n, t, Math::PackUV(0.0f, 1.0f), c);
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
 
     auto finalMesh = Mesh {
         .posBuffer          = posVbo,
@@ -224,9 +224,9 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
     streams.Push(nNX, tNX, uv00, c);
     streams.Push(nNX, tNX, uv01, c);
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
 
     auto finalMesh = Mesh {
         .posBuffer          = posVbo,
@@ -287,10 +287,10 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateIndexBuffer(std::span {indices});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer          = posVbo,
@@ -359,10 +359,10 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateIndexBuffer(std::span {indices});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer          = posVbo,
@@ -426,10 +426,10 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
         indices.insert(indices.end(), {ct, first + static_cast<uint32_t>(ix), first + static_cast<uint32_t>(ix) + 1});
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {streams.frames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {streams.surfaces});
-    BufferHandle ibo        = ctx.CreateIndexBuffer(std::span {indices});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.frames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {streams.surfaces});
+    BufferHandle ibo        = ctx.CreateBuffer<BufferUsage::Index>(std::span {indices});
 
     Mesh finalMesh = {
         .posBuffer          = posVbo,

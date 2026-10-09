@@ -73,15 +73,15 @@ struct CaptureResult {
     const auto packedMeshlets = ZHLN::PackMeshlets(meshlets.meshlets);
 
     return {
-        .posBuffer           = rc.CreateVertexBuffer(std::span {positions}),
-        .tangentFrameBuffer  = rc.CreateVertexBuffer(std::span {frames}),
-        .surfaceBuffer       = rc.CreateVertexBuffer(std::span {surfaces}),
-        .indexBuffer         = rc.CreateIndexBuffer(std::span<const uint32_t> {indices}),
+        .posBuffer           = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
+        .tangentFrameBuffer  = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
+        .surfaceBuffer       = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
+        .indexBuffer         = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span<const uint32_t> {indices}),
         .vertexCount         = static_cast<uint32_t>(positions.size()),
         .indexCount          = static_cast<uint32_t>(indices.size()),
-        .meshletBuffer       = rc.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), ZHLN::kMeshletPackedBytes),
-        .meshletVertexBuffer = rc.CreateStorageBuffer(std::span {meshlets.vertices}),
-        .meshletTriBuffer    = rc.CreateStorageBuffer(std::span {meshlets.triangles}),
+        .meshletBuffer       = rc.CreateBuffer(ZHLN::BufferDesc {.usage = ZHLN::BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = ZHLN::kMeshletPackedBytes}),
+        .meshletVertexBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {meshlets.vertices}),
+        .meshletTriBuffer    = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {meshlets.triangles}),
         .meshletCount        = static_cast<uint32_t>(meshlets.meshlets.size()),
     };
 }

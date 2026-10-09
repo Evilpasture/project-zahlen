@@ -286,9 +286,9 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
     const JPH::Vec3 cameraPosition = camComp->camera.position;
     const auto      ribbon         = BuildCameraFacingRibbon(segments, cameraPosition);
 
-    const BufferHandle vboPos     = rc.CreateVertexBuffer(std::span {ribbon.positions});
-    const BufferHandle vboFrame   = rc.CreateVertexBuffer(std::span {ribbon.frames});
-    const BufferHandle vboSurface = rc.CreateVertexBuffer(std::span {ribbon.surfaces});
+    const BufferHandle vboPos     = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
+    const BufferHandle vboFrame   = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
+    const BufferHandle vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
 
     const Entity boltEntity = reg.Create();
 
@@ -396,13 +396,13 @@ auto Update(Engine& engine, float dt) -> void {
             const JPH::Vec3                  cameraPosition = camComp->camera.position;
             const auto                       ribbon   = BuildCameraFacingRibbon(segments, cameraPosition);
             if (bolt.vboPos == BufferHandle::Invalid) {
-                bolt.vboPos = rc.CreateVertexBuffer(std::span {ribbon.positions});
+                bolt.vboPos = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.positions});
             }
             if (bolt.vboFrame == BufferHandle::Invalid) {
-                bolt.vboFrame = rc.CreateVertexBuffer(std::span {ribbon.frames});
+                bolt.vboFrame = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.frames});
             }
             if (bolt.vboSurface == BufferHandle::Invalid) {
-                bolt.vboSurface = rc.CreateVertexBuffer(std::span {ribbon.surfaces});
+                bolt.vboSurface = rc.CreateBuffer<BufferUsage::Vertex>(std::span {ribbon.surfaces});
             }
             bolt.maxVertices      = ribbon.maxVertices;
             bolt.visibleVertices  = std::min(bolt.visibleVertices, bolt.maxVertices);

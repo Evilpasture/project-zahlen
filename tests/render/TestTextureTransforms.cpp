@@ -43,8 +43,8 @@ namespace {
 static_assert(requires(ZHLN::RenderContext& rc, ZHLN::BufferHandle handle,
                        std::array<ZHLN::VertexPosition, 4>& vertices,
                        const std::array<ZHLN::VertexPosition, 4>& immutable) {
-    rc.CreateStorageBuffer(std::span {vertices});
-    rc.CreateVertexBuffer(std::span {immutable});
+    rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {vertices});
+    rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {immutable});
     rc.UpdateBuffer(handle, std::span {vertices});
 });
 
@@ -114,10 +114,10 @@ constexpr std::array kSampleUV {
     }
     constexpr std::array<uint32_t, 6> indices {0, 1, 2, 0, 2, 3};
     return {
-        .posBuffer          = rc.CreateVertexBuffer(std::span {positions}),
-        .tangentFrameBuffer = rc.CreateVertexBuffer(std::span {frames}),
-        .surfaceBuffer      = rc.CreateVertexBuffer(std::span {surfaces}),
-        .indexBuffer        = rc.CreateIndexBuffer(std::span<const uint32_t> {indices}),
+        .posBuffer          = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
+        .tangentFrameBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
+        .surfaceBuffer      = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
+        .indexBuffer        = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span<const uint32_t> {indices}),
         .vertexCount        = 4,
         .indexCount         = 6,
     };

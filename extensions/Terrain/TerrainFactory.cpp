@@ -53,9 +53,9 @@ void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const Verte
 
     // Storage, not vertex data: the task/mesh shaders reach these only through
     // their device address, they are never bound to the input assembler.
-    mesh.meshletBuffer       = ctx.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), kMeshletPackedBytes);
-    mesh.meshletVertexBuffer = ctx.CreateStorageBuffer(std::span {built.vertices});
-    mesh.meshletTriBuffer    = ctx.CreateStorageBuffer(std::span {built.triangles});
+    mesh.meshletBuffer       = ctx.CreateBuffer(BufferDesc {.usage = BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = kMeshletPackedBytes});
+    mesh.meshletVertexBuffer = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.vertices});
+    mesh.meshletTriBuffer    = ctx.CreateBuffer<BufferUsage::Storage>(std::span {built.triangles});
 
     if (mesh.meshletBuffer == BufferHandle::Invalid || mesh.meshletVertexBuffer == BufferHandle::Invalid || mesh.meshletTriBuffer == BufferHandle::Invalid) {
         ctx.DestroyBuffer(mesh.meshletBuffer);
@@ -172,9 +172,9 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {tangentFrames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {surfaces});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
 
     Mesh finalMesh {.posBuffer = posVbo, .tangentFrameBuffer = frameVbo, .surfaceBuffer = surfaceVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
     AttachTerrainMeshlets(ctx, finalMesh, positions, {});
@@ -379,9 +379,9 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         }
     }
 
-    BufferHandle posVbo     = ctx.CreateVertexBuffer(std::span {positions});
-    BufferHandle frameVbo   = ctx.CreateVertexBuffer(std::span {tangentFrames});
-    BufferHandle surfaceVbo = ctx.CreateVertexBuffer(std::span {surfaces});
+    BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {positions});
+    BufferHandle frameVbo   = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {tangentFrames});
+    BufferHandle surfaceVbo = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {surfaces});
 
     auto finalMesh = Mesh {
         .posBuffer          = posVbo,

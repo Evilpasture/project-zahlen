@@ -14,11 +14,33 @@
 #include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
+#include <type_traits>
 
 namespace ZHLN {
+
+// Public buffer role. GeometryManager maps this to Vk::BufferUsage bits.
+enum class BufferUsage : uint8_t {
+    Vertex,
+    Index,
+    Storage,
+    Uniform,
+    SkinScratch, // skinned-mesh deform target: pos + tangent frame, no host upload
+};
+
+template <typename T>
+concept ValidIndexType = std::same_as<std::remove_cv_t<T>, uint16_t> || std::same_as<std::remove_cv_t<T>, uint32_t>;
+
+struct BufferDesc {
+    BufferUsage                usage  = BufferUsage::Storage;
+    std::span<const std::byte> data   = {}; // empty = zero-fill / uninitialized
+    size_t                     size   = 0;  // used when data is empty
+    uint32_t                   stride = 1;  // bytes per element
+};
 
 // glTF sampler wrapping is attached to a texture *reference*, not its image:
 // multiple texture objects may share the same image with different S/T modes.

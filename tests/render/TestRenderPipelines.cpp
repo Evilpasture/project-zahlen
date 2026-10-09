@@ -281,7 +281,7 @@ struct RenderPipelinesTestSuite {
             assets.ClearCache(); // unregister both aliases; release shared buffers once
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(firstID).has_value());
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(secondID).has_value());
-            const auto next = rc.CreateStorageBuffer(64);
+            const auto next = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(64);
             ZHLN::Test::ExpectTrue(next != ZHLN::BufferHandle::Invalid);
             rc.DestroyBuffer(next);
             return {};
@@ -339,14 +339,14 @@ struct RenderPipelinesTestSuite {
             // Skinned scratch is still an explicit component-owned resource;
             // particle simulation buffers are deliberately not.
             const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
-            const auto firstScratch = rc.CreateSkinnedScratchBuffer(3);
+            const auto firstScratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
             if (ZHLN::Test::ExpectNe(firstScratch, ZHLN::BufferHandle::Invalid)) {
                 reg.Patch<ZHLN::Components::SkeletalMeshComponent>(skinned, [&](auto& comp) {
                     comp.skinnedScratch = firstScratch;
                     comp.scratchVertexCount = 3;
                 });
                 ZHLN::SceneResources::Detach<ZHLN::Components::SkeletalMeshComponent>(*engine, skinned);
-                const auto secondScratch = rc.CreateSkinnedScratchBuffer(3);
+                const auto secondScratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
                 ZHLN::Test::ExpectNe(secondScratch, firstScratch);
                 rc.DestroyBuffer(secondScratch);
             }
@@ -428,10 +428,10 @@ struct RenderPipelinesTestSuite {
             std::array<ZHLN::VertexPosition, 3> positions {};
             std::array<ZHLN::VertexTangentFrame, 3> frames {};
             std::array<ZHLN::VertexSurface, 3>      surfaces {};
-            const auto pos     = rc.CreateVertexBuffer(std::span<ZHLN::VertexPosition> {positions});
-            const auto frame   = rc.CreateVertexBuffer(std::span<ZHLN::VertexTangentFrame> {frames});
-            const auto surface = rc.CreateVertexBuffer(std::span<ZHLN::VertexSurface> {surfaces});
-            const auto scratch = rc.CreateSkinnedScratchBuffer(3);
+            const auto pos     = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span<ZHLN::VertexPosition> {positions});
+            const auto frame   = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span<ZHLN::VertexTangentFrame> {frames});
+            const auto surface = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span<ZHLN::VertexSurface> {surfaces});
+            const auto scratch = rc.CreateBuffer<ZHLN::BufferUsage::SkinScratch>(3);
             if (!ZHLN::Test::ExpectTrue(
                     pos != ZHLN::BufferHandle::Invalid && frame != ZHLN::BufferHandle::Invalid && surface != ZHLN::BufferHandle::Invalid &&
                     scratch != ZHLN::BufferHandle::Invalid

@@ -260,7 +260,7 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectFalse(reg.IsAlive(rawBolt));
             ZHLN::Test::ExpectFalse(rc.GetGPUMesh(oldMesh).has_value());
             ZHLN::Test::ExpectFalse(rc.GetGPUMaterial(oldMat).has_value());
-            const auto reusedSlot = rc.CreateStorageBuffer(64);
+            const auto reusedSlot = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(64);
             ZHLN::Test::ExpectNe(reusedSlot, oldPos);
             rc.DestroyBuffer(reusedSlot);
 

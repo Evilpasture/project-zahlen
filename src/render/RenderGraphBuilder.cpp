@@ -129,7 +129,7 @@ using ScenePushConstants = GeneratedGpu::ScenePassPushConstants;
 // nothing here encodes a dependency twice.
 template <AAMode Mode, typename GetSwapchainImageT>
 [[nodiscard]] auto BuildFrameGraph(RenderContext::Impl& self, const ScenePushConstants& pc, GetSwapchainImageT&& getSwapchain) {
-    using OpaqueReflectionPass = Passes::ReflectionPass<Passes::OpaqueSurface, Res_HdrSceneColor, "Reflection">;
+    using OpaqueReflectionPass      = Passes::ReflectionPass<Passes::OpaqueSurface, Res_HdrSceneColor, "Reflection">;
     using TranslucentReflectionPass = Passes::ReflectionPass<Passes::TranslucentSurface, Res_TransLighting, "TransReflection">;
 
     // 1. Rasterization and deferred lighting DAG.
@@ -144,9 +144,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::ShadowPass {.impl = self}, Passes::GBufferBasePass {.impl = self}, Passes::HiZGeneratePass {.impl = self},
         Passes::GBufferResolvePass {.impl = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc}, Passes::ClusteredLightingPass {.impl = self, .pc = pc},
-        Passes::RtrHalfTracePass {.impl = self}, OpaqueReflectionPass {.impl = self, .pc = pc},
-        TranslucentReflectionPass {.impl = self, .pc = pc}, Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.impl = self},
-        Passes::HdrDenoisePass {.impl = self}, Passes::BloomPass {.impl = self}
+        Passes::RtrHalfTracePass {.impl = self}, OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
+        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.impl = self}, Passes::HdrDenoisePass {.impl = self}, Passes::BloomPass {.impl = self}
     );
 
     // 2. Anti-aliasing tail. Which passes exist at all depends on the mode, so

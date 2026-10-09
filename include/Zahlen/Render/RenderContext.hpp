@@ -115,32 +115,41 @@ class ZHLN_API RenderContext {
     // Drops mesh lookups (not their caller-owned buffers), materials, and textures.
     void                                  ClearGPUCaches() noexcept;
 
-    BufferHandle CreateStorageBuffer(size_t size);
+    [[nodiscard]] auto CreateBuffer(const BufferDesc& desc) -> BufferHandle;
 
-    // Raw byte streams declare their element stride; typed spans derive it.
-    [[nodiscard]] auto CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
-    [[nodiscard]] auto CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle;
-    [[nodiscard]] auto CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle;
+    // Usage is an NTTP so Index can reject non-integer element types at compile time.
+    // (A runtime `if (usage == Index) static_assert` would fire for every T.)
+    template <BufferUsage Usage, typename T, size_t SpanExtent>
+        requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateBuffer(std::span<T, SpanExtent> elements) -> BufferHandle {
+        if constexpr (Usage == BufferUsage::Index) {
+            static_assert(ValidIndexType<T>, "Index buffers must use uint16_t or uint32_t elements.");
+        }
+        return CreateBuffer(BufferDesc {
+            .usage  = Usage,
+            .data   = std::as_bytes(elements),
+            .stride = static_cast<uint32_t>(sizeof(T)),
+        });
+    }
+
+    template <BufferUsage Usage, typename T = std::byte>
+    [[nodiscard]] auto CreateBuffer(size_t elementCount) -> BufferHandle {
+        return CreateBuffer(BufferDesc {
+            .usage  = Usage,
+            .size   = elementCount * sizeof(T),
+            .stride = static_cast<uint32_t>(sizeof(T)),
+        });
+    }
+
     void DestroyBuffer(BufferHandle handle);
     void UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept;
 
-    // Accept both dynamic spans and fixed-extent spans deduced from std::array.
-    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateStorageBuffer(std::span<T, SpanExtent> elements) -> BufferHandle {
-        return CreateStorageBuffer(std::as_bytes(elements), static_cast<uint32_t>(sizeof(T)));
-    }
-    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateVertexBuffer(std::span<T, SpanExtent> vertices) -> BufferHandle {
-        return CreateVertexBuffer(std::as_bytes(vertices), static_cast<uint32_t>(sizeof(T)));
-    }
-    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
+    template <typename T, size_t SpanExtent>
+        requires std::is_trivially_copyable_v<T>
     void UpdateBuffer(BufferHandle handle, std::span<T, SpanExtent> elements) noexcept {
         UpdateBuffer(handle, std::as_bytes(elements));
     }
-    auto CreateConstantBuffer(size_t size) -> BufferHandle;
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
-
-    auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
     [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget>;
 

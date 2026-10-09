@@ -153,19 +153,19 @@ void ConfigureUnlitCapture(ZHLN::Engine& engine) {
     }
 
     ZHLN::Mesh mesh {
-        .posBuffer          = rc.CreateVertexBuffer(std::span {positions}),
-        .tangentFrameBuffer = rc.CreateVertexBuffer(std::span {frames}),
-        .surfaceBuffer      = rc.CreateVertexBuffer(std::span {surfaces}),
+        .posBuffer          = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {positions}),
+        .tangentFrameBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {frames}),
+        .surfaceBuffer      = rc.CreateBuffer<ZHLN::BufferUsage::Vertex>(std::span {surfaces}),
         .skinBuffer         = ZHLN::BufferHandle::Invalid,
-        .indexBuffer        = rc.CreateIndexBuffer(std::span {indices}),
+        .indexBuffer        = rc.CreateBuffer<ZHLN::BufferUsage::Index>(std::span {indices}),
         .vertexCount        = static_cast<uint32_t>(positions.size()),
         .indexCount         = static_cast<uint32_t>(indices.size()),
     };
     if (const ZHLN::MeshletBuildResult built = ZHLN::BuildMeshlets(std::span {indices}, std::span {positions}); !built.Empty()) {
         const auto packedMeshlets = ZHLN::PackMeshlets(built.meshlets);
-        mesh.meshletBuffer       = rc.CreateStorageBuffer(std::as_bytes(std::span {packedMeshlets}), ZHLN::kMeshletPackedBytes);
-        mesh.meshletVertexBuffer = rc.CreateStorageBuffer(std::span {built.vertices});
-        mesh.meshletTriBuffer    = rc.CreateStorageBuffer(std::span {built.triangles});
+        mesh.meshletBuffer       = rc.CreateBuffer(ZHLN::BufferDesc {.usage = ZHLN::BufferUsage::Storage, .data = std::as_bytes(std::span {packedMeshlets}), .stride = ZHLN::kMeshletPackedBytes});
+        mesh.meshletVertexBuffer = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {built.vertices});
+        mesh.meshletTriBuffer    = rc.CreateBuffer<ZHLN::BufferUsage::Storage>(std::span {built.triangles});
         if (mesh.meshletBuffer == ZHLN::BufferHandle::Invalid || mesh.meshletVertexBuffer == ZHLN::BufferHandle::Invalid ||
             mesh.meshletTriBuffer == ZHLN::BufferHandle::Invalid) {
             rc.DestroyBuffer(mesh.meshletBuffer);

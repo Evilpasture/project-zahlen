@@ -197,8 +197,36 @@ void RenderContext::Impl::ClearEmitterBuffers() noexcept {
     }
 }
 
-auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    return _impl->geometry.CreateBuffer({.allocationSize = size}, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex).value_or(BufferHandle::Invalid);
+auto RenderContext::CreateBuffer(const BufferDesc& desc) -> BufferHandle {
+    if (desc.usage == BufferUsage::SkinScratch) {
+        const uint32_t vertexCount = desc.stride == 0 ? 0U : static_cast<uint32_t>(desc.size / desc.stride);
+        return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
+    }
+
+    Vk::BufferUsage vkUsage = Vk::BufferUsage::None;
+    switch (desc.usage) {
+    case BufferUsage::Vertex:
+        vkUsage = Vk::BufferUsage::Vertex;
+        break;
+    case BufferUsage::Index:
+        vkUsage = Vk::BufferUsage::Index;
+        break;
+    case BufferUsage::Storage:
+        vkUsage = desc.data.empty() ? (Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex) : Vk::BufferUsage::Storage;
+        break;
+    case BufferUsage::Uniform:
+        vkUsage = Vk::BufferUsage::Uniform;
+        break;
+    case BufferUsage::SkinScratch:
+        break;
+    }
+
+    GeometryManager::BufferSource source {
+        .bytes          = desc.data,
+        .allocationSize = desc.data.empty() ? desc.size : 0,
+        .stride         = desc.stride,
+    };
+    return _impl->geometry.CreateBuffer(source, vkUsage).value_or(BufferHandle::Invalid);
 }
 
 void RenderContext::SubmitParticleEmitter(
@@ -459,20 +487,7 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
     return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
-auto RenderContext::CreateStorageBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateBuffer({.bytes = bytes, .stride = stride}, Vk::BufferUsage::Storage).value_or(BufferHandle::Invalid);
-}
 
-auto RenderContext::CreateVertexBuffer(std::span<const std::byte> bytes, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateBuffer({.bytes = bytes, .stride = stride}, Vk::BufferUsage::Vertex).value_or(BufferHandle::Invalid);
-}
-
-auto RenderContext::CreateIndexBuffer(std::span<const uint32_t> indices) -> BufferHandle {
-    // An index buffer's element size is the type of its indices, so the caller does
-    // not state it -- the stride is the pointer's own.
-    return _impl->geometry.CreateBuffer({.bytes = std::as_bytes(indices), .stride = static_cast<uint32_t>(sizeof(uint32_t))}, Vk::BufferUsage::Index)
-        .value_or(BufferHandle::Invalid);
-}
 
 void RenderContext::DestroyBuffer(BufferHandle handle) {
     _impl->geometry.Destroy(handle);
@@ -695,10 +710,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
-}
-
-auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-    return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
 }
 
 void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) {
