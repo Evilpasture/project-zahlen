@@ -6,4 +6,5 @@
 add_subdirectory(Network)
 add_subdirectory(HTTP)
 add_subdirectory(RemoteAsset)
+add_subdirectory(CDN)
 add_subdirectory(GitHub)

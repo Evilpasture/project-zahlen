@@ -816,4 +816,50 @@ if(TARGET zahlen_remote_asset)
     zahlen_register_extras_test(${TARGET_NAME})
 endif()
 
+# --- CDN Test Suite ---
+# extensions/net/CDN is a base-URL layer over extensions/net/RemoteAsset. Built only
+# when zahlen_cdn exists, which in turn needs libcurl. Every assertion runs
+# against the loopback server of extensions/net/HTTP, so no test touches a real
+# CDN host.
+if(TARGET zahlen_cdn)
+    set(TARGET_NAME TestCDN)
+    add_executable(${TARGET_NAME} TestCDN.cpp)
+
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        zahlen_engine
+        zahlen_cdn
+        zahlen_remote_asset
+        zahlen_http
+    )
+
+    # Public headers only, as TestRemoteAsset does: <CDN/...> and <RemoteAsset/...>
+    # resolve through ${ZHLN_OPTIONAL_INCLUDE_ROOTS}.
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+        ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
+    )
+
+    zahlen_enable_reflection(${TARGET_NAME})
+
+    if(USE_SANITIZERS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+        )
+        target_link_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+        )
+        target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+    endif()
+
+    zahlen_register_extras_test(${TARGET_NAME})
+endif()
+
 include(${CMAKE_CURRENT_LIST_DIR}/ProjectLightClientTests.cmake)

@@ -150,6 +150,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_asset_cooking` | `plugins/AssetCooking/` | Host-side image and cooked-asset codecs used by `zcook` |
 | `zahlen_network` | `extensions/net/Network/` | `ZHLN.Wire` and replication over the engine ECS |
 | `zahlen_http`, `zahlen_remote_asset`, `zahlen_github` | `extensions/net/{HTTP,RemoteAsset,GitHub}/` | Optional HTTP transfer, remote-asset cache, and GitHub tree adapter |
+| `zahlen_cdn` | `extensions/net/CDN/` | Base-URL asset `Fetch` (cache, else download) and `Load` (cache, else raw bytes) over the remote-asset cache |
 | `zahlen_animation`, `zahlen_camera`, `zahlen_character_controller`, `zahlen_terrain`, `zahlen_ui_schema`, `zahlen_vfx` | `extensions/` | Reusable animation, camera, controller, terrain, UI, and VFX capabilities |
 | `zahlen_ragdoll_authoring` | `gameplay/RagdollAuthoring/` | Domain-specific humanoid ragdoll authoring |
 | `zahlen_scripting`, `zahlen_scripting_lua`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent scripting support, optional LuaJIT runtime, console, and editor |
