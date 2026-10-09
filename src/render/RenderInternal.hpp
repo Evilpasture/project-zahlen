@@ -219,7 +219,6 @@ struct RenderContext::Impl {
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
-    static constexpr uint32_t kGpuParticleCount              = 65'536;
     static constexpr uint32_t kGpuCullingMaxInstances        = 8'192;
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
     static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
@@ -390,7 +389,16 @@ struct RenderContext::Impl {
 
     TextureManager textureManager;
 
-    Vk::Buffer                  particleBuffer;
+    struct EmitterStorage {
+        BufferHandle buffer = BufferHandle::Invalid;
+        uint32_t     capacity = 0;
+        uint64_t     lastSeenFrame = 0;
+        bool         allocationWarningLogged = false;
+    };
+    using EmitterStorageMap = HashMap<uint64_t, EmitterStorage>;
+    EmitterStorageMap particleEmitters;
+    EmitterStorageMap meshParticleEmitters;
+
     Vk::DynamicComputePass      particleUpdatePass;
     VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
@@ -578,6 +586,10 @@ struct RenderContext::Impl {
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode>;
     void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride)
+        -> BufferHandle;
+    void EvictInactiveEmitters() noexcept;
+    void OnDeviceLost() noexcept;
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
@@ -705,7 +717,6 @@ struct RenderContext::Impl {
         destroyFrames(frames.fogVolumesBuffer);
         allocator.DestroyBuffer(clusterBoundsBuffer);
         allocator.DestroyBuffer(morphDeltasBuffer);
-        allocator.DestroyBuffer(particleBuffer);
 
         deletionQueue.Drain();
         graphicsCmdRing.Cleanup();

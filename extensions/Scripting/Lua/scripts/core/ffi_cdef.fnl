@@ -367,8 +367,7 @@
           uint32_t              maxParticles;
           bool                  active;
           bool                  attachToCamera;
-          uint64_t              gpuBuffer;
-          uint32_t              bufferCapacity;
+          bool                  additive;
       } ParticleEmitterComponent;
 
       #pragma pack(push, 1)

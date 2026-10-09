@@ -428,6 +428,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
 
     _impl->destinations.BeginFrame();
     ++_impl->frameSerial;
+    _impl->EvictInactiveEmitters();
     // This frame's billboard batches start again from their first slot. The serial
     // tells same-key submissions apart within one frame, so it is frame state and is
     // reset here, with frameSerial -- the emitter queue it counts into is shared with

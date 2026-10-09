@@ -128,19 +128,16 @@ class ZHLN_API RenderContext {
 
     BufferHandle CreateStorageBuffer(size_t size);
 
-    // Storage for a GPU-simulated emitter: the renderer owns what one particle occupies,
-    // so a host asks for a particle count and never for a stride.
-    [[nodiscard]] auto CreateParticleBuffer(uint32_t maxParticles) -> BufferHandle;
-    [[nodiscard]] auto CreateMeshParticleBuffer(uint32_t maxParticles) -> BufferHandle;
-
-    // Descriptions, not GPU layouts: src/render/GpuPack.cpp writes the struct the
-    // update and render passes read. @p texture is the engine's own handle -- the
-    // renderer resolves it -- and @p additive picks the blend, so an emitter's
-    // presentation never rides its physics. Mesh particles have no author-side upload
-    // path: MeshParticleUpdatePass produces them on the GPU from their parameters.
-    void SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false);
+    // Descriptions, not GPU layouts: the renderer allocates and retains each
+    // emitter's simulation storage, keyed by a stable, per-emitter identity
+    // (normally Entity::Pack()). Keep it unique within this context and stable
+    // across submissions. Storage is evicted after 120 idle frames; use a new
+    // identity for a logically new emitter.
+    void SubmitParticleEmitter(
+        uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive = false
+    );
     void SubmitMeshParticleEmitter(
-        BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
+        uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
     );
 
     // Immediate-mode quads: the host describes billboards in world space for this frame,

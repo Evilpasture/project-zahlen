@@ -14,8 +14,7 @@ template <typename T>
 inline constexpr bool OwnsExternalResource =
     std::is_same_v<T, Components::PhysicsComponent> || std::is_same_v<T, Components::RagdollComponent> ||
     std::is_same_v<T, Components::AudioSourceComponent> || std::is_same_v<T, Components::LoopSynthComponent> ||
-    std::is_same_v<T, Components::OwnedMeshComponent> || std::is_same_v<T, Components::ParticleEmitterComponent> ||
-    std::is_same_v<T, Components::MeshParticleEmitterComponent> || std::is_same_v<T, Components::SkeletalMeshComponent>;
+    std::is_same_v<T, Components::OwnedMeshComponent> || std::is_same_v<T, Components::SkeletalMeshComponent>;
 
 // Typed, explicit ownership operations for the components that hold external
 // handles. These release the old resource before the registry erases or
@@ -30,8 +29,6 @@ ZHLN_API void Release(Engine& engine, Components::RagdollComponent& component);
 ZHLN_API void Release(Engine& engine, Components::AudioSourceComponent& component);
 ZHLN_API void Release(Engine& engine, Components::LoopSynthComponent& component);
 ZHLN_API void Release(Engine& engine, Components::OwnedMeshComponent& component);
-ZHLN_API void Release(Engine& engine, Components::ParticleEmitterComponent& component);
-ZHLN_API void Release(Engine& engine, Components::MeshParticleEmitterComponent& component);
 ZHLN_API void Release(Engine& engine, Components::SkeletalMeshComponent& component);
 
 template <typename T>

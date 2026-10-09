@@ -111,30 +111,8 @@ constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debu
     return *created;
 }
 
-// GPU storage for one emitter: sized to maxParticles by the renderer's own
-// stride, rebuilt if the capacity changed. The layout of a particle is the
-// renderer's business; the engine only knows how many it asked for.
-template <typename Emitter>
-[[nodiscard]] auto EnsureParticleStorage(RenderContext& rc, Emitter& emitter) -> BufferHandle {
-    if (emitter.gpuBuffer != BufferHandle::Invalid && emitter.bufferCapacity != emitter.maxParticles) {
-        rc.DestroyBuffer(emitter.gpuBuffer);
-        emitter.gpuBuffer      = BufferHandle::Invalid;
-        emitter.bufferCapacity = 0;
-    }
-    if (emitter.gpuBuffer == BufferHandle::Invalid && emitter.maxParticles != 0) {
-        // The renderer sizes one particle; the engine only knows how many it asked for.
-        emitter.gpuBuffer = std::is_same_v<Emitter, Components::MeshParticleEmitterComponent> ? rc.CreateMeshParticleBuffer(emitter.maxParticles)
-                                                                                             : rc.CreateParticleBuffer(emitter.maxParticles);
-        if (emitter.gpuBuffer != BufferHandle::Invalid) {
-            emitter.bufferCapacity = emitter.maxParticles;
-        }
-    }
-    return emitter.gpuBuffer;
-}
-
-// Emitters are component state -- a description and a buffer handle -- so the
-// submit step reads them here rather than a simulation system reaching into the
-// renderer. The buffer handle lives on the component and is filled in here.
+// The simulation description stays in ECS; only a stable emitter identity crosses
+// the API. Persistent particle buffers are private to the RenderContext.
 void SubmitParticleEmitters(Engine& engine) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
@@ -147,26 +125,26 @@ void SubmitParticleEmitters(Engine& engine) {
     }
     const auto& cam = camera->camera;
 
-    for (auto& emitter: reg.GetRawArray<Components::ParticleEmitterComponent>()) {
-        if (!emitter.active) {
+    for (const Entity entity: reg.GetEntitiesWith<Components::ParticleEmitterComponent>()) {
+        auto emitter = reg.Get<Components::ParticleEmitterComponent>(entity);
+        if (!emitter || !emitter->active) {
             continue;
         }
-        const BufferHandle buffer = EnsureParticleStorage(rc, emitter);
         // The component's description goes to the renderer as it is; the only thing the
         // system owns here is the camera attachment, which is a scene decision.
-        ParticleEmitterDesc desc = emitter.params;
-        if (emitter.attachToCamera) {
+        ParticleEmitterDesc desc = emitter->params;
+        if (emitter->attachToCamera) {
             desc.spawnOrigin = cam.position;
         }
-        rc.SubmitParticleEmitter(buffer, emitter.maxParticles, desc, emitter.textureAsset, emitter.additive);
+        rc.SubmitParticleEmitter(entity.Pack(), emitter->maxParticles, desc, emitter->textureAsset, emitter->additive);
     }
 
-    for (auto& emitter: reg.GetRawArray<Components::MeshParticleEmitterComponent>()) {
-        if (!emitter.active) {
+    for (const Entity entity: reg.GetEntitiesWith<Components::MeshParticleEmitterComponent>()) {
+        auto emitter = reg.Get<Components::MeshParticleEmitterComponent>(entity);
+        if (!emitter || !emitter->active) {
             continue;
         }
-        const BufferHandle buffer = EnsureParticleStorage(rc, emitter);
-        rc.SubmitMeshParticleEmitter(buffer, emitter.maxParticles, emitter.params, emitter.meshAsset, emitter.materialAsset);
+        rc.SubmitMeshParticleEmitter(entity.Pack(), emitter->maxParticles, emitter->params, emitter->meshAsset, emitter->materialAsset);
     }
 }
 

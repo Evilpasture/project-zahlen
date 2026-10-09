@@ -287,8 +287,8 @@ struct RenderPipelinesTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> particle_buffers_follow_component_and_entity_lifetimes() {
-            auto engine = ZHLN::Test::Headless::AcquireEngine("ParticleComponentBuffers", 320, 240);
+        std::expected<void, ZHLN::ErrorCode> particle_emitters_keep_gpu_storage_inside_the_renderer() {
+            auto engine = ZHLN::Test::Headless::AcquireEngine("RendererOwnedParticleStorage", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return {};
             }
@@ -300,51 +300,44 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles},
                 ZHLN::Components::MeshParticleEmitterComponent {.maxParticles = maxParticles}
             );
-            ZHLN::Test::Headless::TickFrames(*engine, 1);
-            const auto sprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity);
-            const auto mesh   = reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity);
-            if (!ZHLN::Test::ExpectTrue(sprite.has_value() && mesh.has_value() &&
-                                        sprite->gpuBuffer != ZHLN::BufferHandle::Invalid && mesh->gpuBuffer != ZHLN::BufferHandle::Invalid)) {
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+
+            auto sprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity);
+            auto mesh   = reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity);
+            if (!ZHLN::Test::ExpectTrue(sprite.has_value() && mesh.has_value() && sprite->active && mesh->active)) {
                 return {};
             }
-            const auto spriteBuffer = sprite->gpuBuffer;
-            const auto meshBuffer   = mesh->gpuBuffer;
-            ZHLN::Test::ExpectNe(spriteBuffer, meshBuffer);
 
-            // Simulation does not start over every frame.
-            ZHLN::Test::Headless::TickFrames(*engine, 1);
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer, spriteBuffer);
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity)->gpuBuffer, meshBuffer);
-
-            ZHLN::SceneResources::Attach(*engine, entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
-            ZHLN::Test::Headless::TickFrames(*engine, 1);
-            const auto overwrittenSprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer;
-            ZHLN::Test::ExpectNe(overwrittenSprite, spriteBuffer);
-
-            ZHLN::SceneResources::Detach<ZHLN::Components::ParticleEmitterComponent>(*engine, entity);
-            ZHLN::SceneResources::Attach(*engine, entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            // Capacity changes are authoring-data edits. RenderContext replaces
+            // its private storage when the updated emitter is submitted.
+            reg.Patch<ZHLN::Components::ParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
             reg.Patch<ZHLN::Components::MeshParticleEmitterComponent>(entity, [](auto& comp) { comp.maxParticles = 16; });
-            ZHLN::Test::Headless::TickFrames(*engine, 1);
-            const auto renewedSprite = reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer;
-            const auto renewedMesh   = reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity)->gpuBuffer;
-            ZHLN::Test::ExpectNe(renewedSprite, overwrittenSprite);
-            ZHLN::Test::ExpectNe(renewedMesh, meshBuffer);
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->maxParticles, 16u);
+            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::MeshParticleEmitterComponent>(entity)->maxParticles, 16u);
 
-            // The scene system releases both emitter kinds in one cleanup
-            // pass; their data is still available until that pass runs.
+            // Replacing a pure-data component needs no SceneResources release;
+            // the same emitter identity is submitted again with new parameters.
+            reg.Remove<ZHLN::Components::ParticleEmitterComponent>(entity);
+            reg.Add(entity, ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            ZHLN::Test::Headless::TickFrames(*engine, 1);
+
+            // Despawn removes ECS authoring data only. The renderer keys its
+            // cache by the packed generation-bearing entity identity and evicts
+            // the now-idle storage independently.
+            const uint64_t oldEmitterId = entity.Pack();
             ZHLN::DespawnEntity(*engine, entity);
             ZHLN::Test::ExpectTrue(reg.IsAlive(entity));
-            ZHLN::Test::ExpectEq(reg.Get<ZHLN::Components::ParticleEmitterComponent>(entity)->gpuBuffer, renewedSprite);
             engine->ProcessPendingDestroy();
             ZHLN::Test::ExpectFalse(reg.IsAlive(entity));
             const auto replacement = reg.Create(ZHLN::Components::ParticleEmitterComponent {.maxParticles = maxParticles});
+            ZHLN::Test::ExpectNe(replacement.Pack(), oldEmitterId);
             ZHLN::Test::Headless::TickFrames(*engine, 1);
-            ZHLN::Test::ExpectNe(reg.Get<ZHLN::Components::ParticleEmitterComponent>(replacement)->gpuBuffer, renewedSprite);
             ZHLN::DespawnEntity(*engine, replacement);
             engine->ProcessPendingDestroy();
 
-            // Skinned scratch is likewise owned by the component rather than
-            // by an entity-keyed cache inside the renderer.
+            // Skinned scratch is still an explicit component-owned resource;
+            // particle simulation buffers are deliberately not.
             const auto skinned = reg.Create(ZHLN::Components::SkeletalMeshComponent {});
             const auto firstScratch = rc.CreateSkinnedScratchBuffer(3);
             if (ZHLN::Test::ExpectNe(firstScratch, ZHLN::BufferHandle::Invalid)) {

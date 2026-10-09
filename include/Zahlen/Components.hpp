@@ -437,9 +437,8 @@ struct Components {
         int32_t    shadowLayer = -1;
     };
 
-    // GPU handles live with their ECS components. Scene cleanup releases
-    // them before reclaiming marked entities; use SceneResources::Detach or
-    // Attach for direct component mutations.
+    // Particle components are authoring/runtime data only. Persistent simulation
+    // buffers are renderer-owned and keyed by the emitter entity's packed ID.
     struct ParticleEmitterComponent {
         ParticleEmitterDesc params;
         TextureHandle       textureAsset   = TextureHandle::Invalid;
@@ -449,8 +448,6 @@ struct Components {
         // Additive blending is presentation, not physics: it rides the submit call
         // rather than the emitter's parameters, the way DrawBillboards takes it.
         bool                  additive       = false;
-        BufferHandle          gpuBuffer      = BufferHandle::Invalid;
-        uint32_t              bufferCapacity = 0;
     };
 
     struct MeshParticleEmitterComponent {
@@ -459,8 +456,6 @@ struct Components {
         uint32_t                  maxParticles  = 128;
         bool                      active        = true;
         MeshParticleEmitterDesc   params;
-        BufferHandle             gpuBuffer      = BufferHandle::Invalid;
-        uint32_t                 bufferCapacity = 0;
     };
 
     struct DecalComponent {
