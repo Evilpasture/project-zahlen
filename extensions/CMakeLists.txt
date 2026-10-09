@@ -10,6 +10,7 @@
 # Plugins serializer so GitHub can use JSON; scripting precedes Console.
 add_subdirectory(CharacterController)
 add_subdirectory(Camera)
+add_subdirectory(FreeCam)
 add_subdirectory(Animation)
 
 add_subdirectory(net)

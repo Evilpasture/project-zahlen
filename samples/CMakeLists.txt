@@ -33,6 +33,8 @@ file(GLOB SAMPLE_SOURCES
 #                              (zahlen_gltf); its model-list crawl goes through
 #                              ZHLN::GitHub (zahlen_github, over extensions/net/HTTP
 #                              and plugins/json).
+#   CDNMapSample               ZHLN::CDN::CDNManager Load of one R2 .glb, then
+#                              zahlen_gltf import; core free-cam.
 #   FidelityHarness            headless glTF-Render-Fidelity runner: imports
 #                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
 #                              scenario JSONs with ZHLN::ReflectJSON
@@ -45,6 +47,7 @@ file(GLOB SAMPLE_SOURCES
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera zahlen_character_controller)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_GlTFInspectorSample zahlen_gltf)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
