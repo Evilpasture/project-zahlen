@@ -41,7 +41,9 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
+#include <map>
 #include <mutex>
 #include <span>
 #include <string>
@@ -87,6 +89,29 @@ class LoopbackServer {
         return _requests.load();
     }
 
+    // Mutable, in-process fixtures for cache revalidation tests. Replacement
+    // is synchronized with handlers; no real CDN or timing sleeps are needed.
+    struct Resource {
+        std::string           body;
+        std::string           etag;
+        std::string           lastModified;
+        std::string           cacheControl;
+        std::string           age;
+        std::string           vary;
+        std::string           location;
+        int                   status              = 200;
+        bool                  omitValidatorsOn304 = false;
+        std::function<void()> beforeReply;
+    };
+    void SetResource(std::string path, Resource resource);
+
+    [[nodiscard]] auto ConditionalRequests() const noexcept -> uint64_t {
+        return _conditionalRequests.load();
+    }
+    [[nodiscard]] auto NotModifiedResponses() const noexcept -> uint64_t {
+        return _notModifiedResponses.load();
+    }
+
   private:
     // What _listener holds when there is no socket: -1, which is a bad fd on
     // POSIX and INVALID_SOCKET on Windows read as a signed integer of the same
@@ -102,15 +127,22 @@ class LoopbackServer {
 
     static void SendAll(std::intptr_t connection, const std::string& answer);
 
-    std::string Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body) const;
+    std::string Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body);
 
     using HeaderPair = std::pair<std::string_view, std::string_view>;
 
     // An initializer_list rather than a span: a dynamic-extent span cannot be
     // built from a braced list (C++20 removed that constructor, because the list
-    // it would borrow from dies at the end of the full expression), and every
-    // call site is a literal list of pairs.
+    // it would borrow from dies at the end of the full expression). The fixed
+    // routes use literal lists; mutable fixtures use AnswerFields below.
     static std::string Answer(int status, std::string_view reason, std::initializer_list<HeaderPair> headers, std::string_view body);
+
+    static std::string AnswerFields(int status, std::string_view reason, std::span<const HeaderPair> headers, std::string_view body);
+
+    std::mutex                      _resourcesMutex;
+    std::map<std::string, Resource> _resources;
+    std::atomic<uint64_t>           _conditionalRequests {0};
+    std::atomic<uint64_t>           _notModifiedResponses {0};
 
     std::intptr_t             _listener = kNoListener;
     uint16_t                  _port     = 0;

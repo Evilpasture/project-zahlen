@@ -3,15 +3,15 @@
 
 #pragma once
 
+#include <RemoteAsset/DiskCache.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Error.hpp>
-#include <RemoteAsset/DiskCache.hpp>
-
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,7 +29,10 @@ enum class FetchError : uint8_t {
 
 struct FetchPayload {
     std::vector<uint8_t>  data;
+    // Cache-owned and subject to automatic eviction; data remains owned by
+    // this payload. Empty if persistence fails, exceeds budget, or is no-store.
     std::filesystem::path localCachePath;
+    // True also for a validated 304; cached bytes need not mean zero network.
     bool                  fromCache = false;
     std::string           sourceUrl;
     std::string           errorMessage;
@@ -45,6 +48,7 @@ struct FetchJob {
     std::vector<std::string> candidates;
     ValidatorFn              validator      = nullptr;
     uint32_t                 timeoutSeconds = 30;
+    std::optional<CacheEntry> cached;
 
     std::expected<FetchPayload, ErrorCode> result {std::unexpect, ErrorCode {}};
     std::string                            lastError;

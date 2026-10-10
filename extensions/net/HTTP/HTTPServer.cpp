@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -201,6 +202,11 @@ auto LoopbackServer::Url(std::string_view path) const -> std::string {
     return std::format("http://127.0.0.1:{}{}", _port, path);
 }
 
+void LoopbackServer::SetResource(std::string path, Resource resource) {
+    const std::lock_guard lock(_resourcesMutex);
+    _resources.insert_or_assign(std::move(path), std::move(resource));
+}
+
 void LoopbackServer::AcceptLoop() {
     while (!_stop.load()) {
         const SocketHandle accepted = accept(Listener(_listener), nullptr, nullptr);
@@ -284,7 +290,7 @@ void LoopbackServer::SendAll(std::intptr_t connection, const std::string& answer
     }
 }
 
-std::string LoopbackServer::Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body) const {
+std::string LoopbackServer::Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body) {
     std::string path;
     {
         const auto first = requestLine.find(' ');
@@ -292,6 +298,69 @@ std::string LoopbackServer::Route(std::string_view requestLine, std::span<const 
         if (first != std::string_view::npos && last != std::string_view::npos) {
             path = std::string(requestLine.substr(first + 1, last - first - 1));
         }
+    }
+
+    std::optional<Resource> resource;
+    {
+        const std::lock_guard lock(_resourcesMutex);
+        if (const auto it = _resources.find(path); it != _resources.end())
+            resource = it->second;
+    }
+    if (resource) {
+        const auto field = [&](std::string_view wanted) -> std::string_view {
+            for (const auto& line: headerLines) {
+                const auto colon = line.find(':');
+                if (colon != wanted.size())
+                    continue;
+                bool same = true;
+                for (size_t i = 0; i < colon; ++i) {
+                    same &= static_cast<char>(std::tolower(static_cast<unsigned char>(line[i]))) == wanted[i];
+                }
+                if (!same)
+                    continue;
+                std::string_view value = std::string_view(line).substr(colon + 1);
+                while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                    value.remove_prefix(1);
+                return value;
+            }
+            return {};
+        };
+        const auto etag     = field("if-none-match");
+        const auto modified = field("if-modified-since");
+        if (!etag.empty() || !modified.empty())
+            _conditionalRequests.fetch_add(1);
+        const auto weakTag = [](std::string_view tag) {
+            if (tag.starts_with("W/"))
+                tag.remove_prefix(2);
+            return tag;
+        };
+        const bool unchanged = !etag.empty() ? (!resource->etag.empty() && weakTag(etag) == weakTag(resource->etag)) :
+                                               (!modified.empty() && modified == resource->lastModified);
+        const int  status    = resource->status == 200 && unchanged ? 304 : resource->status;
+        if (status == 304)
+            _notModifiedResponses.fetch_add(1);
+        std::vector<HeaderPair> headers;
+        if (status != 304 || !resource->omitValidatorsOn304) {
+            if (!resource->etag.empty())
+                headers.emplace_back("ETag", resource->etag);
+            if (!resource->lastModified.empty())
+                headers.emplace_back("Last-Modified", resource->lastModified);
+        }
+        if (!resource->cacheControl.empty())
+            headers.emplace_back("Cache-Control", resource->cacheControl);
+        if (!resource->age.empty())
+            headers.emplace_back("Age", resource->age);
+        if (!resource->vary.empty())
+            headers.emplace_back("Vary", resource->vary);
+        if (!resource->location.empty())
+            headers.emplace_back("Location", resource->location);
+        // Run outside the resource lock: tests can replace a resource or evict
+        // a cached body exactly while its conditional response is in flight.
+        if (resource->beforeReply)
+            resource->beforeReply();
+        return AnswerFields(
+            status, status == 304 ? "Not Modified" : "Fixture", headers, status == 304 ? std::string_view {} : std::string_view(resource->body)
+        );
     }
 
     if (path == "/ok") {
@@ -358,11 +427,16 @@ std::string LoopbackServer::Route(std::string_view requestLine, std::span<const 
 }
 
 std::string LoopbackServer::Answer(int status, std::string_view reason, std::initializer_list<HeaderPair> headers, std::string_view body) {
+    return AnswerFields(status, reason, std::span<const HeaderPair>(headers.begin(), headers.size()), body);
+}
+
+std::string LoopbackServer::AnswerFields(int status, std::string_view reason, std::span<const HeaderPair> headers, std::string_view body) {
     std::string answer = std::format("HTTP/1.1 {} {}\r\n", status, reason);
     for (const auto& [name, value]: headers) {
         answer += std::format("{}: {}\r\n", name, value);
     }
-    answer += std::format("Content-Length: {}\r\n", body.size());
+    if (status != 304)
+        answer += std::format("Content-Length: {}\r\n", body.size());
     answer += "Connection: close\r\n\r\n";
     answer += body;
     return answer;

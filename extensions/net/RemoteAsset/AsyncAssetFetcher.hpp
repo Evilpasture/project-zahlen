@@ -33,9 +33,13 @@ class AsyncAssetFetcher {
     AsyncAssetFetcher(const AsyncAssetFetcher&)            = delete;
     auto operator=(const AsyncAssetFetcher&) -> AsyncAssetFetcher& = delete;
 
+    // Fresh cache hits complete synchronously. Due entries are revalidated on
+    // the worker using persisted origin validators; forceRefresh bypasses both
+    // local hits and conditional headers and requests a complete body.
     auto Request(std::string_view uri, ValidatorFn validator = Validators::AnyNonEmpty, bool forceRefresh = false)
         -> FetchHandle;
 
+    // The same cache validation/revalidation path, on the calling thread.
     auto FetchSync(std::string_view uri, ValidatorFn validator = Validators::AnyNonEmpty)
         -> std::expected<FetchPayload, ErrorCode>;
 

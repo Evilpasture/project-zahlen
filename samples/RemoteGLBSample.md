@@ -11,7 +11,8 @@ worker while the backdrop and the HUD come up:
 Picking a row in the dropdown fetches that one file — nothing is downloaded
 until it is picked — caches it on disk, imports it through `plugins/glTF`, and
 renders it on a studio turntable. A second run (or a second pick of the same
-row) reads it from the cache.
+row) can reuse the cached bytes after any due origin check; development builds
+check the server on every request.
 
 It is the reference for:
 
@@ -111,21 +112,34 @@ per-user cache directory elsewhere, `ZHLN_CACHE_DIR` over both):
 
 * stem — last path segment without extension, sanitized to `[A-Za-z0-9_-]`,
   truncated to 48 chars.
-* hash — lower 32 bits of `ZHLN::Hash64(url)` as 8 hex digits, so two URLs
-  ending in the same name cannot collide. The name is keyed on the URL
-  itself, and a pick always uses one spelling, so one model is one file.
-* atomic write — `*.tmp-<thread>-<n>` sibling + `rename`, the same pattern
+* hash — lower 32 bits of `ZHLN::Hash64(url)` as 8 hex digits reduce filename
+  collisions. This is not a content digest; persisted metadata also binds a
+  cache hit to its source URL.
+* atomic write — `*.tmp-<pid>-<thread>-<n>` sibling + `rename`, the same pattern
   `PipelineCache.cpp` uses. A crash leaves no half-written hit, and two
   concurrent writes to one name stage in different files.
 * migration — a miss on a `.bin` name migrates the legacy `.glb` spelling
-  the sample's first cache used, instead of re-downloading it.
+  the sample's first cache used, preserving its download time and metadata.
+  Legacy bytes without origin metadata require a new download before the
+  fetcher can trust them as current.
+* integrity/freshness — a `.meta` sidecar binds the body to a whole-file
+  checksum and its ETag/Last-Modified. Local corruption is a miss. Every
+  development request revalidates; other builds reuse a checked entry for
+  up to 5 minutes. A 304 reuses bytes; a 200 installs the validated new body.
+* automatic lifetime — 7 days since body download and a 1 GiB body-plus-metadata
+  budget by default. Opening the cache, reading it, and successful writes
+  reclaim old entries without a sample-side cleanup loop. Read-side full
+  sweeps are throttled to 5 minutes; the requested entry always gets an expiry
+  check. Abandoned staging files are removed after 24 hours. See
+  [CDN caching](../extensions/net/CDN/README.md) for policy and validation limits.
 
 ## A download
 
 `ZHLN::Remote::AsyncAssetFetcher`. Cache first, network second: the cache
 read stays on the calling thread (local disk, a few MiB, first frame on
 screen); only the transfer goes to a worker, because that is the part that
-can take a minute.
+can take a minute. A due revalidation uses that same worker, even when it
+ultimately returns cached bytes after a 304.
 
 The frame's contract is three calls: `Request(url, IsGLB)` (start one, or
 take a synchronous cache hit) returns a request id; `Poll()` once per frame
@@ -152,7 +166,10 @@ the reason `Take` exists.
 Import is `GLTF::LoadGLBPrefabFromMemory(ctx, assetMgr, bytes, virtualPath)`
 followed by `PrefabFactory::InstantiatePrefab`. The virtual path is the
 cache file's filename, so a second run and a device-lost rebuild hit the same
-prefab-cache entry.
+prefab-cache entry. That is a **separate in-memory cache**: the importer may
+return its existing prefab for that virtual path without reparsing changed
+bytes. HTTP/disk freshness does not by itself hot-reload an imported prefab or
+GPU resources; this patch does not change that application-layer behavior.
 
 Bounds are not `localMin/localMax` unioned in place. Each part's node chain
 is accumulated (`NodeModelTransform`) and applied first — for the Damaged

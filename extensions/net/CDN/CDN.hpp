@@ -13,13 +13,14 @@
 // environment variable). Nothing in this directory names a host.
 //
 // Blocking: Fetch and Load perform the transfer on the calling thread. A caller
-// on the frame thread that must not stall should build the URL with GetURL()
-// and hand it to ZHLN::Remote::AsyncAssetFetcher instead.
+// on the frame thread that must not stall should use RequestAsset/Poll instead.
 //
 // Transfers and cache layout are not reimplemented here: they are
 // ZHLN::HTTP::Fetch (extensions/net/HTTP) and ZHLN::Remote::DiskCache
 // (extensions/net/RemoteAsset). A cache file is the complete, validated bytes
-// of one URL, named by ZHLN::Remote::ResolveURL.
+// of one URL, named by ZHLN::Remote::ResolveURL. All fetch paths share the
+// configured origin revalidation, integrity checks, expiry and disk budget;
+// no caller invalidation or cleanup is required.
 
 #pragma once
 
@@ -51,11 +52,17 @@ struct CDNConfig {
     // CDNManager::Create. A trailing '/' is accepted and dropped.
     std::string_view baseURL = {};
 
-    // Where cached files live. Empty means <engine cache dir>/cdn.
+    // Dedicated cache directory. Empty means <engine cache dir>/cdn.
+    // All top-level regular files in this directory are managed cache entries.
     std::filesystem::path cacheDir = {};
 
     // Budget for one transfer, in seconds. 0 means no limit.
     uint32_t timeoutSeconds = 30;
+
+    // Automatic freshness/retention, shared by Fetch, Load and RequestAsset.
+    // Defaults: origin check every request in dev, every 5 min otherwise;
+    // 7 days since body download, 1 GiB, read-side sweeps every 5 minutes.
+    ZHLN::Remote::CachePolicy cachePolicy {};
 };
 
 // What the CDN layer itself can refuse. Transfer failures are not in here: a
@@ -78,7 +85,7 @@ enum class CDNError : uint8_t {
 
 class CDNManager {
   public:
-    // Validates the config and sets up the cache directory. Fails with
+    // Validates the URL and opens the cache, pruning old entries. Fails with
     // CDNError::InvalidConfig when baseURL is not an absolute http or https URL.
     [[nodiscard]] static auto Create(const CDNConfig& config) -> std::expected<CDNManager, ZHLN::ErrorCode>;
 
@@ -93,14 +100,17 @@ class CDNManager {
     [[nodiscard]] auto GetURL(std::string_view relativePath) const -> std::expected<std::string, ZHLN::ErrorCode>;
 
     // A path to a valid copy of the asset on disk: the cache file if one is
-    // there and passes @p validator, otherwise a fresh download written to the
-    // cache first. A cache file that fails the validator is removed and
-    // re-fetched. Blocks for the transfer when it is needed.
+    // there, fresh, checksum-valid and passes @p validator. Revalidates with
+    // the origin when due, downloading changed bodies before returning a path.
+    // Blocks when needed. Returns CacheWrite if persistence fails, including
+    // an over-budget asset or a server no-store response.
+    // The path is cache-owned, not a permanent asset: later cache operations
+    // may evict it. Use Load for owned bytes, or copy it for durable storage.
     [[nodiscard]] auto Fetch(std::string_view relativePath, ValidatorFn validator = nullptr) -> std::expected<std::filesystem::path, ZHLN::ErrorCode>;
 
-    // The asset's bytes: the cache file if it is there and valid, otherwise
-    // the raw content downloaded into memory. Nothing is written to the cache.
-    // Blocks for the transfer when it is needed.
+    // Owned bytes from a fresh, valid cache entry, or after an origin check.
+    // Downloads are cached when allowed and possible; no-store or an unwritable/
+    // full cache does not fail the download. Blocks when a transfer is needed.
     [[nodiscard]] auto Load(std::string_view relativePath, ValidatorFn validator = nullptr) -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode>;
 
     [[nodiscard]] auto Cache() const noexcept -> const ZHLN::Remote::DiskCache& {
@@ -117,7 +127,7 @@ class CDNManager {
     CDNManager(std::string baseURL, ZHLN::Remote::DiskCache cache, std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> fetcher);
 
     std::string                                      m_baseURL;
-    ZHLN::Remote::DiskCache                          m_cache; // TODO(Evilpasture): add cache invalidation
+    ZHLN::Remote::DiskCache                          m_cache;
     std::unique_ptr<ZHLN::Remote::AsyncAssetFetcher> m_fetcher;
 };
 

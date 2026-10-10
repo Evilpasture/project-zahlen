@@ -82,3 +82,30 @@ After building the existing core group, run it with:
 ```sh
 ctest --test-dir build -R '^CPU_Core$' --output-on-failure
 ```
+
+## CDN and remote-asset cache validation
+
+`TestRemoteAsset` covers automatic expiry and bounded disk retention through
+the public `Remote::DiskCache` API, including startup/read/write sweeps,
+legacy file timestamps, oversized entries, failed writes, abandoned staging
+files, path/symlink safety, and concurrent copies/independent cache instances.
+`TestCDN` verifies that the same policy reaches `Fetch`, `Load`, and
+`RequestAsset`/`Poll`, using the loopback HTTP server rather than a live CDN.
+The expiry fixtures backdate file modification times; they do not wait for TTLs.
+
+Origin-backed entries are also tested for bounded metadata and whole-body
+integrity, including same-sized corruption that passes the GLB header check.
+Mutable, synchronized loopback resources exercise same-URL edits, persisted
+ETags, Last-Modified fallback, missing validators, guarded 304 reuse/retries,
+no-cache/no-store/max-age, redirects, HTTP errors, and both sync/async APIs.
+Run normal and `ZHLN_DEV_MODE` builds: the default origin-check intervals differ.
+Tests about intentionally warm local hits pin a positive interval explicitly.
+
+Both suites are registered already when their optional targets are available:
+
+```sh
+cmake --build build --target TestRemoteAsset TestCDN
+ctest --test-dir build -R '^(TestRemoteAsset|TestCDN)$' --output-on-failure
+```
+
+See [CDN caching](../extensions/net/CDN/README.md) for the policy contract.

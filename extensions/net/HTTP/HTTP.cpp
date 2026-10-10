@@ -127,6 +127,7 @@ struct NativeResponse {
     int32_t              statusCode = 0;
     std::vector<Header>  headers;
     std::vector<uint8_t> body;
+    bool                 redirected = false;
 };
 
 // What the two callbacks share: where to put things, and whether the body has
@@ -494,7 +495,14 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
         detail = curl_easy_strerror(info);
         return info;
     }
+    long           redirects    = 0;
+    const CURLcode redirectInfo = curl_easy_getinfo(easy, CURLINFO_REDIRECT_COUNT, &redirects);
+    if (redirectInfo != CURLE_OK) {
+        detail = curl_easy_strerror(redirectInfo);
+        return redirectInfo;
+    }
     response.statusCode = static_cast<int32_t>(status);
+    response.redirected = redirects != 0;
     return CURLE_OK;
 }
 
@@ -541,6 +549,7 @@ auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode
     response.statusCode = transferred.statusCode;
     response.headers    = std::move(transferred.headers);
     response.body       = std::move(transferred.body);
+    response.redirected = transferred.redirected;
     return response;
 }
 

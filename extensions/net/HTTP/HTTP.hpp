@@ -154,6 +154,10 @@ struct Response {
     int32_t              statusCode = 0;
     std::vector<Header>  headers;
     std::vector<uint8_t> body;
+    // Validators from a redirected response belong to its final resource,
+    // not necessarily the requested URL. Consumers must not forward them
+    // blindly when a redirect target can change.
+    bool redirected = false;
 
     // The body as text, without a copy. The view borrows from @p body, so it
     // dies with the Response; a body that is not valid UTF-8 is still returned

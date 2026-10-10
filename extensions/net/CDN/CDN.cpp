@@ -130,7 +130,7 @@ auto CDNManager::Create(const CDNConfig& config) -> std::expected<CDNManager, ZH
     }
 
     std::filesystem::path root = config.cacheDir.empty() ? (ZHLN::FS::Paths::CacheDir() / kCacheSubdir) : config.cacheDir;
-    ZHLN::Remote::DiskCache cache(std::move(root));
+    ZHLN::Remote::DiskCache cache(std::move(root), config.cachePolicy);
     auto                    fetcher = std::make_unique<ZHLN::Remote::AsyncAssetFetcher>(cache, config.timeoutSeconds);
     return CDNManager(std::move(*base), std::move(cache), std::move(fetcher));
 }

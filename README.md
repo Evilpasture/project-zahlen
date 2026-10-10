@@ -80,6 +80,14 @@ and looks for `data/base.pak` next to the executable. `ZHLN_CACHE_DIR` and
 `RenderConfig::crashDumpPath` in code. See
 [include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
 
+CDN and remote-download caches manage freshness, integrity, and retention:
+ETag/Last-Modified revalidation runs on every request in `ZHLN_DEV_MODE` (every
+5 minutes otherwise), and persisted checksums catch local byte corruption.
+Bodies expire after 7 days; bodies plus metadata are bounded to 1 GiB per cache
+directory. Cleanup runs on open and normal use, without caller invalidation.
+See [CDN caching](extensions/net/CDN/README.md) for server requirements,
+validation limits, configuration, and the lifetime of returned paths.
+
 ## Architecture
 
 The optional source tree is split by role: `plugins/` contains asset formats and codecs, `extensions/` contains reusable engine subsystems plus network/platform I/O, and `gameplay/` contains domain-specific systems and project integrations. The existing top-level `modules/` remains reserved for Core C++ module interfaces.

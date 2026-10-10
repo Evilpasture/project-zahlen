@@ -145,6 +145,7 @@ struct HTTPTestSuite {
             }
 
             ZHLN::Test::ExpectEq(response->statusCode, 200);
+            ZHLN::Test::ExpectFalse(response->redirected);
             ZHLN::Test::ExpectEq(Text(*response), std::string("hello"));
             // Text() is a view over the body, not a copy of it.
             ZHLN::Test::ExpectEq(response->Text().size(), response->body.size());
@@ -378,6 +379,7 @@ struct HTTPTestSuite {
             }
 
             ZHLN::Test::ExpectEq(response->statusCode, 200);
+            ZHLN::Test::ExpectTrue(response->redirected);
             ZHLN::Test::ExpectEq(Text(*response), std::string("hello"));
             // The 302's Location is from an answer that was not the last one.
             // Leaving it in the list would make the response look like both.
@@ -403,6 +405,7 @@ struct HTTPTestSuite {
             }
 
             ZHLN::Test::ExpectEq(response->statusCode, 302);
+            ZHLN::Test::ExpectFalse(response->redirected);
             ZHLN::Test::ExpectEq(Value(*response, "Location"), std::string("/ok"));
             ZHLN::Test::ExpectTrue(response->body.empty());
             return {};
