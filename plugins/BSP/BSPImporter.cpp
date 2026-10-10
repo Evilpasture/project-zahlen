@@ -28,9 +28,10 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <stb_image.h>
 #include <string>
 #include <vector>
+
+#include <stb_image.h>
 
 namespace ZHLN::BSP {
 namespace {
@@ -55,11 +56,12 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     int            width    = 0;
     int            height   = 0;
     int            channels = 0;
-    unsigned char* pixels =
-        stbi_load_from_memory(reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
+    unsigned char* pixels   = stbi_load_from_memory(
+        reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4
+    );
     if (pixels) {
         const std::span<const std::byte> rgba(reinterpret_cast<const std::byte*>(pixels), static_cast<size_t>(width) * height * 4);
-        auto                             texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
+        auto texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
         stbi_image_free(pixels);
         if (texRes.has_value()) {
             return *texRes;
@@ -69,7 +71,8 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     return TextureHandle::Invalid;
 }
 
-auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, TextureHandle lightmapTexture) -> MaterialDesc {
+auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, TextureHandle lightmapTexture)
+    -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
@@ -95,7 +98,7 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         return desc;
     }
 
-    const auto& vmt  = *vmtMatExp;
+    const auto& vmt   = *vmtMatExp;
     desc.baseColor   = vmt.baseColor;
     desc.doubleSided = vmt.noCull;
     if (vmt.isTranslucent) {
@@ -211,18 +214,16 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         const bool hasMeshlets    = !meshletResult.Empty();
         const auto packedMeshlets = PackMeshlets(meshletResult.meshlets);
 
-        BufferHandle meshletVbo       = hasMeshlets ? ctx.CreateBuffer(
-                                                          BufferDesc {
-                                                              .usage  = BufferUsage::Storage,
-                                                              .data   = std::as_bytes(std::span {packedMeshlets}),
-                                                              .stride = kMeshletPackedBytes,
-                                                          }
-                                                      ) :
+        BufferHandle meshletVbo       = hasMeshlets ? ctx.CreateBuffer(BufferDesc {
+                                                          .usage  = BufferUsage::Storage,
+                                                          .data   = std::as_bytes(std::span {packedMeshlets}),
+                                                          .stride = kMeshletPackedBytes,
+                                                }) :
                                                       BufferHandle::Invalid;
         BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.vertices}) : BufferHandle::Invalid;
         BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.triangles}) : BufferHandle::Invalid;
         const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
-                                        meshletTriVbo != BufferHandle::Invalid;
+                                      meshletTriVbo != BufferHandle::Invalid;
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
@@ -306,13 +307,6 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         prefab->lights.push_back(modelLight);
     }
 
-    // Preload static prop models referenced by the map into AssetManager
-    for (const auto& sp: map.staticProps) {
-        if (!sp.modelName.empty()) {
-            return LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options);
-        }
-    }
-
     assetMgr.CachePrefab(HashAssetPath(virtualPath), std::move(prefab));
     return assetMgr.GetCachedPrefab(HashAssetPath(virtualPath));
 }
@@ -353,6 +347,28 @@ auto LoadBSPPrefabFromMemory(
         return std::nullopt;
     }
     return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
+}
+
+auto PreloadStaticProps(
+    RenderContext&       ctx,
+    AssetManager&        assetMgr,
+    const BSPMap&        map,
+    const ImportOptions& options
+) -> size_t {
+    SourceVFS vfs;
+    if (!options.assetRoot.empty()) {
+        vfs.AddSearchPath(options.assetRoot);
+    }
+
+    size_t loaded = 0;
+    for (const auto& sp: map.staticProps) {
+        if (!sp.modelName.empty()) {
+            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options); model.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+    return loaded;
 }
 
 } // namespace ZHLN::BSP

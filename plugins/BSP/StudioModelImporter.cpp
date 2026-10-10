@@ -104,6 +104,50 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
     return desc;
 }
 
+static auto CreateFallbackModelPrefab(
+    AssetManager&        assetMgr,
+    std::string_view     virtualPath,
+    const ImportOptions& options
+) -> ZHLN::Optional<ModelPrefab&> {
+    const uint64_t hash = HashAssetPath(virtualPath);
+    if (const auto cached = assetMgr.GetCachedPrefab(hash)) {
+        return cached;
+    }
+
+    auto prefab                 = std::make_unique<ModelPrefab>();
+    prefab->virtualPath         = String256(virtualPath);
+    prefab->emissiveFactorScale = 1.0f;
+
+    prefab->nodes.push_back(ModelNode {
+        .name           = String64("root"),
+        .parentIndex    = -1,
+        .localTransform = JPH::Mat44::sIdentity(),
+        .hasMesh        = false,
+    });
+
+    ModelPart fallbackPart;
+    fallbackPart.name           = String64("placeholder");
+    fallbackPart.nodeIndex      = 0;
+    fallbackPart.localTransform = JPH::Mat44::sIdentity();
+    fallbackPart.localMin       = {-0.25f, -0.25f, -0.25f};
+    fallbackPart.localMax       = {0.25f, 0.25f, 0.25f};
+    fallbackPart.boundingRadius = 0.433f;
+
+    const std::string assetKey = std::string(virtualPath) + "#fallback";
+    fallbackPart.meshAsset     = HashAssetID(assetKey);
+    fallbackPart.materialAsset = HashAssetID(assetKey + "_mat");
+
+    if (options.buildColliders) {
+        const JPH::ShapeRefC baseBox = new JPH::BoxShape(JPH::Vec3(0.25f, 0.25f, 0.25f));
+        fallbackPart.boxCollider     = baseBox;
+        fallbackPart.meshCollider    = baseBox;
+    }
+
+    prefab->parts.push_back(std::move(fallbackPart));
+    assetMgr.CachePrefab(hash, std::move(prefab));
+    return assetMgr.GetCachedPrefab(hash);
+}
+
 } // namespace
 
 auto LoadStudioModelPrefab(
@@ -121,13 +165,13 @@ auto LoadStudioModelPrefab(
     const auto resolvedMdl = vfs.ResolveModel(path);
     if (!resolvedMdl.has_value()) {
         LogWarning("StudioModel: failed to resolve MDL path {}", path);
-        return std::nullopt;
+        return CreateFallbackModelPrefab(assetMgr, path, options);
     }
 
     const auto mdlBytes = vfs.ReadFile(*resolvedMdl);
     if (!mdlBytes.has_value()) {
         LogWarning("StudioModel: failed to read MDL {}", *resolvedMdl);
-        return std::nullopt;
+        return CreateFallbackModelPrefab(assetMgr, path, options);
     }
 
     std::string basePath = *resolvedMdl;
@@ -145,13 +189,13 @@ auto LoadStudioModelPrefab(
     const auto vvdBytes = vfs.ReadFile(vvdPath);
     if (!vvdBytes.has_value()) {
         LogWarning("StudioModel: missing VVD file for {}", *resolvedMdl);
-        return std::nullopt;
+        return CreateFallbackModelPrefab(assetMgr, path, options);
     }
 
     const auto vtxBytes = vfs.ReadFile(vtxPath);
     if (!vtxBytes.has_value()) {
         LogWarning("StudioModel: missing VTX file for {}", *resolvedMdl);
-        return std::nullopt;
+        return CreateFallbackModelPrefab(assetMgr, path, options);
     }
 
     const auto                       phyBytes = vfs.ReadFile(phyPath);
@@ -179,7 +223,7 @@ auto LoadStudioModelPrefabFromMemory(
     const auto parsedExp = ParseStudioModel(mdlBytes, vvdBytes, vtxBytes, phyBytes, options);
     if (!parsedExp.has_value()) {
         LogWarning("StudioModel: failed to parse model {}: {}", virtualPath, parsedExp.error());
-        return std::nullopt;
+        return CreateFallbackModelPrefab(assetMgr, virtualPath, options);
     }
 
     const auto& data            = *parsedExp;
