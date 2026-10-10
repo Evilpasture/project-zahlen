@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -21,6 +22,16 @@ namespace ZHLN::BSP {
 namespace {
 
 constexpr float kEpsilon = 1e-6f;
+
+// texinfo flags, Source bspflags.h. Only the routing-relevant bits are
+// listed; the rest (SURF_WARP for water, SURF_TRANS...) do not change which
+// side of the render/physics split a face lands on.
+constexpr int32_t kSurfSky2D   = 0x2;
+constexpr int32_t kSurfSky     = 0x4;
+constexpr int32_t kSurfTrigger = 0x40;
+constexpr int32_t kSurfNodraw  = 0x80;
+constexpr int32_t kSurfHint    = 0x100;
+constexpr int32_t kSurfSkip    = 0x200;
 
 void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, JPH::Vec3 p) {
     if (first) {
@@ -168,6 +179,69 @@ struct FaceProjection {
         return "unknown";
     }
     return map.texNames[static_cast<size_t>(texDataIndex)];
+}
+
+[[nodiscard]] auto StartsWithIgnoreCase(std::string_view text, std::string_view prefix) noexcept -> bool {
+    if (text.size() < prefix.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < prefix.size(); ++i) {
+        const auto lhs = static_cast<unsigned char>(text[i]);
+        const auto rhs = static_cast<unsigned char>(prefix[i]);
+        if (std::tolower(lhs) != std::tolower(rhs)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
+
+// Source ships tool-texture brushes as ordinary world faces distinguished
+// only by texinfo flags and the "tools/" material names -- VIS helpers and
+// volumetric markers that must never draw (fog/trigger/hint/skip render as
+// "FOG" or "TRIGGER"-lettered walls when treated as textures), plus invisible
+// blockers that must still collide (nodraw undersides, sky brushes, invisible
+// and clip walls). Route each face to its proper consumer:
+//   Render        -> visible world mesh
+//   CollisionOnly -> world physics hull only (invisible yet solid)
+//   Drop          -> invisible AND non-solid, meaning literally nothing
+[[nodiscard]] auto DispositionFor(const BSPMap& map, const DFace& face) -> FaceDisposition {
+    if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
+        return FaceDisposition::Render;
+    }
+    const std::string_view name = MaterialNameFor(map, face);
+
+    // Name checks come first: trigger/fog/hint/skip are invisible and
+    // non-solid regardless of what (or whether) the flags record, and a name
+    // cannot be overridden away -- it encodes the mapper's intent directly.
+    constexpr std::string_view kToolsPrefix = "tools/";
+    if (StartsWithIgnoreCase(name, kToolsPrefix)) {
+        const std::string_view tool = name.substr(kToolsPrefix.size());
+        if (StartsWithIgnoreCase(tool, "toolstrigger") || StartsWithIgnoreCase(tool, "toolshint") || StartsWithIgnoreCase(tool, "toolsskip") ||
+            StartsWithIgnoreCase(tool, "toolsfog") || StartsWithIgnoreCase(tool, "toolsblocklight") || StartsWithIgnoreCase(tool, "toolsareaportal") ||
+            StartsWithIgnoreCase(tool, "toolsoccluder") || StartsWithIgnoreCase(tool, "toolsblocklos") || StartsWithIgnoreCase(tool, "toolsblockbullets") ||
+            StartsWithIgnoreCase(tool, "toolsnpcclip") || StartsWithIgnoreCase(tool, "toolsgrenadeclip")) {
+            return FaceDisposition::Drop;
+        }
+        // toolsblack and toolsdotted are the two tool textures that Source
+        // DOES draw in-game; everything else under tools/ is editor-only.
+        if (!StartsWithIgnoreCase(tool, "toolsblack") && !StartsWithIgnoreCase(tool, "toolsdotted")) {
+            return FaceDisposition::CollisionOnly;
+        }
+        return FaceDisposition::Render;
+    }
+
+    // Generic materials can still carry compile flags (mapper toggled them in
+    // Hammer's face editor); honour the flag-based classes for those.
+    const int32_t flags = map.texInfos[static_cast<size_t>(face.texinfo)].flags;
+    if ((flags & (kSurfTrigger | kSurfHint | kSurfSkip)) != 0) {
+        return FaceDisposition::Drop;
+    }
+    if ((flags & (kSurfSky | kSurfSky2D | kSurfNodraw)) != 0) {
+        return FaceDisposition::CollisionOnly;
+    }
+    return FaceDisposition::Render;
 }
 
 auto FindOrMakePart(ImportedMapData& result, const std::string& name) -> MaterialStreams& {
@@ -324,13 +398,43 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 continue;
             }
 
+            // Faces on the back side of their plane (side != 0) store their
+            // winding reversed in the file: the loop is CCW about the plane's
+            // normal, opposite to the face's own normal. Emit vertices in the
+            // face-normal orientation instead, keeping triangle fronts
+            // consistent with the flipped faceNormal below. This one flip is
+            // what both consumers key off: the renderer culls back faces (an
+            // unreversed interior wall is culled away and invisible from
+            // inside), and the world Jolt mesh collider is built from these
+            // same triangles (rigid bodies resting on an unreversed floor
+            // contact only its front side and drop straight through; the
+            // CharacterVirtual walks anywhere only because it opts into
+            // EBackFaceMode::CollideWithBackFaces).
+            if (face.side != 0) {
+                std::reverse(winding->begin(), winding->end());
+            }
+
+            // Tool-texture classes: skip fog/trigger/hint entirely (they are
+            // editor markers, not surfaces), and route invisible-but-solid
+            // faces (nodraw, sky, clip) to the collision stream so the physics
+            // hull matches Source even though no pixels are produced. When no
+            // collider is being built the collision stream is unused --
+            // dropping the faces there saves the vertex emission work too.
+            const FaceDisposition disposition = DispositionFor(map, face);
+            if (disposition == FaceDisposition::Drop || (disposition == FaceDisposition::CollisionOnly && !options.buildColliders)) {
+                continue;
+            }
+
             const auto projection = ProjectionFor(map, face);
             if (!projection) {
                 continue;
             }
 
             const std::string_view materialName = MaterialNameFor(map, face);
-            MaterialStreams&       part         = FindOrMakePart(result, std::string(materialName));
+            MaterialStreams&       part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
+            if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
+                part.materialName = std::string(materialName); // informational only; the importer does not key off it
+            }
 
             JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
@@ -411,8 +515,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                         part.indices.push_back(d);
                     }
                 }
-                ++result.displacementCount;
-                result.triangleCount += gridSize * gridSize * 2;
+                if (disposition != FaceDisposition::CollisionOnly) {
+                    ++result.displacementCount;
+                    result.triangleCount += gridSize * gridSize * 2;
+                }
             } else {
                 // Fan triangulation: Source faces are convex planar polygons.
                 for (const auto& corner: *winding) {
@@ -423,10 +529,16 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     part.indices.push_back(baseVertex + static_cast<uint32_t>(i));
                     part.indices.push_back(baseVertex + static_cast<uint32_t>(i) + 1u);
                 }
-                result.triangleCount += static_cast<uint32_t>(winding->size()) - 2;
+                // The collision stream is invisible -- keep the public render
+                // counters to faces the player can actually see.
+                if (disposition != FaceDisposition::CollisionOnly) {
+                    result.triangleCount += static_cast<uint32_t>(winding->size()) - 2;
+                }
             }
 
-            ++result.faceCount;
+            if (disposition != FaceDisposition::CollisionOnly) {
+                ++result.faceCount;
+            }
         }
     }
 

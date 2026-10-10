@@ -17,6 +17,7 @@
 #include "VTFDecoder.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -284,6 +285,40 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         }
 
         prefab->parts.push_back(std::move(modelPart));
+    }
+
+    // Invisible-but-solid tool faces (nodraw undersides, sky brushes, clip and
+    // invisible walls): RenderContext::Draw would only log-and-skip an empty
+    // render mesh, so instead of a dummy "physics-only" part, fold the stream
+    // into the collider of the first part that already has one. A static
+    // compound of {part mesh, collision-only mesh} keeps both hulls intact
+    // for mesh queries and CharacterVirtual alike.
+    if (options.buildColliders && imported.collisionOnly.IndexCount() > 0) {
+        if (JPH::ShapeRefC collisionShape = Physics::CreateMeshShape(
+                imported.collisionOnly.positions.data(), imported.collisionOnly.VertexCount(), imported.collisionOnly.indices.data(),
+                imported.collisionOnly.IndexCount()
+            )) {
+            bool folded = false;
+            for (ModelPart& part: prefab->parts) {
+                if (part.meshCollider == nullptr) {
+                    continue;
+                }
+                JPH::StaticCompoundShapeSettings compoundSettings;
+                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), part.meshCollider);
+                compoundSettings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), collisionShape);
+                const auto compound = compoundSettings.Create();
+                if (!compound.IsValid()) {
+                    continue;
+                }
+                part.meshCollider = compound.Get();
+                folded            = true;
+                break;
+            }
+            if (!folded) {
+                LogWarning("BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
+                           imported.collisionOnly.indices.size() / 3);
+            }
+        }
     }
 
     for (const BspPointLight& light: imported.lights) {

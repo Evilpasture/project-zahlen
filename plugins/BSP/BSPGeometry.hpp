@@ -76,6 +76,15 @@ struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
 
+    // Invisible-but-solid tool faces (toolsnodraw, toolsskybox, toolsinvisible,
+    // toolsclip...): Source strips these from the visual mesh but keeps them in
+    // the physics hull, so they arrive here under the same split -- positions
+    // and indices only, never rendered, folded into the world collider by the
+    // importer adapter. Fog/trigger/hint/skip classes (invisible AND non-solid)
+    // do not appear anywhere: they are compile-time/volumetric helpers, not
+    // geometry. Empty unless options.buildColliders is set.
+    MaterialStreams collisionOnly;
+
     JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
     JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
     uint32_t    faceCount         = 0;

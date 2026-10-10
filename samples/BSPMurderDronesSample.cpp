@@ -7,7 +7,7 @@
 // loads import/engine_assets/maps/gm_murder_drones.bsp, resolves VMT/VTF materials,
 // external lightmap atlas, static prop StudioModels (.mdl/.vvd/.vtx/.phy),
 // interactive entities (doors, buttons, triggers), and spawns the player at
-// info_player_start with free-cam controls.
+// info_player_start as an invisible first-person capsule character controller.
 //
 // Usage:
 //   ./build/p2996/samples/BSPMurderDronesSample
@@ -17,7 +17,7 @@
 #include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
-#include <FreeCam/FreeCam.hpp>
+#include <CharacterController/CharacterController.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -29,6 +29,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -43,6 +44,7 @@
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
@@ -126,16 +128,82 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3
     }
 }
 
+// --- First-person rig -----------------------------------------------------------
+
+// Source-style player proportions in metres: the 32x32x72 inch hull becomes a
+// 1.8 m capsule, and the 64 inch view offset puts the eye 0.72 m above the
+// capsule centre. The radius sits slightly wider than the Source hull so the
+// round hull keeps climbing the ~18 inch (0.46 m) steps Source maps are full of.
+inline constexpr float kCapsuleHalfHeight = 0.45f;
+inline constexpr float kCapsuleRadius     = 0.45f;
+inline constexpr float kEyeAboveCenter    = 0.72f;
+inline constexpr float kWalkSpeedMeters   = 5.0f; // GMod walk is 200 u/s = 5.08 m/s
+inline constexpr float kJumpForceMeters   = 6.0f; // against the integrator's fixed 32 m/s^2 gravity
+inline constexpr float kLookSensitivity   = 0.12f;
+
+// One sample process, one main camera and one invisible capsule: the rig state
+// is file-static for the same reason the controller extension keeps its
+// PlayerInputSystem static inside its frame steps.
+ZHLN::Entity g_player = ZHLN::Entity::Null();
+
+// Camera-phase step: pins the main camera to the player capsule's eye position
+// and turns RMB-held mouse motion into view yaw/pitch. Runs before the core
+// CameraSystems step projects the matrices, and the controller extension's
+// PlayerIntent step reads the same Camera yaw to make WASD camera-relative.
+void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /*ctx*/) {
+    if (g_player == ZHLN::Entity::Null()) {
+        return;
+    }
+    auto& reg = engine.GetRegistry();
+    if (!reg.IsAlive(g_player)) {
+        g_player = ZHLN::Entity::Null();
+        return;
+    }
+    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    if (camEnt == ZHLN::Entity::Null()) {
+        return;
+    }
+
+    // The update graph already resolved this frame's physics-interpolated
+    // capsule position (VisualInterpolationSystem); hang the eye off it.
+    const auto trans = reg.Get<ZHLN::Components::TransformComponent>(g_player);
+    if (!trans) {
+        return;
+    }
+    const JPH::Vec3 eyePos = trans->position + JPH::Vec3(0.0f, kEyeAboveCenter, 0.0f);
+
+    reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [&](auto& cc) -> auto {
+        if (const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+            input && input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+            cc.camera.yaw   += input->GetMouseDeltaX() * kLookSensitivity;
+            cc.camera.pitch  = std::clamp(cc.camera.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
+        }
+        cc.camera.position = eyePos;
+    });
+}
+
+void AddFirstPersonCameraStep(ZHLN::FrameScheduler& scheduler) {
+    // Idempotent across schedule rebuilds, same guard the other extensions use.
+    for (const ZHLN::FrameStep& step: scheduler.GetSteps()) {
+        if (std::string_view(step.name) == "FirstPersonCamera") {
+            return;
+        }
+    }
+    if (!scheduler.InsertBefore("CameraSystems", ZHLN::FramePhase::Camera, "FirstPersonCamera", &FirstPersonCameraStep)) {
+        scheduler.Add(ZHLN::FramePhase::Camera, "FirstPersonCamera", &FirstPersonCameraStep);
+    }
+}
+
 void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("==================================================================");
     ZHLN::Log("       Zahlen Engine :: Source World Ingestion Sample             ");
     ZHLN::Log("==================================================================");
     ZHLN::Log("Map: {}", mapPath);
     ZHLN::Log("Controls:");
-    ZHLN::Log("  WASD          - Move camera in viewport");
-    ZHLN::Log("  Mouse         - Look around");
-    ZHLN::Log("  Space / Ctrl  - Move camera up / down");
-    ZHLN::Log("  Left Shift    - Boost camera speed");
+    ZHLN::Log("  WASD          - Move");
+    ZHLN::Log("  Hold RMB      - Look around (mouse)");
+    ZHLN::Log("  Space         - Jump");
+    ZHLN::Log("  Left Shift    - Sprint");
     ZHLN::Log("  E             - Interact with doors, buttons, and triggers");
     ZHLN::Log("  Escape        - Quit sample");
     ZHLN::Log("==================================================================");
@@ -253,9 +321,15 @@ auto main(int argc, char* argv[]) -> int {
         engine->GetPlatformHost().Focus();
     }
 
-    // Install systems
-    ZHLN::FreeCam::Install(*engine);
+    // Install systems. The character controller comes first: it registers the
+    // external-writes anchor for Character::MovementComponent, and the
+    // interaction layer reads that component to find the player.
+    ZHLN::Character::Install(*engine);
     ZHLN::Interaction::Install(*engine);
+
+    // The first-person view is sample-local glue on top: a Camera-phase frame
+    // step that pins the view to the player capsule's eye position.
+    engine->AddFrameSchedulerExtension(&AddFirstPersonCameraStep);
 
 #if defined(ZHLN_HAS_FONTS)
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
@@ -321,20 +395,77 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Interaction::InitializeBSPEntities(engine->GetRegistry(), bspMap, instance, importOpts);
     ZHLN::Log("[BSPSample] Interactive entity components attached and wired.");
 
-    // 8. Configure Camera & Viewport
+    // 8. Spawn the first-person player at info_player_start
+    //
+    // An invisible capsule replaces the free-cam: a CharacterVirtual body in
+    // Source hull proportions plus the controller extension's
+    // MovementComponent/InputComponent pair. The extension's substep hooks
+    // integrate WASD intent, sprint, gravity and jumping; its PlayerIntent
+    // step resolves that intent against the camera yaw; and the interaction
+    // layer finds the player through the MovementComponent.
+    const bool hasPlayerStart = std::any_of(bspMap.entities.begin(), bspMap.entities.end(), [](const ZHLN::BSP::BSPEntity& ent) {
+        return ent.Find("classname") == "info_player_start";
+    });
+
     JPH::Vec3 boundsMin;
     JPH::Vec3 boundsMax;
     ComputeBounds(prefab, boundsMin, boundsMax);
     const JPH::Vec3 mapCenter = (boundsMin + boundsMax) * 0.5f;
     const float     mapRadius = std::max((boundsMax - boundsMin).Length() * 0.5f, 10.0f);
-    const float     moveSpeed = std::clamp(mapRadius * 0.08f, 12.0f, 150.0f);
 
-    ZHLN::FreeCam::Attach(*engine, moveSpeed);
     ZHLN::Log("[BSPSample] Map bounds: min=({:.1f}, {:.1f}, {:.1f}), max=({:.1f}, {:.1f}, {:.1f}), radius={:.1f} m",
         boundsMin.GetX(), boundsMin.GetY(), boundsMin.GetZ(),
         boundsMax.GetX(), boundsMax.GetY(), boundsMax.GetZ(),
         mapRadius);
-    ZHLN::Log("[BSPSample] FreeCam initialized at {:.1f} m/s", moveSpeed);
+
+    {
+        auto& reg     = engine->GetRegistry();
+        auto& physics = engine->GetPhysicsContext();
+
+        // DescribeScene already converted the first info_player_start into
+        // scene.camera (or kept the authored default when the map has none).
+        // Source stores the origin at the feet, so the capsule centre starts
+        // half a hull above it, plus a small lift to settle instead of
+        // resolving penetration on the first step.
+        const JPH::Vec3 spawnFeet {sceneDesc.camera.position};
+        const JPH::Vec3 spawnCenter = spawnFeet + JPH::Vec3(0.0f, kCapsuleHalfHeight + kCapsuleRadius + 0.05f, 0.0f);
+
+        const ZHLN::Physics::CharacterParams characterParams {
+            .shape         = physics.GetOrCreateShape(ZHLN::Physics::ShapeType::Capsule, kCapsuleHalfHeight, kCapsuleRadius),
+            .maxSlopeAngle = JPH::DegreesToRadians(50.0f),
+        };
+        const ZHLN::Physics::BodyHandle playerBody = physics.CreateCharacter(JPH::RVec3(spawnCenter), characterParams);
+        if (playerBody == ZHLN::Physics::BodyHandle::Null()) {
+            ZHLN::LogError("[BSPSample] Failed to create the player CharacterVirtual body.");
+            return EXIT_FAILURE;
+        }
+
+        const JPH::Mat44 playerWorld = ZHLN::Math::CreateTransform(spawnCenter, JPH::Quat::sIdentity());
+        g_player = reg.Create(
+            ZHLN::Components::PlayerTagComponent {},
+            ZHLN::Components::NameComponent {.name = ZHLN::String64("Player_FirstPerson")},
+            ZHLN::Components::TransformComponent {.position = spawnCenter, .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)},
+            ZHLN::Components::WorldTransformComponent {.world = playerWorld, .previous = playerWorld},
+            ZHLN::Components::PhysicsComponent {.physicsHandle = playerBody, .isStatic = false},
+            ZHLN::Character::InputComponent {},
+            ZHLN::Character::MovementComponent {.speed = kWalkSpeedMeters, .jumpForce = kJumpForceMeters}
+        );
+
+        // Scene::Instantiate already aimed the camera with the info_player_start
+        // yaw/pitch; first person just wants a wider lens and a closer near
+        // plane for Source interiors.
+        const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+        if (camEnt != ZHLN::Entity::Null()) {
+            reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [](auto& cc) -> auto {
+                cc.camera.fov   = 75.0f;
+                cc.camera.nearZ = 0.05f;
+            });
+        }
+
+        ZHLN::Log("[BSPSample] Spawned first-person capsule ({}) at ({:.2f}, {:.2f}, {:.2f})",
+            hasPlayerStart ? "info_player_start" : "no info_player_start, fallback view position",
+            spawnCenter.GetX(), spawnCenter.GetY(), spawnCenter.GetZ());
+    }
 
     // 9. Lighting & Post-Processing Setup
     {
