@@ -39,5 +39,6 @@ target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 # The importer consumes the serializer; Fonts consumes both engine and
 # serialization; SVG remains independently optional when resvg is unavailable.
 add_subdirectory(glTF)
+add_subdirectory(BSP)
 add_subdirectory(Fonts)
 add_subdirectory(SVG)
