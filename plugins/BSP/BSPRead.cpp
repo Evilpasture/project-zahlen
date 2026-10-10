@@ -8,75 +8,82 @@
 // through the reflection-driven ReadStruct in BSPRead.hpp.
 
 #include "BSPRead.hpp"
-
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 
 namespace ZHLN::BSP {
 namespace {
 
-auto IsEntitySpace(char c) -> bool {
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
-// Reads one quoted string starting at *cursor (which must be on the opening
-// quote). Returns false on end-of-text before the closing quote.
-auto ReadQuoted(std::string_view text, size_t& cursor, std::string& out) -> bool {
-    if (cursor >= text.size() || text[cursor] != '"') {
-        return false;
-    }
-    ++cursor;
-    out.clear();
-    while (cursor < text.size() && text[cursor] != '"') {
-        out.push_back(text[cursor]);
-        ++cursor;
-    }
-    if (cursor >= text.size()) {
-        return false;
-    }
-    ++cursor; // closing quote
-    return true;
-}
-
-void SkipLineComments(std::string_view text, size_t& cursor) {
-    while (cursor + 1 < text.size() && text[cursor] == '/' && text[cursor + 1] == '/') {
-        while (cursor < text.size() && text[cursor] != '\n') {
-            ++cursor;
+void SkipWhitespaceAndComments(std::string_view& text) noexcept {
+    while (!text.empty()) {
+        if (text.front() == ' ' || text.front() == '\t' || text.front() == '\r' || text.front() == '\n') {
+            text.remove_prefix(1);
+            continue;
         }
+        if (text.starts_with("//")) {
+            const auto newline = text.find('\n');
+            if (newline == std::string_view::npos) {
+                text = {};
+            } else {
+                text.remove_prefix(newline + 1);
+            }
+            continue;
+        }
+        break;
     }
+}
+
+auto ReadQuotedString(std::string_view& text) noexcept -> std::optional<std::string_view> {
+    if (text.empty() || text.front() != '"') {
+        return std::nullopt;
+    }
+    text.remove_prefix(1);
+    const auto closeQuote = text.find('"');
+    if (closeQuote == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::string_view result = text.substr(0, closeQuote);
+    text.remove_prefix(closeQuote + 1);
+    return result;
 }
 
 template <typename T>
-auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry, std::vector<T>& out, const char* name, std::string& error) -> bool {
+auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry, std::vector<T>& out) -> std::expected<void, ErrorCode> {
     if (entry.filelen < 0 || entry.fileofs < 0 || static_cast<size_t>(entry.fileofs) + static_cast<size_t>(entry.filelen) > file.size()) {
-        error = std::string("lump out of bounds: ") + name;
-        return false;
+        return std::unexpected(BSPError::LumpOutOfBounds);
     }
     if (entry.filelen == 0) {
-        return true;
+        return {};
     }
     if (entry.filelen % static_cast<int32_t>(sizeof(T)) != 0) {
-        error = std::string("lump size is not a multiple of the struct: ") + name;
-        return false;
+        return std::unexpected(BSPError::MalformedLump);
     }
     const size_t count = static_cast<size_t>(entry.filelen) / sizeof(T);
     out.resize(count);
     ByteReader in(file.subspan(static_cast<size_t>(entry.fileofs), static_cast<size_t>(entry.filelen)));
     for (T& element: out) {
         if (!ReadStruct(in, element)) {
-            error = std::string("short read in lump: ") + name;
-            return false;
+            return std::unexpected(BSPError::ShortRead);
         }
     }
-    return true;
+    return {};
 }
 
 // Texdata names live in a string table: LUMP_TEXDATA_STRING_TABLE is int32
 // offsets into LUMP_TEXDATA_STRING_DATA (NUL-terminated).
-auto ReadTexNames(std::span<const std::byte> file, const LumpEntry& dataEntry, const LumpEntry& tableEntry, const std::vector<DTexData>& texDatas, std::vector<std::string>& out, std::string& error) -> bool {
-    if (dataEntry.filelen < 0 || tableEntry.filelen < 0) {
-        error = "texdata string lumps out of bounds";
-        return false;
+auto ReadTexNames(
+    std::span<const std::byte>   file,
+    const LumpEntry&             dataEntry,
+    const LumpEntry&             tableEntry,
+    const std::vector<DTexData>& texDatas,
+    std::vector<std::string>&    out
+) -> std::expected<void, ErrorCode> {
+    if (dataEntry.filelen < 0 || tableEntry.filelen < 0 || dataEntry.fileofs < 0 || tableEntry.fileofs < 0 ||
+        static_cast<size_t>(dataEntry.fileofs) + static_cast<size_t>(dataEntry.filelen) > file.size() ||
+        static_cast<size_t>(tableEntry.fileofs) + static_cast<size_t>(tableEntry.filelen) > file.size()) {
+        return std::unexpected(BSPError::LumpOutOfBounds);
     }
     const auto dataSpan  = file.subspan(static_cast<size_t>(dataEntry.fileofs), static_cast<size_t>(dataEntry.filelen));
     const auto tableSpan = file.subspan(static_cast<size_t>(tableEntry.fileofs), static_cast<size_t>(tableEntry.filelen));
@@ -92,89 +99,101 @@ auto ReadTexNames(std::span<const std::byte> file, const LumpEntry& dataEntry, c
             int32_t offset = 0;
             std::memcpy(&offset, tableSpan.data() + tableIndex * sizeof(int32_t), sizeof(offset));
             if (offset >= 0 && static_cast<size_t>(offset) < dataSpan.size()) {
-                const char* str    = reinterpret_cast<const char*>(dataSpan.data()) + offset;
+                const char*  str   = reinterpret_cast<const char*>(dataSpan.data()) + offset;
                 const size_t limit = dataSpan.size() - static_cast<size_t>(offset);
                 const size_t len   = std::min(std::strlen(str), limit);
                 name.assign(str, len);
             }
         }
         if (name.empty()) {
-            error = "unresolved texdata name";
-            return false;
+            return std::unexpected(BSPError::UnresolvedTexData);
         }
         out.push_back(std::move(name));
     }
-    return true;
+    return {};
 }
 
 } // namespace
 
+auto BSPEntity::Find(std::string_view key) const noexcept -> std::string_view {
+    for (const auto& [k, v]: keys) {
+        if (k == key) {
+            return v;
+        }
+    }
+    return {};
+}
+
+auto BSPEntity::FindVector(std::string_view key, float out[3]) const noexcept -> bool {
+    const std::string_view raw = Find(key);
+    if (raw.empty()) {
+        return false;
+    }
+    const std::string buffer(raw);
+    const char*       cursor = buffer.c_str();
+    char*             end    = nullptr;
+    for (size_t k = 0; k < 3; ++k) {
+        out[k] = std::strtof(cursor, &end);
+        if (end == cursor) {
+            return false;
+        }
+        cursor = end;
+    }
+    return true;
+}
+
 auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
     std::vector<BSPEntity> entities;
-    size_t                 cursor = 0;
-    std::string            scratch;
 
-    while (cursor < text.size()) {
-        SkipLineComments(text, cursor);
-        while (cursor < text.size() && IsEntitySpace(text[cursor])) {
-            ++cursor;
-        }
-        SkipLineComments(text, cursor);
-        if (cursor >= text.size() || text[cursor] != '{') {
+    while (true) {
+        SkipWhitespaceAndComments(text);
+        if (text.empty() || text.front() != '{') {
             break;
         }
-        ++cursor;
+        text.remove_prefix(1);
 
         BSPEntity entity;
-        while (cursor < text.size()) {
-            SkipLineComments(text, cursor);
-            while (cursor < text.size() && IsEntitySpace(text[cursor])) {
-                ++cursor;
-            }
-            SkipLineComments(text, cursor);
-            if (cursor >= text.size()) {
+        while (true) {
+            SkipWhitespaceAndComments(text);
+            if (text.empty()) {
                 break;
             }
-            if (text[cursor] == '}') {
-                ++cursor;
+            if (text.front() == '}') {
+                text.remove_prefix(1);
                 break;
             }
-            std::string key;
-            std::string value;
-            if (!ReadQuoted(text, cursor, key)) {
+
+            const auto key = ReadQuotedString(text);
+            if (!key) {
                 break;
             }
-            while (cursor < text.size() && IsEntitySpace(text[cursor])) {
-                ++cursor;
-            }
-            if (!ReadQuoted(text, cursor, value)) {
+            SkipWhitespaceAndComments(text);
+            const auto val = ReadQuotedString(text);
+            if (!val) {
                 break;
             }
-            entity.keys.emplace_back(std::move(key), std::move(value));
+            entity.keys.emplace_back(std::string(*key), std::string(*val));
         }
         entities.push_back(std::move(entity));
     }
     return entities;
 }
 
-auto ParseBsp(std::span<const std::byte> bytes) -> ParseResult {
-    ParseResult result;
-
+auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCode> {
     ByteReader file(bytes);
     BspHeader  header {};
     if (!ReadStruct(file, header)) {
-        result.error = "file too small for a BSP header";
-        return result;
+        return std::unexpected(BSPError::FileTooSmall);
     }
     if (header.ident != kBspIdent) {
-        result.error = "not a VBSP image";
-        return result;
+        return std::unexpected(BSPError::InvalidIdent);
     }
     if (header.version < kBspVersionMin || header.version > kBspVersionMax) {
-        result.error = "unsupported BSP version (mainline 19-21 only): " + std::to_string(header.version);
-        return result;
+        return std::unexpected(BSPError::UnsupportedVersion);
     }
-    result.map.version = header.version;
+
+    BSPMap map;
+    map.version = header.version;
 
     const auto lump = [&](Lump id) -> const LumpEntry& { return header.lumps[static_cast<uint32_t>(id)]; };
 
@@ -182,61 +201,80 @@ auto ParseBsp(std::span<const std::byte> bytes) -> ParseResult {
     const LumpEntry& entitiesLump = lump(Lump::Entities);
     if (entitiesLump.filelen > 0) {
         if (entitiesLump.fileofs < 0 || static_cast<size_t>(entitiesLump.fileofs) + static_cast<size_t>(entitiesLump.filelen) > bytes.size()) {
-            result.error = "entity lump out of bounds";
-            return result;
+            return std::unexpected(BSPError::LumpOutOfBounds);
         }
         const auto textSpan = bytes.subspan(static_cast<size_t>(entitiesLump.fileofs), static_cast<size_t>(entitiesLump.filelen));
-        result.map.entities = ParseEntities(std::string_view(reinterpret_cast<const char*>(textSpan.data()), textSpan.size()));
+        map.entities        = ParseEntities(std::string_view(reinterpret_cast<const char*>(textSpan.data()), textSpan.size()));
     }
 
-    bool ok = true;
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Planes), result.map.planes, "planes", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Vertexes), result.map.vertices, "vertexes", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Edges), result.map.edges, "edges", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::SurfEdges), result.map.surfEdges, "surfedges", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Faces), result.map.faces, "faces", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::TexInfo), result.map.texInfos, "texinfo", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::TexData), result.map.texDatas, "texdata", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Models), result.map.models, "models", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::DispInfo), result.map.dispInfos, "dispinfo", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::DispVerts), result.map.dispVerts, "dispverts", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Nodes), result.map.nodes, "nodes", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Brushes), result.map.brushes, "brushes", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::BrushSides), result.map.brushSides, "brushsides", result.error);
-    ok = ok && ReadLumpArray(bytes, lump(Lump::Overlays), result.map.overlays, "overlays", result.error);
-    if (!ok) {
-        return result;
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Planes), map.planes); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Vertexes), map.vertices); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Edges), map.edges); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::SurfEdges), map.surfEdges); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::TexInfo), map.texInfos); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::TexData), map.texDatas); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Models), map.models); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::DispInfo), map.dispInfos); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::DispVerts), map.dispVerts); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Nodes), map.nodes); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Brushes), map.brushes); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::BrushSides), map.brushSides); !res) {
+        return std::unexpected(res.error());
+    }
+    if (auto res = ReadLumpArray(bytes, lump(Lump::Overlays), map.overlays); !res) {
+        return std::unexpected(res.error());
     }
 
     // Leaves: version 0 is 30-byte DLeaf, version 1 appends two padding bytes.
-    {
-        const LumpEntry& leafLump = lump(Lump::Leafs);
-        if (leafLump.filelen > 0) {
-            const size_t stride = (leafLump.version == 1) ? sizeof(DLeaf) + 2 : sizeof(DLeaf);
-            if (leafLump.fileofs < 0 || leafLump.filelen < 0 ||
-                static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size() ||
-                static_cast<size_t>(leafLump.filelen) % stride != 0) {
-                result.error = "leaf lump malformed";
-                return result;
-            }
-            ByteReader in(bytes.subspan(static_cast<size_t>(leafLump.fileofs), static_cast<size_t>(leafLump.filelen)));
-            const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
-            result.map.leafs.resize(count);
-            for (DLeaf& leaf: result.map.leafs) {
-                if (!ReadStruct(in, leaf) || !in.Skip(stride - sizeof(DLeaf))) {
-                    result.error = "short read in lump: leafs";
-                    return result;
-                }
+    const LumpEntry& leafLump = lump(Lump::Leafs);
+    if (leafLump.filelen > 0) {
+        const size_t stride = (leafLump.version == 1) ? sizeof(DLeaf) + 2 : sizeof(DLeaf);
+        if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {
+            return std::unexpected(BSPError::LumpOutOfBounds);
+        }
+        if (static_cast<size_t>(leafLump.filelen) % stride != 0) {
+            return std::unexpected(BSPError::MalformedLump);
+        }
+        ByteReader   in(bytes.subspan(static_cast<size_t>(leafLump.fileofs), static_cast<size_t>(leafLump.filelen)));
+        const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
+        map.leafs.resize(count);
+        for (DLeaf& leaf: map.leafs) {
+            if (!ReadStruct(in, leaf) || !in.Skip(stride - sizeof(DLeaf))) {
+                return std::unexpected(BSPError::ShortRead);
             }
         }
     }
 
-    if (!ReadTexNames(bytes, lump(Lump::TexDataStringData), lump(Lump::TexDataStringTable), result.map.texDatas, result.map.texNames, result.error)) {
-        return result;
+    if (auto res = ReadTexNames(bytes, lump(Lump::TexDataStringData), lump(Lump::TexDataStringTable), map.texDatas, map.texNames); !res) {
+        return std::unexpected(res.error());
     }
 
-    result.ok = true;
-    return result;
+    return map;
 }
 
 } // namespace ZHLN::BSP

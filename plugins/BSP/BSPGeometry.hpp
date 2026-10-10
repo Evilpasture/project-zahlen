@@ -5,7 +5,7 @@
 
 // plugins/BSP/BSPGeometry.hpp
 //
-// The marshalling step: BSP lumps in, Zahlen-native vertex streams out. The
+// The import step: BSP lumps in, Zahlen-native vertex streams out. The
 // streams are exactly the cooked-mesh payload layout the renderer already
 // consumes -- VertexPosition / VertexTangentFrame / VertexSurface / indices
 // (see <Zahlen/Vertex.hpp>) -- grouped per material the way the glTF importer
@@ -13,15 +13,12 @@
 // the importer adapter uploads these streams and Scene::Instantiate /
 // PrefabFactory::InstantiatePrefab take it from there.
 //
-// Engine-free by design: this is the layer the standalone calculator builds.
+// Engine-free by design: this layer is buildable without the full renderer tree.
 
 #include "BSPRead.hpp"
-#include "BSPTypes.hpp"
-
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
-
-#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -31,11 +28,12 @@ namespace ZHLN::BSP {
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
 // and measures in metres. The default converts; unitScale lets a caller keep
 // inches (1.0f) or feed a differently scaled world.
-struct MarshallOptions {
+struct ImportOptions {
     bool  convertCoordinates   = true;
-    float unitScale            = 0.0254f;
+    float unitScale            = 0.0254f; // Inches to meters
     bool  includeDisplacements = true;
     bool  gatherLights         = true;
+    bool  buildColliders       = true;
 };
 
 // One material group: the concatenated, de-indexed-then-reindexed streams of
@@ -48,50 +46,50 @@ struct MaterialStreams {
     std::vector<VertexSurface>      surfaces;
     std::vector<uint32_t>           indices;
 
-    float boundsMin[3] = {0.0f, 0.0f, 0.0f};
-    float boundsMax[3] = {0.0f, 0.0f, 0.0f};
+    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
+    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
 
-    [[nodiscard]] auto VertexCount() const noexcept -> uint32_t { return static_cast<uint32_t>(positions.size()); }
-    [[nodiscard]] auto IndexCount() const noexcept -> uint32_t { return static_cast<uint32_t>(indices.size()); }
+    [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
+        return static_cast<uint32_t>(positions.size());
+    }
+    [[nodiscard]] auto IndexCount() const noexcept -> uint32_t {
+        return static_cast<uint32_t>(indices.size());
+    }
 };
 
-// A light recovered from the entity lump. Carries no engine types so the
-// marshaller stays buildable standalone; the adapter converts to ModelLight.
+// A light recovered from the entity lump.
 struct BspPointLight {
-    enum class Kind : uint8_t { Point, Spot, Directional };
-
     std::string name;
-    Kind        kind = Kind::Point;
+    LightType   type = LightType::Point; // Direct reuse of engine enum
 
-    float position[3] = {0.0f, 0.0f, 0.0f};
-    float direction[3] = {0.0f, -1.0f, 0.0f}; // spot/environment aim, converted space
-    float color[3]    = {1.0f, 1.0f, 1.0f};
-    float intensity   = 1.0f; // the "_light" alpha channel, as authored
-    float innerConeRadians = 0.0f;
-    float outerConeRadians = 0.78539816339f;
+    JPH::Vec3 position {0.0f, 0.0f, 0.0f};
+    JPH::Vec3 direction {0.0f, -1.0f, 0.0f};
+    JPH::Vec3 color {1.0f, 1.0f, 1.0f};
+    float     intensity        = 1.0f;
+    float     innerConeRadians = 0.0f;
+    float     outerConeRadians = 0.78539816339f; // Default 45 deg
 };
 
-struct MarshalledMap {
+struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
 
-    float    boundsMin[3] = {0.0f, 0.0f, 0.0f};
-    float    boundsMax[3] = {0.0f, 0.0f, 0.0f};
-    uint32_t faceCount        = 0;
-    uint32_t displacementCount = 0;
-    uint32_t triangleCount    = 0;
+    JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
+    JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
+    uint32_t    faceCount         = 0;
+    uint32_t    displacementCount = 0;
+    uint32_t    triangleCount     = 0;
 };
 
 // Position transform for the options in force (Source Z-up inches -> engine
-// Y-up metres by default). Exposed so the scene marshalling and the
-// calculator convert identically.
-void ConvertPosition(const MarshallOptions& options, const float in[3], float out[3]) noexcept;
-void ConvertDirection(const MarshallOptions& options, const float in[3], float out[3]) noexcept;
+// Y-up metres by default). Exposed so scene importing converts identically.
+[[nodiscard]] auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
+[[nodiscard]] auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
 
 // Faces + displacements -> per-material native streams; entities -> lights.
 // Faces whose texinfo is missing or node-only are skipped (they are tree
 // partitions, not surfaces). Degenerate polygons (fewer than 3 unique corners)
 // are skipped rather than producing zero-area triangles.
-[[nodiscard]] auto MarshallMap(const BSPMap& map, const MarshallOptions& options = {}) -> MarshalledMap;
+[[nodiscard]] auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options = {}) -> ImportedMapData;
 
 } // namespace ZHLN::BSP

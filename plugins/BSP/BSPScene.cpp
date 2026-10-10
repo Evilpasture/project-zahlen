@@ -9,7 +9,6 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -20,22 +19,20 @@ namespace {
 
 constexpr float kRadiansToDegrees = 57.29577951308232f;
 
-void EngineAnglesFromDirection(const float forward[3], float sourceRollDegrees, const MarshallOptions& options, float out[3]) {
-    float engineForward[3];
-    ConvertDirection(options, forward, engineForward);
+auto EngineAnglesFromDirection(JPH::Vec3 forward, float sourceRollDegrees, const ImportOptions& options) -> JPH::Vec3 {
+    const JPH::Vec3 engineForward = ConvertDirection(options, forward);
 
     // Yaw around +Y, pitch around +X: forward = (cos p cos y, sin p, cos p sin y),
     // matching the SceneCamera convention (default yaw -90 looks down -Z).
-    const float pitch = std::asin(std::clamp(engineForward[1], -1.0f, 1.0f));
-    const float yaw   = std::atan2(engineForward[2], engineForward[0]);
-    out[0]            = pitch * kRadiansToDegrees;
-    out[1]            = yaw * kRadiansToDegrees;
-    out[2]            = options.convertCoordinates ? -sourceRollDegrees : sourceRollDegrees;
+    const float pitch = std::asin(std::clamp(engineForward.GetY(), -1.0f, 1.0f));
+    const float yaw   = std::atan2(engineForward.GetZ(), engineForward.GetX());
+    const float roll  = options.convertCoordinates ? -sourceRollDegrees : sourceRollDegrees;
+    return JPH::Vec3(pitch * kRadiansToDegrees, yaw * kRadiansToDegrees, roll);
 }
 
 } // namespace
 
-auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const MarshallOptions& options) -> Scene::Scene {
+auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
     Scene::Scene scene;
     scene.name = std::string(virtualPath);
 
@@ -44,10 +41,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Marsha
     // map's collision comes up with it.
     {
         Scene::SceneEntity world;
-        world.name       = "worldspawn";
-        world.shape      = Scene::ShapeKind::Prefab;
-        world.source     = std::string(virtualPath);
-        world.body       = Scene::BodyKind::Static;
+        world.name   = "worldspawn";
+        world.shape  = Scene::ShapeKind::Prefab;
+        world.source = std::string(virtualPath);
+        world.body   = Scene::BodyKind::Static;
         scene.entities.push_back(std::move(world));
     }
 
@@ -59,35 +56,35 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Marsha
             continue;
         }
 
-        float origin[3]  = {0.0f, 0.0f, 0.0f};
-        float angles[3]  = {0.0f, 0.0f, 0.0f};
-        static_cast<void>(entity.FindVector("origin", origin));
-        static_cast<void>(entity.FindVector("angles", angles));
+        float originArr[3] = {0.0f, 0.0f, 0.0f};
+        float anglesArr[3] = {0.0f, 0.0f, 0.0f};
+        static_cast<void>(entity.FindVector("origin", originArr));
+        static_cast<void>(entity.FindVector("angles", anglesArr));
+        const JPH::Vec3 origin(originArr[0], originArr[1], originArr[2]);
+        JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
         if (className == "light" || className == "light_spot" || className == "light_environment") {
-            const MarshallOptions lightOptions = options;
-            const auto            lightName    = entity.Find("targetname");
+            const auto lightName = entity.Find("targetname");
 
             Scene::SceneLight light;
             light.name = lightName.empty() ? std::string(className) : std::string(lightName);
 
-            BspPointLight::Kind kind = BspPointLight::Kind::Point;
+            LightType lightType = LightType::Point;
             if (className == "light_spot") {
-                kind        = BspPointLight::Kind::Spot;
-                light.type  = "Spot";
+                lightType  = LightType::Spot;
+                light.type = "Spot";
             } else if (className == "light_environment") {
-                kind       = BspPointLight::Kind::Directional;
+                lightType  = LightType::Directional;
                 light.type = "Directional";
             } else {
                 light.type = "Point";
             }
 
-            float enginePosition[3];
-            ConvertPosition(lightOptions, origin, enginePosition);
-            light.position = {enginePosition[0], enginePosition[1], enginePosition[2]};
+            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+            light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
             float color4[4] = {255.0f, 255.0f, 255.0f, 200.0f};
-            if (entity.Has("_light")) {
+            if (!entity.Find("_light").empty()) {
                 const std::string buffer(entity.Find("_light"));
                 const char*       cursor = buffer.c_str();
                 char*             end    = nullptr;
@@ -102,28 +99,24 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Marsha
             light.color     = {color4[0] / 255.0f, color4[1] / 255.0f, color4[2] / 255.0f};
             light.intensity = color4[3];
 
-            float direction[3] = {0.0f, 0.0f, -1.0f};
-            if (kind != BspPointLight::Kind::Point) {
-                float aimAngles[3] = {angles[0], angles[1], angles[2]};
-                if (entity.Has("pitch")) {
-                    aimAngles[0] = std::strtof(std::string(entity.Find("pitch")).c_str(), nullptr);
+            JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
+            if (lightType != LightType::Point) {
+                float pitchDeg = angles.GetX();
+                if (!entity.Find("pitch").empty()) {
+                    pitchDeg = std::strtof(std::string(entity.Find("pitch")).c_str(), nullptr);
                 }
-                const float pitch = aimAngles[0] * (3.14159265358979323846f / 180.0f);
-                const float yaw   = aimAngles[1] * (3.14159265358979323846f / 180.0f);
+                const float pitch = pitchDeg * (3.14159265358979323846f / 180.0f);
+                const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
                 const float cp    = std::cos(pitch);
-                direction[0]      = cp * std::cos(yaw);
-                direction[1]      = cp * std::sin(yaw);
-                direction[2]      = -std::sin(pitch);
+                direction         = JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
             }
-            float engineDirection[3];
-            ConvertDirection(lightOptions, direction, engineDirection);
-            light.direction = {engineDirection[0], engineDirection[1], engineDirection[2]};
+            const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
+            light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
 
-            float engineAngles[3];
-            EngineAnglesFromDirection(direction, angles[2], lightOptions, engineAngles);
-            light.rotation = {engineAngles[0], engineAngles[1], engineAngles[2]};
+            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+            light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
-            if (kind == BspPointLight::Kind::Spot) {
+            if (lightType == LightType::Spot) {
                 const float outerDegrees = std::strtof(std::string(entity.Find("_cone")).c_str(), nullptr);
                 if (outerDegrees > 0.0f) {
                     light.range = outerDegrees; // cone width is not range; the
@@ -137,19 +130,92 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Marsha
         }
 
         if (className == "info_player_start" && !cameraSet) {
-            float enginePosition[3];
-            ConvertPosition(options, origin, enginePosition);
-            scene.camera.position = {enginePosition[0], enginePosition[1], enginePosition[2]};
+            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+            scene.camera.position          = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
-            const float pitch = angles[0] * (3.14159265358979323846f / 180.0f);
-            const float yaw   = angles[1] * (3.14159265358979323846f / 180.0f);
-            const float cp    = std::cos(pitch);
-            float       direction[3] = {cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch)};
-            float       engineAngles[3];
-            EngineAnglesFromDirection(direction, angles[2], options, engineAngles);
-            scene.camera.pitch = engineAngles[0];
-            scene.camera.yaw   = engineAngles[1];
-            cameraSet          = true;
+            const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
+            const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
+            const float     cp    = std::cos(pitch);
+            const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+            scene.camera.pitch           = engineAngles.GetX();
+            scene.camera.yaw             = engineAngles.GetY();
+            cameraSet                    = true;
+            continue;
+        }
+
+        // Interactive entities: doors, buttons, and trigger volumes.
+        const bool isDoor =
+            (className == "func_door" || className == "func_door_rotating" || className == "prop_door_rotating" || className == "momentary_door");
+        const bool isButton  = (className == "func_button" || className == "func_rot_button" || className == "momentary_rot_button");
+        const bool isTrigger = className.starts_with("trigger_");
+
+        if (isDoor || isButton || isTrigger) {
+            Scene::SceneEntity interactive;
+            const auto         targetName = entity.Find("targetname");
+            interactive.name              = targetName.empty() ? std::string(className) : std::string(targetName);
+
+            if (isDoor || isButton) {
+                interactive.body = Scene::BodyKind::Kinematic;
+            } else {
+                interactive.body = Scene::BodyKind::None;
+            }
+
+            const std::string_view modelName = entity.Find("model");
+            if (!modelName.empty() && modelName.starts_with('*')) {
+                // Brush entity referencing submodel (*1, *2, ...)
+                interactive.shape  = Scene::ShapeKind::Box;
+                interactive.source = std::string(modelName);
+
+                char*     endPtr     = nullptr;
+                const int modelIndex = static_cast<int>(std::strtol(modelName.data() + 1, &endPtr, 10));
+                if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
+                    const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
+                    const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+                    const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+                    JPH::Vec3       bspCenter = (mins + maxs) * 0.5f;
+                    const JPH::Vec3 bspHalf   = (maxs - mins) * 0.5f;
+
+                    float originCheck[3] = {0.0f, 0.0f, 0.0f};
+                    if (entity.FindVector("origin", originCheck)) {
+                        bspCenter = JPH::Vec3(originCheck[0], originCheck[1], originCheck[2]);
+                    }
+
+                    const JPH::Vec3 enginePos      = ConvertPosition(options, bspCenter);
+                    interactive.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
+                    const JPH::Vec3 engineHalf(
+                        std::abs(bspHalf.GetX()) * options.unitScale, std::abs(bspHalf.GetY()) * options.unitScale, std::abs(bspHalf.GetZ()) * options.unitScale
+                    );
+                    interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
+                } else {
+                    const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+                    interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                    interactive.halfExtents        = {0.5f, 0.5f, 0.5f};
+                }
+            } else if (!modelName.empty()) {
+                // Prop/model asset reference (e.g. prop_door_rotating with .mdl)
+                interactive.shape  = Scene::ShapeKind::Prefab;
+                interactive.source = std::string(modelName);
+
+                const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+                interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+            } else {
+                interactive.shape              = Scene::ShapeKind::Box;
+                const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+                interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                interactive.halfExtents        = {1.0f, 1.0f, 1.0f};
+            }
+
+            if (angles.LengthSq() > 1e-4f) {
+                const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
+                const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
+                const float     cp    = std::cos(pitch);
+                const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+                const JPH::Vec3 engineAngles   = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+                interactive.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+            }
+
+            scene.entities.push_back(std::move(interactive));
             continue;
         }
 
@@ -162,27 +228,22 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Marsha
             prop.source = std::string(modelName);
             prop.body   = (className == "prop_physics") ? Scene::BodyKind::Dynamic : Scene::BodyKind::Static;
 
-            float enginePosition[3];
-            ConvertPosition(options, origin, enginePosition);
-            prop.transform.position = {enginePosition[0], enginePosition[1], enginePosition[2]};
+            const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+            prop.transform.position        = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
-            float direction[3] = {0.0f, 0.0f, -1.0f};
-            const float pitch  = angles[0] * (3.14159265358979323846f / 180.0f);
-            const float yaw    = angles[1] * (3.14159265358979323846f / 180.0f);
-            const float cp     = std::cos(pitch);
-            direction[0]       = cp * std::cos(yaw);
-            direction[1]       = cp * std::sin(yaw);
-            direction[2]       = -std::sin(pitch);
-            float engineAngles[3];
-            EngineAnglesFromDirection(direction, angles[2], options, engineAngles);
-            prop.transform.rotation = {engineAngles[0], engineAngles[1], engineAngles[2]};
+            const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
+            const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
+            const float     cp    = std::cos(pitch);
+            const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+            prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
             scene.entities.push_back(std::move(prop));
             continue;
         }
 
-        // Everything else: trigger_* , logic_*, choreo, ... intentionally not
-        // scene-model entities.
+        // Everything else: logic_*, ambient_generic, info_*, env_*
+        // intentionally not scene-model geometry.
     }
 
     return scene;

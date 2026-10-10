@@ -5,7 +5,7 @@
 
 // plugins/BSP/BSPScene.hpp
 //
-// The other half of "marshal down to native representation, let the
+// The other half of "import down to native representation, let the
 // instantiator do the rest": this turns the entity lump into a plain
 // ZHLN::Scene::Scene description -- the same document the reflection TOML
 // layer parses -- and ZHLN::Scene::Instantiate does all the spawning. World
@@ -15,17 +15,15 @@
 
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
-
 #include <Zahlen/Scene.hpp>
-
 #include <string_view>
 
 namespace ZHLN::BSP {
 
-// Entity classes that map cleanly onto the scene model today. Everything else
-// (triggers, choreo, logic entities...) is dropped with a count available via
-// the returned scene's entity list; their gameplay semantics are not the
-// importer's problem.
-[[nodiscard]] auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const MarshallOptions& options = {}) -> Scene::Scene;
+// Entity classes mapped onto the scene model: world geometry, lights, player
+// camera start, static/dynamic props, as well as interactive entities
+// (func_door, func_button, trigger_*, prop_door_rotating) with their kinematic
+// bodies, bounding extents, and prefab sources retained for ECS initialization.
+[[nodiscard]] auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options = {}) -> Scene::Scene;
 
 } // namespace ZHLN::BSP

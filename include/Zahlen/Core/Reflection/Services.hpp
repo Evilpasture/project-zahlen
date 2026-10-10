@@ -35,8 +35,8 @@ consteval auto HasMemberOfType() -> bool {
 // says so at the point the bundle is defined.
 template <typename Bundle>
 consteval auto BundleTypesAreUnique() -> bool {
-    constexpr auto members = NonStaticDataMembers<Bundle>();
-    constexpr size_t count = members.size();
+    constexpr auto   members = NonStaticDataMembers<Bundle>();
+    constexpr size_t count   = members.size();
     for (size_t i = 0; i < count; ++i) {
         for (size_t j = i + 1; j < count; ++j) {
             if (std::meta::type_of(members[i]) == std::meta::type_of(members[j])) {
@@ -72,6 +72,15 @@ auto FindService(Bundle& bundle) noexcept -> T* {
 }
 
 #else
+
+namespace TemplatedDetail {
+
+template <typename Bundle>
+consteval auto BundleTypesAreUnique() -> bool {
+    return true;
+}
+
+} // namespace TemplatedDetail
 
 // Without reflection the member list cannot be read, so no bundle can be
 // searched. The stub answers "yes" to every query so that stub-mode builds

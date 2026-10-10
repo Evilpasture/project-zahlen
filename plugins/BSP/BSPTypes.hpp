@@ -12,9 +12,8 @@
 // versions) are deliberately out of scope here.
 //
 // The structs are packed and declared in file order so that a C++ member's
-// offset *is* its file offset. That identity is the contract the reflection
-// calculator (plugins/BSP/calculator) checks, and it is what lets the generic
-// field-wise reader in BSPRead.hpp marshall any of these in one code path
+// offset *is* its file offset. That identity is what lets the generic
+// field-wise reader in BSPRead.hpp read any of these in one code path
 // instead of one hand-written reader per lump, per version.
 
 #include <cstdint>
@@ -22,7 +21,7 @@
 namespace ZHLN::BSP {
 
 // 'VBSP' as a little-endian int32.
-inline constexpr int32_t kBspIdent     = 0x50534256;
+inline constexpr int32_t kBspIdent      = 0x50534256;
 inline constexpr int32_t kBspVersionMin = 19;
 inline constexpr int32_t kBspVersionMax = 21;
 
@@ -30,37 +29,37 @@ inline constexpr int32_t kBspVersionMax = 21;
 inline constexpr int32_t kTexInfoNode = -1;
 
 enum class Lump : uint32_t {
-    Entities         = 0,
-    Planes           = 1,
-    TexData          = 2,
-    Vertexes         = 3,
-    Visibility       = 4,
-    Nodes            = 5,
-    TexInfo          = 6,
-    Faces            = 7,
-    Lighting         = 8,
-    Leafs            = 9,
-    FaceIds          = 10,
-    Edges            = 12,
-    SurfEdges        = 13,
-    Models           = 14,
-    WorldLights      = 15,
-    LeafFaces        = 16,
-    LeafBrushes      = 17,
-    Brushes          = 18,
-    BrushSides       = 19,
-    Areas            = 20,
-    AreaPortals      = 21,
-    DispInfo         = 26,
-    DispVerts        = 27,
-    DispTris         = 28,
-    GameLump         = 35,
-    PakFile          = 40,
-    Cubemaps         = 41,
+    Entities           = 0,
+    Planes             = 1,
+    TexData            = 2,
+    Vertexes           = 3,
+    Visibility         = 4,
+    Nodes              = 5,
+    TexInfo            = 6,
+    Faces              = 7,
+    Lighting           = 8,
+    Leafs              = 9,
+    FaceIds            = 10,
+    Edges              = 12,
+    SurfEdges          = 13,
+    Models             = 14,
+    WorldLights        = 15,
+    LeafFaces          = 16,
+    LeafBrushes        = 17,
+    Brushes            = 18,
+    BrushSides         = 19,
+    Areas              = 20,
+    AreaPortals        = 21,
+    DispInfo           = 26,
+    DispVerts          = 27,
+    DispTris           = 28,
+    GameLump           = 35,
+    PakFile            = 40,
+    Cubemaps           = 41,
     TexDataStringData  = 43,
     TexDataStringTable = 44,
-    Overlays         = 45,
-    Count            = 64
+    Overlays           = 45,
+    Count              = 64
 };
 
 #pragma pack(push, 1)
@@ -73,9 +72,9 @@ struct LumpEntry {
 };
 
 struct BspHeader {
-    int32_t    ident;
-    int32_t    version;
-    LumpEntry  lumps[static_cast<uint32_t>(Lump::Count)];
+    int32_t   ident;
+    int32_t   version;
+    LumpEntry lumps[static_cast<uint32_t>(Lump::Count)];
 };
 
 // LUMP_PLANES
@@ -215,15 +214,15 @@ struct DBrushSide {
 
 // LUMP_OVERLAYS
 struct DOverlay {
-    int32_t id;
-    int16_t texinfo;
+    int32_t  id;
+    int16_t  texinfo;
     uint16_t faceCountAndRenderOrder;
-    int32_t ofaces[64];
-    float   u[2];
-    float   v[2];
-    float   uvpoints[4][3];
-    float   origin[3];
-    float   basisNormal[3];
+    int32_t  ofaces[64];
+    float    u[2];
+    float    v[2];
+    float    uvpoints[4][3];
+    float    origin[3];
+    float    basisNormal[3];
 };
 
 #pragma pack(pop)

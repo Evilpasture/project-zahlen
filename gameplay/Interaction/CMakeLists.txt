@@ -39,10 +39,12 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
     zahlen_character_controller
+    zahlen_bsp
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/gameplay
+    ${PROJECT_SOURCE_DIR}/plugins
 )
 
 # InteractionComponents.hpp is registered through the ECS name table and the

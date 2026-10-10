@@ -4,16 +4,15 @@
 # plugins/BSP -- the Source engine BSP importer (zahlen_bsp).
 #
 # Same shape as plugins/glTF: an extra that produces data core then consumes.
-# It marshall a .bsp into the plain ZHLN::ModelPrefab (native vertex streams,
+# It imports a .bsp into the plain ZHLN::ModelPrefab (native vertex streams,
 # materials, colliders, lights) and caches it under HashAssetPath; Core's
 # PrefabFactory::LoadModelPrefab reads that cache and the instantiators
 # (PrefabFactory::InstantiatePrefab, Scene::Instantiate) do the rest. No
 # registration, and nothing in src/ includes it.
 #
 # The format/geometry layers (BSPTypes, BSPRead, BSPGeometry) are engine-free
-# on purpose: plugins/BSP/calculator builds them standalone (see its README)
-# and validates them against the synthetic fixture without configuring the
-# tree. BSPScene additionally consumes the public Scene model; BSPImporter is
+# on purpose: they can be built and validated without configuring the full
+# renderer tree. BSPScene additionally consumes the public Scene model; BSPImporter is
 # the only file that names RenderContext.
 #
 # Public headers are reached as <BSP/...>.

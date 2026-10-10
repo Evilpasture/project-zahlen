@@ -9,8 +9,8 @@
 // lights read from the entity lump. See BSPGeometry.hpp for the contract.
 
 #include "BSPGeometry.hpp"
-
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <string_view>
@@ -20,59 +20,28 @@ namespace {
 
 constexpr float kEpsilon = 1e-6f;
 
-auto Dot(const float a[3], const float b[3]) -> float {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-void Cross(const float a[3], const float b[3], float out[3]) {
-    out[0] = a[1] * b[2] - a[2] * b[1];
-    out[1] = a[2] * b[0] - a[0] * b[2];
-    out[2] = a[0] * b[1] - a[1] * b[0];
-}
-
-auto Length(const float v[3]) -> float {
-    return std::sqrt(Dot(v, v));
-}
-
-void Normalize(float v[3]) {
-    const float len = Length(v);
-    if (len > kEpsilon) {
-        v[0] /= len;
-        v[1] /= len;
-        v[2] /= len;
-    }
-}
-
-void Lerp3(const float a[3], const float b[3], float t, float out[3]) {
-    out[0] = a[0] + (b[0] - a[0]) * t;
-    out[1] = a[1] + (b[1] - a[1]) * t;
-    out[2] = a[2] + (b[2] - a[2]) * t;
-}
-
-void MinMax(float boundsMin[3], float boundsMax[3], bool& first, const float p[3]) {
+void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, JPH::Vec3 p) {
     if (first) {
-        for (int k = 0; k < 3; ++k) {
-            boundsMin[k] = p[k];
-            boundsMax[k] = p[k];
-        }
-        first = false;
+        boundsMin = JPH::Float3(p.GetX(), p.GetY(), p.GetZ());
+        boundsMax = JPH::Float3(p.GetX(), p.GetY(), p.GetZ());
+        first     = false;
         return;
     }
-    for (int k = 0; k < 3; ++k) {
-        boundsMin[k] = std::min(boundsMin[k], p[k]);
-        boundsMax[k] = std::max(boundsMax[k], p[k]);
-    }
+    boundsMin.x = std::min(boundsMin.x, p.GetX());
+    boundsMin.y = std::min(boundsMin.y, p.GetY());
+    boundsMin.z = std::min(boundsMin.z, p.GetZ());
+    boundsMax.x = std::max(boundsMax.x, p.GetX());
+    boundsMax.y = std::max(boundsMax.y, p.GetY());
+    boundsMax.z = std::max(boundsMax.z, p.GetZ());
 }
 
 // Source angle triples are (pitch, yaw, roll) degrees, pitch positive down,
 // around a Z-up world. Pitch/yaw -> unit direction in source space.
-void AngleDirection(const float angles[3], float out[3]) {
-    const float pitch = angles[0] * (3.14159265358979323846f / 180.0f);
-    const float yaw   = angles[1] * (3.14159265358979323846f / 180.0f);
+[[nodiscard]] auto AngleDirection(JPH::Vec3 angles) -> JPH::Vec3 {
+    const float pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
+    const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
     const float cp    = std::cos(pitch);
-    out[0]            = cp * std::cos(yaw);
-    out[1]            = cp * std::sin(yaw);
-    out[2]            = -std::sin(pitch);
+    return JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
 }
 
 auto ParseColor4(std::string_view text, float out[4]) -> bool {
@@ -90,7 +59,7 @@ auto ParseColor4(std::string_view text, float out[4]) -> bool {
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
-auto FaceWinding(const BSPMap& map, const DFace& face, std::vector<std::array<float, 3>>& out) -> bool {
+auto FaceWinding(const BSPMap& map, const DFace& face, std::vector<JPH::Vec3>& out) -> bool {
     if (face.firstedge < 0 || face.numedges < 3) {
         return false;
     }
@@ -100,34 +69,32 @@ auto FaceWinding(const BSPMap& map, const DFace& face, std::vector<std::array<fl
     out.clear();
     out.reserve(static_cast<size_t>(face.numedges));
     for (int16_t k = 0; k < face.numedges; ++k) {
-        const int32_t surfEdge = map.surfEdges[static_cast<size_t>(face.firstedge) + static_cast<size_t>(k)];
+        const int32_t surfEdge  = map.surfEdges[static_cast<size_t>(face.firstedge) + static_cast<size_t>(k)];
         const int64_t edgeIndex = (surfEdge >= 0) ? surfEdge : -static_cast<int64_t>(surfEdge);
         if (edgeIndex < 0 || static_cast<size_t>(edgeIndex) >= map.edges.size()) {
             return false;
         }
-        const DEdge& edge   = map.edges[static_cast<size_t>(edgeIndex)];
+        const DEdge&   edge = map.edges[static_cast<size_t>(edgeIndex)];
         const uint16_t vert = (surfEdge >= 0) ? edge.v[0] : edge.v[1];
         if (vert >= map.vertices.size()) {
             return false;
         }
-        out.push_back({map.vertices[vert].point[0], map.vertices[vert].point[1], map.vertices[vert].point[2]});
+        const auto& pt = map.vertices[vert].point;
+        out.emplace_back(pt[0], pt[1], pt[2]);
     }
     return true;
 }
 
-void DropDuplicateCorners(std::vector<std::array<float, 3>>& winding) {
-    std::vector<std::array<float, 3>> unique;
+void DropDuplicateCorners(std::vector<JPH::Vec3>& winding) {
+    std::vector<JPH::Vec3> unique;
     unique.reserve(winding.size());
     for (const auto& point: winding) {
-        if (unique.empty() || std::abs(point[0] - unique.back()[0]) > kEpsilon || std::abs(point[1] - unique.back()[1]) > kEpsilon ||
-            std::abs(point[2] - unique.back()[2]) > kEpsilon) {
+        if (unique.empty() || (point - unique.back()).LengthSq() > kEpsilon * kEpsilon) {
             unique.push_back(point);
         }
     }
     if (unique.size() > 1) {
-        const auto& first = unique.front();
-        const auto& last  = unique.back();
-        if (std::abs(first[0] - last[0]) <= kEpsilon && std::abs(first[1] - last[1]) <= kEpsilon && std::abs(first[2] - last[2]) <= kEpsilon) {
+        if ((unique.front() - unique.back()).LengthSq() <= kEpsilon * kEpsilon) {
             unique.pop_back();
         }
     }
@@ -135,10 +102,12 @@ void DropDuplicateCorners(std::vector<std::array<float, 3>>& winding) {
 }
 
 struct FaceProjection {
-    float s[4] = {1, 0, 0, 0};
-    float t[4] = {0, 1, 0, 0};
-    float width  = 512.0f;
-    float height = 512.0f;
+    JPH::Vec3 sDir {1.0f, 0.0f, 0.0f};
+    float     sOffset = 0.0f;
+    JPH::Vec3 tDir {0.0f, 1.0f, 0.0f};
+    float     tOffset = 0.0f;
+    float     width   = 512.0f;
+    float     height  = 512.0f;
 };
 
 auto ProjectionFor(const BSPMap& map, const DFace& face, FaceProjection& out) -> bool {
@@ -150,12 +119,12 @@ auto ProjectionFor(const BSPMap& map, const DFace& face, FaceProjection& out) ->
         return false;
     }
     const DTexData& texData = map.texDatas[static_cast<size_t>(texInfo.texdata)];
-    for (int k = 0; k < 4; ++k) {
-        out.s[k] = texInfo.textureVecs[0][k];
-        out.t[k] = texInfo.textureVecs[1][k];
-    }
-    out.width  = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
-    out.height = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
+    out.sDir                = JPH::Vec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
+    out.sOffset             = texInfo.textureVecs[0][3];
+    out.tDir                = JPH::Vec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
+    out.tOffset             = texInfo.textureVecs[1][3];
+    out.width               = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
+    out.height              = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
     return true;
 }
 
@@ -171,7 +140,7 @@ void MaterialNameFor(const BSPMap& map, const DFace& face, std::string& out) {
     out = map.texNames[static_cast<size_t>(texDataIndex)];
 }
 
-auto FindOrMakePart(MarshalledMap& result, const std::string& name) -> MaterialStreams& {
+auto FindOrMakePart(ImportedMapData& result, const std::string& name) -> MaterialStreams& {
     for (MaterialStreams& part: result.parts) {
         if (part.materialName == name) {
             return part;
@@ -186,95 +155,86 @@ auto FindOrMakePart(MarshalledMap& result, const std::string& name) -> MaterialS
 // the forward texture projection in source space. Bounds are tracked on both
 // the owning part and the whole map as positions are emitted.
 void EmitVertex(
-    MaterialStreams&       part,
-    const MarshallOptions& options,
-    const FaceProjection&  projection,
-    const float            sourcePos[3],
-    const float            sourceNormal[3],
-    MarshalledMap&         result,
-    bool&                  partBoundsFirst,
-    bool&                  mapBoundsFirst
+    MaterialStreams&      part,
+    const ImportOptions&  options,
+    const FaceProjection& projection,
+    JPH::Vec3             sourcePos,
+    JPH::Vec3             sourceNormal,
+    ImportedMapData&      result,
+    bool&                 partBoundsFirst,
+    bool&                 mapBoundsFirst
 ) {
-    const float u = (Dot(sourcePos, projection.s) + projection.s[3]) / projection.width;
-    const float v = (Dot(sourcePos, projection.t) + projection.t[3]) / projection.height;
+    const float u = (sourcePos.Dot(projection.sDir) + projection.sOffset) / projection.width;
+    const float v = (sourcePos.Dot(projection.tDir) + projection.tOffset) / projection.height;
 
-    float tangent[3] = {projection.s[0], projection.s[1], projection.s[2]};
-    Normalize(tangent);
-
-    float normal[3] = {sourceNormal[0], sourceNormal[1], sourceNormal[2]};
-    Normalize(normal);
+    const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
+    const JPH::Vec3 normal  = (sourceNormal.LengthSq() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : JPH::Vec3::sAxisZ();
 
     // Handedness so that bitangent = cross(normal, tangent.xyz) * tangent.w,
     // which is the glTF convention the renderer's tangent frames assume.
-    float crossNT[3];
-    Cross(normal, tangent, crossNT);
-    const float handedness = (Dot(crossNT, projection.t) < 0.0f) ? -1.0f : 1.0f;
+    const JPH::Vec3 crossNT    = normal.Cross(tangent);
+    const float     handedness = (crossNT.Dot(projection.tDir) < 0.0f) ? -1.0f : 1.0f;
 
-    float enginePos[3];
-    float engineNormal[3];
-    float engineTangent[3];
-    ConvertPosition(options, sourcePos, enginePos);
-    ConvertDirection(options, normal, engineNormal);
-    ConvertDirection(options, tangent, engineTangent);
+    const JPH::Vec3 enginePos     = ConvertPosition(options, sourcePos);
+    const JPH::Vec3 engineNormal  = ConvertDirection(options, normal);
+    const JPH::Vec3 engineTangent = ConvertDirection(options, tangent);
 
-    part.positions.push_back(VertexPosition {{enginePos[0], enginePos[1], enginePos[2]}});
+    part.positions.push_back(VertexPosition {{enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()}});
     part.tangentFrames.push_back(VertexTangentFrame {
-        Math::PackNormal(engineNormal[0], engineNormal[1], engineNormal[2]),
-        Math::PackNormal(engineTangent[0], engineTangent[1], engineTangent[2], handedness),
+        Math::PackNormal(engineNormal.GetX(), engineNormal.GetY(), engineNormal.GetZ()),
+        Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
     });
     part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(0.0f, 0.0f)});
 
-    MinMax(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
-    MinMax(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
+    UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
+    UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
 }
 
-void GatherLights(const BSPMap& map, const MarshallOptions& options, std::vector<BspPointLight>& out) {
+void GatherLights(const BSPMap& map, const ImportOptions& options, std::vector<BspPointLight>& out) {
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
-        BspPointLight::Kind    kind;
+        LightType              type;
         if (className == "light") {
-            kind = BspPointLight::Kind::Point;
+            type = LightType::Point;
         } else if (className == "light_spot") {
-            kind = BspPointLight::Kind::Spot;
+            type = LightType::Spot;
         } else if (className == "light_environment") {
-            kind = BspPointLight::Kind::Directional;
+            type = LightType::Directional;
         } else {
             continue;
         }
 
         BspPointLight light;
-        light.kind = kind;
+        light.type = type;
         light.name = std::string(entity.Find("targetname"));
         if (light.name.empty()) {
             light.name = std::string(className);
         }
 
-        float origin[3] = {0.0f, 0.0f, 0.0f};
-        static_cast<void>(entity.FindVector("origin", origin));
-        ConvertPosition(options, origin, light.position);
+        float originArr[3] = {0.0f, 0.0f, 0.0f};
+        static_cast<void>(entity.FindVector("origin", originArr));
+        light.position = ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
 
         float color4[4] = {255.0f, 255.0f, 255.0f, 200.0f};
-        if (entity.Has("_light")) {
+        if (!entity.Find("_light").empty()) {
             ParseColor4(entity.Find("_light"), color4);
         }
-        for (int k = 0; k < 3; ++k) {
-            light.color[k] = std::clamp(color4[k] / 255.0f, 0.0f, 1.0f);
-        }
+        light.color =
+            JPH::Vec3(std::clamp(color4[0] / 255.0f, 0.0f, 1.0f), std::clamp(color4[1] / 255.0f, 0.0f, 1.0f), std::clamp(color4[2] / 255.0f, 0.0f, 1.0f));
         light.intensity = color4[3];
 
-        float angles[3] = {0.0f, 0.0f, 0.0f};
-        if (entity.Has("angles")) {
-            static_cast<void>(entity.FindVector("angles", angles));
-        } else if (entity.Has("pitch")) {
+        float anglesArr[3] = {0.0f, 0.0f, 0.0f};
+        if (!entity.Find("angles").empty()) {
+            static_cast<void>(entity.FindVector("angles", anglesArr));
+        } else if (!entity.Find("pitch").empty()) {
             // light_environment keeps its aim in "pitch" and "angles"(yaw).
-            static_cast<void>(entity.FindVector("angles", angles));
-            angles[0] = std::strtof(std::string(entity.Find("pitch")).c_str(), nullptr);
+            static_cast<void>(entity.FindVector("angles", anglesArr));
+            anglesArr[0] = std::strtof(std::string(entity.Find("pitch")).c_str(), nullptr);
         }
-        float direction[3] = {0.0f, 0.0f, -1.0f};
-        AngleDirection(angles, direction);
-        ConvertDirection(options, direction, light.direction);
+        const JPH::Vec3 direction = AngleDirection(JPH::Vec3(anglesArr[0], anglesArr[1], anglesArr[2]));
+        light.direction           = ConvertDirection(options, direction);
 
-        if (kind == BspPointLight::Kind::Spot) {
+        if (type == LightType::Spot) {
             const float outerDegrees = std::strtof(std::string(entity.Find("_cone")).c_str(), nullptr);
             const float innerDegrees = std::strtof(std::string(entity.Find("_cone2")).c_str(), nullptr);
             if (outerDegrees > 0.0f) {
@@ -291,36 +251,26 @@ void GatherLights(const BSPMap& map, const MarshallOptions& options, std::vector
 
 } // namespace
 
-void ConvertPosition(const MarshallOptions& options, const float in[3], float out[3]) noexcept {
+auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3 {
     const float s = options.unitScale;
     if (!options.convertCoordinates) {
-        out[0] = in[0] * s;
-        out[1] = in[1] * s;
-        out[2] = in[2] * s;
-        return;
+        return in * s;
     }
     // Z-up right-handed -> Y-up right-handed: rotate -90 degrees about X,
     // then scale. (x, y, z) -> (x, z, -y).
-    out[0] = in[0] * s;
-    out[1] = in[2] * s;
-    out[2] = -in[1] * s;
+    return JPH::Vec3(in.GetX() * s, in.GetZ() * s, -in.GetY() * s);
 }
 
-void ConvertDirection(const MarshallOptions& options, const float in[3], float out[3]) noexcept {
+auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3 {
     if (!options.convertCoordinates) {
-        out[0] = in[0];
-        out[1] = in[1];
-        out[2] = in[2];
-        return;
+        return in;
     }
-    out[0] = in[0];
-    out[1] = in[2];
-    out[2] = -in[1];
+    return JPH::Vec3(in.GetX(), in.GetZ(), -in.GetY());
 }
 
-auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> MarshalledMap {
-    MarshalledMap result;
-    bool          globalBoundsFirst = true;
+auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> ImportedMapData {
+    ImportedMapData result;
+    bool            globalBoundsFirst = true;
 
     for (const DModel& model: map.models) {
         if (model.firstface < 0 || model.numfaces < 0) {
@@ -330,7 +280,7 @@ auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> Marshalle
         for (size_t faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
             const DFace& face = map.faces[faceIndex];
 
-            std::vector<std::array<float, 3>> winding;
+            std::vector<JPH::Vec3> winding;
             if (!FaceWinding(map, face, winding)) {
                 continue;
             }
@@ -348,24 +298,20 @@ auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> Marshalle
             MaterialNameFor(map, face, materialName);
             MaterialStreams& part = FindOrMakePart(result, materialName);
 
-            float faceNormal[3] = {0.0f, 0.0f, 1.0f};
-            if (face.planenum >= 0 && static_cast<size_t>(face.planenum) < map.planes.size()) {
+            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
+            if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal[0]       = plane.normal[0];
-                faceNormal[1]       = plane.normal[1];
-                faceNormal[2]       = plane.normal[2];
+                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
                 if (face.side != 0) {
-                    faceNormal[0] = -faceNormal[0];
-                    faceNormal[1] = -faceNormal[1];
-                    faceNormal[2] = -faceNormal[2];
+                    faceNormal = -faceNormal;
                 }
             }
 
-            const uint32_t baseVertex = part.VertexCount();
+            const uint32_t baseVertex      = part.VertexCount();
             bool           partBoundsFirst = (baseVertex == 0);
 
-            const bool displaced = options.includeDisplacements && face.dispinfo >= 0 &&
-                                   static_cast<size_t>(face.dispinfo) < map.dispInfos.size() && winding.size() == 4;
+            const bool displaced = options.includeDisplacements && face.dispinfo >= 0 && static_cast<size_t>(face.dispinfo) < map.dispInfos.size() &&
+                                   winding.size() == 4;
 
             if (displaced) {
                 const DDispInfo& dispInfo = map.dispInfos[static_cast<size_t>(face.dispinfo)];
@@ -376,19 +322,19 @@ auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> Marshalle
                 const uint32_t gridSize = 1u << static_cast<uint32_t>(power);
                 const uint32_t side     = gridSize + 1;
 
+                const JPH::Vec3 dispStartPos(dispInfo.startPosition[0], dispInfo.startPosition[1], dispInfo.startPosition[2]);
                 // Rotate the base quad so corner 0 is the displacement's start
                 // position, keeping winding order.
                 size_t startIndex = 0;
-                float  bestDist   = 1e30f;
+                float  bestDistSq = 1e30f;
                 for (size_t c = 0; c < 4; ++c) {
-                    float d[3] = {winding[c][0] - dispInfo.startPosition[0], winding[c][1] - dispInfo.startPosition[1], winding[c][2] - dispInfo.startPosition[2]};
-                    const float dist = Dot(d, d);
-                    if (dist < bestDist) {
-                        bestDist   = dist;
+                    const float distSq = (winding[c] - dispStartPos).LengthSq();
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
                         startIndex = c;
                     }
                 }
-                const std::array<float, 3> corners[4] = {
+                const std::array<JPH::Vec3, 4> corners = {
                     winding[startIndex],
                     winding[(startIndex + 1) % 4],
                     winding[(startIndex + 2) % 4],
@@ -405,18 +351,14 @@ auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> Marshalle
                     for (uint32_t i = 0; i < side; ++i) {
                         const float fu = static_cast<float>(i) / static_cast<float>(gridSize);
 
-                        float row[3];
-                        float base[3];
-                        Lerp3(corners[0].data(), corners[1].data(), fu, row);
-                        Lerp3(corners[3].data(), corners[2].data(), fu, base);
-                        Lerp3(row, base, fv, base);
+                        const JPH::Vec3 row0 = corners[0] + (corners[1] - corners[0]) * fu;
+                        const JPH::Vec3 row1 = corners[3] + (corners[2] - corners[3]) * fu;
+                        const JPH::Vec3 base = row0 + (row1 - row0) * fv;
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
-                        float            sourcePos[3] = {
-                            base[0] + dispVert.vec[0] * dispVert.dist,
-                            base[1] + dispVert.vec[1] * dispVert.dist,
-                            base[2] + dispVert.vec[2] * dispVert.dist,
-                        };
+                        const JPH::Vec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
+                        const JPH::Vec3  sourcePos = base + dispVec * dispVert.dist;
+
                         EmitVertex(part, options, projection, sourcePos, faceNormal, result, partBoundsFirst, globalBoundsFirst);
                     }
                 }
@@ -440,8 +382,7 @@ auto MarshallMap(const BSPMap& map, const MarshallOptions& options) -> Marshalle
             } else {
                 // Fan triangulation: Source faces are convex planar polygons.
                 for (const auto& corner: winding) {
-                    const float sourcePos[3] = {corner[0], corner[1], corner[2]};
-                    EmitVertex(part, options, projection, sourcePos, faceNormal, result, partBoundsFirst, globalBoundsFirst);
+                    EmitVertex(part, options, projection, corner, faceNormal, result, partBoundsFirst, globalBoundsFirst);
                 }
                 for (size_t i = 1; i + 1 < winding.size(); ++i) {
                     part.indices.push_back(baseVertex);
