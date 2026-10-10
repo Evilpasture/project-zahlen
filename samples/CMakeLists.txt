@@ -50,6 +50,7 @@ set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_freecam zahlen_interaction)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

@@ -10,6 +10,7 @@
 
 #include "BSPScene.hpp"
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -56,10 +57,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             continue;
         }
 
-        float originArr[3] = {0.0f, 0.0f, 0.0f};
-        float anglesArr[3] = {0.0f, 0.0f, 0.0f};
-        static_cast<void>(entity.FindVector("origin", originArr));
-        static_cast<void>(entity.FindVector("angles", anglesArr));
+        const auto      originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
+        const auto      anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
         const JPH::Vec3 origin(originArr[0], originArr[1], originArr[2]);
         JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
@@ -83,17 +82,23 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
-            float color4[4] = {255.0f, 255.0f, 255.0f, 200.0f};
-            if (!entity.Find("_light").empty()) {
-                const std::string buffer(entity.Find("_light"));
-                const char*       cursor = buffer.c_str();
-                char*             end    = nullptr;
+            std::array<float, 4>   color4   = {255.0f, 255.0f, 255.0f, 200.0f};
+            const std::string_view lightVal = entity.Find("_light");
+            if (!lightVal.empty()) {
+                const char* cur = lightVal.data();
+                const char* end = lightVal.data() + lightVal.size();
                 for (float& component: color4) {
-                    component = std::strtof(cursor, &end);
-                    if (end == cursor) {
+                    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+                        cur++;
+                    }
+                    if (cur >= end) {
                         break;
                     }
-                    cursor = end;
+                    auto [ptr, ec] = std::from_chars(cur, end, component);
+                    if (ec != std::errc {}) {
+                        break;
+                    }
+                    cur = ptr;
                 }
             }
             light.color     = {color4[0] / 255.0f, color4[1] / 255.0f, color4[2] / 255.0f};
@@ -102,8 +107,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
             if (lightType != LightType::Point) {
                 float pitchDeg = angles.GetX();
-                if (!entity.Find("pitch").empty()) {
-                    pitchDeg = std::strtof(std::string(entity.Find("pitch")).c_str(), nullptr);
+                if (const auto p = entity.FindFloat("pitch")) {
+                    pitchDeg = *p;
                 }
                 const float pitch = pitchDeg * (3.14159265358979323846f / 180.0f);
                 const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
@@ -117,9 +122,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
             if (lightType == LightType::Spot) {
-                const float outerDegrees = std::strtof(std::string(entity.Find("_cone")).c_str(), nullptr);
-                if (outerDegrees > 0.0f) {
-                    light.range = outerDegrees; // cone width is not range; the
+                if (const auto outerDegrees = entity.FindFloat("_cone"); outerDegrees && *outerDegrees > 0.0f) {
+                    light.range = *outerDegrees; // cone width is not range; the
                                                 // instantiator's spot params own
                                                 // the mapping. Keep authored value.
                 }
@@ -167,8 +171,9 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 interactive.shape  = Scene::ShapeKind::Box;
                 interactive.source = std::string(modelName);
 
-                char*     endPtr     = nullptr;
-                const int modelIndex = static_cast<int>(std::strtol(modelName.data() + 1, &endPtr, 10));
+                int                    modelIndex = -1;
+                const std::string_view indexStr   = modelName.substr(1);
+                std::from_chars(indexStr.data(), indexStr.data() + indexStr.size(), modelIndex);
                 if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
                     const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
                     const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
@@ -176,9 +181,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                     JPH::Vec3       bspCenter = (mins + maxs) * 0.5f;
                     const JPH::Vec3 bspHalf   = (maxs - mins) * 0.5f;
 
-                    float originCheck[3] = {0.0f, 0.0f, 0.0f};
-                    if (entity.FindVector("origin", originCheck)) {
-                        bspCenter = JPH::Vec3(originCheck[0], originCheck[1], originCheck[2]);
+                    if (const auto originCheck = entity.FindVector("origin")) {
+                        bspCenter = JPH::Vec3((*originCheck)[0], (*originCheck)[1], (*originCheck)[2]);
                     }
 
                     const JPH::Vec3 enginePos      = ConvertPosition(options, bspCenter);
@@ -244,6 +248,43 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
         // Everything else: logic_*, ambient_generic, info_*, env_*
         // intentionally not scene-model geometry.
+    }
+
+    // Static props recovered from LUMP_GAMELUMP ('sprp')
+    for (size_t propIdx = 0; propIdx < map.staticProps.size(); ++propIdx) {
+        const StaticProp& sp = map.staticProps[propIdx];
+        if (sp.modelName.empty()) {
+            continue;
+        }
+
+        Scene::SceneEntity propEntity;
+        propEntity.name   = "prop_static_" + std::to_string(propIdx);
+        propEntity.shape  = Scene::ShapeKind::Prefab;
+        propEntity.source = sp.modelName;
+        propEntity.body   = (options.buildColliders && sp.solid != 0) ? Scene::BodyKind::Static : Scene::BodyKind::None;
+
+        const JPH::Vec3 spOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
+        const JPH::Vec3 enginePos = ConvertPosition(options, spOrigin);
+        propEntity.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
+
+        const float pitch = sp.angles[0] * (3.14159265358979323846f / 180.0f);
+        const float yaw   = sp.angles[1] * (3.14159265358979323846f / 180.0f);
+        const float cp    = std::cos(pitch);
+        const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+        const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, sp.angles[2], options);
+        propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+
+        const float s = (sp.uniformScale > 0.0f) ? sp.uniformScale : 1.0f;
+        propEntity.transform.scale = {s, s, s};
+
+        propEntity.material.baseColor = {
+            sp.diffuseModulation[0] / 255.0f,
+            sp.diffuseModulation[1] / 255.0f,
+            sp.diffuseModulation[2] / 255.0f,
+            sp.diffuseModulation[3] / 255.0f
+        };
+
+        scene.entities.push_back(std::move(propEntity));
     }
 
     return scene;

@@ -48,6 +48,10 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/plugins
 )
 
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/stb
+)
+
 # BSPRead.cpp includes <Zahlen/Core/Reflection/Structs.hpp>, whose layout
 # depends on reflection.
 if(COMMAND zahlen_enable_reflection)

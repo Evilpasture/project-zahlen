@@ -29,11 +29,13 @@ namespace ZHLN::BSP {
 // and measures in metres. The default converts; unitScale lets a caller keep
 // inches (1.0f) or feed a differently scaled world.
 struct ImportOptions {
-    bool  convertCoordinates   = true;
-    float unitScale            = 0.0254f; // Inches to meters
-    bool  includeDisplacements = true;
-    bool  gatherLights         = true;
-    bool  buildColliders       = true;
+    bool        convertCoordinates   = true;
+    float       unitScale            = 0.0254f; // Inches to meters
+    bool        includeDisplacements = true;
+    bool        gatherLights         = true;
+    bool        buildColliders       = true;
+    std::string assetRoot;
+    std::string lightmapAtlasPath;
 };
 
 // One material group: the concatenated, de-indexed-then-reindexed streams of

@@ -8,6 +8,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -21,36 +22,55 @@ auto ParseFloat(std::string_view sv, float defaultVal = 0.0f) noexcept -> float 
     if (sv.empty()) {
         return defaultVal;
     }
-    const std::string s(sv);
-    char*             end = nullptr;
-    const float       val = std::strtof(s.c_str(), &end);
-    return (end != s.c_str()) ? val : defaultVal;
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    float val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
 }
 
 auto ParseUInt(std::string_view sv, uint32_t defaultVal = 0) noexcept -> uint32_t {
     if (sv.empty()) {
         return defaultVal;
     }
-    const std::string s(sv);
-    char*             end = nullptr;
-    const auto        val = static_cast<uint32_t>(std::strtoul(s.c_str(), &end, 10));
-    return (end != s.c_str()) ? val : defaultVal;
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    uint32_t val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
 }
 
 auto ParseMoveDir(std::string_view movedirStr, const BSP::ImportOptions& opts) -> JPH::Vec3 {
     if (movedirStr.empty()) {
         return ConvertDirection(opts, JPH::Vec3::sAxisX());
     }
-    float             v[3] = {0.0f, 0.0f, 0.0f};
-    const std::string s(movedirStr);
-    const char*       cur = s.c_str();
-    char*             end = nullptr;
+    float       v[3] = {0.0f, 0.0f, 0.0f};
+    const char* cur  = movedirStr.data();
+    const char* end  = movedirStr.data() + movedirStr.size();
     for (float& component: v) {
-        component = std::strtof(cur, &end);
-        if (end == cur) {
+        while (cur < end && (*cur == ' ' || *cur == '\t')) {
+            cur++;
+        }
+        if (cur >= end) {
             break;
         }
-        cur = end;
+        auto [ptr, ec] = std::from_chars(cur, end, component);
+        if (ec != std::errc {}) {
+            break;
+        }
+        cur = ptr;
     }
     // Special Source conventions:
     // -1 0 0 => UP (+Z in Source Z-up)

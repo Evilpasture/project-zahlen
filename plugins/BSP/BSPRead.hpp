@@ -18,9 +18,11 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -38,6 +40,7 @@ enum class BSPError : uint8_t {
     MalformedLump      ZHLN_ANNOTATION(ZHLN::Description<"BSP lump size is malformed or unaligned"> {}),
     ShortRead          ZHLN_ANNOTATION(ZHLN::Description<"Unexpected end of stream while reading BSP lump"> {}),
     UnresolvedTexData  ZHLN_ANNOTATION(ZHLN::Description<"Unresolved texdata material name"> {}),
+    ChecksumMismatch   ZHLN_ANNOTATION(ZHLN::Description<"Checksum mismatch between model files"> {}),
 };
 
 // A forward cursor over one lump (or the whole file) that never reads past the
@@ -111,9 +114,30 @@ struct BSPEntity {
         return !Find(key).empty();
     }
 
-    // "x y z" (or "p y r") keyvalues, Source convention. Returns false when the
-    // key is missing or does not parse to exactly three floats.
+    // "x y z" (or "p y r") keyvalues, Source convention.
+    [[nodiscard]] auto FindVector(std::string_view key) const noexcept -> std::optional<std::array<float, 3>>;
     [[nodiscard]] auto FindVector(std::string_view key, float out[3]) const noexcept -> bool;
+    [[nodiscard]] auto FindFloat(std::string_view key) const noexcept -> std::optional<float>;
+    [[nodiscard]] auto FindInt(std::string_view key) const noexcept -> std::optional<int32_t>;
+};
+
+// One static prop instance recovered from LUMP_GAMELUMP ('sprp').
+struct StaticProp {
+    std::string            modelName;
+    std::array<float, 3>   origin {0.0f, 0.0f, 0.0f};
+    std::array<float, 3>   angles {0.0f, 0.0f, 0.0f}; // pitch, yaw, roll (degrees)
+    uint16_t               propType = 0;               // Model dictionary index
+    uint16_t               firstLeaf = 0;
+    uint16_t               leafCount = 0;
+    uint8_t                solid = 6;                  // Collision mode (0=none, 2=bbox, 6=vphysics)
+    uint8_t                flags = 0;
+    int32_t                skin = 0;
+    float                  fadeMinDist = 0.0f;
+    float                  fadeMaxDist = 0.0f;
+    std::array<float, 3>   lightingOrigin {0.0f, 0.0f, 0.0f};
+    float                  forcedFadeScale = 1.0f;
+    std::array<uint8_t, 4> diffuseModulation {255, 255, 255, 255}; // RGBA Color32
+    float                  uniformScale = 1.0f;
 };
 
 // The parsed map: every lump the importer needs, plus the entity list and
@@ -140,6 +164,8 @@ struct BSPMap {
     std::vector<DBrush>      brushes;
     std::vector<DBrushSide>  brushSides;
     std::vector<DOverlay>    overlays;
+    std::vector<DGameLump>   gameLumps;
+    std::vector<StaticProp>  staticProps;
 };
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,
@@ -148,5 +174,9 @@ struct BSPMap {
 
 // LUMP_ENTITIES text -> entities.
 [[nodiscard]] auto ParseEntities(std::string_view text) -> std::vector<BSPEntity>;
+
+// LUMP_GAMELUMP (Lump 35) directory and static prop ('sprp') parsing.
+[[nodiscard]] auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, BSPMap& map)
+    -> std::expected<void, ErrorCode>;
 
 } // namespace ZHLN::BSP

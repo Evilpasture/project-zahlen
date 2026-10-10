@@ -225,7 +225,20 @@ struct DOverlay {
     float    basisNormal[3];
 };
 
+// LUMP_GAMELUMP (Lump 35): dgamelump_t directory entry (16 bytes)
+struct DGameLump {
+    int32_t  id;      // FourCC (e.g. 'sprp' 0x70727073)
+    uint16_t flags;   // Flags (bit 0: compressed with LZMA)
+    uint16_t version; // Game lump version
+    int32_t  fileofs; // Absolute byte offset from start of BSP file
+    int32_t  filelen; // Byte length of game lump data
+};
+
 #pragma pack(pop)
+
+// Game lump identifiers
+inline constexpr int32_t kGameLumpStaticProps    = 0x70727073; // 'sprp' (little-endian)
+inline constexpr int32_t kGameLumpStaticPropsAlt = 0x73707270; // 'prps' (big-endian)
 
 static_assert(sizeof(LumpEntry) == 16);
 static_assert(sizeof(BspHeader) == 4 + 4 + 16 * 64);
@@ -243,5 +256,6 @@ static_assert(sizeof(DLeaf) == 30);
 static_assert(sizeof(DBrush) == 12);
 static_assert(sizeof(DBrushSide) == 8);
 static_assert(sizeof(DOverlay) == 352);
+static_assert(sizeof(DGameLump) == 16);
 
 } // namespace ZHLN::BSP
