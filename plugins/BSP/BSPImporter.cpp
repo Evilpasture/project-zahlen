@@ -368,6 +368,16 @@ auto PreloadStaticProps(
             }
         }
     }
+
+    for (const auto& ent: map.entities) {
+        const std::string_view model = ent.Find("model");
+        if (model.ends_with(".mdl")) {
+            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, options); m.has_value()) {
+                ++loaded;
+            }
+        }
+    }
+
     return loaded;
 }
 

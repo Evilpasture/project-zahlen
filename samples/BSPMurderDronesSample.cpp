@@ -293,6 +293,15 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Imported prefab: {} part(s), {} node(s), {} light(s)",
         prefab.parts.size(), prefab.nodes.size(), prefab.lights.size());
 
+    // 5b. Preload static prop models referenced by the map into AssetManager
+    const size_t preloadedProps = ZHLN::BSP::PreloadStaticProps(
+        engine->GetRenderContext(),
+        engine->GetAssetManager(),
+        bspMap,
+        importOpts
+    );
+    ZHLN::Log("[BSPSample] Preloaded {} static prop model prefab(s)", preloadedProps);
+
     // 6. Describe and Instantiate Scene
     ZHLN::Log("[BSPSample] Translating BSP entities and static props to Scene...");
     const ZHLN::Scene::Scene sceneDesc = ZHLN::BSP::DescribeScene(bspMap, virtualPath, importOpts);

@@ -184,8 +184,17 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 break;
             }
             case ShapeKind::Prefab: {
-                std::array<Entity, 256> parts {};
-                const uint32_t count = PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                std::vector<Entity> parts;
+                uint32_t count = 0;
+                if (auto loadedPrefab = PrefabFactory::LoadModelPrefab(engine, entity.source)) {
+                    const uint32_t expectedCount = static_cast<uint32_t>(loadedPrefab->parts.size() * 2 + loadedPrefab->lights.size() + 1);
+                    parts.resize(std::max(256u, expectedCount));
+                    count = PrefabFactory::InstantiatePrefab(engine, *loadedPrefab, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                } else {
+                    parts.resize(256);
+                    count = PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                }
+
                 if (count == 0) {
                     ZHLN::Log("[Scene] entity '{}': prefab '{}' produced nothing", entity.name, entity.source);
                     return std::unexpected(SceneError::PrefabNotFound);
