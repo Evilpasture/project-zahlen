@@ -252,6 +252,10 @@ auto LoadStudioModelPrefabFromMemory(
         modelPart.localMin        = partData.boundsMin;
         modelPart.localMax        = partData.boundsMax;
 
+        const std::string assetKey = std::string(virtualPath) + "#part_" + std::to_string(prefab->parts.size());
+        modelPart.meshAsset        = HashAssetID(assetKey);
+        modelPart.materialAsset    = HashAssetID(assetKey + "_mat");
+
         const JPH::Vec3 halfExtents(
             std::max(0.01f, (partData.boundsMax.x - partData.boundsMin.x) * 0.5f),
             std::max(0.01f, (partData.boundsMax.y - partData.boundsMin.y) * 0.5f),
@@ -263,7 +267,8 @@ auto LoadStudioModelPrefabFromMemory(
             JPH::BoxShapeSettings boxSettings(halfExtents);
             auto                  shapeResult = boxSettings.Create();
             if (shapeResult.IsValid()) {
-                modelPart.boxCollider = shapeResult.Get();
+                modelPart.boxCollider  = shapeResult.Get();
+                modelPart.meshCollider = modelPart.boxCollider;
             }
         }
 

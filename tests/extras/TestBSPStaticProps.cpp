@@ -466,6 +466,56 @@ struct BSPStaticPropsTestSuite {
             std::filesystem::remove_all(tempRoot, ec);
             return {};
         }
+
+        auto hdr_faces_lump_priority() -> std::expected<void, std::string> {
+            std::vector<std::byte> fileBytes;
+            fileBytes.resize(sizeof(ZHLN::BSP::BspHeader), std::byte {0});
+
+            ZHLN::BSP::BspHeader header {};
+            header.ident = (('P' << 24) | ('S' << 16) | ('B' << 8) | 'V');
+            header.version = 20;
+
+            // Dummy face in standard LUMP_FACES
+            ZHLN::BSP::DFace standardFace {};
+            standardFace.texinfo = 10;
+            const size_t stdFaceOffset = fileBytes.size();
+            AppendBytes(fileBytes, standardFace);
+            const size_t stdFaceLen = sizeof(ZHLN::BSP::DFace);
+
+            // Two faces in LUMP_FACES_HDR
+            ZHLN::BSP::DFace hdrFace1 {};
+            hdrFace1.texinfo = 20;
+            ZHLN::BSP::DFace hdrFace2 {};
+            hdrFace2.texinfo = 30;
+            const size_t hdrFaceOffset = fileBytes.size();
+            AppendBytes(fileBytes, hdrFace1);
+            AppendBytes(fileBytes, hdrFace2);
+            const size_t hdrFaceLen = sizeof(ZHLN::BSP::DFace) * 2;
+
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Faces)].fileofs = static_cast<int32_t>(stdFaceOffset);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Faces)].filelen = static_cast<int32_t>(stdFaceLen);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].fileofs = static_cast<int32_t>(hdrFaceOffset);
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = static_cast<int32_t>(hdrFaceLen);
+
+            std::memcpy(fileBytes.data(), &header, sizeof(header));
+
+            const auto mapExp = ZHLN::BSP::ParseBsp(fileBytes);
+            ZHLN::Test::ExpectTrue(mapExp.has_value());
+            ZHLN::Test::ExpectEq(mapExp->faces.size(), size_t {2});
+            ZHLN::Test::ExpectEq(mapExp->faces[0].texinfo, int16_t {20});
+            ZHLN::Test::ExpectEq(mapExp->faces[1].texinfo, int16_t {30});
+
+            // Test fallback when FacesHDR is empty
+            header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = 0;
+            std::memcpy(fileBytes.data(), &header, sizeof(header));
+
+            const auto fallbackMapExp = ZHLN::BSP::ParseBsp(fileBytes);
+            ZHLN::Test::ExpectTrue(fallbackMapExp.has_value());
+            ZHLN::Test::ExpectEq(fallbackMapExp->faces.size(), size_t {1});
+            ZHLN::Test::ExpectEq(fallbackMapExp->faces[0].texinfo, int16_t {10});
+
+            return {};
+        }
     };
 };
 
@@ -498,6 +548,7 @@ int main() {
     runTest("static_prop_v11_uniform_scale", [&] { return suite.static_prop_v11_uniform_scale(); });
     runTest("static_prop_scene_entity_conversion", [&] { return suite.static_prop_scene_entity_conversion(); });
     runTest("vfs_model_resolution", [&] { return suite.vfs_model_resolution(); });
+    runTest("hdr_faces_lump_priority", [&] { return suite.hdr_faces_lump_priority(); });
 
     ZHLN::Println("--------------------------------------------------");
     ZHLN::Println("Summary for BSPStaticPropsTestSuite: {} Passed, {} Failed", passed, failed);

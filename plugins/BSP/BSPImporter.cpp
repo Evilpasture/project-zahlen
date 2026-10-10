@@ -197,6 +197,10 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
 
     for (const MaterialStreams& part: imported.parts) {
+        if (part.VertexCount() == 0 || part.IndexCount() == 0) {
+            continue;
+        }
+
         const auto meshletResult = BuildMeshlets(std::span {part.indices}, std::span {part.positions});
 
         const BufferHandle posVbo     = ctx.CreateBuffer<BufferUsage::Vertex>(std::span {part.positions});
@@ -251,6 +255,10 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         modelPart.localMin        = part.boundsMin;
         modelPart.localMax        = part.boundsMax;
 
+        const std::string assetKey = std::string(virtualPath) + "#part_" + std::to_string(prefab->parts.size());
+        modelPart.meshAsset        = HashAssetID(assetKey);
+        modelPart.materialAsset    = HashAssetID(assetKey + "_mat");
+
         const float extentX      = std::max(std::abs(part.boundsMin.x), std::abs(part.boundsMax.x));
         const float extentY      = std::max(std::abs(part.boundsMin.y), std::abs(part.boundsMax.y));
         const float extentZ      = std::max(std::abs(part.boundsMin.z), std::abs(part.boundsMax.z));
@@ -268,6 +276,10 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
             );
             const JPH::ShapeRefC baseBox = new JPH::BoxShape(halfExtents);
             modelPart.boxCollider        = new JPH::RotatedTranslatedShape(localCenter, JPH::Quat::sIdentity(), baseBox);
+
+            if (modelPart.meshCollider == nullptr) {
+                modelPart.meshCollider = modelPart.boxCollider;
+            }
         }
 
         prefab->parts.push_back(std::move(modelPart));

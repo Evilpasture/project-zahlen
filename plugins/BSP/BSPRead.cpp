@@ -249,20 +249,24 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
         }
     }
 
+    if ((sprpLump->flags & 1) != 0) {
+        return {};
+    }
+
     const auto sprpSpan = file.subspan(sprpOffset, sprpLen);
     ByteReader propReader(sprpSpan);
 
     // 1. Model Dictionary
     int32_t dictEntries = 0;
     if (!propReader.Read(dictEntries) || dictEntries < 0) {
-        return std::unexpected(BSPError::MalformedLump);
+        return {};
     }
     std::vector<std::string> modelDict;
     modelDict.reserve(static_cast<size_t>(dictEntries));
     for (int32_t i = 0; i < dictEntries; ++i) {
         char nameBuf[128] {};
         if (!propReader.Read(nameBuf)) {
-            return std::unexpected(BSPError::ShortRead);
+            return {};
         }
         nameBuf[127] = '\0';
         modelDict.emplace_back(nameBuf);
@@ -271,16 +275,16 @@ auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEnt
     // 2. Leaf Array
     int32_t leafEntries = 0;
     if (!propReader.Read(leafEntries) || leafEntries < 0) {
-        return std::unexpected(BSPError::MalformedLump);
+        return {};
     }
     if (!propReader.Skip(static_cast<size_t>(leafEntries) * sizeof(uint16_t))) {
-        return std::unexpected(BSPError::ShortRead);
+        return {};
     }
 
     // 3. Static Props
     int32_t propCount = 0;
     if (!propReader.Read(propCount) || propCount < 0) {
-        return std::unexpected(BSPError::MalformedLump);
+        return {};
     }
 
     if (propCount == 0) {
@@ -447,8 +451,19 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     if (auto res = ReadLumpArray(bytes, lump(Lump::SurfEdges), map.surfEdges); !res) {
         return std::unexpected(res.error());
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !res) {
-        return std::unexpected(res.error());
+
+    const LumpEntry* facesLump = &lump(Lump::Faces);
+    if (lump(Lump::FacesHDR).filelen > 0) {
+        facesLump = &lump(Lump::FacesHDR);
+    }
+    if (auto res = ReadLumpArray(bytes, *facesLump, map.faces); !res) {
+        if (facesLump != &lump(Lump::Faces)) {
+            if (auto fallbackRes = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !fallbackRes) {
+                return std::unexpected(res.error());
+            }
+        } else {
+            return std::unexpected(res.error());
+        }
     }
     if (auto res = ReadLumpArray(bytes, lump(Lump::TexInfo), map.texInfos); !res) {
         return std::unexpected(res.error());
@@ -478,16 +493,28 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
-    // Leaves: version 0 is 30-byte DLeaf, version 1 appends two padding bytes.
+    // Leaves: support version 0 (30 bytes or 32/56 with padding/ambient) and version 1 (32 bytes).
     const LumpEntry& leafLump = lump(Lump::Leafs);
     if (leafLump.filelen > 0) {
-        const size_t stride = (leafLump.version == 1) ? sizeof(DLeaf) + 2 : sizeof(DLeaf);
         if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {
             return std::unexpected(BSPError::LumpOutOfBounds);
         }
-        if (static_cast<size_t>(leafLump.filelen) % stride != 0) {
+
+        size_t stride = 0;
+        if (leafLump.version == 1 && (leafLump.filelen % (sizeof(DLeaf) + 2)) == 0) {
+            stride = sizeof(DLeaf) + 2; // 32
+        } else if (leafLump.filelen % sizeof(DLeaf) == 0) {
+            stride = sizeof(DLeaf); // 30
+        } else if (leafLump.filelen % 32 == 0) {
+            stride = 32;
+        } else if (leafLump.filelen % 56 == 0) {
+            stride = 56;
+        }
+
+        if (stride == 0) {
             return std::unexpected(BSPError::MalformedLump);
         }
+
         ByteReader   in(bytes.subspan(static_cast<size_t>(leafLump.fileofs), static_cast<size_t>(leafLump.filelen)));
         const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
         map.leafs.resize(count);
