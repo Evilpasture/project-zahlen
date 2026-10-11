@@ -15,8 +15,28 @@
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cmath>
+#include <string>
 
 namespace ZHLN::Interaction {
+namespace {
+
+// Debug aid: a readable label for whatever entity "E" is being aimed at.
+// Prefers the Source targetname the interaction code dispatches on, then the
+// ECS name, then the raw entity id so an unnamed entity is still traceable.
+std::string DebugLabel(const ECS::Registry& registry, Entity e) {
+    if (const auto meta = registry.Get<BSPEntityMetadataComponent>(e)) {
+        if (!meta->className.empty()) {
+            return std::string(meta->className.c_str()) +
+                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
+        }
+    }
+    if (const auto name = registry.Get<Components::NameComponent>(e); name && !name->name.empty()) {
+        return std::string(name->name.c_str());
+    }
+    return "entity#" + std::to_string(e.index);
+}
+
+} // namespace
 
 void InteractionSystem::Update(
     ECS::Query<
@@ -90,6 +110,14 @@ void InteractionSystem::Update(
         if (inside) {
             const bool newlyEntered = ((trigger.flags & TriggerFlags::PlayerInside) == TriggerFlags::None);
             trigger.flags |= TriggerFlags::PlayerInside;
+
+            if (interactJustPressed) {
+                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}", DebugLabel(registry, triggerEnt),
+                    static_cast<uint32_t>(trigger.flags), std::string_view(trigger.target),
+                    (trigger.flags & TriggerFlags::TouchOpens) != TriggerFlags::None,
+                    (trigger.flags & TriggerFlags::UseOpens) != TriggerFlags::None,
+                    (trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None);
+            }
 
             if (newlyEntered) {
                 FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
@@ -177,6 +205,22 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
+            const auto doorStateName = [](DoorState s) -> const char* {
+                switch (s) {
+                    case DoorState::Closed: return "Closed";
+                    case DoorState::Opening: return "Opening";
+                    case DoorState::Open: return "Open";
+                    case DoorState::Closing: return "Closing";
+                }
+                return "?";
+            };
+            Log("[Interaction] E -> {} (door) dist={:.2f} state={} progress={:.2f} flags={:#x} startsOpen={} touchOpens={} useOpens={} "
+                "closed=({:.1f},{:.1f},{:.1f}) open=({:.1f},{:.1f},{:.1f})",
+                DebugLabel(registry, doorEnt), dist, doorStateName(door.state), door.progress, static_cast<uint32_t>(door.flags),
+                (door.flags & DoorFlags::StartsOpen) != DoorFlags::None, (door.flags & DoorFlags::TouchOpens) != DoorFlags::None,
+                (door.flags & DoorFlags::UseOpens) != DoorFlags::None, door.closedPosition.GetX(), door.closedPosition.GetY(),
+                door.closedPosition.GetZ(), door.openPosition.GetX(), door.openPosition.GetY(), door.openPosition.GetZ());
+
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
                 FireEntityInput(registry, std::string_view(door.targetname), "Open", "", audio);
             }
@@ -216,6 +260,8 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
+            Log("[Interaction] E -> {} (button) dist={:.2f} state={} progress={:.2f} flags={:#x}", DebugLabel(registry, buttonEnt), dist,
+                static_cast<uint32_t>(button.state), button.progress, static_cast<uint32_t>(button.flags));
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
                 FireEntityInput(registry, std::string_view(button.targetname), "Press", "", audio);
             }
