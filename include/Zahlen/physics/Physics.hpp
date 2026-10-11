@@ -264,6 +264,10 @@ class ZHLN_API PhysicsContext {
     void SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3Arg position);
+    // Teleports a kinematic (scripted) rigid body. SetCharacterPosition only
+    // works on CharacterVirtual bodies; rigid-body handles need this instead.
+    // Ignored for static bodies, which cannot be moved in the broadphase.
+    void SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation);
 
     auto               GetCharacterVelocity(Physics::BodyHandle handle) const -> JPH::Vec3;
     [[nodiscard]] auto IsCharacterOnGround(Physics::BodyHandle handle) const -> bool;

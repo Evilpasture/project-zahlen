@@ -81,8 +81,9 @@ static_assert(
         .position        = ToRVec3(entity.transform.position),
         .rotation        = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
         .scale           = JPH::Vec3 {entity.transform.scale},
-        .createPhysics   = entity.body != BodyKind::None,
-        .isStaticPhysics = entity.body != BodyKind::Dynamic,
+        .createPhysics      = entity.body != BodyKind::None,
+        .isStaticPhysics    = entity.body != BodyKind::Dynamic,
+        .isKinematicPhysics = entity.body == BodyKind::Kinematic,
 
         .emissiveVirtualLights = entity.material.emissiveVirtualLights,
 

@@ -722,6 +722,18 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3
     }
 }
 
+void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation) {
+    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
+    // Static bodies live in the static broadphase tree and must never be
+    // teleported; kinematic/dynamic bodies can. The WhenChanged variant only
+    // touches the pose/broadphase when it actually differs, so idle scripted
+    // bodies don't churn every frame, and EActivation::Activate wakes the body
+    // so Jolt keeps updating contacts while it moves.
+    if (!id.IsInvalid() && _impl->world.bodyInterface->GetMotionType(id) != JPH::EMotionType::Static) {
+        _impl->world.bodyInterface->SetPositionAndRotationWhenChanged(id, position, rotation, JPH::EActivation::Activate);
+    }
+}
+
 void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
