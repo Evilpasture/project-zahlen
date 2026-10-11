@@ -19,6 +19,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -120,6 +121,11 @@ struct ImportStats {
     uint32_t singleSidedSheets = 0;       // faces with no opposite-facing twin; forced double-sided + backside collision
 };
 
+// texinfo flag: face compiled with bumpmapping, so VRAD stored 4 ColorRGBExp32
+// luxels per lightmap sample instead of 1. The importer needs it to stride
+// through LUMP_LIGHTING correctly.
+inline constexpr int32_t kSurfBumpLight = 0x800;
+
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
@@ -147,6 +153,12 @@ struct ImportedMapData {
     // into atlas space. Zero when no face carries a lightmap.
     float lightmapPageWidth  = 0.0f;
     float lightmapPageHeight = 0.0f;
+
+    // Per-face atlas cell origin in luxels, indexed by face index, from the
+    // same shelf pack that produced the TEXCOORD_1 UVs above. {-1, -1} marks
+    // a face with no lightmap. The importer walks this alongside
+    // BSPMap::lighting to unpack VRAD radiosity into an atlas texture.
+    std::vector<std::array<int32_t, 2>> lightmapOrigins;
 };
 
 // Position transform for the options in force (Source Z-up inches -> engine

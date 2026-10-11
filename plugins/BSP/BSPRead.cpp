@@ -465,6 +465,21 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
             return std::unexpected(res.error());
         }
     }
+
+    // VRAD radiosity as raw bytes: prefer LUMP_LIGHTING_HDR (58), fall back to
+    // LDR LUMP_LIGHTING (8). Not decoded here; the importer walks DFace::lightofs
+    // against this buffer when building the lightmap atlas.
+    {
+        const bool       useHDR = lump(Lump::LightingHDR).filelen > 0;
+        const LumpEntry& lit    = useHDR ? lump(Lump::LightingHDR) : lump(Lump::Lighting);
+        if (lit.filelen > 0) {
+            if (lit.fileofs < 0 || static_cast<size_t>(lit.fileofs) + static_cast<size_t>(lit.filelen) > bytes.size()) {
+                return std::unexpected(BSPError::LumpOutOfBounds);
+            }
+            map.lighting.assign(bytes.begin() + lit.fileofs, bytes.begin() + lit.fileofs + lit.filelen);
+            map.lightingHDR = useHDR;
+        }
+    }
     if (auto res = ReadLumpArray(bytes, lump(Lump::TexInfo), map.texInfos); !res) {
         return std::unexpected(res.error());
     }

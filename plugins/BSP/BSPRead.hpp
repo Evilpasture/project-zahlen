@@ -166,6 +166,12 @@ struct BSPMap {
     std::vector<DOverlay>    overlays;
     std::vector<DGameLump>   gameLumps;
     std::vector<StaticProp>  staticProps;
+
+    // VRAD baked radiosity: raw LUMP_LIGHTING_HDR (58) when present, else the
+    // LDR LUMP_LIGHTING (8). Luxels are ColorRGBExp32, addressed per-face via
+    // DFace::lightofs; the importer decodes them into the lightmap atlas.
+    std::vector<std::byte> lighting;
+    bool                   lightingHDR = false;
 };
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,

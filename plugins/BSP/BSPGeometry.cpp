@@ -677,6 +677,13 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     // atlas layout: raw-page UVs (the old code) scatter each face's samples
     // over unrelated rectangles -- surfaces read black or glow at random.
     const std::vector<LightmapAtlasEntry> lightmapAtlas = ComputeLightmapAtlas(map);
+
+    // Mirror the shelf pack back out for the importer: it decodes VRAD luxels
+    // into an atlas texture whose texels must land on exactly these cells.
+    result.lightmapOrigins.reserve(lightmapAtlas.size());
+    for (const LightmapAtlasEntry& entry: lightmapAtlas) {
+        result.lightmapOrigins.push_back({entry.x, entry.y});
+    }
     for (const DFace& face: map.faces) {
         if (face.lightofs >= 0 && face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0) {
             result.lightmapPageWidth  = kLightmapAtlasWidth;

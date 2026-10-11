@@ -81,6 +81,91 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     return TextureHandle::Invalid;
 }
 
+// One VRAD luxel: RGB mantissas sharing a signed power-of-two exponent.
+// Linear value = ldexp(byte / 255, exponent). This is the on-disk unit of
+// LUMP_LIGHTING_HDR (and LUMP_LIGHTING, which uses the same encoding).
+struct ColorRGBExp32 {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    int8_t  exponent;
+};
+static_assert(sizeof(ColorRGBExp32) == 4);
+
+[[nodiscard]] inline auto LinearToSRGB8(float linear) -> uint8_t {
+    const float c = std::max(linear, 0.0f);
+    const float s = (c <= 0.0031308f) ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+    return static_cast<uint8_t>(std::clamp(s, 0.0f, 1.0f) * 255.0f + 0.5f);
+}
+
+// Decode VRAD radiosity from BSPMap::lighting (LUMP_LIGHTING_HDR, falling back
+// to LDR LUMP_LIGHTING) into the same shelf-packed atlas BSPGeometry's
+// TEXCOORD_1 UVs reference -- no external *_lightmap0.png required. Each face
+// owns a (W+1)x(H+1) block of ColorRGBExp32 samples at face.lightofs;
+// bump-lit faces store 4 samples per luxel (flat + three directional) and the
+// flat one is taken. Linear radiance is encoded to sRGB8 because engine
+// texture ingestion is 8-bit only: the sampler's sRGB->linear decode
+// round-trips the encode, and luxels above 1.0 clip to white (the same limit
+// a pre-dumped atlas PNG has).
+[[nodiscard]] auto BuildLightmapAtlasTexture(RenderContext& ctx, const BSPMap& map, const ImportedMapData& imported) -> TextureHandle {
+    if (map.lighting.empty() || imported.lightmapOrigins.size() != map.faces.size()) {
+        return TextureHandle::Invalid;
+    }
+    const auto atlasW = static_cast<int32_t>(imported.lightmapPageWidth);
+    const auto atlasH = static_cast<int32_t>(imported.lightmapPageHeight);
+    if (atlasW <= 0 || atlasH <= 0) {
+        return TextureHandle::Invalid;
+    }
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(atlasW) * static_cast<size_t>(atlasH) * 4, 0);
+    const auto           putPixel = [&](int32_t x, int32_t y, float r, float g, float b) {
+        if (x < 0 || y < 0 || x >= atlasW || y >= atlasH) {
+            return;
+        }
+        uint8_t* px = &pixels[(static_cast<size_t>(y) * static_cast<size_t>(atlasW) + static_cast<size_t>(x)) * 4];
+        px[0]       = LinearToSRGB8(r);
+        px[1]       = LinearToSRGB8(g);
+        px[2]       = LinearToSRGB8(b);
+        px[3]       = 255;
+    };
+
+    size_t facesUnpacked = 0;
+    for (size_t faceIndex = 0; faceIndex < map.faces.size(); ++faceIndex) {
+        const DFace& face   = map.faces[faceIndex];
+        const auto   origin = imported.lightmapOrigins[faceIndex];
+        if (face.lightofs < 0 || face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0 || origin[0] < 0) {
+            continue;
+        }
+        const int32_t w = face.lightmapTextureSizeInLuxels[0] + 1;
+        const int32_t h = face.lightmapTextureSizeInLuxels[1] + 1;
+        const bool    bumpLit = face.texinfo >= 0 && static_cast<size_t>(face.texinfo) < map.texInfos.size() &&
+                             (map.texInfos[static_cast<size_t>(face.texinfo)].flags & kSurfBumpLight) != 0;
+        const size_t  sampleStride = bumpLit ? 4 : 1;
+        const size_t  byteCount =
+            static_cast<size_t>(w) * static_cast<size_t>(h) * sampleStride * sizeof(ColorRGBExp32);
+        if (static_cast<size_t>(face.lightofs) + byteCount > map.lighting.size()) {
+            continue; // truncated or corrupt lump: skip this face, not the map
+        }
+        const auto* luxels = reinterpret_cast<const ColorRGBExp32*>(map.lighting.data() + static_cast<size_t>(face.lightofs));
+        for (int32_t y = 0; y < h; ++y) {
+            for (int32_t x = 0; x < w; ++x) {
+                const ColorRGBExp32& s = luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride];
+                putPixel(origin[0] + x, origin[1] + y, std::ldexp(s.r / 255.0f, s.exponent), std::ldexp(s.g / 255.0f, s.exponent),
+                         std::ldexp(s.b / 255.0f, s.exponent));
+            }
+        }
+        ++facesUnpacked;
+    }
+    if (facesUnpacked == 0) {
+        return TextureHandle::Invalid;
+    }
+
+    Log("BSP Importer: decoded {} lightmapped faces from {} lighting into a {}x{} atlas", facesUnpacked, map.lightingHDR ? "HDR" : "LDR",
+        atlasW, atlasH);
+    return ctx.CreateTexture("bsp_lightmap", std::span {pixels}, Extent2D {static_cast<uint32_t>(atlasW), static_cast<uint32_t>(atlasH)}, true)
+        .value_or(TextureHandle::Invalid);
+}
+
 auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, TextureHandle lightmapTexture)
     -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
@@ -92,13 +177,22 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     // into a blinding surface under direct light.
     MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
     if (lightmapTexture != TextureHandle::Invalid) {
-        desc.occlusionMap = lightmapTexture;
+        // A VRAD lightmap is baked radiance, not a dimensionless occlusion
+        // scalar: wiring it as occlusionMap feeds it through a single-channel
+        // AO lerp (see material_model.slang -- occlusion samples .r only),
+        // which discards the baked color AND darkens every surface. As
+        // emissive it is added to the dynamic lighting, matching Source's
+        // surface shader (lightmap * basecolor + dynamic). The factor must be
+        // set explicitly: MaterialDesc defaults emissive to 0, which would
+        // multiply the map to black.
+        desc.emissive    = {1.0f, 1.0f, 1.0f, 1.0f};
+        desc.emissiveMap = lightmapTexture;
         // BSP lightmap UVs are emitted into TEXCOORD_1 (see EmitVertex in
         // BSPGeometry.cpp). Every textureInfo defaults to texCoord = 0, so
-        // without this the occlusion sample reads the tiling surface UV and
+        // without this the emissive sample reads the tiling surface UV and
         // each face collects random atlas texels -- black walls next to
         // glowing pools, regardless of how correct the atlas packing is.
-        desc.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)].texCoord = 1;
+        desc.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Emissive)].texCoord = 1;
     }
 
     const auto vmtPath = vfs.ResolveMaterial(part.materialName);
@@ -410,18 +504,24 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         }
     }
 
-    TextureHandle lightmapTex = TextureHandle::Invalid;
-    std::string   lmPath      = options.lightmapAtlasPath;
-    if (lmPath.empty()) {
-        const auto resolvedLm = vfs.ResolveLightmap(virtualPath);
-        if (resolvedLm.has_value()) {
-            lmPath = *resolvedLm;
+    // VRAD radiosity decoded from the BSP's own lighting lumps wins: same
+    // shelf-packed layout the vertex UVs were emitted against, with no
+    // external *_lightmap0.png dependency. The on-disk atlas PNG remains as a
+    // fallback for maps with a stripped/absent lighting lump.
+    TextureHandle lightmapTex = BuildLightmapAtlasTexture(ctx, map, imported);
+    if (lightmapTex == TextureHandle::Invalid) {
+        std::string lmPath = options.lightmapAtlasPath;
+        if (lmPath.empty()) {
+            const auto resolvedLm = vfs.ResolveLightmap(virtualPath);
+            if (resolvedLm.has_value()) {
+                lmPath = *resolvedLm;
+            }
         }
-    }
-    if (!lmPath.empty()) {
-        const auto lmBytes = vfs.ReadFile(lmPath);
-        if (lmBytes.has_value()) {
-            lightmapTex = LoadTextureFromBytes(ctx, "bsp_lightmap", *lmBytes, false);
+        if (!lmPath.empty()) {
+            const auto lmBytes = vfs.ReadFile(lmPath);
+            if (lmBytes.has_value()) {
+                lightmapTex = LoadTextureFromBytes(ctx, "bsp_lightmap", *lmBytes, false);
+            }
         }
     }
 
