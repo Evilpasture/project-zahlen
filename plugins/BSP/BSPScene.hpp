@@ -30,6 +30,6 @@ namespace ZHLN::BSP {
 // triplet: pitch about +X, yaw about +Y, roll about +Z, with +X as the model
 // forward axis. Exposed so the heading conversion is testable against Jolt's
 // own quaternion builder rather than a second copy of the formula.
-[[nodiscard]] auto EngineAnglesFromDirection(JPH::Vec3 forward, float sourceRollDegrees, const ImportOptions& options) -> JPH::Vec3;
+[[nodiscard]] auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3;
 
 } // namespace ZHLN::BSP

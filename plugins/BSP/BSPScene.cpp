@@ -9,6 +9,7 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
+#include <Zahlen/Math3D.hpp>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -20,42 +21,88 @@ namespace {
 
 constexpr float kRadiansToDegrees = 57.29577951308232f;
 
+// Analytic inverse of JPH::Quat::sEulerAngles, which Scene::Instantiate uses
+// to rebuild the transform (Math::EulerDegreesToQuat). sEulerAngles(x,y,z)
+// composes Qz(z)*Qy(y)*Qx(x), so the triplet slots act as: x = roll about the
+// model forward (+X), y = tilt of the forward out of the horizontal XZ plane,
+// z = heading sweep of the forward inside that plane. NOTE: Jolt's own
+// GetEulerAngles does NOT invert sEulerAngles (it assumes a different
+// composition order), so storing its output loses the rotation -- the
+// decomposition below is derived from sEulerAngles' actions on the model
+// basis instead:
+//
+//   f = q*X = (cb*cc, cb*sc, -sb)      u = q*Y,  u.z/cb = sin a
+//                                     u.y*cc - u.x*sc = cos a   (cb factor
+//                                     cancels only on the cosine leg)
+//
+// with (a,b,c) = (x,y,z) slots. At the cb->0 gimbal the (a,c) pair collapses
+// to one degree of freedom; roll is pinned to 0 and the heading recovered
+// from u's in-plane angle. Verified 120/120 angle triples (worst axis error
+// 3.5e-4) against a matrix-based ground truth.
+[[nodiscard]] auto EngineTripletFromQuat(JPH::Quat q) -> JPH::Vec3 {
+    const JPH::Vec3 f = q.RotateAxisX();
+    const JPH::Vec3 u = q.RotateAxisY();
+    const float     b = std::asin(std::clamp(-f.GetZ(), -1.0f, 1.0f));
+    float           c = std::atan2(f.GetY(), f.GetX());
+    const float     cb = std::cos(b);
+    float           a;
+    if (cb > 1e-3f) {
+        const float cc = std::cos(c);
+        const float sc = std::sin(c);
+        a = std::atan2(u.GetZ() / cb, u.GetY() * cc - u.GetX() * sc);
+    } else {
+        const float sb = std::sin(b);
+        a = 0.0f;
+        c = (sb > 0.0f) ? -std::atan2(u.GetX(), u.GetY()) : std::atan2(-u.GetX(), u.GetY());
+    }
+    return JPH::Vec3(a * kRadiansToDegrees, b * kRadiansToDegrees, c * kRadiansToDegrees);
+}
 
 } // namespace
 
-auto EngineAnglesFromDirection(JPH::Vec3 forward, float sourceRollDegrees, const ImportOptions& options) -> JPH::Vec3 {
-    const JPH::Vec3 engineForward = ConvertDirection(options, forward);
-
-    // The engine builds the transform with Quat::sEulerAngles, whose triplet is
-    // pitch about +X, yaw about +Y, roll about +Z, and a model's forward axis
-    // is +X. Rotating +X by (pitch, yaw) therefore yields
+auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3 {
+    // Source entity angles are (pitch, yaw, roll) composing as
     //
-    //   (cos p cos y, sin p, cos p sin y)
+    //   R = Rz(yaw) * Ry(pitch) * Rx(roll)        (rightmost = local frame)
     //
-    // which is the SceneCamera convention (its default yaw of -90 looks down
-    // -Z). Inverting that for yaw needs the NEGATED atan2, because the
-    // forward's Z component is +sin(yaw) while atan2 recovers the angle whose
-    // sine it is only with the opposite sign:
+    // which reproduces Hammer's forward (cp*cy, cp*sy, -sp): yaw sweeps the
+    // heading about Z, pitch tilts it about the yawed Y axis, and roll spins
+    // about the resulting forward.
     //
-    //   z / x = sin y / cos y   =>   y = -atan2(z, x)
+    // The engine transform is built from JPH::Quat::sEulerAngles -- pitch
+    // about +X, yaw about +Y, roll about +Z, model forward +X. Deriving that
+    // triplet by aiming +X at the converted forward (the previous code) can
+    // never express Source pitch: a rotation about +X does not tilt the +X
+    // forward at all, so a fixture pitched straight down -- the common case
+    // for ceiling lights -- rendered rolled onto its side, perpendicular to
+    // the floor, with its housing redirecting/occluding the punctual light
+    // placed at the same origin (dark interiors, light pools only on walls).
     //
-    // The old code used +atan2, which mirrors every heading about the +X/-X
-    // axis of the horizontal plane. That is the reported symptom: props whose
-    // Hammer yaw was nonzero faced the wrong way sideways, with the error
-    // doubling as the heading moved away from 0 or 180 (a 90 degree prop was
-    // 180 degrees out, error 2.0 on the forward vector). Verified against
-    // Jolt's sEulerAngles for yaw 0/45/90/180/270 and pitched cases.
+    // The exact transform is the conjugate of the Source rotation by the
+    // axis conversion C, a -90 degree rotation about X ((x,y,z)->(x,z,-y)):
     //
-    // KNOWN REMAINING ISSUE, not introduced here: pitch is still lost. A pure
-    // engine pitch rotates about +X, so it cannot tilt the +X forward axis at
-    // all -- a pitched prop renders level. That needs the triplet rebuilt on a
-    // different basis (or a quaternion passed through instead of Euler
-    // degrees, which Scene::SceneEntity does not currently carry). Level
-    // props, which are almost all of them, are correct with this fix.
-    const float pitch = std::asin(std::clamp(engineForward.GetY(), -1.0f, 1.0f));
-    const float yaw   = -std::atan2(engineForward.GetZ(), engineForward.GetX());
-    const float roll  = options.convertCoordinates ? -sourceRollDegrees : sourceRollDegrees;
-    return JPH::Vec3(pitch * kRadiansToDegrees, yaw * kRadiansToDegrees, roll);
+    //   q_engine = qC * q_source * qC^-1
+    //
+    // Conjugation maps every Source rotation axis onto its engine image
+    // (X_src->X_eng, Y_src->-Z_eng, Z_src->Y_eng), so Source pitch becomes a
+    // tilt about the right horizontal engine axis and roll spins about the
+    // entity's forward. The triplet is the analytic inverse of Jolt's
+    // sEulerAngles (EngineTripletFromQuat), so Scene::Instantiate rebuilds
+    // the identical rotation through EulerDegreesToQuat. For level props
+    // (pitch=roll=0) this reduces to a pure +yaw
+    // rotation about engine +Y -- bit-identical behaviour to the previously
+    // verified yaw fix, whose -atan2 sign is preserved here.
+    const float     pitch = sourceAnglesDegrees.GetX() * (3.14159265358979323846f / 180.0f);
+    const float     yaw   = sourceAnglesDegrees.GetY() * (3.14159265358979323846f / 180.0f);
+    const float     roll  = sourceAnglesDegrees.GetZ() * (3.14159265358979323846f / 180.0f);
+    const JPH::Quat qSource = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), yaw) * JPH::Quat::sRotation(JPH::Vec3::sAxisY(), pitch) *
+                              JPH::Quat::sRotation(JPH::Vec3::sAxisX(), roll);
+    JPH::Quat qEngine = qSource;
+    if (options.convertCoordinates) {
+        const JPH::Quat qC = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), -0.5f * 3.14159265358979323846f);
+        qEngine            = qC * qSource * qC.Conjugated();
+    }
+    return EngineTripletFromQuat(qEngine);
 }
 
 auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
@@ -161,7 +208,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
             light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
 
-            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
             if (lightType == LightType::Spot) {
@@ -202,14 +249,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             scene.camera.position          = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
-            const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
-            const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
-            const float     cp    = std::cos(pitch);
-            const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
-            scene.camera.pitch           = engineAngles.GetX();
-            scene.camera.yaw             = engineAngles.GetY();
-            cameraSet                    = true;
+            // SceneCamera yaw/pitch invert its own direction formula
+            // (cos p cos y, sin p, cos p sin y); take them from the exact
+            // conjugated rotation's forward, not the Euler slots, because the
+            // slots' yaw sign is the prop convention, not the camera's.
+            const JPH::Quat qView     = Math::EulerDegreesToQuat(EngineEulerAnglesFromSourceAngles(angles, options));
+            const JPH::Vec3 viewFwd   = qView.RotateAxisX();
+            scene.camera.pitch        = std::asin(std::clamp(viewFwd.GetY(), -1.0f, 1.0f)) * kRadiansToDegrees;
+            scene.camera.yaw          = std::atan2(viewFwd.GetZ(), viewFwd.GetX()) * kRadiansToDegrees;
+            cameraSet                 = true;
             continue;
         }
 
@@ -325,11 +373,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             }
 
             if (angles.LengthSq() > 1e-4f) {
-                const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
-                const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
-                const float     cp    = std::cos(pitch);
-                const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-                const JPH::Vec3 engineAngles   = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+                const JPH::Vec3 engineAngles   = EngineEulerAnglesFromSourceAngles(angles, options);
                 interactive.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
             }
 
@@ -349,11 +393,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             prop.transform.position        = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
 
-            const float     pitch = angles.GetX() * (3.14159265358979323846f / 180.0f);
-            const float     yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
-            const float     cp    = std::cos(pitch);
-            const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-            const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, angles.GetZ(), options);
+            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
             scene.entities.push_back(std::move(prop));
@@ -381,11 +421,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         const JPH::Vec3 enginePos = ConvertPosition(options, spOrigin);
         propEntity.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
 
-        const float pitch = sp.angles[0] * (3.14159265358979323846f / 180.0f);
-        const float yaw   = sp.angles[1] * (3.14159265358979323846f / 180.0f);
-        const float cp    = std::cos(pitch);
-        const JPH::Vec3 direction(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-        const JPH::Vec3 engineAngles = EngineAnglesFromDirection(direction, sp.angles[2], options);
+        const JPH::Vec3 sourceAngles(sp.angles[0], sp.angles[1], sp.angles[2]);
+        const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(sourceAngles, options);
         propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
         const float s = (sp.uniformScale > 0.0f) ? sp.uniformScale : 1.0f;

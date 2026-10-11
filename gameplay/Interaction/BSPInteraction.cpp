@@ -281,13 +281,9 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             }
             const auto  originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
             const auto  anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-            const float pitch     = anglesArr[0] * (3.14159265358979323846f / 180.0f);
-            const float yaw       = anglesArr[1] * (3.14159265358979323846f / 180.0f);
-            const float cp        = std::cos(pitch);
-            // Source forward from the destination's angles, carried into
-            // engine space; roll is irrelevant for an upright view.
-            const JPH::Vec3 forward(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-            const JPH::Vec3 engineAngles  = BSP::EngineAnglesFromDirection(forward, 0.0f, options);
+            // Exact conjugated Source rotation: TeleportPlayer recovers the
+            // post-teleport view direction from this transform's +X axis.
+            const JPH::Vec3 engineAngles  = BSP::EngineEulerAnglesFromSourceAngles(JPH::Vec3(anglesArr[0], anglesArr[1], anglesArr[2]), options);
             const JPH::Vec3 enginePos     = BSP::ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
             registry.Create(
                 Components::NameComponent {.name = String64(destName)},
