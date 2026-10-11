@@ -51,6 +51,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
     bool cameraSet = false;
 
+    // Interactive brush submodels: doors/buttons get the authored submodel
+    // prefab the importer caches under "<map>#model_<N>"; their pivots decide
+    // where the entity transform sits.
+    const std::vector<InteractiveSubmodel> interactiveSubmodels = CollectInteractiveSubmodels(map, options);
+
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
@@ -102,7 +107,7 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 }
             }
             light.color     = {color4[0] / 255.0f, color4[1] / 255.0f, color4[2] / 255.0f};
-            light.intensity = color4[3];
+            light.intensity = color4[3] * kSourceBrightnessToEngine;
 
             JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
             if (lightType != LightType::Point) {
@@ -127,6 +132,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                                                 // instantiator's spot params own
                                                 // the mapping. Keep authored value.
                 }
+            }
+
+            // Source's explicit falloff distance ("_distance", legacy
+            // "_falloff"; inches). Wins over the defaults above so a light
+            // authored to reach 128 units doesn't smear across the engine's
+            // 20-metre default range.
+            const auto distanceKey = entity.FindFloat("_distance").or_else([&] { return entity.FindFloat("_falloff"); });
+            if (distanceKey && *distanceKey > 0.0f) {
+                light.range = *distanceKey * options.unitScale;
             }
 
             scene.lights.push_back(std::move(light));
@@ -167,31 +181,80 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
             const std::string_view modelName = entity.Find("model");
             if (!modelName.empty() && modelName.starts_with('*')) {
-                // Brush entity referencing submodel (*1, *2, ...)
-                interactive.shape  = Scene::ShapeKind::Box;
-                interactive.source = std::string(modelName);
-
+                // Brush entity referencing a submodel (*1, *2, ...). Doors and
+                // buttons render the authored submodel geometry: the importer
+                // caches one prefab per interactive submodel under
+                // "<map>#model_<N>" and keeps those faces out of the static
+                // world mesh.
                 int                    modelIndex = -1;
                 const std::string_view indexStr   = modelName.substr(1);
                 std::from_chars(indexStr.data(), indexStr.data() + indexStr.size(), modelIndex);
-                if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
+
+                const InteractiveSubmodel* subRecord = nullptr;
+                for (const InteractiveSubmodel& sub: interactiveSubmodels) {
+                    if (sub.modelIndex == modelIndex) {
+                        subRecord = &sub;
+                        break;
+                    }
+                }
+
+                if ((isDoor || isButton) && subRecord != nullptr) {
+                    interactive.shape  = Scene::ShapeKind::Prefab;
+                    interactive.source = std::string(virtualPath) + "#model_" + std::to_string(modelIndex);
+
+                    if (subRecord->rotating) {
+                        // The importer re-based the geometry on the hinge; put
+                        // the entity transform at the pivot so rotations sweep
+                        // the door around the correct point.
+                        interactive.transform.position = {subRecord->pivot.GetX(), subRecord->pivot.GetY(), subRecord->pivot.GetZ()};
+                    }
+                    // Sliding doors/buttons keep world-space vertices: the
+                    // transform starts at identity and the movement system's
+                    // delta translates the baked geometry.
+
+                    // Submodel bounds still drive the door travel distance
+                    // (BSPInteraction) and the instantiator's root collider
+                    // fallback.
                     const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
                     const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
                     const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
-                    JPH::Vec3       bspCenter = (mins + maxs) * 0.5f;
-                    const JPH::Vec3 bspHalf   = (maxs - mins) * 0.5f;
-
-                    if (const auto originCheck = entity.FindVector("origin")) {
-                        bspCenter = JPH::Vec3((*originCheck)[0], (*originCheck)[1], (*originCheck)[2]);
-                    }
-
-                    const JPH::Vec3 enginePos      = ConvertPosition(options, bspCenter);
-                    interactive.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
+                    const JPH::Vec3 bspHalf = (maxs - mins) * 0.5f;
                     const JPH::Vec3 engineHalf(
                         std::abs(bspHalf.GetX()) * options.unitScale, std::abs(bspHalf.GetY()) * options.unitScale, std::abs(bspHalf.GetZ()) * options.unitScale
                     );
                     interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
+                } else if (isTrigger) {
+                    // Trigger volumes are logic only: no rendered geometry and
+                    // no collider, just the transform proximity checks measure
+                    // from. (They used to render as opaque placeholder boxes.)
+                    interactive.shape  = Scene::ShapeKind::Empty;
+                    interactive.source = std::string(modelName);
+
+                    if (modelIndex >= 0 && static_cast<size_t>(modelIndex) < map.models.size()) {
+                        const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
+                        const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+                        const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+                        JPH::Vec3       bspCenter = (mins + maxs) * 0.5f;
+                        if (const auto originCheck = entity.FindVector("origin")) {
+                            bspCenter = JPH::Vec3((*originCheck)[0], (*originCheck)[1], (*originCheck)[2]);
+                        }
+                        const JPH::Vec3 enginePos = ConvertPosition(options, bspCenter);
+                        interactive.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
+                        const JPH::Vec3 bspHalf = (maxs - mins) * 0.5f;
+                        const JPH::Vec3 engineHalf(
+                            std::abs(bspHalf.GetX()) * options.unitScale, std::abs(bspHalf.GetY()) * options.unitScale,
+                            std::abs(bspHalf.GetZ()) * options.unitScale
+                        );
+                        interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
+                    } else {
+                        const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
+                        interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+                    }
                 } else {
+                    // Interactive brush with no importable submodel prefab:
+                    // keep the placeholder box.
+                    interactive.shape  = Scene::ShapeKind::Box;
+                    interactive.source = std::string(modelName);
                     const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
                     interactive.transform.position = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
                     interactive.halfExtents        = {0.5f, 0.5f, 0.5f};

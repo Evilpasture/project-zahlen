@@ -535,7 +535,11 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
                     .color     = JPH::Vec3(0.95f, 0.96f, 1.00f),
-                    .intensity = 8.0f,
+                    // Indoor map: the baked lightmap carries the look. This
+                    // fallback is only a dim fill so the level stays navigable
+                    // without a compiled light_environment -- at 8.0 it washed
+                    // every shadow-leaking interior out to white.
+                    .intensity = 3.0f,
                     .direction = JPH::Vec3(-0.4f, 0.85f, -0.35f).Normalized(),
                 }
             );

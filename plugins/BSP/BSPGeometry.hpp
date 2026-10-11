@@ -25,6 +25,15 @@
 
 namespace ZHLN::BSP {
 
+// Source `_light` brightness (the 4th component, typically 150-300) is a
+// VRAD radiosity unit, not a renderer intensity. Passed through raw, every
+// point/spot light lands ~30x too hot (intensity 200 against an engine
+// convention of single digits for punctual lights and 3-28 for suns) and
+// blows the scene out to white. Dividing by ~30 calibrates a stock
+// brightness-200 room light to engine intensity ~6.7, matching the physical
+// inches->metres rescale (unitScale^2) plus VRAD's luxel gain.
+inline constexpr float kSourceBrightnessToEngine = 1.0f / 30.0f;
+
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
 // and measures in metres. The default converts; unitScale lets a caller keep
 // inches (1.0f) or feed a differently scaled world.
@@ -36,6 +45,18 @@ struct ImportOptions {
     bool        buildColliders       = true;
     std::string assetRoot;
     std::string lightmapAtlasPath;
+
+    // Restrict the import to one submodel (index into BSPMap::models); -1
+    // imports every model not listed in skipModels. Interactive brush
+    // entities (func_door, func_button, ...) get their own prefab per
+    // submodel so they can animate instead of being baked into the world.
+    int32_t onlyModel = -1;
+
+    // Submodel indices to exclude entirely: their faces are imported
+    // separately, so they must not also land in the static world mesh (and
+    // its collider -- a door baked into the world keeps blocking after it
+    // opens).
+    std::vector<int32_t> skipModels;
 };
 
 // One material group: the concatenated, de-indexed-then-reindexed streams of
@@ -126,6 +147,20 @@ struct ImportedMapData {
 // Y-up metres by default). Exposed so scene importing converts identically.
 [[nodiscard]] auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
 [[nodiscard]] auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
+
+// One interactive brush submodel (func_door / func_button family) recovered
+// from the entity lump: its model index, whether the entity rotates about a
+// hinge, and the engine-space pivot that rotation happens around (the
+// authored origin keyvalue when present, otherwise the model bounds centre).
+// The importer and the scene description both consume this list so they
+// agree on which submodels leave the static world and where their pivots are.
+struct InteractiveSubmodel {
+    int32_t   modelIndex = -1;
+    bool      rotating   = false;
+    JPH::Vec3 pivot {0.0f, 0.0f, 0.0f};
+};
+
+[[nodiscard]] auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
 
 // Faces + displacements -> per-material native streams; entities -> lights.
 // Faces whose texinfo is missing or node-only are skipped (they are tree

@@ -41,6 +41,15 @@ auto IsToolTexture(std::string_view name) -> bool {
     return name.starts_with("tools/");
 }
 
+// UnlitGeneric surfaces bypass lighting entirely (baseColor goes straight to
+// the framebuffer): Source's white lamp panels (lights/white and friends)
+// would land at luma 1.0 -- exactly the bloom threshold -- and turn every
+// ceiling fixture into a blinding glare. Scale them to read as bright but
+// sub-threshold. Missing textures would otherwise fall back to the raw
+// baseColor (usually pure white) and blow out wherever direct light reaches.
+inline constexpr float kUnlitDim          = 0.55f;
+inline constexpr float kMissingTextureDim = 0.25f;
+
 auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true) -> TextureHandle {
     // 1. Try VTF first
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
@@ -78,7 +87,10 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
 
-    MaterialDesc desc = MaterialDesc::Basic({1.0f, 1.0f, 1.0f, 1.0f}, 0.8f, 0.0f, false);
+    // Neutral grey, not white: this desc is what ships when the VMT cannot be
+    // found or parsed, and a pure-white fallback turns every missing material
+    // into a blinding surface under direct light.
+    MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
     if (lightmapTexture != TextureHandle::Invalid) {
         desc.occlusionMap = lightmapTexture;
         // BSP lightmap UVs are emitted into TEXCOORD_1 (see EmitVertex in
@@ -123,6 +135,9 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
 
     if (vmt.shader == "UnlitGeneric") {
         desc.unlit = true;
+        desc.baseColor.x *= kUnlitDim;
+        desc.baseColor.y *= kUnlitDim;
+        desc.baseColor.z *= kUnlitDim;
     }
 
     // Resolve base texture (albedo)
@@ -133,6 +148,14 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
             if (texBytes.has_value()) {
                 desc.albedoMap = LoadTextureFromBytes(ctx, vmt.baseTexture, *texBytes, true);
             }
+        }
+        if (desc.albedoMap == TextureHandle::Invalid) {
+            // The VMT references art that is not on disk: darken the flat
+            // baseColor so the surface reads as missing (dark grey) instead
+            // of rendering as a pure-white wall.
+            desc.baseColor.x *= kMissingTextureDim;
+            desc.baseColor.y *= kMissingTextureDim;
+            desc.baseColor.z *= kMissingTextureDim;
         }
     }
 
@@ -167,63 +190,20 @@ auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte
     return out;
 }
 
-auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
-    -> ZHLN::Optional<ModelPrefab&> {
-    const ImportedMapData imported = ImportMapGeometry(map, options);
-    if (imported.parts.empty()) {
-        LogWarning("BSP Importer: no importable surfaces in {}", virtualPath);
-        return std::nullopt;
-    }
-
-    // Face-pipeline accounting: when a wall seems to be missing in-game, this
-    // line proves whether it was dropped here (and by which stage) or is
-    // present and the problem is downstream of this import.
-    Log(
-        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided; lightmap page {}x{} luxels",
-        virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
-                         imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
-        imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
-        imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
-        imported.stats.singleSidedSheets, static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
-    );
-
-    auto prefab                 = std::make_unique<ModelPrefab>();
-    prefab->virtualPath         = String256(virtualPath);
-    prefab->emissiveFactorScale = 1.0f; // Source emission is baked lighting, not glTF factors.
-
-    SourceVFS vfs;
-    if (!options.assetRoot.empty()) {
-        vfs.AddSearchPath(options.assetRoot);
-    }
-    const std::filesystem::path bspPath(virtualPath);
-    if (bspPath.has_parent_path()) {
-        vfs.AddSearchPath(bspPath.parent_path().string());
-        if (bspPath.parent_path().has_parent_path()) {
-            vfs.AddSearchPath(bspPath.parent_path().parent_path().string());
-        }
-    }
-
-    TextureHandle lightmapTex = TextureHandle::Invalid;
-    std::string   lmPath      = options.lightmapAtlasPath;
-    if (lmPath.empty()) {
-        const auto resolvedLm = vfs.ResolveLightmap(virtualPath);
-        if (resolvedLm.has_value()) {
-            lmPath = *resolvedLm;
-        }
-    }
-    if (!lmPath.empty()) {
-        const auto lmBytes = vfs.ReadFile(lmPath);
-        if (lmBytes.has_value()) {
-            lightmapTex = LoadTextureFromBytes(ctx, "bsp_lightmap", *lmBytes, false);
-        }
-    }
-
-    // One identity root; parts hang off it directly (part.localTransform does
-    // the placement), lights get their own translated nodes because ModelLight
-    // resolves position through its node chain.
-    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
-
-    for (const MaterialStreams& part: imported.parts) {
+// Fills prefab->parts from imported material streams: one compiled part per
+// material group (GPU buffers, material, meshlets, BLAS, colliders), then
+// folds the invisible-but-solid tool faces into the first part collider.
+// Shared by the world prefab and the interactive submodel prefabs.
+void AssemblePrefabParts(
+    RenderContext&         ctx,
+    const SourceVFS&       vfs,
+    const ImportedMapData& data,
+    std::string_view       prefabPath,
+    const ImportOptions&   options,
+    TextureHandle          lightmapTex,
+    ModelPrefab&           prefab
+) {
+    for (const MaterialStreams& part: data.parts) {
         if (part.VertexCount() == 0 || part.IndexCount() == 0) {
             continue;
         }
@@ -280,7 +260,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         modelPart.localMin        = part.boundsMin;
         modelPart.localMax        = part.boundsMax;
 
-        const std::string assetKey = std::string(virtualPath) + "#part_" + std::to_string(prefab->parts.size());
+        const std::string assetKey = std::string(prefabPath) + "#part_" + std::to_string(prefab.parts.size());
         modelPart.meshAsset        = HashAssetID(assetKey);
         modelPart.materialAsset    = HashAssetID(assetKey + "_mat");
 
@@ -307,7 +287,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
             }
         }
 
-        prefab->parts.push_back(std::move(modelPart));
+        prefab.parts.push_back(std::move(modelPart));
     }
 
     // Invisible-but-solid tool faces (nodraw undersides, sky brushes, clip and
@@ -316,13 +296,13 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // into the collider of the first part that already has one. A static
     // compound of {part mesh, collision-only mesh} keeps both hulls intact
     // for mesh queries and CharacterVirtual alike.
-    if (options.buildColliders && imported.collisionOnly.IndexCount() > 0) {
+    if (options.buildColliders && data.collisionOnly.IndexCount() > 0) {
         if (JPH::ShapeRefC collisionShape = Physics::CreateMeshShape(
-                imported.collisionOnly.positions.data(), imported.collisionOnly.VertexCount(), imported.collisionOnly.indices.data(),
-                imported.collisionOnly.IndexCount()
+                data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(),
+                data.collisionOnly.IndexCount()
             )) {
             bool folded = false;
-            for (ModelPart& part: prefab->parts) {
+            for (ModelPart& part: prefab.parts) {
                 if (part.meshCollider == nullptr) {
                     continue;
                 }
@@ -339,10 +319,118 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
             }
             if (!folded) {
                 LogWarning("BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
-                           imported.collisionOnly.indices.size() / 3);
+                           data.collisionOnly.indices.size() / 3);
             }
         }
     }
+
+}
+
+// Translates every stream (render parts and the collision-only fold) by
+// offset. Used to re-base rotating doors on their hinge pivot so the entity
+// transform -- placed at the pivot -- rotates the geometry about it.
+void ShiftImportedGeometry(ImportedMapData& data, JPH::Vec3Arg offset) {
+    const auto shiftStreams = [offset](MaterialStreams& streams) {
+        for (VertexPosition& vertex: streams.positions) {
+            vertex.position[0] += offset.GetX();
+            vertex.position[1] += offset.GetY();
+            vertex.position[2] += offset.GetZ();
+        }
+        streams.boundsMin.x += offset.GetX();
+        streams.boundsMin.y += offset.GetY();
+        streams.boundsMin.z += offset.GetZ();
+        streams.boundsMax.x += offset.GetX();
+        streams.boundsMax.y += offset.GetY();
+        streams.boundsMax.z += offset.GetZ();
+    };
+    for (MaterialStreams& part: data.parts) {
+        shiftStreams(part);
+    }
+    shiftStreams(data.collisionOnly);
+    data.boundsMin.x += offset.GetX();
+    data.boundsMin.y += offset.GetY();
+    data.boundsMin.z += offset.GetZ();
+    data.boundsMax.x += offset.GetX();
+    data.boundsMax.y += offset.GetY();
+    data.boundsMax.z += offset.GetZ();
+}
+
+auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, std::string_view virtualPath, const ImportOptions& options)
+    -> ZHLN::Optional<ModelPrefab&> {
+    // Interactive brush submodels (doors, buttons) get their own prefabs
+    // below; excluding them here keeps their faces out of the static world
+    // mesh and world collider (a door baked into the world keeps blocking
+    // the doorway after it opens).
+    const std::vector<InteractiveSubmodel> interactiveSubmodels = CollectInteractiveSubmodels(map, options);
+
+    ImportOptions worldOptions = options;
+    // Lights come from the scene description (DescribeScene -> SceneLights),
+    // not from the prefab: shipping them as ModelLights too made
+    // InstantiatePrefab's KHR_lights_punctual pass spawn every light a second
+    // time -- and BSP-built ModelLights carry no range, which the
+    // instantiator expands to 1000 m. Double intensity-200 lights with
+    // kilometre range washed the whole map out.
+    worldOptions.gatherLights = false;
+    worldOptions.skipModels.reserve(interactiveSubmodels.size());
+    for (const InteractiveSubmodel& sub: interactiveSubmodels) {
+        worldOptions.skipModels.push_back(sub.modelIndex);
+    }
+
+    const ImportedMapData imported = ImportMapGeometry(map, worldOptions);
+    if (imported.parts.empty()) {
+        LogWarning("BSP Importer: no importable surfaces in {}", virtualPath);
+        return std::nullopt;
+    }
+
+    // Face-pipeline accounting: when a wall seems to be missing in-game, this
+    // line proves whether it was dropped here (and by which stage) or is
+    // present and the problem is downstream of this import.
+    Log(
+        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided; lightmap page {}x{} luxels",
+        virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
+                         imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
+        imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
+        imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
+        imported.stats.singleSidedSheets, static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
+    );
+
+    auto prefab                 = std::make_unique<ModelPrefab>();
+    prefab->virtualPath         = String256(virtualPath);
+    prefab->emissiveFactorScale = 1.0f; // Source emission is baked lighting, not glTF factors.
+
+    SourceVFS vfs;
+    if (!options.assetRoot.empty()) {
+        vfs.AddSearchPath(options.assetRoot);
+    }
+    const std::filesystem::path bspPath(virtualPath);
+    if (bspPath.has_parent_path()) {
+        vfs.AddSearchPath(bspPath.parent_path().string());
+        if (bspPath.parent_path().has_parent_path()) {
+            vfs.AddSearchPath(bspPath.parent_path().parent_path().string());
+        }
+    }
+
+    TextureHandle lightmapTex = TextureHandle::Invalid;
+    std::string   lmPath      = options.lightmapAtlasPath;
+    if (lmPath.empty()) {
+        const auto resolvedLm = vfs.ResolveLightmap(virtualPath);
+        if (resolvedLm.has_value()) {
+            lmPath = *resolvedLm;
+        }
+    }
+    if (!lmPath.empty()) {
+        const auto lmBytes = vfs.ReadFile(lmPath);
+        if (lmBytes.has_value()) {
+            lightmapTex = LoadTextureFromBytes(ctx, "bsp_lightmap", *lmBytes, false);
+        }
+    }
+
+    // One identity root; parts hang off it directly (part.localTransform does
+    // the placement), lights get their own translated nodes because ModelLight
+    // resolves position through its node chain.
+    prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
+
+    AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, lightmapTex, *prefab);
 
     for (const BspPointLight& light: imported.lights) {
         ModelNode node;
@@ -366,6 +454,36 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     }
 
     assetMgr.CachePrefab(HashAssetPath(virtualPath), std::move(prefab));
+
+    // One prefab per interactive submodel, cached under "<map>#model_<N>" --
+    // the source BSPScene stamps on the door/button entity description.
+    // Sliding doors keep their world-space vertices (the entity transform is
+    // just the movement delta); rotating doors are re-based on their hinge.
+    for (const InteractiveSubmodel& sub: interactiveSubmodels) {
+        ImportOptions subOptions = options;
+        subOptions.onlyModel    = sub.modelIndex;
+        subOptions.gatherLights = false;
+
+        ImportedMapData subImported = ImportMapGeometry(map, subOptions);
+        if (subImported.parts.empty()) {
+            continue; // Pure tool faces (clip/hint brushes): nothing to draw.
+        }
+        if (sub.rotating) {
+            ShiftImportedGeometry(subImported, -sub.pivot);
+        }
+
+        const std::string subPath = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
+        auto              subPrefab                 = std::make_unique<ModelPrefab>();
+        subPrefab->virtualPath         = String256(subPath);
+        subPrefab->emissiveFactorScale = 1.0f;
+        subPrefab->nodes.push_back(
+            ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false}
+        );
+        AssemblePrefabParts(ctx, vfs, subImported, subPath, options, lightmapTex, *subPrefab);
+        assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));
+        Log("BSP Importer: {} -> interactive submodel prefab ({}, {} parts)", subPath, sub.rotating ? "rotating" : "sliding", subImported.parts.size());
+    }
+
     return assetMgr.GetCachedPrefab(HashAssetPath(virtualPath));
 }
 

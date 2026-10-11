@@ -36,7 +36,7 @@ struct Transform {
     JPH::Float3 scale    = {1.0f, 1.0f, 1.0f};
 };
 
-enum class ShapeKind : uint8_t { Box, Plane, Prefab };
+enum class ShapeKind : uint8_t { Box, Plane, Prefab, Empty };
 
 enum class BodyKind : uint8_t { None, Static, Dynamic, Kinematic };
 

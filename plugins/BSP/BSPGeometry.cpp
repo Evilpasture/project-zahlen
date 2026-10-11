@@ -538,7 +538,7 @@ void EmitVertex(
         const auto color4 = ParseColor4(entity.Find("_light")).value_or(std::array<float, 4> {255.0f, 255.0f, 255.0f, 200.0f});
         light.color =
             JPH::Vec3(std::clamp(color4[0] / 255.0f, 0.0f, 1.0f), std::clamp(color4[1] / 255.0f, 0.0f, 1.0f), std::clamp(color4[2] / 255.0f, 0.0f, 1.0f));
-        light.intensity = color4[3];
+        light.intensity = color4[3] * kSourceBrightnessToEngine;
 
         auto anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
         if (entity.Find("angles").empty()) {
@@ -617,6 +617,51 @@ struct LightmapAtlasEntry {
     return placements;
 }
 
+auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel> {
+    std::vector<InteractiveSubmodel> result;
+
+    for (const BSPEntity& entity: map.entities) {
+        const std::string_view className = entity.Find("classname");
+        const bool             isDoor =
+            (className == "func_door" || className == "func_door_rotating" || className == "prop_door_rotating" || className == "momentary_door");
+        const bool isButton = (className == "func_button" || className == "func_rot_button" || className == "momentary_rot_button");
+        if (!isDoor && !isButton) {
+            continue;
+        }
+
+        const std::string_view modelName = entity.Find("model");
+        if (modelName.size() < 2 || modelName[0] != '*') {
+            continue;
+        }
+        int32_t modelIndex = -1;
+        std::from_chars(modelName.data() + 1, modelName.data() + modelName.size(), modelIndex);
+        // Model 0 is worldspawn; brush entities reference submodels 1..N.
+        if (modelIndex < 1 || static_cast<size_t>(modelIndex) >= map.models.size()) {
+            continue;
+        }
+        if (std::any_of(result.begin(), result.end(), [&](const InteractiveSubmodel& sub) { return sub.modelIndex == modelIndex; })) {
+            continue;
+        }
+
+        InteractiveSubmodel sub;
+        sub.modelIndex = modelIndex;
+        sub.rotating   = (className == "func_door_rotating" || className == "func_rot_button" || className == "momentary_rot_button");
+
+        const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
+        const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
+        const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
+        JPH::Vec3       pivot = (mins + maxs) * 0.5f;
+        if (const auto originKey = entity.FindVector("origin")) {
+            pivot = JPH::Vec3((*originKey)[0], (*originKey)[1], (*originKey)[2]);
+        }
+        sub.pivot = ConvertPosition(options, pivot);
+
+        result.push_back(sub);
+    }
+
+    return result;
+}
+
 auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> ImportedMapData {
     ImportedMapData result;
     bool            globalBoundsFirst = true;
@@ -640,7 +685,14 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
         }
     }
 
-    for (const DModel& model: map.models) {
+    for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
+        if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
+            continue;
+        }
+        if (std::find(options.skipModels.begin(), options.skipModels.end(), static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
+            continue;
+        }
+        const DModel& model = map.models[modelIdx];
         if (model.firstface < 0 || model.numfaces < 0) {
             continue;
         }

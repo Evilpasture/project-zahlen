@@ -99,9 +99,20 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
         }
     }
     if (!modelSource.empty()) {
+        // Brush entities reference their submodel as "*N". Placeholder boxes
+        // are stamped with that exact string; authored-geometry submodel
+        // prefabs are stamped "<map path>#model_N", so match the suffix too.
+        std::string modelSuffix;
+        if (modelSource.starts_with('*')) {
+            modelSuffix = "#model_" + std::string(modelSource.substr(1));
+        }
         for (const Entity e: registry.GetEntitiesWith<Components::SceneSourceComponent>()) {
             const auto srcComp = registry.Get<Components::SceneSourceComponent>(e);
-            if (srcComp && std::string_view(srcComp->source) == modelSource) {
+            if (!srcComp) {
+                continue;
+            }
+            const std::string_view source(srcComp->source);
+            if (source == modelSource || (!modelSuffix.empty() && source.ends_with(modelSuffix))) {
                 return e;
             }
         }
