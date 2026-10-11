@@ -1,74 +1,18 @@
 # Project Zahlen
 
-A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware raytracing, fast and straightforward creative work conversions and game development with Fennel/Lua.
+A **simple** project that integrates modern Vulkan, Jolt Physics, fast and straightforward creative work conversions and game development with pure C++ interface.
+
+It's kinda like Bevy but C++.
 
 ## Build Requirements
-* **CMake (>= 3.25)**: Build automation tool.
-* **Ninja**: The only supported generator.
-* **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later).
-* **Zig's clang (optional, no `-freflection`)**: `pip install ziglang cmake ninja slangpy` and build with
-  `./tools/build.sh --zig`. Zig ships clang plus its own libc++, so it is a complete C++26 toolchain in one
-  package. It has no P2996 reflection, so the build takes the documented non-reflection fallback
-  ("Using generated script for source code flattening"); everything else builds as usual.
-  Slang normally comes as a host `slangc` (Vulkan SDK or a GitHub release). When no `slangc` is on PATH, CMake
-  builds the vendored [extern/slang](https://github.com/shader-slang/slang) submodule. `./tools/build.sh --zig`
-  can still fall back to the compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
-* **C compiler (C11)**: Builds the remaining C dependencies such as Volk; the engine itself is C++26.
-* **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
-* **resvg (optional)**: `plugins/SVG` rasterizes `.svg` documents through [resvg](https://github.com/linebender/resvg)'s C API.
-  CMake looks for it (CMake package, `resvg.pc`, or a bare prefix) and, when it is not installed, warns and skips that one
-  target — everything else still builds. Arch and Homebrew: `resvg`; elsewhere build it with `cargo-c`, or point CMake at an
-  existing prefix with `-DRESVG_ROOT=/path/to/prefix`. `-DZHLN_BUILD_SVG=OFF` skips the search.
-* **libcurl (optional)**: `extensions/net/HTTP` fetches over HTTP through [libcurl](https://curl.se/libcurl/)'s easy interface.
-  CMake looks for it (`find_package(CURL)`, `libcurl.pc`, or a bare prefix) and, when it is not installed, warns and skips
-  that one target — everything else still builds. Debian and Ubuntu: `libcurl4-openssl-dev`; Fedora: `libcurl-devel`;
-  Arch: `curl`; Homebrew and vcpkg: `curl`; or point CMake at an existing prefix with `-DCURL_ROOT=/path/to/prefix`.
-  `-DZHLN_BUILD_HTTP=OFF` skips the search.
+* **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later). At this point, if you have a modern compiler I assume you know what you're doing.
 
 ## Build Instructions
 
 For creative works, the build system expects Blender files in `./blender/` depending on your CMakeLists.txt.
 For compiled assets, the build system expects usually in resources/assets/ as an unofficial convention.
 
-You can do it the hard way, or the easy way.
-
-### Manual Build
-1. Clone the repository and its submodules:
-   ```sh
-   git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
-   ```
-   
-2. Create a build directory and configure the project:
-   ```sh
-   cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release 
-   ```
-   
-3. Build the project:
-   ```sh
-   cmake --build build
-   ```
-
-4. Run the project:
-   ```sh
-   ./build/zahlen
-   ```  
-
-### Convenient Build
-
-1. Clone the repository and its submodules:
-   ```sh
-   git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
-   ```
-   
-2. Run this script (`--gcc`, `--clang`, `--p2996` or `--zig`):
-   ```sh
-   ./tools/build.sh --gcc
-   ```
-
-3. Run the project:
-   ```sh
-   ./build/zahlen
-   ```
+Run tools/build.sh and fix every error you go along the way if you're missing dependencies.
 
 ### Runtime Directories
 
@@ -319,65 +263,27 @@ GAMEPLAY_API ZHLN::GameplayStatus NativeGameplayUpdate(ZHLN::Engine* engine, flo
 ## Hardware expectations
 
 The project is designed to run on a system with a discrete GPU and a dedicated CPU. Tested on NVIDIA RTX 3050 6GB in Arch Linux.
-Should work on macOS too with MoltenVK if you manage to compile it, but expect MoltenVK overhead.
+Should work on macOS too if you manage to compile it, but you need a CPU rasterizer due to missing VK_EXT_descriptor_heap support in MoltenVK and KosmicKrisp.
 
 ## System & Platform Dependencies
 
-The project is primarily developed on Linux and macOS, but should also work on Windows as originally planned. 
-That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
+The project is primarily developed on Linux and macOS and Windows.
+You can compile this project. That is true, if your compiler supports standard C++26 features. Otherwise, tough luck. Compile GCC 16.1.1+ yourself.
 
 The project can also be compiled with Bloomberg Clang with its own libcxx and libunwind and work effectively. 
-However, precompiled headers are buggy due to unknown internal compiler errors.
-Make sure to pass your compiled runtime `-stdlib=libc++` to the compiler and `-lc++abi` to the linker.
-Bloomberg Clang also needs `-fparameter-reflection` alongside `-freflection` for P3096 callable
-parameter inspection (or the unified `-freflection-latest` flag). The root CMake configuration
-probes and applies the supported flag through `zahlen_enable_reflection()`; independent consumers
-of the headers must enable it too.
-
-I'd love to give instructions but it took an entire morning of my life to just get it to work.
+However, precompiled headers are buggy due to unknown internal compiler errors. tools/build.sh --p2996 should handle some of the work as long as you have your build ready.
 
 See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed compiler support information.
 
-These packages are expected to be installed on the host operating system:
-
-* **Vulkan SDK (>= 1.4.321)**: Core graphics API and validation layers. A host `slangc` (from the SDK or a Slang release) is preferred for SPIR-V shader compilation; otherwise CMake builds the vendored `extern/slang` submodule. The renderer requires the `VK_EXT_descriptor_heap` extension (headers + driver support; see [DESCRIPTOR_HEAPS.md](DESCRIPTOR_HEAPS.md)). `VK_EXT_mesh_shader` is used opportunistically for meshlet-based geometry rasterisation and falls back to the vertex pipeline when absent (see [MESH_SHADERS.md](MESH_SHADERS.md)).
-* **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
-* **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
-* **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.
-* **libevdev** *(Linux only)*: Kernel-level input device wrapper used by the native TTY/KMS fallback backend.
-* **libseat** *(Linux only)*: Shared session management library used to acquire input and graphics permissions in TTY mode without root access.
-* **X11 / Xlib** *(Linux only)*: Legacy windowing library.
-* **Cocoa / QuartzCore** *(macOS only)*: Apple frameworks.
+These packages are expected to be installed on the host operating system: Read the Dockerfile.
 
 ## Bundled / External Libraries
-These are located in the `extern/` and `third_party/` directories:
+These are located in the `extern/` and `third_party/` directories. To not update this everytime I add or remove a dependency, ls the directories. Take my words, it's all open source.
 
-### Physics & Math
-* **Jolt Physics**: A multi-core 3D physics simulation and collision engine. Also used for fast SIMD math.
-* **VulkanMemoryAllocator (VMA)**: Vulkan memory management utility.
-
-### Scripting & Audio
-* **LuaJIT**: JIT runtime for the Lua scripting language.
-* **Fennel Compiler**: Used to transpile Fennel scripts to Lua.
-* **miniaudio**: Single-file C audio playback and mixing library.
-
-### Graphics & Tooling
-* **Dear ImGui**: Immediate-mode graphical user interface for debug overlays and controllers.
-* **GLFW**: Multi-platform window, GL/Vulkan context, and input handling.
-* **Slang**: Shader language and `slangc` compiler, vendored as `extern/slang` when no host `slangc` is available.
-* **SPIRV-Reflect**: Lightweight reflection library for SPIR-V shader bytecode.
-* **RenderDoc**: Integrated in-app graphics debugger hook.
-
-### Utilities & Formats
-* **cgltf**: Lightweight glTF 2.0 parser and loader.
-* **stb**: Single-file public domain libraries (including `stb_image` for texture loading and `stb_truetype`, used only by the offline cooker `zcook font` to bake TTFs into cooked glyph atlases -- the runtime engine consumes pre-baked atlases and parses no outline font).
 
 ## LICENSE
 
-This project is licensed under the GNU General Public License version 3.0 or later versions. See the [LICENSE](LICENSE.md) file for more details.
+This project is licensed under the GNU General Public License version 3.0 or later versions. 
 
-# Third-Party Software Notices
+All dependencies are licensed under their respective licenses too.
 
-Project Zahlen includes or links to third-party software components subject to their respective licenses:
-
-For complete license texts, see the respective subdirectories or `third_party/vulkan_sandbox/LICENSE`.
