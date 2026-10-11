@@ -378,6 +378,9 @@ auto main(int argc, char* argv[]) -> int {
         .unitScale            = 0.0254f, // Convert inches to meters
         .includeDisplacements = true,
         .gatherLights         = true,
+        // The baked lightmap already carries every static light; only spawn
+        // the dynamic ones (named/styled) in real time.
+        .onlyInteractiveLights = true,
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
         .lightmapAtlasPath    = lightmapPath.string(),

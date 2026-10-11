@@ -42,6 +42,12 @@ struct ImportOptions {
     float       unitScale            = 0.0254f; // Inches to meters
     bool        includeDisplacements = true;
     bool        gatherLights         = true;
+    // When true, DescribeScene skips light entities that are VRAD baking
+    // markers: unnamed and style 0. Those lights are already in the baked
+    // lightmap; respawning them in real time double-lights the map and
+    // floods the shading clusters. Named/styled lights stay: they are
+    // switchable or animated at runtime.
+    bool        onlyInteractiveLights = false;
     bool        buildColliders       = true;
     std::string assetRoot;
     std::string lightmapAtlasPath;

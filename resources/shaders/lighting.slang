@@ -321,6 +321,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             window *= window;
             float atten = window / (distSq + 1.0f);
 
+            // Spotlight cone falloff: lerp between the outer and inner cone
+            // cosines. Lights without an authored cone pack -1/-1 (see
+            // PackLight), which skips this branch and keeps the full sphere.
+            if (light.type == 2 && light.outerConeCos > -0.5f) {
+                float3 spotDir   = normalize(light.direction);
+                float  cosAngle  = dot(-L_p, spotDir);
+                float  spotAtten = saturate((cosAngle - light.outerConeCos) / max(light.innerConeCos - light.outerConeCos, 1e-4f));
+                atten *= spotAtten * spotAtten;
+            }
+
             if (NdotL > 0.0f) {
                 float3 H   = SafeNormalize(V + L_p, N);
                 float3 F_p = FresnelSchlick(max(dot(H, V), 0.0f), F0);

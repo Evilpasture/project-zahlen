@@ -799,7 +799,9 @@ auto InstantiatePrefab(
                               .radius      = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
                               .direction   = worldDir,
                               .range       = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
-                              .shadowLayer = -1
+                              .shadowLayer = -1,
+                              .innerConeRadians = light.innerConeAngle,
+                              .outerConeRadians = light.outerConeAngle
                           }
             );
 

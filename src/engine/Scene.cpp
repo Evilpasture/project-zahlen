@@ -301,7 +301,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 .radius      = light.radius,
                 .direction   = direction,
                 .range       = light.range,
-                .shadowLayer = light.shadowLayer
+                .shadowLayer = light.shadowLayer,
+                .innerConeRadians = light.innerConeRadians,
+                .outerConeRadians = light.outerConeRadians
             },
             Components::SceneLightTagComponent {}
         );

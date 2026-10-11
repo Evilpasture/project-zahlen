@@ -70,6 +70,19 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         if (className == "light" || className == "light_spot" || className == "light_environment") {
             const auto lightName = entity.Find("targetname");
 
+            // VRAD leaves every baked light in the entity lump. Unnamed,
+            // style-0 lights are offline markers whose contribution is
+            // already in the lightmap; spawning them in real time
+            // double-lights the map and floods the punctual clusters.
+            // Named or styled lights are dynamic (switchable, flickering).
+            // light_environment is the sun and always stays.
+            if (options.onlyInteractiveLights && className != "light_environment") {
+                const int32_t style = entity.FindInt("style").value_or(0);
+                if (lightName.empty() && style == 0) {
+                    continue;
+                }
+            }
+
             Scene::SceneLight light;
             light.name = lightName.empty() ? std::string(className) : std::string(lightName);
 
@@ -127,20 +140,33 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
             if (lightType == LightType::Spot) {
-                if (const auto outerDegrees = entity.FindFloat("_cone"); outerDegrees && *outerDegrees > 0.0f) {
-                    light.range = *outerDegrees; // cone width is not range; the
-                                                // instantiator's spot params own
-                                                // the mapping. Keep authored value.
-                }
+                // Cone angles in degrees (_cone outer, _cone2 inner), the
+                // same convention BSPGeometry::GatherLights uses. The old
+                // code assigned the cone WIDTH to light.range -- a 60-degree
+                // cone became a 60-metre throw.
+                const float outerDegrees = entity.FindFloat("_cone").value_or(45.0f);
+                const float innerDegrees = entity.FindFloat("_cone2").value_or(outerDegrees * (2.0f / 3.0f));
+                light.outerConeRadians = outerDegrees * (3.14159265358979323846f / 180.0f);
+                light.innerConeRadians = innerDegrees * (3.14159265358979323846f / 180.0f);
             }
 
-            // Source's explicit falloff distance ("_distance", legacy
-            // "_falloff"; inches). Wins over the defaults above so a light
-            // authored to reach 128 units doesn't smear across the engine's
-            // 20-metre default range.
-            const auto distanceKey = entity.FindFloat("_distance").or_else([&] { return entity.FindFloat("_falloff"); });
+            // Range: Source's authored cutoff when present
+            // ("_zero_percent_distance", "_distance", legacy "_falloff";
+            // inches). Otherwise derive where the engine's windowed
+            // inverse-square attenuation (atten = 1/(d^2+1)) drops below a
+            // ~0.05 cutoff, clamped to indoor sanity -- the 20-metre default
+            // let one closet lamp reach through five rooms of unshadowed
+            // concrete.
+            const auto distanceKey = entity.FindFloat("_zero_percent_distance")
+                                         .or_else([&] { return entity.FindFloat("_distance"); })
+                                         .or_else([&] { return entity.FindFloat("_falloff"); });
             if (distanceKey && *distanceKey > 0.0f) {
                 light.range = *distanceKey * options.unitScale;
+            } else {
+                constexpr float kCutoff = 0.05f;
+                light.range = (light.intensity > kCutoff) ?
+                                  std::clamp(std::sqrt((light.intensity / kCutoff) - 1.0f), 3.0f, 12.0f) :
+                                  3.0f;
             }
 
             scene.lights.push_back(std::move(light));
