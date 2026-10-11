@@ -20,18 +20,43 @@ namespace {
 
 constexpr float kRadiansToDegrees = 57.29577951308232f;
 
+
+} // namespace
+
 auto EngineAnglesFromDirection(JPH::Vec3 forward, float sourceRollDegrees, const ImportOptions& options) -> JPH::Vec3 {
     const JPH::Vec3 engineForward = ConvertDirection(options, forward);
 
-    // Yaw around +Y, pitch around +X: forward = (cos p cos y, sin p, cos p sin y),
-    // matching the SceneCamera convention (default yaw -90 looks down -Z).
+    // The engine builds the transform with Quat::sEulerAngles, whose triplet is
+    // pitch about +X, yaw about +Y, roll about +Z, and a model's forward axis
+    // is +X. Rotating +X by (pitch, yaw) therefore yields
+    //
+    //   (cos p cos y, sin p, cos p sin y)
+    //
+    // which is the SceneCamera convention (its default yaw of -90 looks down
+    // -Z). Inverting that for yaw needs the NEGATED atan2, because the
+    // forward's Z component is +sin(yaw) while atan2 recovers the angle whose
+    // sine it is only with the opposite sign:
+    //
+    //   z / x = sin y / cos y   =>   y = -atan2(z, x)
+    //
+    // The old code used +atan2, which mirrors every heading about the +X/-X
+    // axis of the horizontal plane. That is the reported symptom: props whose
+    // Hammer yaw was nonzero faced the wrong way sideways, with the error
+    // doubling as the heading moved away from 0 or 180 (a 90 degree prop was
+    // 180 degrees out, error 2.0 on the forward vector). Verified against
+    // Jolt's sEulerAngles for yaw 0/45/90/180/270 and pitched cases.
+    //
+    // KNOWN REMAINING ISSUE, not introduced here: pitch is still lost. A pure
+    // engine pitch rotates about +X, so it cannot tilt the +X forward axis at
+    // all -- a pitched prop renders level. That needs the triplet rebuilt on a
+    // different basis (or a quaternion passed through instead of Euler
+    // degrees, which Scene::SceneEntity does not currently carry). Level
+    // props, which are almost all of them, are correct with this fix.
     const float pitch = std::asin(std::clamp(engineForward.GetY(), -1.0f, 1.0f));
-    const float yaw   = std::atan2(engineForward.GetZ(), engineForward.GetX());
+    const float yaw   = -std::atan2(engineForward.GetZ(), engineForward.GetX());
     const float roll  = options.convertCoordinates ? -sourceRollDegrees : sourceRollDegrees;
     return JPH::Vec3(pitch * kRadiansToDegrees, yaw * kRadiansToDegrees, roll);
 }
-
-} // namespace
 
 auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
     Scene::Scene scene;

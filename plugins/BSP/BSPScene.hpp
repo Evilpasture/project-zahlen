@@ -26,4 +26,10 @@ namespace ZHLN::BSP {
 // bodies, bounding extents, and prefab sources retained for ECS initialization.
 [[nodiscard]] auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options = {}) -> Scene::Scene;
 
+// Converts a Source forward direction (and roll) into the engine's Euler
+// triplet: pitch about +X, yaw about +Y, roll about +Z, with +X as the model
+// forward axis. Exposed so the heading conversion is testable against Jolt's
+// own quaternion builder rather than a second copy of the formula.
+[[nodiscard]] auto EngineAnglesFromDirection(JPH::Vec3 forward, float sourceRollDegrees, const ImportOptions& options) -> JPH::Vec3;
+
 } // namespace ZHLN::BSP
