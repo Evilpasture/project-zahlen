@@ -164,6 +164,18 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         return std::nullopt;
     }
 
+    // Face-pipeline accounting: when a wall seems to be missing in-game, this
+    // line proves whether it was dropped here (and by which stage) or is
+    // present and the problem is downstream of this import.
+    Log(
+        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; lightmap page {}x{} luxels",
+        virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
+                         imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
+        imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
+        imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
+        static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
+    );
+
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);
     prefab->emissiveFactorScale = 1.0f; // Source emission is baked lighting, not glTF factors.

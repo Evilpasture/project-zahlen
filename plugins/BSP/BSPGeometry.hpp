@@ -72,6 +72,19 @@ struct BspPointLight {
     float     outerConeRadians = 0.78539816339f; // Default 45 deg
 };
 
+// Bookkeeping for the face pipeline. Every face in every model leaves through
+// exactly one of these counters, so an importer log line can prove where
+// geometry went when a wall seems to be "missing": the counts are exhaustive
+// over the model face ranges.
+struct ImportStats {
+    uint32_t helperFacesDropped = 0;      // tools/ & compile-flag helpers dropped by design (fog, trigger, skip...)
+    uint32_t collisionOnlyFaces = 0;      // invisible-but-solid faces kept in the physics hull
+    uint32_t droppedNoWinding = 0;        // surfedge/edge/vertex indices out of range
+    uint32_t droppedDegenerate = 0;       // fewer than 3 unique corners
+    uint32_t droppedNoProjection = 0;     // texinfo/texdata index problems (includes tree-only kTexInfoNode faces)
+    uint32_t displacementFallbacks = 0;   // invalid disp records rendered as flat quads instead of being lost
+};
+
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
@@ -90,6 +103,15 @@ struct ImportedMapData {
     uint32_t    faceCount         = 0;
     uint32_t    displacementCount = 0;
     uint32_t    triangleCount     = 0;
+    ImportStats stats;
+
+    // Lightmap atlas page extent, in luxels: max(mins + size) over all faces.
+    // Source lightmaps live in one huge page-local coordinate space, and the
+    // baked atlas images community tools dump next to the map use that same
+    // origin -- the absorption in EmitVertex maps global luxel UVs straight
+    // into atlas space. Zero when no face carries a lightmap.
+    float lightmapPageWidth  = 0.0f;
+    float lightmapPageHeight = 0.0f;
 };
 
 // Position transform for the options in force (Source Z-up inches -> engine

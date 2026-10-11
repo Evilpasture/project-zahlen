@@ -274,12 +274,18 @@ void EmitVertex(
     float lmU = 0.0f;
     float lmV = 0.0f;
     if (projection.hasLightmap) {
-        const float sLuxel = sourcePos.Dot(projection.lightmapSDir) + projection.lightmapSOffset - static_cast<float>(projection.lightmapMins[0]);
-        const float tLuxel = sourcePos.Dot(projection.lightmapTDir) + projection.lightmapTOffset - static_cast<float>(projection.lightmapMins[1]);
-        const float wLuxel = static_cast<float>(projection.lightmapSize[0]);
-        const float hLuxel = static_cast<float>(projection.lightmapSize[1]);
-        lmU = (wLuxel > 0.0f) ? std::clamp((sLuxel + 0.5f) / (wLuxel + 1.0f), 0.0f, 1.0f) : 0.0f;
-        lmV = (hLuxel > 0.0f) ? std::clamp((tLuxel + 0.5f) / (hLuxel + 1.0f), 0.0f, 1.0f) : 0.0f;
+        // dot(p, lightmapS/TDir) + offset IS the absolute luxel coordinate in
+        // the shared lightmap page (a point on the face's mins corner maps to
+        // exactly lightmapTextureMins), so dividing by the page extent gives
+        // atlas UVs in the same packing the baked *_lightmapN.png images and
+        // every third-party lightmap dumper use. Normalizing per-face (the
+        // old code, mins/size) instead stretches the whole atlas across each
+        // quad -- faces then sample random atlas texels and wrong surfaces
+        // render pitch black or glowing, looking "missing".
+        const float sLuxel = sourcePos.Dot(projection.lightmapSDir) + projection.lightmapSOffset;
+        const float tLuxel = sourcePos.Dot(projection.lightmapTDir) + projection.lightmapTOffset;
+        lmU = (result.lightmapPageWidth > 0.0f) ? std::clamp((sLuxel + 0.5f) / result.lightmapPageWidth, 0.0f, 1.0f) : 0.0f;
+        lmV = (result.lightmapPageHeight > 0.0f) ? std::clamp((tLuxel + 0.5f) / result.lightmapPageHeight, 0.0f, 1.0f) : 0.0f;
     }
 
     const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
@@ -381,6 +387,21 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     ImportedMapData result;
     bool            globalBoundsFirst = true;
 
+    // Lightmap atlas extent: baked lightmap pages (the *_lightmap0.png dumps
+    // that community tools produce) place each face's sample rect at its
+    // lightmap mins inside one shared page, so vertex lightmap UVs must be in
+    // that page's coordinate space. The page is max(mins + allocated samples)
+    // across faces; Source reserves size+1 luxels per axis per face.
+    for (const DFace& face: map.faces) {
+        if (face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0) {
+            continue;
+        }
+        result.lightmapPageWidth =
+            std::max(result.lightmapPageWidth, static_cast<float>(face.lightmapTextureMinsInLuxels[0] + face.lightmapTextureSizeInLuxels[0] + 1));
+        result.lightmapPageHeight =
+            std::max(result.lightmapPageHeight, static_cast<float>(face.lightmapTextureMinsInLuxels[1] + face.lightmapTextureSizeInLuxels[1] + 1));
+    }
+
     for (const DModel& model: map.models) {
         if (model.firstface < 0 || model.numfaces < 0) {
             continue;
@@ -391,10 +412,12 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
             auto winding = FaceWinding(map, face);
             if (!winding) {
+                ++result.stats.droppedNoWinding;
                 continue;
             }
             DropDuplicateCorners(*winding);
             if (winding->size() < 3) {
+                ++result.stats.droppedDegenerate;
                 continue;
             }
 
@@ -421,12 +444,18 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // collider is being built the collision stream is unused --
             // dropping the faces there saves the vertex emission work too.
             const FaceDisposition disposition = DispositionFor(map, face);
-            if (disposition == FaceDisposition::Drop || (disposition == FaceDisposition::CollisionOnly && !options.buildColliders)) {
+            if (disposition == FaceDisposition::Drop) {
+                ++result.stats.helperFacesDropped;
+                continue;
+            }
+            if (disposition == FaceDisposition::CollisionOnly && !options.buildColliders) {
+                ++result.stats.helperFacesDropped;
                 continue;
             }
 
             const auto projection = ProjectionFor(map, face);
             if (!projection) {
+                ++result.stats.droppedNoProjection;
                 continue;
             }
 
@@ -448,8 +477,27 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             const uint32_t baseVertex      = part.VertexCount();
             bool           partBoundsFirst = (baseVertex == 0);
 
-            const bool displaced = options.includeDisplacements && face.dispinfo >= 0 && static_cast<size_t>(face.dispinfo) < map.dispInfos.size() &&
-                                   winding->size() == 4;
+            // A face with a dispinfo record whose contents are bogus (power
+            // outside 1-4, or a dispVert range that runs past the lump) must
+            // not sink the whole face: the base winding still exists, so it
+            // falls through to the flat-quad path with a stat bump. Compiled
+            // maps do ship these, and every community converter renders the
+            // base quad.
+            bool displaced = options.includeDisplacements && face.dispinfo >= 0 && static_cast<size_t>(face.dispinfo) < map.dispInfos.size() &&
+                             winding->size() == 4;
+            if (displaced) {
+                const DDispInfo& dispInfo = map.dispInfos[static_cast<size_t>(face.dispinfo)];
+                const int32_t    power    = dispInfo.power;
+                bool             rangeFits = false;
+                if (power >= 1 && power <= 4) {
+                    const size_t side = static_cast<size_t>((1u << static_cast<uint32_t>(power)) + 1u);
+                    rangeFits         = static_cast<size_t>(dispInfo.dispVertStart) + side * side <= map.dispVerts.size();
+                }
+                if (!rangeFits) {
+                    displaced = false;
+                    ++result.stats.displacementFallbacks;
+                }
+            }
 
             if (displaced) {
                 const DDispInfo& dispInfo = map.dispInfos[static_cast<size_t>(face.dispinfo)];
@@ -538,6 +586,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
             if (disposition != FaceDisposition::CollisionOnly) {
                 ++result.faceCount;
+            } else {
+                ++result.stats.collisionOnlyFaces;
             }
         }
     }
