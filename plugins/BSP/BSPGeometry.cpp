@@ -11,12 +11,14 @@
 #include "BSPGeometry.hpp"
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 
 namespace ZHLN::BSP {
 namespace {
@@ -154,7 +156,7 @@ struct FaceProjection {
     // Repacked shelf-atlas origin for this face's sample rect in the
     // engine-side 2048x2048 lightmap atlas (see ComputeLightmapAtlas); -1/-1
     // when the face has no atlas placement.
-    int32_t   atlasOrigin[2] {-1, -1};
+    int32_t atlasOrigin[2] {-1, -1};
 };
 
 [[nodiscard]] auto ProjectionFor(const BSPMap& map, const DFace& face) -> std::optional<FaceProjection> {
@@ -167,22 +169,22 @@ struct FaceProjection {
     }
     const DTexData& texData = map.texDatas[static_cast<size_t>(texInfo.texdata)];
     FaceProjection  out;
-    out.sDir                = JPH::Vec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
-    out.sOffset             = texInfo.textureVecs[0][3];
-    out.tDir                = JPH::Vec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
-    out.tOffset             = texInfo.textureVecs[1][3];
-    out.width               = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
-    out.height              = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
+    out.sDir    = JPH::Vec3(texInfo.textureVecs[0][0], texInfo.textureVecs[0][1], texInfo.textureVecs[0][2]);
+    out.sOffset = texInfo.textureVecs[0][3];
+    out.tDir    = JPH::Vec3(texInfo.textureVecs[1][0], texInfo.textureVecs[1][1], texInfo.textureVecs[1][2]);
+    out.tOffset = texInfo.textureVecs[1][3];
+    out.width   = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
+    out.height  = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
 
-    out.lightmapSDir        = JPH::Vec3(texInfo.lightmapVecs[0][0], texInfo.lightmapVecs[0][1], texInfo.lightmapVecs[0][2]);
-    out.lightmapSOffset     = texInfo.lightmapVecs[0][3];
-    out.lightmapTDir        = JPH::Vec3(texInfo.lightmapVecs[1][0], texInfo.lightmapVecs[1][1], texInfo.lightmapVecs[1][2]);
-    out.lightmapTOffset     = texInfo.lightmapVecs[1][3];
-    out.lightmapMins[0]     = face.lightmapTextureMinsInLuxels[0];
-    out.lightmapMins[1]     = face.lightmapTextureMinsInLuxels[1];
-    out.lightmapSize[0]     = face.lightmapTextureSizeInLuxels[0];
-    out.lightmapSize[1]     = face.lightmapTextureSizeInLuxels[1];
-    out.hasLightmap         = (face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0);
+    out.lightmapSDir    = JPH::Vec3(texInfo.lightmapVecs[0][0], texInfo.lightmapVecs[0][1], texInfo.lightmapVecs[0][2]);
+    out.lightmapSOffset = texInfo.lightmapVecs[0][3];
+    out.lightmapTDir    = JPH::Vec3(texInfo.lightmapVecs[1][0], texInfo.lightmapVecs[1][1], texInfo.lightmapVecs[1][2]);
+    out.lightmapTOffset = texInfo.lightmapVecs[1][3];
+    out.lightmapMins[0] = face.lightmapTextureMinsInLuxels[0];
+    out.lightmapMins[1] = face.lightmapTextureMinsInLuxels[1];
+    out.lightmapSize[0] = face.lightmapTextureSizeInLuxels[0];
+    out.lightmapSize[1] = face.lightmapTextureSizeInLuxels[1];
+    out.hasLightmap     = (face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0);
     return out;
 }
 
@@ -271,6 +273,176 @@ auto FindOrMakePart(ImportedMapData& result, const std::string& name) -> Materia
     return result.parts.back();
 }
 
+// One render-class face after emission, reduced to what the twin audit needs:
+// canonical plane identity, 2D extents inside that plane, its authored front
+// and the part it landed in.
+//
+// Source compiles a closed BSP out of the brush set, but mappers routinely
+// build single-sheet walls whose ONLY face points away from the room it
+// bounds (the room-facing half is left out entirely -- common on 2010s-era
+// ported maps built as poster boxes). vbsp still lists such a face in the
+// leaffaces of the leaves on its back side, and Source's world pass draws it
+// from there; a strictly front-only renderer instead culls it, so the room
+// sees straight through. Rigid bodies fall through the same faces from the
+// back while EBackFaceMode::CollideWithBackFaces hides the hole from the
+// CharacterVirtual -- the classic symptom is "wall invisible from inside,
+// props pushed at it vanish into the void" (confirmed empirically on
+// gm_murder_drones: every such face clusters inside the spawn building, and
+// the spawn-room leaves reference them from their back side).
+//
+// The audit pairs kept render faces on the same plane; a face without an
+// opposite-facing twin covering it gets the double-sided treatment: its whole
+// material group renders both ways, and reversed copies of its triangles join
+// the collision stream so dynamic bodies contact the back side too.
+struct TwinRecord {
+    double                 cn[3] {0.0, 0.0, 0.0};                      // canonical plane normal (dominant component positive)
+    double                 cd = 0.0;                                   // plane constant in the canonical frame
+    double                 ownN[3] {0.0, 0.0, 0.0};                    // authored front (Source coords)
+    double                 uLo = 0.0, uHi = 0.0, vLo = 0.0, vHi = 0.0; // extents in canonical plane axes
+    double                 area      = 0.0;
+    size_t                 partIndex = 0;
+    std::vector<JPH::Vec3> winding; // Source-space corners in emitted (post-flip) order
+};
+
+// Twin matching tolerance grouping: normals quantized to 0.01, plane constant
+// to 4u so genuinely coplanar sheets (vbsp emits them bitwise-identical) land
+// in one bucket without pulling parallel-but-different walls in.
+[[nodiscard]] auto CanonicalTwinKey(const double cn[3], double cd) -> uint64_t {
+    auto     quant = [](double v, double step) -> int64_t { return static_cast<int64_t>(std::llround(v / step)); };
+    uint64_t h     = 1469598103934665603ull;
+    auto     mix   = [&h](uint64_t x) {
+        h ^= x;
+        h *= 1099511628211ull;
+    };
+    mix(static_cast<uint64_t>(quant(cn[0], 0.01)) * 1315423911ull);
+    mix(static_cast<uint64_t>(quant(cn[1], 0.01)) * 2654435761ull);
+    mix(static_cast<uint64_t>(quant(cn[2], 0.01)) * 97531ull);
+    mix(static_cast<uint64_t>(quant(cd, 4.0)) * 31ull);
+    return h;
+}
+
+// CONTENTS_SOLID per Source; used to detect open space behind a face.
+constexpr int32_t kContentsSolid = 0x1;
+
+// BSPTree point classification against model 0's head node: walks split
+// planes down to a leaf and reports its contents. Mirrors Source's own "what
+// volume is this point in" query; runs in Source coordinates.
+[[nodiscard]] auto ContentsAtPoint(const BSPMap& map, const JPH::Vec3& p) noexcept -> int32_t {
+    if (map.models.empty() || map.nodes.empty()) {
+        return kContentsSolid;
+    }
+    int32_t node = map.models.front().headnode;
+    for (int guard = 0; guard < 8192; ++guard) {
+        if (node < 0) {
+            const size_t leaf = static_cast<size_t>(-1 - node);
+            return leaf < map.leafs.size() ? map.leafs[leaf].contents : kContentsSolid;
+        }
+        if (static_cast<size_t>(node) >= map.nodes.size()) {
+            return kContentsSolid;
+        }
+        const DNode& n = map.nodes[static_cast<size_t>(node)];
+        if (n.planenum < 0 || static_cast<size_t>(n.planenum) >= map.planes.size()) {
+            return kContentsSolid;
+        }
+        const DPlane& plane = map.planes[static_cast<size_t>(n.planenum)];
+        const float   dist  = p.GetX() * plane.normal[0] + p.GetY() * plane.normal[1] + p.GetZ() * plane.normal[2] - plane.dist;
+        node                = n.children[dist >= 0.0f ? 0 : 1];
+    }
+    return kContentsSolid;
+}
+
+// Marks every undercovered face's part double-sided and appends reversed
+// triangles to the collision stream (engine coords, matching the rest of
+// result.collisionOnly). A face only qualifies when open air exists BEHIND
+// it: without that gate every exterior wall backside and every sealed void
+// skin matches "no twin" and we'd force most of the map double-sided. With
+// it, the marks land exactly on single-sheet walls players can stand behind
+// (gm_murder_drones: ~5000 audit hits, only the spawn-building subset is
+// reachable, the rest sits in sealed chases -- harmless but inclusive).
+void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::vector<TwinRecord>& records, const ImportOptions& options) {
+    if (records.empty()) {
+        return;
+    }
+    constexpr double                                  kMinSheetArea   = 128.0;
+    constexpr double                                  kCoverThreshold = 0.25;
+    std::unordered_map<uint64_t, std::vector<size_t>> buckets;
+    buckets.reserve(records.size());
+    for (size_t i = 0; i < records.size(); ++i) {
+        buckets[CanonicalTwinKey(records[i].cn, records[i].cd)].push_back(i);
+    }
+    for (auto& kv: buckets) {
+        for (const size_t a: kv.second) {
+            TwinRecord& rec = records[a];
+            if (rec.area < kMinSheetArea) {
+                continue;
+            }
+            double cover = 0.0;
+            for (const size_t b: kv.second) {
+                if (b == a) {
+                    continue;
+                }
+                const TwinRecord& other = records[b];
+                const double      dot   = rec.ownN[0] * other.ownN[0] + rec.ownN[1] * other.ownN[1] + rec.ownN[2] * other.ownN[2];
+                if (dot > -0.5) {
+                    continue; // twin must FACE the opposite way
+                }
+                const double ovU = std::min(rec.uHi, other.uHi) - std::max(rec.uLo, other.uLo);
+                const double ovV = std::min(rec.vHi, other.vHi) - std::max(rec.vLo, other.vLo);
+                if (ovU > 0.0 && ovV > 0.0) {
+                    cover += ovU * ovV;
+                }
+            }
+            const double extent = (rec.uHi - rec.uLo) * (rec.vHi - rec.vLo);
+            if (extent <= 0.0 || cover / extent >= kCoverThreshold) {
+                continue;
+            }
+            // Open air behind the face (centroid and a few edge midpoints,
+            // sampled close and far)? Without it nobody can ever see or touch
+            // the back side, so the twin-less sheets is fine single-sided.
+            const JPH::Vec3 n(rec.ownN[0], rec.ownN[1], rec.ownN[2]);
+            JPH::Vec3       centre = JPH::Vec3::sZero();
+            for (const JPH::Vec3& corner: rec.winding) {
+                centre += corner;
+            }
+            centre          = centre / static_cast<float>(rec.winding.size());
+            bool backIsOpen = false;
+            auto probeBack  = [&](const JPH::Vec3& at, float distance) {
+                const int32_t contents = ContentsAtPoint(map, at - n * distance);
+                if ((contents & kContentsSolid) == 0) {
+                    backIsOpen = true;
+                }
+            };
+            probeBack(centre, 2.0f);
+            if (!backIsOpen) {
+                probeBack(centre, 8.0f);
+            }
+            for (size_t i = 1; i < rec.winding.size() && !backIsOpen; i += 2) {
+                const JPH::Vec3 mid = (rec.winding[i - 1] + rec.winding[i]) * 0.5f;
+                probeBack(mid, 2.0f);
+            }
+            if (!backIsOpen) {
+                continue;
+            }
+            result.parts[rec.partIndex].forceDoubleSided = true;
+            ++result.stats.singleSidedSheets;
+            if (!options.buildColliders) {
+                continue;
+            }
+            MaterialStreams& coll = result.collisionOnly;
+            const uint32_t   base = coll.VertexCount();
+            for (const JPH::Vec3& corner: rec.winding) {
+                const JPH::Vec3 p = ConvertPosition(options, corner);
+                coll.positions.push_back(VertexPosition {{p.GetX(), p.GetY(), p.GetZ()}});
+            }
+            for (size_t i = 1; i + 1 < rec.winding.size(); ++i) {
+                coll.indices.push_back(base);
+                coll.indices.push_back(base + static_cast<uint32_t>(i) + 1u);
+                coll.indices.push_back(base + static_cast<uint32_t>(i));
+            }
+        }
+    }
+}
+
 // Emits one vertex: position/normal/tangent converted to engine space, UVs from
 // the forward texture projection in source space. Bounds are tracked on both
 // the owning part and the whole map as positions are emitted.
@@ -326,10 +498,12 @@ void EmitVertex(
     const JPH::Vec3 engineTangent = ConvertDirection(options, tangent);
 
     part.positions.push_back(VertexPosition {{enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()}});
-    part.tangentFrames.push_back(VertexTangentFrame {
-        Math::PackNormal(engineNormal.GetX(), engineNormal.GetY(), engineNormal.GetZ()),
-        Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
-    });
+    part.tangentFrames.push_back(
+        VertexTangentFrame {
+            Math::PackNormal(engineNormal.GetX(), engineNormal.GetY(), engineNormal.GetZ()),
+            Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
+        }
+    );
     part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(lmU, lmV)});
 
     UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
@@ -447,6 +621,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     ImportedMapData result;
     bool            globalBoundsFirst = true;
 
+    // Post-pass input for the single-sheet wall audit (one record per
+    // undisplaced render face; see ApplyTwinAudit).
+    std::vector<TwinRecord> twinRecords;
+
     // Lightmap atlas: reproduced analytically from the same shelf packer the
     // offline atlas generator used to lay out the *_lightmap0.png (see
     // ComputeLightmapAtlas). Every vertex's lightmap UV is then expressed in
@@ -510,8 +688,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     const JPH::Vec3& a = (*winding)[i];
                     const JPH::Vec3& b = (*winding)[(i + 1) % winding->size()];
                     windingNormal += JPH::Vec3(
-                        (a.GetY() - b.GetY()) * (a.GetZ() + b.GetZ()),
-                        (a.GetZ() - b.GetZ()) * (a.GetX() + b.GetX()),
+                        (a.GetY() - b.GetY()) * (a.GetZ() + b.GetZ()), (a.GetZ() - b.GetZ()) * (a.GetX() + b.GetX()),
                         (a.GetX() - b.GetX()) * (a.GetY() + b.GetY())
                     );
                 }
@@ -547,7 +724,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             }
 
             const std::string_view materialName = MaterialNameFor(map, face);
-            MaterialStreams&       part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
+            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
             }
@@ -564,8 +741,8 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             bool displaced = options.includeDisplacements && face.dispinfo >= 0 && static_cast<size_t>(face.dispinfo) < map.dispInfos.size() &&
                              winding->size() == 4;
             if (displaced) {
-                const DDispInfo& dispInfo = map.dispInfos[static_cast<size_t>(face.dispinfo)];
-                const int32_t    power    = dispInfo.power;
+                const DDispInfo& dispInfo  = map.dispInfos[static_cast<size_t>(face.dispinfo)];
+                const int32_t    power     = dispInfo.power;
                 bool             rangeFits = false;
                 if (power >= 1 && power <= 4) {
                     const size_t side = static_cast<size_t>((1u << static_cast<uint32_t>(power)) + 1u);
@@ -662,6 +839,45 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 }
             }
 
+            // Remember every undisplaced render face for the post-pass that
+            // detects single-sheet walls (see TwinRecord).
+            if (disposition == FaceDisposition::Render && !displaced) {
+                TwinRecord rec;
+                rec.partIndex   = static_cast<size_t>(&part - result.parts.data());
+                rec.ownN[0]     = faceNormal.GetX();
+                rec.ownN[1]     = faceNormal.GetY();
+                rec.ownN[2]     = faceNormal.GetZ();
+                const double nx = rec.ownN[0], ny = rec.ownN[1], nz = rec.ownN[2];
+                const double ax = std::abs(nx), ay = std::abs(ny), az = std::abs(nz);
+                const int    dom        = (ax >= ay && ax >= az) ? 0 : (ay >= az ? 1 : 2);
+                const double domV       = dom == 0 ? nx : (dom == 1 ? ny : nz);
+                const double sgn        = domV < 0.0 ? -1.0 : 1.0;
+                rec.cn[0]               = nx * sgn;
+                rec.cn[1]               = ny * sgn;
+                rec.cn[2]               = nz * sgn;
+                rec.winding             = *winding;
+                const JPH::Vec3& anchor = rec.winding.front();
+                rec.cd                  = rec.cn[0] * anchor.GetX() + rec.cn[1] * anchor.GetY() + rec.cn[2] * anchor.GetZ();
+                const int au = (dom + 1) % 3, av = (dom + 2) % 3;
+                auto      comp = [](const JPH::Vec3& p, int axis) { return axis == 0 ? p.GetX() : (axis == 1 ? p.GetY() : p.GetZ()); };
+                rec.uLo = rec.vLo = 1e30;
+                rec.uHi = rec.vHi = -1e30;
+                for (const JPH::Vec3& p: rec.winding) {
+                    const float uu = comp(p, au), vv = comp(p, av);
+                    rec.uLo = std::min(rec.uLo, static_cast<double>(uu));
+                    rec.uHi = std::max(rec.uHi, static_cast<double>(uu));
+                    rec.vLo = std::min(rec.vLo, static_cast<double>(vv));
+                    rec.vHi = std::max(rec.vHi, static_cast<double>(vv));
+                }
+                for (size_t i = 1; i + 1 < rec.winding.size(); ++i) {
+                    const JPH::Vec3 a  = rec.winding[i] - rec.winding[0];
+                    const JPH::Vec3 b  = rec.winding[i + 1] - rec.winding[0];
+                    const JPH::Vec3 cr = a.Cross(b);
+                    rec.area += 0.5 * static_cast<double>(cr.Length());
+                }
+                twinRecords.push_back(std::move(rec));
+            }
+
             if (disposition != FaceDisposition::CollisionOnly) {
                 ++result.faceCount;
             } else {
@@ -669,6 +885,10 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             }
         }
     }
+
+    // Single-sheet wall audit: undercovered faces get double-sided render and
+    // reversed backside triangles in the physics hull.
+    ApplyTwinAudit(map, result, twinRecords, options);
 
     if (options.gatherLights) {
         result.lights = GatherLights(map, options);

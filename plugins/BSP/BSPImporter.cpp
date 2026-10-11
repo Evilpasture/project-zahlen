@@ -107,7 +107,12 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
 
     const auto& vmt   = *vmtMatExp;
     desc.baseColor   = vmt.baseColor;
-    desc.doubleSided = vmt.noCull;
+    // $nocull from the VMT, or the importer's single-sheet wall audit marking
+    // this part: Source draws undercovered faces from their back side (the
+    // vbsp leaffaces of the room include them), so honours match by rendering
+    // the whole material group double-sided. Backface physics is handled
+    // separately via reversed triangles in the collision stream.
+    desc.doubleSided = vmt.noCull || part.forceDoubleSided;
     if (vmt.isTranslucent) {
         desc.alphaBlend = true;
         desc.alphaMode  = 2;
@@ -174,12 +179,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // line proves whether it was dropped here (and by which stage) or is
     // present and the problem is downstream of this import.
     Log(
-        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; lightmap page {}x{} luxels",
+        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided; lightmap page {}x{} luxels",
         virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
                          imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
         imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
         imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
-        static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
+        imported.stats.singleSidedSheets, static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
     );
 
     auto prefab                 = std::make_unique<ModelPrefab>();

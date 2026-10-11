@@ -51,6 +51,13 @@ struct MaterialStreams {
     JPH::Float3 boundsMin {0.0f, 0.0f, 0.0f};
     JPH::Float3 boundsMax {0.0f, 0.0f, 0.0f};
 
+    // Set when at least one face in this group has no opposite-facing twin:
+    // a single-sheet wall whose only geometry faces AWAY from the reachable
+    // side (Source still draws such faces -- vbsp's leaffaces list them in the
+    // leaf on their back side). The whole material group renders double-sided
+    // so those walls stop being invisible from the room side.
+    bool forceDoubleSided = false;
+
     [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
         return static_cast<uint32_t>(positions.size());
     }
@@ -83,6 +90,7 @@ struct ImportStats {
     uint32_t droppedDegenerate = 0;       // fewer than 3 unique corners
     uint32_t droppedNoProjection = 0;     // texinfo/texdata index problems (includes tree-only kTexInfoNode faces)
     uint32_t displacementFallbacks = 0;   // invalid disp records rendered as flat quads instead of being lost
+    uint32_t singleSidedSheets = 0;       // faces with no opposite-facing twin; forced double-sided + backside collision
 };
 
 struct ImportedMapData {
