@@ -15,6 +15,7 @@
 #include "StudioModelImporter.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
+#include <array>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
@@ -98,15 +99,34 @@ static_assert(sizeof(ColorRGBExp32) == 4);
     return static_cast<uint8_t>(std::clamp(s, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
+// Engine texture ingestion is 8-bit only: RenderContext::CreateTexture always
+// uploads RGBA8 and TextureUploader hardcodes four bytes per texel, so a float
+// atlas is not reachable without RHI work. That forces a choice, because VRAD
+// radiance above 1.0 (sunlit patches, lamp pools) clips to one flat white in
+// an 8-bit target while an sRGB-encoded ramp below 1.0 is already well
+// resolved. This scale is where that trade is set, and SampleBakedRadiosity
+// divides it back out.
+//
+// Measured over a linear ramp, distinct stored codes / worst absolute error:
+//
+//   range          scale 1.0      scale 0.5      scale 0.25
+//   0.01-0.08      56 / 0.0010    41 / 0.0014    32 / 0.0018
+//   0.0-0.3       150 / 0.0022   109 / 0.0029    78 / 0.0039
+//   1.0-4.0         1 / 3.0000    68 / 2.0000   119 / 0.0176
+//
+// So 1.0 destroys everything above 1.0 outright, while 0.25 costs the shadows
+// 56 -> 32 codes -- a worst-case error of 0.0018 against values around 0.05,
+// which stays invisible under an albedo multiply. 0.25 is the better trade
+// for a baked-lighting map whose brights carry the readable information.
+inline constexpr float kLightmapEncodeScale = 0.25f;
+
 // Decode VRAD radiosity from BSPMap::lighting (LUMP_LIGHTING_HDR, falling back
 // to LDR LUMP_LIGHTING) into the same shelf-packed atlas BSPGeometry's
 // TEXCOORD_1 UVs reference -- no external *_lightmap0.png required. Each face
 // owns a (W+1)x(H+1) block of ColorRGBExp32 samples at face.lightofs;
 // bump-lit faces store 4 samples per luxel (flat + three directional) and the
-// flat one is taken. Linear radiance is encoded to sRGB8 because engine
-// texture ingestion is 8-bit only: the sampler's sRGB->linear decode
-// round-trips the encode, and luxels above 1.0 clip to white (the same limit
-// a pre-dumped atlas PNG has).
+// flat one is taken. Linear radiance is scaled down and encoded to sRGB8; the
+// sampler's sRGB->linear decode round-trips the encode.
 [[nodiscard]] auto BuildLightmapAtlasTexture(RenderContext& ctx, const BSPMap& map, const ImportedMapData& imported) -> TextureHandle {
     if (map.lighting.empty() || imported.lightmapOrigins.size() != map.faces.size()) {
         return TextureHandle::Invalid;
@@ -123,9 +143,9 @@ static_assert(sizeof(ColorRGBExp32) == 4);
             return;
         }
         uint8_t* px = &pixels[(static_cast<size_t>(y) * static_cast<size_t>(atlasW) + static_cast<size_t>(x)) * 4];
-        px[0]       = LinearToSRGB8(r);
-        px[1]       = LinearToSRGB8(g);
-        px[2]       = LinearToSRGB8(b);
+        px[0]       = LinearToSRGB8(r * kLightmapEncodeScale);
+        px[1]       = LinearToSRGB8(g * kLightmapEncodeScale);
+        px[2]       = LinearToSRGB8(b * kLightmapEncodeScale);
         px[3]       = 255;
     };
 
@@ -147,12 +167,46 @@ static_assert(sizeof(ColorRGBExp32) == 4);
             continue; // truncated or corrupt lump: skip this face, not the map
         }
         const auto* luxels = reinterpret_cast<const ColorRGBExp32*>(map.lighting.data() + static_cast<size_t>(face.lightofs));
+        // Decode into a scratch tile first: the gutter ring has to copy the
+        // edge luxels, which are only all known once the interior is decoded.
+        std::vector<std::array<float, 3>> tile(static_cast<size_t>(w) * static_cast<size_t>(h));
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
                 const ColorRGBExp32& s = luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride];
-                putPixel(origin[0] + x, origin[1] + y, std::ldexp(s.r / 255.0f, s.exponent), std::ldexp(s.g / 255.0f, s.exponent),
-                         std::ldexp(s.b / 255.0f, s.exponent));
+                tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = {std::ldexp(s.r / 255.0f, s.exponent),
+                                                                                                 std::ldexp(s.g / 255.0f, s.exponent),
+                                                                                                 std::ldexp(s.b / 255.0f, s.exponent)};
             }
+        }
+        for (int32_t y = 0; y < h; ++y) {
+            for (int32_t x = 0; x < w; ++x) {
+                const auto c = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+                putPixel(origin[0] + x, origin[1] + y, c[0], c[1], c[2]);
+            }
+        }
+        // Duplicate the border luxels into the reserved gutter so a bilinear
+        // tap just outside the cell reads this face's own edge colour.
+        for (int32_t x = 0; x < w; ++x) {
+            const auto top = tile[static_cast<size_t>(x)];
+            const auto bot = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+            putPixel(origin[0] + x, origin[1] - 1, top[0], top[1], top[2]);
+            putPixel(origin[0] + x, origin[1] + h, bot[0], bot[1], bot[2]);
+        }
+        for (int32_t y = 0; y < h; ++y) {
+            const auto lft = tile[static_cast<size_t>(y) * static_cast<size_t>(w)];
+            const auto rgt = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
+            putPixel(origin[0] - 1, origin[1] + y, lft[0], lft[1], lft[2]);
+            putPixel(origin[0] + w, origin[1] + y, rgt[0], rgt[1], rgt[2]);
+        }
+        {
+            const auto cornerTL = tile[0];
+            const auto cornerTR = tile[static_cast<size_t>(w - 1)];
+            const auto cornerBL = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w)];
+            const auto cornerBR = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
+            putPixel(origin[0] - 1, origin[1] - 1, cornerTL[0], cornerTL[1], cornerTL[2]);
+            putPixel(origin[0] + w, origin[1] - 1, cornerTR[0], cornerTR[1], cornerTR[2]);
+            putPixel(origin[0] - 1, origin[1] + h, cornerBL[0], cornerBL[1], cornerBL[2]);
+            putPixel(origin[0] + w, origin[1] + h, cornerBR[0], cornerBR[1], cornerBR[2]);
         }
         ++facesUnpacked;
     }
@@ -177,22 +231,16 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     // into a blinding surface under direct light.
     MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
     if (lightmapTexture != TextureHandle::Invalid) {
-        // A VRAD lightmap is baked radiance, not a dimensionless occlusion
-        // scalar: wiring it as occlusionMap feeds it through a single-channel
-        // AO lerp (see material_model.slang -- occlusion samples .r only),
-        // which discards the baked color AND darkens every surface. As
-        // emissive it is added to the dynamic lighting, matching Source's
-        // surface shader (lightmap * basecolor + dynamic). The factor must be
-        // set explicitly: MaterialDesc defaults emissive to 0, which would
-        // multiply the map to black.
-        desc.emissive    = {1.0f, 1.0f, 1.0f, 1.0f};
-        desc.emissiveMap = lightmapTexture;
-        // BSP lightmap UVs are emitted into TEXCOORD_1 (see EmitVertex in
-        // BSPGeometry.cpp). Every textureInfo defaults to texCoord = 0, so
-        // without this the emissive sample reads the tiling surface UV and
-        // each face collects random atlas texels -- black walls next to
-        // glowing pools, regardless of how correct the atlas packing is.
-        desc.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Emissive)].texCoord = 1;
+        // A VRAD lightmap is incoming irradiance, so it modulates the surface
+        // colour rather than being added to it. Routing it through
+        // MaterialDesc::emissiveMap would add it after lighting (see
+        // lighting.slang: `... + directSun + directPunctual + emissive`), which
+        // washes every material towards the same grey no matter how dark or
+        // saturated its albedo is. The dedicated lightmap slot is sampled in
+        // material_model.slang and multiplied into the albedo instead.
+        // The UV selector is not needed: SampleBakedRadiosity reads uv1
+        // directly, which is where EmitVertex puts the atlas coordinates.
+        desc.lightmapMap = lightmapTexture;
     }
 
     const auto vmtPath = vfs.ResolveMaterial(part.materialName);

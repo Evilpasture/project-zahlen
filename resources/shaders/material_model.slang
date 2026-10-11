@@ -54,6 +54,7 @@ public struct MaterialSampleInputs {
     public uint sheenRoughnessTexIndex;
     public uint occlusionTexIndex;
     public float occlusionStrength;
+    public uint lightmapTexIndex;
 };
 
 [ForceInline]
@@ -90,6 +91,7 @@ public MaterialSampleInputs MakeMaterialInputs(float2 uv, float4 color, uint4 in
     i.sheenRoughnessTexIndex = 0xFFFFu;
     i.occlusionTexIndex  = 0xFFFFu;
     i.occlusionStrength  = 1.0f;
+    i.lightmapTexIndex   = 0xFFFFu;
     return i;
 }
 
@@ -134,6 +136,34 @@ public void ConfigureSceneMaterial(inout MaterialSampleInputs i, float2 uv1, uin
     i.sheenRoughnessTexIndex = inst.sheenRoughnessTexIndex;
     i.occlusionTexIndex = inst.occlusionTexIndex;
     i.occlusionStrength = inst.occlusionStrength;
+    i.lightmapTexIndex = inst.lightmapTexIndex;
+}
+
+// Matches kLightmapEncodeScale in plugins/BSP/BSPImporter.cpp. VRAD radiance
+// above 1.0 is scaled down before the 8-bit encode so sunlit luxels are not
+// all clipped to the same white; this restores the original magnitude.
+public static const float kBakedRadiosityScale = 4.0f;
+
+// Baked radiosity from a Source lightmap, sampled at the atlas UV in uv1.
+// Deliberately sampled with an explicit LOD of 0 through the clamp sampler
+// rather than through SampleMaterialTexture: the material sampler array is
+// mip-mapped and wrap-addressed, so a lightmap read through it would pull
+// neighbouring faces' luxels across the shelf seams at distance and wrap off
+// the atlas edges. LOD 0 plus clamp-to-edge keeps each tap inside its own
+// cell; the 1-luxel gutter then supplies the border colour bilinear wants.
+
+[ForceInline]
+public float3 SampleBakedRadiosity(MaterialSampleInputs i) {
+    // Unlit materials (KHR_materials_unlit, Source's UnlitGeneric) return their
+    // albedo straight out of the shader without any lighting term, so baked
+    // radiance has nothing to modulate there -- applying it would darken
+    // self-lit fixtures that are supposed to stay flat and bright.
+    if (i.lightmapTexIndex == 0xFFFFu || i.isUnlit) {
+        return float3(1.0f, 1.0f, 1.0f);
+    }
+    return scene.globalTextures[NonUniformResourceIndex(i.lightmapTexIndex)]
+        .SampleLevel(scene.clampSampler, i.uv1, 0.0f)
+        .rgb * kBakedRadiosityScale;
 }
 
 // Staging these operations keeps alpha-only shadow passes from sampling PBR
@@ -169,7 +199,15 @@ public bool RejectMaskedAlpha(MaterialSampleInputs i, float alpha) {
 public struct StandardPBRMaterial : IMaterial {
     [ForceInline]
     public static float4 sampleAlbedo(MaterialSampleInputs i) {
-        return SampleMaterialTexture(i.albedoIndex, MaterialTextureUV(i, kSamplerAlbedo), i.samplerCodes, kSamplerAlbedo) * i.baseColorFactor * i.vertexColor;
+        // Baked radiosity modulates the surface colour, matching Source's
+        // lightmap * texture. Doing it here rather than as an additive term
+        // keeps dark surfaces dark: an added lightmap flattens every material
+        // towards the same milky grey regardless of its albedo. Alpha is left
+        // alone -- coverage is a property of the material, not of the light.
+        float3 baked = SampleBakedRadiosity(i);
+        float4 base  = SampleMaterialTexture(i.albedoIndex, MaterialTextureUV(i, kSamplerAlbedo), i.samplerCodes, kSamplerAlbedo) *
+                      i.baseColorFactor * i.vertexColor;
+        return float4(base.rgb * baked, base.a);
     }
 
     [ForceInline]

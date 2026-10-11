@@ -36,6 +36,9 @@ constexpr float kEpsilon = 1e-6f;
 //   * next-fit shelves left to right over the atlas width, rects packed tight
 constexpr int32_t kLightmapAtlasWidth  = 2048;
 constexpr int32_t kLightmapAtlasHeight = 2048;
+// One luxel of padding reserved on each side of every packed face cell, so a
+// bilinear lightmap sample at a face border cannot reach a neighbouring face.
+inline constexpr int32_t kLightmapGutter = 1;
 
 // texinfo flags, Source bspflags.h. Only the routing-relevant bits are
 // listed; the rest (SURF_WARP for water, SURF_TRANS...) do not change which
@@ -598,7 +601,14 @@ struct LightmapAtlasEntry {
         if (face.lightofs < 0 || face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0) {
             continue;
         }
-        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 1, face.lightmapTextureSizeInLuxels[1] + 1, static_cast<int32_t>(i)});
+        // Reserve one luxel of gutter on every side (hence +2 per axis, on top
+        // of the +1 the (W+1)x(H+1) sample grid already needs). Without it the
+        // bilinear lightmap sample at a face edge reaches into whichever face
+        // the shelf packer happened to put next door, and bright outdoor
+        // luxels bleed onto dark interior walls as glowing outlines. The
+        // gutter itself is filled by the importer with the duplicated edge
+        // luxel, so it is the face's own border colour, not a neighbour's.
+        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 3, face.lightmapTextureSizeInLuxels[1] + 3, static_cast<int32_t>(i)});
     }
     std::stable_sort(rects.begin(), rects.end(), [](const Rect& a, const Rect& b) { return a.h > b.h; });
 
@@ -610,7 +620,10 @@ struct LightmapAtlasEntry {
             y += shelfH;
             shelfH = 0;
         }
-        placements[static_cast<size_t>(r.faceIndex)] = {x, y};
+        // Store the cell's top-left content texel, inset past the gutter.
+        // Vertex UVs derive from this, so the inset needs no compensation
+        // anywhere else.
+        placements[static_cast<size_t>(r.faceIndex)] = {x + kLightmapGutter, y + kLightmapGutter};
         x += r.w;
         shelfH = std::max(shelfH, r.h);
     }
