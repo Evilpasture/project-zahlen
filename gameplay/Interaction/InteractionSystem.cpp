@@ -36,6 +36,71 @@ std::string DebugLabel(const ECS::Registry& registry, Entity e) {
     return "entity#" + std::to_string(e.index);
 }
 
+// Move the player to a named info_teleport_destination: repositions the
+// CharacterVirtual body so its feet land on the destination's floor-level
+// origin, zeroes carried-over velocity so arrival momentum cannot fling the
+// player through the exit room, syncs the ECS transform in the same frame so
+// the view does not lag the physics body, and snaps the camera to the
+// destination's facing the way Source does.
+void TeleportPlayer(
+    ECS::Registry&                  registry,
+    ZHLN::Optional<PhysicsContext&> physics,
+    Entity                          playerEnt,
+    std::string_view                destination,
+    ZHLN::Optional<AudioContext&>   audio
+) {
+    if (destination.empty() || !physics) {
+        return;
+    }
+    const auto playerPhys = registry.Get<Components::PhysicsComponent>(playerEnt);
+    if (!playerPhys || playerPhys->physicsHandle == Physics::BodyHandle::Null()) {
+        return;
+    }
+
+    Entity destEnt = Entity::Null();
+    for (const Entity e: registry.GetEntitiesWith<TeleportDestinationComponent>()) {
+        const auto nameComp = registry.Get<Components::NameComponent>(e);
+        if (nameComp && std::string_view(nameComp->name) == destination) {
+            destEnt = e;
+            break;
+        }
+    }
+    if (destEnt == Entity::Null()) {
+        Log("[Interaction] trigger_teleport target '{}' not found -- no info_teleport_destination with that name", destination);
+        return;
+    }
+    const auto destTrans = registry.Get<Components::TransformComponent>(destEnt);
+    if (!destTrans) {
+        return;
+    }
+
+    // The destination origin is at floor level while the character body origin
+    // sits at the capsule centre, so lift by the shape's own ground offset.
+    const JPH::Vec3 center = destTrans->position + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
+    physics->SetCharacterPosition(playerPhys->physicsHandle, JPH::RVec3(center));
+    physics->SetCharacterVelocity(playerPhys->physicsHandle, JPH::Vec3::sZero());
+
+    if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
+        playerTrans->position = center;
+    }
+
+    // View snap: the destination's Euler triplet rotates +X to
+    // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
+    // formula -- so the camera's yaw/pitch invert straight out of it.
+    const JPH::Vec3 forward = destTrans->rotation.RotateAxisX();
+    if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
+        registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
+            cc.camera.yaw   = std::atan2(forward.GetZ(), forward.GetX()) * 57.29577951308232f;
+            cc.camera.pitch = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * 57.29577951308232f;
+        });
+    }
+
+    if (audio) {
+        audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.15f, .param1 = 440.0f, .duration = 0.06f});
+    }
+    Log("[Interaction] Teleported player to '{}'", destination);
+}
+
 } // namespace
 
 void InteractionSystem::Update(
@@ -122,7 +187,9 @@ void InteractionSystem::Update(
             if (newlyEntered) {
                 FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
                 FireEntityOutputs(registry, triggerEnt, "OnStartTouch", audio);
-                if (!trigger.target.empty()) {
+                if ((trigger.flags & TriggerFlags::Teleports) != TriggerFlags::None) {
+                    TeleportPlayer(registry, physics, playerEnt, std::string_view(trigger.target), audio);
+                } else if (!trigger.target.empty()) {
                     FireEntityInput(registry, std::string_view(trigger.target), "Toggle", "", audio);
                 }
                 if ((trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None) {
@@ -449,6 +516,7 @@ void Install(Engine& engine) {
     reg.RegisterComponent<ButtonComponent>();
     reg.RegisterComponent<EntityConnectionComponent>();
     reg.RegisterComponent<BSPEntityMetadataComponent>();
+    reg.RegisterComponent<TeleportDestinationComponent>();
 
     engine.AddSystemGraphsExtension(&AddSystems);
 }

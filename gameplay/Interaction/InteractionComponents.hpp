@@ -68,6 +68,9 @@ enum class TriggerFlags : uint32_t {
     TouchOpens   = 1u << 4,
     UseOpens     = 1u << 5,
     Fired        = 1u << 6,
+    // trigger_teleport: on entry, move the player to the TeleportDestination
+    // named by `target` instead of firing the generic Toggle input.
+    Teleports    = 1u << 7,
 };
 
 struct TriggerComponent {
@@ -82,6 +85,13 @@ struct TriggerComponent {
     String64 filterName;
     uint64_t scriptHash = 0;
 };
+
+// Marker for a teleport landing point (Source's info_teleport_destination).
+// The entity's NameComponent is the targetname triggers refer to and its
+// TransformComponent carries the destination: position at the floor (Source
+// stores the origin at the feet, like info_player_start) and rotation for the
+// post-teleport view direction.
+struct TeleportDestinationComponent {};
 
 // --- Door Component & States ---
 enum class DoorState : uint8_t { Closed, Opening, Open, Closing };

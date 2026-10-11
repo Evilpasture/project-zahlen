@@ -270,6 +270,12 @@ class ZHLN_API PhysicsContext {
     void SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation);
 
     auto               GetCharacterVelocity(Physics::BodyHandle handle) const -> JPH::Vec3;
+    // Vertical half-extent of a character's collision shape, i.e. the distance
+    // from the body origin (capsule centre) to the soles of its feet. Gameplay
+    // needs this to place feet-referenced spawn points -- Source's
+    // info_player_start and info_teleport_destination origins are at the floor.
+    // Returns 0 for stale or non-character handles.
+    [[nodiscard]] auto GetCharacterGroundOffset(Physics::BodyHandle handle) const -> float;
     [[nodiscard]] auto IsCharacterOnGround(Physics::BodyHandle handle) const -> bool;
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyHandle handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;

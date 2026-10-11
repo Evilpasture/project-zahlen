@@ -751,6 +751,22 @@ auto PhysicsContext::GetCharacterVelocity(Physics::BodyHandle handle) const -> J
     return JPH::Vec3::sZero();
 }
 
+auto PhysicsContext::GetCharacterGroundOffset(Physics::BodyHandle handle) const -> float {
+    if (handle.index < _impl->characterMap.size()) {
+        auto& character = _impl->characterMap[handle.index];
+        if (character != nullptr && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+            // Shapes are authored centred on the body origin, so the local
+            // bounds' +Y half-extent is the centre-to-feet distance: for the
+            // player capsule that is the cylinder half-height plus the cap
+            // radius. The shape offset is included because a shifted shape
+            // moves the feet without moving the body origin.
+            const JPH::AABox bounds = character->GetShape()->GetLocalBounds();
+            return bounds.mMax.GetY() - character->GetShapeOffset().GetY();
+        }
+    }
+    return 0.0f;
+}
+
 auto PhysicsContext::IsCharacterOnGround(Physics::BodyHandle handle) const -> bool {
     if (handle.index < _impl->characterMap.size()) {
         auto& character = _impl->characterMap[handle.index];

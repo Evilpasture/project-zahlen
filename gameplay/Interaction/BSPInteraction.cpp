@@ -4,6 +4,7 @@
 #include "BSPInteraction.hpp"
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPRead.hpp>
+#include <BSP/BSPScene.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -268,6 +269,38 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             continue;
         }
 
+        // Teleport landing points are pure logic: DescribeScene deliberately
+        // keeps info_* classes out of the scene entities, so the interaction
+        // layer creates its own lightweight entity here -- a name and a
+        // transform, no mesh and no physics. trigger_teleport resolves its
+        // `target` keyvalue against these names.
+        if (className == "info_teleport_destination") {
+            const auto destName = entity.Find("targetname");
+            if (destName.empty()) {
+                continue; // unnamed destinations are not addressable
+            }
+            const auto  originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
+            const auto  anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
+            const float pitch     = anglesArr[0] * (3.14159265358979323846f / 180.0f);
+            const float yaw       = anglesArr[1] * (3.14159265358979323846f / 180.0f);
+            const float cp        = std::cos(pitch);
+            // Source forward from the destination's angles, carried into
+            // engine space; roll is irrelevant for an upright view.
+            const JPH::Vec3 forward(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+            const JPH::Vec3 engineAngles  = BSP::EngineAnglesFromDirection(forward, 0.0f, options);
+            const JPH::Vec3 enginePos     = BSP::ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
+            registry.Create(
+                Components::NameComponent {.name = String64(destName)},
+                // Source stores the origin at the feet; keep it that way and
+                // let the teleport lift the character by its own ground offset.
+                Components::TransformComponent {
+                    .position = enginePos, .rotation = Math::EulerDegreesToQuat(engineAngles), .scale = JPH::Vec3::sReplicate(1.0f)
+                },
+                TeleportDestinationComponent {}
+            );
+            continue;
+        }
+
         const bool isDoor =
             (className == "func_door" || className == "func_door_rotating" || className == "prop_door_rotating" || className == "momentary_door");
         const bool isButton  = (className == "func_button" || className == "func_rot_button" || className == "momentary_rot_button");
@@ -497,6 +530,9 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             TriggerFlags trigFlags = TriggerFlags::Active;
             if (className == "trigger_once") {
                 trigFlags |= TriggerFlags::TriggerOnce;
+            }
+            if (className == "trigger_teleport") {
+                trigFlags |= TriggerFlags::Teleports;
             }
 
             auto            srcComp = registry.Get<Components::SceneSourceComponent>(e);
