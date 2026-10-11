@@ -39,7 +39,9 @@ file(GLOB SAMPLE_SOURCES
 #                              interaction (zahlen_interaction); the player is an
 #                              invisible first-person capsule through the character
 #                              controller (<CharacterController/CharacterController.hpp>,
-#                              zahlen_character_controller) instead of a fly cam.
+#                              zahlen_character_controller), and V hands the view to
+#                              the fly cam (<FreeCam/FreeCam.hpp>, zahlen_freecam)
+#                              while that capsule waits where it stood.
 #   FidelityHarness            headless glTF-Render-Fidelity runner: imports
 #                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
 #                              scenario JSONs with ZHLN::ReflectJSON
@@ -55,7 +57,7 @@ set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction zahlen_freecam)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

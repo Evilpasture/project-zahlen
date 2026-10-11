@@ -659,28 +659,29 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 continue;
             }
 
-            // Orient the winding so triangle fronts face the face's own normal
-            // (side == 0 ? +planeNormal : -planeNormal). The file's `side` bit
-            // is NOT a reliable inverse-winding marker: on real compiled maps
-            // the stored loop tracks the PLANE normal (CCW about +N) for both
-            // side values, so any side-bit-driven flip rule inverts a whole
-            // population of perfectly fine faces alongside the ones it fixes.
-            // The only rule that is correct on every map is geometric: compute
-            // this face's own winding normal and flip iff it disagrees with the
-            // face normal. Both consumers key off the result: the renderer
-            // culls back faces (a wrong-side interior wall is culled away and
-            // invisible from inside), and the world Jolt mesh collider made
-            // from these same triangles only contacts rigid bodies on triangle
-            // fronts (an inverted floor drops props straight through; the
+            // Orient the winding so triangle fronts face the face's own front,
+            // which is the PLANE normal: vbsp stores every brush face's plane
+            // with +N pointing out of the solid while the stored surfedge loop
+            // runs the other way (CW about +N) for BOTH side values, so the
+            // geometric fix-up below reverses it. The `side` bit must NOT enter
+            // the rule -- it is tree bookkeeping, not the authored front:
+            // auditing gm_murder_drones against the BSP's own leaf contents
+            // (open air vs CONTENTS_SOLID a few units off each face) puts the
+            // air side on +N for 20414 of 21024 decidable faces across both
+            // side values; flipping on side==1 inverts ~8.6k of them (room-side
+            // invisible under backface culling, normals lit from inside the
+            // wall, and twin-audit back-probes aimed at the wrong side). Both
+            // consumers key off the result: the renderer culls back faces (a
+            // wrong-side interior wall is culled away and invisible from
+            // inside), and the world Jolt mesh collider made from these same
+            // triangles only contacts rigid bodies on triangle fronts (an
+            // inverted floor drops props straight through; the
             // CharacterVirtual walks anywhere only because it opts into
             // EBackFaceMode::CollideWithBackFaces).
             JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
             if (static_cast<size_t>(face.planenum) < map.planes.size()) {
                 const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
                 faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
-                if (face.side != 0) {
-                    faceNormal = -faceNormal;
-                }
             }
             {
                 JPH::Vec3 windingNormal = JPH::Vec3::sZero();

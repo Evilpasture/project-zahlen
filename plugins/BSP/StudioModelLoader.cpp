@@ -294,6 +294,20 @@ auto ParseStudioModel(
                             return newIndex;
                         };
 
+                        // .vtx index data was optimized for the D3D pipeline's
+                        // clockwise-front culling (see gkjohnson's
+                        // source-engine-model-loader NOTES: "THREE assumes
+                        // counter clockwise triangle winding order while
+                        // DirectX (and probably the vtx files) assume
+                        // clockwise order"). This engine's rasterizer is
+                        // CCW-front (VK_FRONT_FACE_COUNTER_CLOCKWISE) with
+                        // backface culling, so emitting the stored order
+                        // draws every prop inside-out. Audited against the
+                        // authored VVD normals on four gm_murder_drones props
+                        // (barrelwarning, Cardboard_box01, cardboard_box001a,
+                        // it_mkt_shelf1): 1168/1168 triangles oppose the
+                        // stored winding. Every emission site below therefore
+                        // reverses each triangle.
                         const size_t vtxStripsOfs = vtxSgOfs + vtxSg->stripOffset;
                         if (vtxStripsOfs + vtxSg->numStrips * sizeof(VtxStrip) <= vtxBytes.size()) {
                             const auto* strips = reinterpret_cast<const VtxStrip*>(vtxBytes.data() + vtxStripsOfs);
@@ -312,8 +326,8 @@ auto ParseStudioModel(
                                             std::swap(i0, i1);
                                         }
                                         part.indices.push_back(getOrAddVertex(i0));
-                                        part.indices.push_back(getOrAddVertex(i1));
                                         part.indices.push_back(getOrAddVertex(i2));
+                                        part.indices.push_back(getOrAddVertex(i1));
                                     }
                                 } else {
                                     // Trilist
@@ -322,8 +336,8 @@ auto ParseStudioModel(
                                         uint16_t i1 = getSgIndex(strip.indexOffset + t + 1);
                                         uint16_t i2 = getSgIndex(strip.indexOffset + t + 2);
                                         part.indices.push_back(getOrAddVertex(i0));
-                                        part.indices.push_back(getOrAddVertex(i1));
                                         part.indices.push_back(getOrAddVertex(i2));
+                                        part.indices.push_back(getOrAddVertex(i1));
                                     }
                                 }
                             }
@@ -331,8 +345,8 @@ auto ParseStudioModel(
                             // Direct trilist from strip group indices
                             for (int32_t t = 0; t + 2 < vtxSg->numIndices; t += 3) {
                                 part.indices.push_back(getOrAddVertex(getSgIndex(t)));
-                                part.indices.push_back(getOrAddVertex(getSgIndex(t + 1)));
                                 part.indices.push_back(getOrAddVertex(getSgIndex(t + 2)));
+                                part.indices.push_back(getOrAddVertex(getSgIndex(t + 1)));
                             }
                         }
                     }

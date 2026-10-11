@@ -58,10 +58,11 @@ class DoorMovementSystem {
 class ButtonMovementSystem {
   public:
     static void Update(
-        ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent> query,
-        ECS::Registry&                                                                                 registry,
-        FrameDt                                                                                        dt,
-        ZHLN::Optional<AudioContext&>                                                                  audio
+        ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
+        ECS::Registry&                                                                                                                   registry,
+        FrameDt                                                                                                                          dt,
+        ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
+        ZHLN::Optional<AudioContext&>                                                                                                    audio
     );
 };
 

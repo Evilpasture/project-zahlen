@@ -297,11 +297,15 @@ void DoorMovementSystem::Update(
             trans->position = door->closedPosition + (door->openPosition - door->closedPosition) * door->progress;
         }
 
-        // Sync with physics body if present
+        // Sync the physics body with the animated transform. Door bodies are
+        // kinematic rigid bodies, so the old SetCharacterPosition call was a
+        // no-op (characters only) and the collider stayed frozen at the closed
+        // pose. Push position and rotation together so rotating doors sweep
+        // their collision as well.
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                 if (phys->physicsHandle.Pack() != 0) {
-                    physics->SetCharacterPosition(phys->physicsHandle, JPH::RVec3(trans->position));
+                    physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
                 }
             }
         }
@@ -309,10 +313,11 @@ void DoorMovementSystem::Update(
 }
 
 void ButtonMovementSystem::Update(
-    ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent> query,
-    ECS::Registry&                                                                                 registry,
-    FrameDt                                                                                        dt,
-    ZHLN::Optional<AudioContext&>                                                                  audio
+    ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
+    ECS::Registry&                                                                                                                   registry,
+    FrameDt                                                                                                                          dt,
+    ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
+    ZHLN::Optional<AudioContext&>                                                                                                    audio
 ) {
     const float deltaTime = dt.value;
     for (Entity e: query.Entities<ButtonComponent>()) {
@@ -365,6 +370,14 @@ void ButtonMovementSystem::Update(
 
         if ((button->flags & ButtonFlags::DontMove) == ButtonFlags::None) {
             trans->position = button->unpressedPosition + (button->pressedPosition - button->unpressedPosition) * button->progress;
+            // Keep the kinematic collider in sync with the moving button.
+            if (physics) {
+                if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
+                    if (phys->physicsHandle.Pack() != 0) {
+                        physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
+                    }
+                }
+            }
         }
     }
 }

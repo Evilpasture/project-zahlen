@@ -8,6 +8,8 @@
 // external lightmap atlas, static prop StudioModels (.mdl/.vvd/.vtx/.phy),
 // interactive entities (doors, buttons, triggers), and spawns the player at
 // info_player_start as an invisible first-person capsule character controller.
+// V swaps that eye for the extensions/FreeCam fly camera while the capsule
+// waits where it stood, so the map can be looked at from the outside.
 //
 // Usage:
 //   ./build/p2996/samples/BSPMurderDronesSample
@@ -18,6 +20,7 @@
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
 #include <CharacterController/CharacterController.hpp>
+#include <FreeCam/FreeCam.hpp>
 #include <Interaction/BSPInteraction.hpp>
 #include <Interaction/InteractionSystem.hpp>
 #include <Zahlen/AssetManager.hpp>
@@ -140,6 +143,10 @@ inline constexpr float kEyeAboveCenter    = 0.72f;
 inline constexpr float kWalkSpeedMeters   = 5.0f; // GMod walk is 200 u/s = 5.08 m/s
 inline constexpr float kJumpForceMeters   = 6.0f; // against the integrator's fixed 32 m/s^2 gravity
 inline constexpr float kLookSensitivity   = 0.12f;
+// Cruise speed for the fly camera the V toggle hands the view to
+// (extensions/FreeCam). Walking is 5 m/s, so this is a map-tour pace, and the
+// extension's own sprint multiplier still applies on Left Shift.
+inline constexpr float kFlySpeedMeters    = 8.0f;
 
 // One sample process, one main camera and one invisible capsule: the rig state
 // is file-static for the same reason the controller extension keeps its
@@ -150,6 +157,8 @@ ZHLN::Entity g_player = ZHLN::Entity::Null();
 // and turns RMB-held mouse motion into view yaw/pitch. Runs before the core
 // CameraSystems step projects the matrices, and the controller extension's
 // PlayerIntent step reads the same Camera yaw to make WASD camera-relative.
+// Yields entirely while the free-camera toggle has the FreeCam tag on the main
+// camera, so the fly cam is the only writer of the pose in that mode.
 void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContext& /*ctx*/) {
     if (g_player == ZHLN::Entity::Null()) {
         return;
@@ -161,6 +170,16 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     }
     const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
     if (camEnt == ZHLN::Entity::Null()) {
+        return;
+    }
+
+    // The tag the V toggle attaches is the one switch both halves read:
+    // FreeCamSystem drives position and look in this same phase, and the
+    // controller extension's PlayerIntent step freezes the capsule's intent off
+    // the same flag. Pinning the eye here would fight the fly cam, so stand down
+    // instead -- the look is not applied twice either, since FreeCam's own step
+    // already turns RMB motion into yaw/pitch.
+    if (reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt)) {
         return;
     }
 
@@ -205,6 +224,8 @@ void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("  Space         - Jump");
     ZHLN::Log("  Left Shift    - Sprint");
     ZHLN::Log("  E             - Interact with doors, buttons, and triggers");
+    ZHLN::Log("  V             - Toggle free camera (WASD fly, Space/E up, Q down, Left Shift fast)");
+    ZHLN::Log("                  The capsule waits where you left it; V puts the view back on it.");
     ZHLN::Log("  Escape        - Quit sample");
     ZHLN::Log("==================================================================");
 }
@@ -327,6 +348,13 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Character::Install(*engine);
     ZHLN::Interaction::Install(*engine);
 
+    // The V toggle reuses the fly camera extension instead of a second
+    // hand-rolled one: FreeCamTag on the main camera is the switch both halves
+    // already read -- its Camera-phase step drives the pose, and the controller
+    // extension's PlayerIntent step freezes the capsule while the tag is on.
+    // Install before InitializeDefaultScene, like the two above.
+    ZHLN::FreeCam::Install(*engine);
+
     // The first-person view is sample-local glue on top: a Camera-phase frame
     // step that pins the view to the player capsule's eye position.
     engine->AddFrameSchedulerExtension(&AddFirstPersonCameraStep);
@@ -338,6 +366,11 @@ auto main(int argc, char* argv[]) -> int {
 #endif
 
     engine->InitializeDefaultScene();
+
+    // Flying is opt-in here. FreeCam's step seeds the boot camera with its tag
+    // unless that camera carries the opt-out marker, so Detach once the main
+    // camera exists and the sample boots on the capsule instead of in the air.
+    ZHLN::FreeCam::Detach(*engine);
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {
@@ -512,18 +545,55 @@ auto main(int argc, char* argv[]) -> int {
     PrintControlsBanner(mapPath.string());
 
     // 10. Frame Loop
+    //
+    // The free-camera toggle lives here rather than in a frame step: it is a
+    // one-shot key edge, and the level it edges against is the input singleton
+    // this loop already reads for the resize. Attaching the FreeCam tag (Attach)
+    // or dropping it (Detach) is the whole mode switch -- FreeCamSystem drives
+    // the pose while it is on, FirstPersonCameraStep yields to it, and the
+    // controller extension freezes the capsule's intent off the same flag.
+    bool freeCamKeyWasDown = false;
+
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
         engine->ProcessEvents();
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
 
         {
-            auto& reg = engine->GetRegistry();
-            if (auto st = reg.GetSingleton<ZHLN::Components::InputStateComponent>(); st && st->needsResize) {
-                engine->GetRenderContext().SetResolution(st->newSize);
-                st->needsResize = false;
+            auto&      reg   = engine->GetRegistry();
+            const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+            if (input && input->needsResize) {
+                engine->GetRenderContext().SetResolution(input->newSize);
+                input->needsResize = false;
                 continue;
             }
+
+            // Raw, like the other samples' edge detection: no console or text
+            // field in this sample captures the keyboard.
+            const bool freeCamKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::V));
+            if (freeCamKeyDown && !freeCamKeyWasDown) {
+                const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+                bool               flying = false;
+                if (camEnt != ZHLN::Entity::Null()) {
+                    flying = static_cast<bool>(reg.Get<ZHLN::FreeCam::FreeCamTagComponent>(camEnt));
+                }
+                if (flying) {
+                    // Detach drops the tag and leaves the opt-out marker behind,
+                    // so FreeCamSystem stops driving the camera and this frame's
+                    // FirstPersonCamera step pins the view back onto the capsule.
+                    ZHLN::FreeCam::Detach(*engine);
+                    ZHLN::Log("[BSPSample] Free camera off: view returns to the capsule.");
+                } else {
+                    // The camera is still on the eye from last frame, so the
+                    // flight starts where the player's head was. The fly cam
+                    // brings its own bindings -- Space/E up, Q down -- and E
+                    // still interacts with whatever the capsule, not the camera,
+                    // is standing next to.
+                    ZHLN::FreeCam::Attach(*engine, kFlySpeedMeters);
+                    ZHLN::Log("[BSPSample] Free camera on: WASD fly, Space/E up, Q down, Left Shift fast. The capsule waits where you left it.");
+                }
+            }
+            freeCamKeyWasDown = freeCamKeyDown;
         }
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
