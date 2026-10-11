@@ -23,6 +23,18 @@ namespace {
 
 constexpr float kEpsilon = 1e-6f;
 
+// Width/height of the engine-side lightmap atlas texture (the
+// *_lightmap0.png). The atlas is NOT the raw luxel page from the BSP: its
+// layout is produced by repacking every face's (size+1 x size+1) sample rect
+// with a deterministic shelf packer, so the importer reproduces the exact
+// same packing analytically and emits UVs that land on the atlas the renderer
+// actually samples. Scheme (must match the offline atlas generator exactly):
+//   * one rect per face with lightofs >= 0 and sizeU,sizeV > 0, dims size+1
+//   * stable sort by height descending; ties keep ascending face index
+//   * next-fit shelves left to right over the atlas width, rects packed tight
+constexpr int32_t kLightmapAtlasWidth  = 2048;
+constexpr int32_t kLightmapAtlasHeight = 2048;
+
 // texinfo flags, Source bspflags.h. Only the routing-relevant bits are
 // listed; the rest (SURF_WARP for water, SURF_TRANS...) do not change which
 // side of the render/physics split a face lands on.
@@ -139,6 +151,10 @@ struct FaceProjection {
     int32_t   lightmapMins[2] {0, 0};
     int32_t   lightmapSize[2] {0, 0};
     bool      hasLightmap = false;
+    // Repacked shelf-atlas origin for this face's sample rect in the
+    // engine-side 2048x2048 lightmap atlas (see ComputeLightmapAtlas); -1/-1
+    // when the face has no atlas placement.
+    int32_t   atlasOrigin[2] {-1, -1};
 };
 
 [[nodiscard]] auto ProjectionFor(const BSPMap& map, const DFace& face) -> std::optional<FaceProjection> {
@@ -284,8 +300,17 @@ void EmitVertex(
         // render pitch black or glowing, looking "missing".
         const float sLuxel = sourcePos.Dot(projection.lightmapSDir) + projection.lightmapSOffset;
         const float tLuxel = sourcePos.Dot(projection.lightmapTDir) + projection.lightmapTOffset;
-        lmU = (result.lightmapPageWidth > 0.0f) ? std::clamp((sLuxel + 0.5f) / result.lightmapPageWidth, 0.0f, 1.0f) : 0.0f;
-        lmV = (result.lightmapPageHeight > 0.0f) ? std::clamp((tLuxel + 0.5f) / result.lightmapPageHeight, 0.0f, 1.0f) : 0.0f;
+        if (projection.atlasOrigin[0] >= 0) {
+            // dot(p, lightmapS/TDir) + offset is the absolute luxel coordinate
+            // in the raw page; subtracting the face's mins corner gives the
+            // in-rect luxel, and the repacked atlas origin places it on the
+            // 2048x2048 engine atlas alongside the baked image.
+            lmU = std::clamp((projection.atlasOrigin[0] + (sLuxel - projection.lightmapMins[0]) + 0.5f) / kLightmapAtlasWidth, 0.0f, 1.0f);
+            lmV = std::clamp((projection.atlasOrigin[1] + (tLuxel - projection.lightmapMins[1]) + 0.5f) / kLightmapAtlasHeight, 0.0f, 1.0f);
+        } else {
+            lmU = (result.lightmapPageWidth > 0.0f) ? std::clamp((sLuxel + 0.5f) / result.lightmapPageWidth, 0.0f, 1.0f) : 0.0f;
+            lmV = (result.lightmapPageHeight > 0.0f) ? std::clamp((tLuxel + 0.5f) / result.lightmapPageHeight, 0.0f, 1.0f) : 0.0f;
+        }
     }
 
     const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
@@ -383,23 +408,58 @@ auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JP
     return JPH::Vec3(in.GetX(), in.GetZ(), -in.GetY());
 }
 
+struct LightmapAtlasEntry {
+    int32_t x = -1;
+    int32_t y = -1;
+};
+
+[[nodiscard]] auto ComputeLightmapAtlas(const BSPMap& map) -> std::vector<LightmapAtlasEntry> {
+    struct Rect {
+        int32_t w, h, faceIndex;
+    };
+    std::vector<Rect> rects;
+    rects.reserve(map.faces.size());
+    for (size_t i = 0; i < map.faces.size(); ++i) {
+        const DFace& face = map.faces[i];
+        if (face.lightofs < 0 || face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0) {
+            continue;
+        }
+        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 1, face.lightmapTextureSizeInLuxels[1] + 1, static_cast<int32_t>(i)});
+    }
+    std::stable_sort(rects.begin(), rects.end(), [](const Rect& a, const Rect& b) { return a.h > b.h; });
+
+    std::vector<LightmapAtlasEntry> placements(map.faces.size());
+    int32_t                         x = 0, y = 0, shelfH = 0;
+    for (const Rect& r: rects) {
+        if (x + r.w > kLightmapAtlasWidth) {
+            x = 0;
+            y += shelfH;
+            shelfH = 0;
+        }
+        placements[static_cast<size_t>(r.faceIndex)] = {x, y};
+        x += r.w;
+        shelfH = std::max(shelfH, r.h);
+    }
+    return placements;
+}
+
 auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> ImportedMapData {
     ImportedMapData result;
     bool            globalBoundsFirst = true;
 
-    // Lightmap atlas extent: baked lightmap pages (the *_lightmap0.png dumps
-    // that community tools produce) place each face's sample rect at its
-    // lightmap mins inside one shared page, so vertex lightmap UVs must be in
-    // that page's coordinate space. The page is max(mins + allocated samples)
-    // across faces; Source reserves size+1 luxels per axis per face.
+    // Lightmap atlas: reproduced analytically from the same shelf packer the
+    // offline atlas generator used to lay out the *_lightmap0.png (see
+    // ComputeLightmapAtlas). Every vertex's lightmap UV is then expressed in
+    // that atlas' coordinate space. The raw-BSP mins/page size is NOT the
+    // atlas layout: raw-page UVs (the old code) scatter each face's samples
+    // over unrelated rectangles -- surfaces read black or glow at random.
+    const std::vector<LightmapAtlasEntry> lightmapAtlas = ComputeLightmapAtlas(map);
     for (const DFace& face: map.faces) {
-        if (face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0) {
-            continue;
+        if (face.lightofs >= 0 && face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0) {
+            result.lightmapPageWidth  = kLightmapAtlasWidth;
+            result.lightmapPageHeight = kLightmapAtlasHeight;
+            break;
         }
-        result.lightmapPageWidth =
-            std::max(result.lightmapPageWidth, static_cast<float>(face.lightmapTextureMinsInLuxels[0] + face.lightmapTextureSizeInLuxels[0] + 1));
-        result.lightmapPageHeight =
-            std::max(result.lightmapPageHeight, static_cast<float>(face.lightmapTextureMinsInLuxels[1] + face.lightmapTextureSizeInLuxels[1] + 1));
     }
 
     for (const DModel& model: map.models) {
@@ -421,20 +481,43 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 continue;
             }
 
-            // Faces on the back side of their plane (side != 0) store their
-            // winding reversed in the file: the loop is CCW about the plane's
-            // normal, opposite to the face's own normal. Emit vertices in the
-            // face-normal orientation instead, keeping triangle fronts
-            // consistent with the flipped faceNormal below. This one flip is
-            // what both consumers key off: the renderer culls back faces (an
-            // unreversed interior wall is culled away and invisible from
-            // inside), and the world Jolt mesh collider is built from these
-            // same triangles (rigid bodies resting on an unreversed floor
-            // contact only its front side and drop straight through; the
+            // Orient the winding so triangle fronts face the face's own normal
+            // (side == 0 ? +planeNormal : -planeNormal). The file's `side` bit
+            // is NOT a reliable inverse-winding marker: on real compiled maps
+            // the stored loop tracks the PLANE normal (CCW about +N) for both
+            // side values, so any side-bit-driven flip rule inverts a whole
+            // population of perfectly fine faces alongside the ones it fixes.
+            // The only rule that is correct on every map is geometric: compute
+            // this face's own winding normal and flip iff it disagrees with the
+            // face normal. Both consumers key off the result: the renderer
+            // culls back faces (a wrong-side interior wall is culled away and
+            // invisible from inside), and the world Jolt mesh collider made
+            // from these same triangles only contacts rigid bodies on triangle
+            // fronts (an inverted floor drops props straight through; the
             // CharacterVirtual walks anywhere only because it opts into
             // EBackFaceMode::CollideWithBackFaces).
-            if (face.side != 0) {
-                std::reverse(winding->begin(), winding->end());
+            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
+            if (static_cast<size_t>(face.planenum) < map.planes.size()) {
+                const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
+                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+                if (face.side != 0) {
+                    faceNormal = -faceNormal;
+                }
+            }
+            {
+                JPH::Vec3 windingNormal = JPH::Vec3::sZero();
+                for (size_t i = 0; i < winding->size(); ++i) {
+                    const JPH::Vec3& a = (*winding)[i];
+                    const JPH::Vec3& b = (*winding)[(i + 1) % winding->size()];
+                    windingNormal += JPH::Vec3(
+                        (a.GetY() - b.GetY()) * (a.GetZ() + b.GetZ()),
+                        (a.GetZ() - b.GetZ()) * (a.GetX() + b.GetX()),
+                        (a.GetX() - b.GetX()) * (a.GetY() + b.GetY())
+                    );
+                }
+                if (windingNormal.Dot(faceNormal) < 0.0f) {
+                    std::reverse(winding->begin(), winding->end());
+                }
             }
 
             // Tool-texture classes: skip fog/trigger/hint entirely (they are
@@ -453,25 +536,20 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 continue;
             }
 
-            const auto projection = ProjectionFor(map, face);
+            auto projection = ProjectionFor(map, face);
             if (!projection) {
                 ++result.stats.droppedNoProjection;
                 continue;
+            }
+            if (projection->hasLightmap && faceIndex < lightmapAtlas.size() && lightmapAtlas[faceIndex].x >= 0) {
+                projection->atlasOrigin[0] = lightmapAtlas[faceIndex].x;
+                projection->atlasOrigin[1] = lightmapAtlas[faceIndex].y;
             }
 
             const std::string_view materialName = MaterialNameFor(map, face);
             MaterialStreams&       part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
-            }
-
-            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
-            if (static_cast<size_t>(face.planenum) < map.planes.size()) {
-                const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
-                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
-                if (face.side != 0) {
-                    faceNormal = -faceNormal;
-                }
             }
 
             const uint32_t baseVertex      = part.VertexCount();

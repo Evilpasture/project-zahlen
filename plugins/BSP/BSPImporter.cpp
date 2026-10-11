@@ -81,6 +81,12 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     MaterialDesc desc = MaterialDesc::Basic({1.0f, 1.0f, 1.0f, 1.0f}, 0.8f, 0.0f, false);
     if (lightmapTexture != TextureHandle::Invalid) {
         desc.occlusionMap = lightmapTexture;
+        // BSP lightmap UVs are emitted into TEXCOORD_1 (see EmitVertex in
+        // BSPGeometry.cpp). Every textureInfo defaults to texCoord = 0, so
+        // without this the occlusion sample reads the tiling surface UV and
+        // each face collects random atlas texels -- black walls next to
+        // glowing pools, regardless of how correct the atlas packing is.
+        desc.textureTransforms[static_cast<size_t>(MaterialTextureSlot::Occlusion)].texCoord = 1;
     }
 
     const auto vmtPath = vfs.ResolveMaterial(part.materialName);
