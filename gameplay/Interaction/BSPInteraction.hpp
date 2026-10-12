@@ -27,6 +27,18 @@ void FireEntityInput(
     ZHLN::Optional<AudioContext&> audio     = std::nullopt
 );
 
+// Same dispatch applied to one already-resolved entity. Used by the
+// interaction step, which knows the exact entity it is looking at -- unnamed
+// brush doors/buttons have an empty targetname, so the named lookup above
+// can never reach them.
+void FireEntityInput(
+    ECS::Registry&                registry,
+    Entity                        entity,
+    std::string_view              input,
+    std::string_view              parameter = "",
+    ZHLN::Optional<AudioContext&> audio     = std::nullopt
+);
+
 // Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.)
 void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
 

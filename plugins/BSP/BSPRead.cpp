@@ -9,6 +9,7 @@
 
 #include "BSPRead.hpp"
 #include <algorithm>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -124,22 +125,253 @@ auto BSPEntity::Find(std::string_view key) const noexcept -> std::string_view {
     return {};
 }
 
-auto BSPEntity::FindVector(std::string_view key, float out[3]) const noexcept -> bool {
+auto BSPEntity::FindVector(std::string_view key) const noexcept -> std::optional<std::array<float, 3>> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {
+        return std::nullopt;
+    }
+    const char*          cur = raw.data();
+    const char*          end = raw.data() + raw.size();
+    std::array<float, 3> result {};
+    for (size_t k = 0; k < 3; ++k) {
+        while (cur < end && (*cur == ' ' || *cur == '\t')) {
+            cur++;
+        }
+        if (cur >= end) {
+            return std::nullopt;
+        }
+        auto [ptr, ec] = std::from_chars(cur, end, result[k]);
+        if (ec != std::errc {}) {
+            return std::nullopt;
+        }
+        cur = ptr;
+    }
+    return result;
+}
+
+auto BSPEntity::FindVector(std::string_view key, float out[3]) const noexcept -> bool {
+    const auto vec = FindVector(key);
+    if (!vec) {
         return false;
     }
-    const std::string buffer(raw);
-    const char*       cursor = buffer.c_str();
-    char*             end    = nullptr;
-    for (size_t k = 0; k < 3; ++k) {
-        out[k] = std::strtof(cursor, &end);
-        if (end == cursor) {
-            return false;
-        }
-        cursor = end;
-    }
+    out[0] = (*vec)[0];
+    out[1] = (*vec)[1];
+    out[2] = (*vec)[2];
     return true;
+}
+
+auto BSPEntity::FindFloat(std::string_view key) const noexcept -> std::optional<float> {
+    const std::string_view raw = Find(key);
+    if (raw.empty()) {
+        return std::nullopt;
+    }
+    const char* cur = raw.data();
+    const char* end = raw.data() + raw.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return std::nullopt;
+    }
+    float val = 0.0f;
+    if (auto [ptr, ec] = std::from_chars(cur, end, val); ec == std::errc {}) {
+        return val;
+    }
+    return std::nullopt;
+}
+
+auto BSPEntity::FindInt(std::string_view key) const noexcept -> std::optional<int32_t> {
+    const std::string_view raw = Find(key);
+    if (raw.empty()) {
+        return std::nullopt;
+    }
+    const char* cur = raw.data();
+    const char* end = raw.data() + raw.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return std::nullopt;
+    }
+    int32_t val = 0;
+    if (auto [ptr, ec] = std::from_chars(cur, end, val); ec == std::errc {}) {
+        return val;
+    }
+    return std::nullopt;
+}
+
+auto ParseGameLump(std::span<const std::byte> file, const LumpEntry& gameLumpEntry, BSPMap& map)
+    -> std::expected<void, ErrorCode> {
+    if (gameLumpEntry.filelen == 0) {
+        return {};
+    }
+    if (gameLumpEntry.fileofs < 0 || gameLumpEntry.filelen < 0 ||
+        static_cast<size_t>(gameLumpEntry.fileofs) + static_cast<size_t>(gameLumpEntry.filelen) > file.size()) {
+        return std::unexpected(BSPError::LumpOutOfBounds);
+    }
+    if (gameLumpEntry.filelen < static_cast<int32_t>(sizeof(int32_t))) {
+        return {};
+    }
+
+    const auto gameLumpSpan = file.subspan(static_cast<size_t>(gameLumpEntry.fileofs), static_cast<size_t>(gameLumpEntry.filelen));
+    ByteReader reader(gameLumpSpan);
+
+    int32_t lumpCount = 0;
+    if (!reader.Read(lumpCount) || lumpCount < 0) {
+        return std::unexpected(BSPError::MalformedLump);
+    }
+
+    map.gameLumps.reserve(static_cast<size_t>(lumpCount));
+    const DGameLump* sprpLump = nullptr;
+
+    for (int32_t i = 0; i < lumpCount; ++i) {
+        DGameLump gl {};
+        if (!reader.Read(gl)) {
+            return std::unexpected(BSPError::ShortRead);
+        }
+        map.gameLumps.push_back(gl);
+        if (gl.id == kGameLumpStaticProps || gl.id == kGameLumpStaticPropsAlt) {
+            sprpLump = &map.gameLumps.back();
+        }
+    }
+
+    if (!sprpLump || sprpLump->filelen <= 0) {
+        return {};
+    }
+
+    size_t sprpOffset = static_cast<size_t>(sprpLump->fileofs);
+    const size_t sprpLen = static_cast<size_t>(sprpLump->filelen);
+    if (sprpLump->fileofs < 0 || sprpOffset + sprpLen > file.size()) {
+        if (static_cast<size_t>(gameLumpEntry.fileofs) + sprpOffset + sprpLen <= file.size()) {
+            sprpOffset += static_cast<size_t>(gameLumpEntry.fileofs);
+        } else {
+            return std::unexpected(BSPError::LumpOutOfBounds);
+        }
+    }
+
+    if ((sprpLump->flags & 1) != 0) {
+        return {};
+    }
+
+    const auto sprpSpan = file.subspan(sprpOffset, sprpLen);
+    ByteReader propReader(sprpSpan);
+
+    // 1. Model Dictionary
+    int32_t dictEntries = 0;
+    if (!propReader.Read(dictEntries) || dictEntries < 0) {
+        return {};
+    }
+    std::vector<std::string> modelDict;
+    modelDict.reserve(static_cast<size_t>(dictEntries));
+    for (int32_t i = 0; i < dictEntries; ++i) {
+        char nameBuf[128] {};
+        if (!propReader.Read(nameBuf)) {
+            return {};
+        }
+        nameBuf[127] = '\0';
+        modelDict.emplace_back(nameBuf);
+    }
+
+    // 2. Leaf Array
+    int32_t leafEntries = 0;
+    if (!propReader.Read(leafEntries) || leafEntries < 0) {
+        return {};
+    }
+    if (!propReader.Skip(static_cast<size_t>(leafEntries) * sizeof(uint16_t))) {
+        return {};
+    }
+
+    // 3. Static Props
+    int32_t propCount = 0;
+    if (!propReader.Read(propCount) || propCount < 0) {
+        return {};
+    }
+
+    if (propCount == 0) {
+        return {};
+    }
+
+    const uint16_t version = sprpLump->version;
+    size_t stride = 56;
+    if ((propReader.Remaining() % static_cast<size_t>(propCount)) == 0 &&
+        (propReader.Remaining() / static_cast<size_t>(propCount)) >= 56) {
+        stride = propReader.Remaining() / static_cast<size_t>(propCount);
+    } else {
+        switch (version) {
+            case 4:  stride = 56; break;
+            case 5:  stride = 60; break;
+            case 6:  stride = 64; break;
+            case 7:  stride = 68; break;
+            case 8:  stride = 68; break;
+            case 9:  stride = 72; break;
+            case 10: stride = 76; break;
+            case 11: stride = 80; break;
+            default: stride = (version >= 11) ? 80 : 56; break;
+        }
+    }
+
+    if (stride < 56 || propReader.Remaining() < static_cast<size_t>(propCount) * stride) {
+        return std::unexpected(BSPError::ShortRead);
+    }
+
+    map.staticProps.reserve(static_cast<size_t>(propCount));
+    for (int32_t i = 0; i < propCount; ++i) {
+        const size_t propStart = propReader.Cursor();
+        StaticProp prop;
+
+        float origin[3] {};
+        float angles[3] {};
+        float lightingOrigin[3] {};
+
+        if (!propReader.Read(origin) ||
+            !propReader.Read(angles) ||
+            !propReader.Read(prop.propType) ||
+            !propReader.Read(prop.firstLeaf) ||
+            !propReader.Read(prop.leafCount) ||
+            !propReader.Read(prop.solid) ||
+            !propReader.Read(prop.flags) ||
+            !propReader.Read(prop.skin) ||
+            !propReader.Read(prop.fadeMinDist) ||
+            !propReader.Read(prop.fadeMaxDist) ||
+            !propReader.Read(lightingOrigin)) {
+            return std::unexpected(BSPError::ShortRead);
+        }
+
+        prop.origin         = {origin[0], origin[1], origin[2]};
+        prop.angles         = {angles[0], angles[1], angles[2]};
+        prop.lightingOrigin = {lightingOrigin[0], lightingOrigin[1], lightingOrigin[2]};
+
+        if (prop.propType < modelDict.size()) {
+            prop.modelName = modelDict[prop.propType];
+        }
+
+        if (version >= 5 && stride >= 60) {
+            float fadeScale = 1.0f;
+            std::memcpy(&fadeScale, sprpSpan.data() + propStart + 56, sizeof(float));
+            prop.forcedFadeScale = fadeScale;
+        }
+
+        if (version >= 7 && stride >= 68) {
+            uint8_t rgba[4] {};
+            std::memcpy(rgba, sprpSpan.data() + propStart + 64, 4);
+            if (rgba[0] != 0 || rgba[1] != 0 || rgba[2] != 0 || rgba[3] != 0) {
+                std::memcpy(prop.diffuseModulation.data(), rgba, 4);
+            }
+        }
+
+        if (version >= 11 && stride >= 76) {
+            float uScale = 1.0f;
+            std::memcpy(&uScale, sprpSpan.data() + propStart + stride - sizeof(float), sizeof(float));
+            if (uScale > 0.0001f && uScale < 10000.0f) {
+                prop.uniformScale = uScale;
+            }
+        }
+
+        map.staticProps.push_back(std::move(prop));
+        propReader.Skip(stride - (propReader.Cursor() - propStart));
+    }
+
+    return {};
 }
 
 auto ParseEntities(std::string_view text) -> std::vector<BSPEntity> {
@@ -219,8 +451,34 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     if (auto res = ReadLumpArray(bytes, lump(Lump::SurfEdges), map.surfEdges); !res) {
         return std::unexpected(res.error());
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !res) {
-        return std::unexpected(res.error());
+
+    const LumpEntry* facesLump = &lump(Lump::Faces);
+    if (lump(Lump::FacesHDR).filelen > 0) {
+        facesLump = &lump(Lump::FacesHDR);
+    }
+    if (auto res = ReadLumpArray(bytes, *facesLump, map.faces); !res) {
+        if (facesLump != &lump(Lump::Faces)) {
+            if (auto fallbackRes = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !fallbackRes) {
+                return std::unexpected(res.error());
+            }
+        } else {
+            return std::unexpected(res.error());
+        }
+    }
+
+    // VRAD radiosity as raw bytes: prefer LUMP_LIGHTING_HDR (58), fall back to
+    // LDR LUMP_LIGHTING (8). Not decoded here; the importer walks DFace::lightofs
+    // against this buffer when building the lightmap atlas.
+    {
+        const bool       useHDR = lump(Lump::LightingHDR).filelen > 0;
+        const LumpEntry& lit    = useHDR ? lump(Lump::LightingHDR) : lump(Lump::Lighting);
+        if (lit.filelen > 0) {
+            if (lit.fileofs < 0 || static_cast<size_t>(lit.fileofs) + static_cast<size_t>(lit.filelen) > bytes.size()) {
+                return std::unexpected(BSPError::LumpOutOfBounds);
+            }
+            map.lighting.assign(bytes.begin() + lit.fileofs, bytes.begin() + lit.fileofs + lit.filelen);
+            map.lightingHDR = useHDR;
+        }
     }
     if (auto res = ReadLumpArray(bytes, lump(Lump::TexInfo), map.texInfos); !res) {
         return std::unexpected(res.error());
@@ -250,16 +508,28 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
-    // Leaves: version 0 is 30-byte DLeaf, version 1 appends two padding bytes.
+    // Leaves: support version 0 (30 bytes or 32/56 with padding/ambient) and version 1 (32 bytes).
     const LumpEntry& leafLump = lump(Lump::Leafs);
     if (leafLump.filelen > 0) {
-        const size_t stride = (leafLump.version == 1) ? sizeof(DLeaf) + 2 : sizeof(DLeaf);
         if (leafLump.fileofs < 0 || leafLump.filelen < 0 || static_cast<size_t>(leafLump.fileofs) + static_cast<size_t>(leafLump.filelen) > bytes.size()) {
             return std::unexpected(BSPError::LumpOutOfBounds);
         }
-        if (static_cast<size_t>(leafLump.filelen) % stride != 0) {
+
+        size_t stride = 0;
+        if (leafLump.version == 1 && (leafLump.filelen % (sizeof(DLeaf) + 2)) == 0) {
+            stride = sizeof(DLeaf) + 2; // 32
+        } else if (leafLump.filelen % sizeof(DLeaf) == 0) {
+            stride = sizeof(DLeaf); // 30
+        } else if (leafLump.filelen % 32 == 0) {
+            stride = 32;
+        } else if (leafLump.filelen % 56 == 0) {
+            stride = 56;
+        }
+
+        if (stride == 0) {
             return std::unexpected(BSPError::MalformedLump);
         }
+
         ByteReader   in(bytes.subspan(static_cast<size_t>(leafLump.fileofs), static_cast<size_t>(leafLump.filelen)));
         const size_t count = static_cast<size_t>(leafLump.filelen) / stride;
         map.leafs.resize(count);
@@ -271,6 +541,10 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
     }
 
     if (auto res = ReadTexNames(bytes, lump(Lump::TexDataStringData), lump(Lump::TexDataStringTable), map.texDatas, map.texNames); !res) {
+        return std::unexpected(res.error());
+    }
+
+    if (auto res = ParseGameLump(bytes, lump(Lump::GameLump), map); !res) {
         return std::unexpected(res.error());
     }
 

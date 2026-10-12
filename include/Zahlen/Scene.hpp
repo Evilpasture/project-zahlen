@@ -36,7 +36,7 @@ struct Transform {
     JPH::Float3 scale    = {1.0f, 1.0f, 1.0f};
 };
 
-enum class ShapeKind : uint8_t { Box, Plane, Prefab };
+enum class ShapeKind : uint8_t { Box, Plane, Prefab, Empty };
 
 enum class BodyKind : uint8_t { None, Static, Dynamic, Kinematic };
 
@@ -59,6 +59,10 @@ struct SceneEntity {
 
     Transform     transform;
     BodyKind      body = BodyKind::None;
+    // Dynamic bodies start dormant: the body exists and collides, but does
+    // not simulate until a force or an active body disturbs it. Mirrors the
+    // Source prop_physics "Start Asleep" behaviour.
+    bool          startsAsleep = false;
     SceneMaterial material;
 };
 
@@ -71,8 +75,11 @@ struct SceneLight {
     JPH::Float3 color       = {1.0f, 1.0f, 1.0f};
     float       intensity   = 100.0f;
     float       radius      = 0.5f;
-    float       range       = 20.0f;
+    float       range      = 20.0f;
     int32_t     shadowLayer = -1;
+    // Spot cone angles in radians from the axis (0 = none authored).
+    float innerConeRadians = 0.0f;
+    float outerConeRadians = 0.0f;
 };
 
 struct SceneCamera {

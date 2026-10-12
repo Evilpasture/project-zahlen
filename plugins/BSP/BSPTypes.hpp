@@ -16,6 +16,8 @@
 // field-wise reader in BSPRead.hpp read any of these in one code path
 // instead of one hand-written reader per lump, per version.
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 
 namespace ZHLN::BSP {
@@ -29,37 +31,54 @@ inline constexpr int32_t kBspVersionMax = 21;
 inline constexpr int32_t kTexInfoNode = -1;
 
 enum class Lump : uint32_t {
-    Entities           = 0,
-    Planes             = 1,
-    TexData            = 2,
-    Vertexes           = 3,
-    Visibility         = 4,
-    Nodes              = 5,
-    TexInfo            = 6,
-    Faces              = 7,
-    Lighting           = 8,
-    Leafs              = 9,
-    FaceIds            = 10,
-    Edges              = 12,
-    SurfEdges          = 13,
-    Models             = 14,
-    WorldLights        = 15,
-    LeafFaces          = 16,
-    LeafBrushes        = 17,
-    Brushes            = 18,
-    BrushSides         = 19,
-    Areas              = 20,
-    AreaPortals        = 21,
-    DispInfo           = 26,
-    DispVerts          = 27,
-    DispTris           = 28,
-    GameLump           = 35,
-    PakFile            = 40,
-    Cubemaps           = 41,
-    TexDataStringData  = 43,
-    TexDataStringTable = 44,
-    Overlays           = 45,
-    Count              = 64
+    Entities                    = 0,
+    Planes                      = 1,
+    TexData                     = 2,
+    Vertexes                    = 3,
+    Visibility                  = 4,
+    Nodes                       = 5,
+    TexInfo                     = 6,
+    Faces                       = 7,
+    Lighting                    = 8,
+    Occlusion                   = 9,
+    Leafs                       = 10,
+    FaceIds                     = 11,
+    Edges                       = 12,
+    SurfEdges                   = 13,
+    Models                      = 14,
+    WorldLights                 = 15,
+    LeafFaces                   = 16,
+    LeafBrushes                 = 17,
+    Brushes                     = 18,
+    BrushSides                  = 19,
+    Areas                       = 20,
+    AreaPortals                 = 21,
+    DispInfo                    = 26,
+    OriginalFaces               = 27,
+    PhysDisp                    = 28,
+    PhysCollide                 = 29,
+    VertNormals                 = 30,
+    VertNormalIndices           = 31,
+    DispLightmapAlphas          = 32,
+    DispVerts                   = 33,
+    DispLightmapSamplePositions = 34,
+    GameLump                    = 35,
+    LeafWaterData               = 36,
+    Primitives                  = 37,
+    PrimVerts                   = 38,
+    PrimIndices                 = 39,
+    PakFile                     = 40,
+    ClipPortalVerts             = 41,
+    Cubemaps                    = 42,
+    TexDataStringData           = 43,
+    TexDataStringTable          = 44,
+    Overlays                    = 45,
+    LeafMinDistToWater          = 46,
+    FaceMacroTextureInfo        = 47,
+    DispTris                    = 48,
+    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR, VRAD radiosity (ColorRGBExp32)
+    FacesHDR                    = 58, // v20+: LUMP_FACES_HDR, face list whose lightofs address LightingHDR
+    Count                       = 64
 };
 
 #pragma pack(push, 1)
@@ -225,7 +244,20 @@ struct DOverlay {
     float    basisNormal[3];
 };
 
+// LUMP_GAMELUMP (Lump 35): dgamelump_t directory entry (16 bytes)
+struct DGameLump {
+    int32_t  id;      // FourCC (e.g. 'sprp' 0x70727073)
+    uint16_t flags;   // Flags (bit 0: compressed with LZMA)
+    uint16_t version; // Game lump version
+    int32_t  fileofs; // Absolute byte offset from start of BSP file
+    int32_t  filelen; // Byte length of game lump data
+};
+
 #pragma pack(pop)
+
+// Game lump identifiers
+inline constexpr int32_t kGameLumpStaticProps    = 0x70727073; // 'sprp' (little-endian)
+inline constexpr int32_t kGameLumpStaticPropsAlt = 0x73707270; // 'prps' (big-endian)
 
 static_assert(sizeof(LumpEntry) == 16);
 static_assert(sizeof(BspHeader) == 4 + 4 + 16 * 64);
@@ -243,5 +275,27 @@ static_assert(sizeof(DLeaf) == 30);
 static_assert(sizeof(DBrush) == 12);
 static_assert(sizeof(DBrushSide) == 8);
 static_assert(sizeof(DOverlay) == 352);
+static_assert(sizeof(DGameLump) == 16);
+
+// Source's ColorRGBExp32, the on-disk unit of LUMP_LIGHTING_HDR and
+// LUMP_LIGHTING: linear value = byte * 2^E with E the exponent byte read as
+// SIGNED (Source SDK's ColorRGBExp32ToVector does ldexp(byte, exponent) with
+// the signed char directly -- no 128 bias, no /255). Measured on
+// gm_murder_drones: mantissas 16-21 with exponents 245-252 (int8 -11..-4),
+// i.e. dim luxels around 0.1; a bias-128 read of the same bytes inflates them
+// by 2^121 (saturating the whole atlas white), while byte/255 shrinks them by
+// 255x (the original near-black interiors).
+struct ColorRGBExp32 {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    int8_t  exponent;
+};
+static_assert(sizeof(ColorRGBExp32) == 4);
+
+// Decode one RGBE texel to linear RGB (VRAD radiosity, Source units).
+[[nodiscard]] inline auto DecodeRGBE(const ColorRGBExp32& s) -> std::array<float, 3> {
+    return {std::ldexp(static_cast<float>(s.r), s.exponent), std::ldexp(static_cast<float>(s.g), s.exponent), std::ldexp(static_cast<float>(s.b), s.exponent)};
+}
 
 } // namespace ZHLN::BSP

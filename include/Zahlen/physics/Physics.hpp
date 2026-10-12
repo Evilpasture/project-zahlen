@@ -221,7 +221,11 @@ class ZHLN_API PhysicsContext {
         Layers::ID            layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
-        uint32_t              mask       = 0xFFFFFFFF
+        uint32_t              mask       = 0xFFFFFFFF,
+        // Activation for non-static bodies. Pass DontActivate to spawn the
+        // body asleep; it wakes on contact with active bodies or on
+        // impulse/velocity changes.
+        JPH::EActivation      activation = JPH::EActivation::Activate
     ) -> Physics::BodyHandle;
 
     auto CreateMeshBody(
@@ -264,8 +268,18 @@ class ZHLN_API PhysicsContext {
     void SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3Arg position);
+    // Teleports a kinematic (scripted) rigid body. SetCharacterPosition only
+    // works on CharacterVirtual bodies; rigid-body handles need this instead.
+    // Ignored for static bodies, which cannot be moved in the broadphase.
+    void SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation);
 
     auto               GetCharacterVelocity(Physics::BodyHandle handle) const -> JPH::Vec3;
+    // Vertical half-extent of a character's collision shape, i.e. the distance
+    // from the body origin (capsule centre) to the soles of its feet. Gameplay
+    // needs this to place feet-referenced spawn points -- Source's
+    // info_player_start and info_teleport_destination origins are at the floor.
+    // Returns 0 for stale or non-character handles.
+    [[nodiscard]] auto GetCharacterGroundOffset(Physics::BodyHandle handle) const -> float;
     [[nodiscard]] auto IsCharacterOnGround(Physics::BodyHandle handle) const -> bool;
     [[nodiscard]] auto IsBodyDynamic(Physics::BodyHandle handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;

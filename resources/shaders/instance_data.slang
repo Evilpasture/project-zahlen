@@ -61,6 +61,11 @@ public struct InstanceData {
     public uint occlusionTexIndex;
     public float occlusionStrength;
 
+    // Baked radiosity (Source VRAD lightmaps). Sampled from TEXCOORD_1 and
+    // multiplied into the diffuse albedo, never added: it is incoming
+    // irradiance, not self-emission. 0xFFFF when the surface has no lightmap.
+    public uint lightmapTexIndex;
+
     // Transmission is independent of alpha coverage, metallicity and emission.
     // Do not alias those authored factors to store optical parameters: masked
     // glass still needs its baseColor alpha and cutoff in the forward shader.

@@ -447,7 +447,8 @@ auto PhysicsContext::CreateRigidBody(
     Layers::ID            layer,
     uint32_t              materialID,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    JPH::EActivation      activation
 ) -> Physics::BodyHandle {
     auto&                 world = _impl->world;
     Physics::MaterialData mat {};
@@ -462,10 +463,14 @@ auto PhysicsContext::CreateRigidBody(
 
         if (motion == JPH::EMotionType::Dynamic) {
             settings.mAllowSleeping = true;
+            // Continuous collision detection. Brush-world floors are thin
+            // one-sided triangle meshes; with discrete stepping a small prop
+            // moving fast enough tunnels straight through them.
+            settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
         }
 
         JPH::BodyID id =
-            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
 
         auto dense                      = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
         world.bodyIDs[dense]            = id;
@@ -722,9 +727,25 @@ void PhysicsContext::SetCharacterPosition(Physics::BodyHandle handle, JPH::RVec3
     }
 }
 
+void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg position, JPH::QuatArg rotation) {
+    JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
+    // Static bodies live in the static broadphase tree and must never be
+    // teleported; kinematic/dynamic bodies can. The WhenChanged variant only
+    // touches the pose/broadphase when it actually differs, so idle scripted
+    // bodies don't churn every frame, and EActivation::Activate wakes the body
+    // so Jolt keeps updating contacts while it moves.
+    if (!id.IsInvalid() && _impl->world.bodyInterface->GetMotionType(id) != JPH::EMotionType::Static) {
+        _impl->world.bodyInterface->SetPositionAndRotationWhenChanged(id, position, rotation, JPH::EActivation::Activate);
+    }
+}
+
 void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
+        // Jolt's SetLinearVelocity does not wake the body; a sleeping prop
+        // that gets an explicit velocity (thrown, pushed by script) must
+        // actually start simulating.
+        _impl->world.bodyInterface->ActivateBody(id);
         _impl->world.bodyInterface->SetLinearVelocity(id, velocity);
     }
 }
@@ -737,6 +758,22 @@ auto PhysicsContext::GetCharacterVelocity(Physics::BodyHandle handle) const -> J
         }
     }
     return JPH::Vec3::sZero();
+}
+
+auto PhysicsContext::GetCharacterGroundOffset(Physics::BodyHandle handle) const -> float {
+    if (handle.index < _impl->characterMap.size()) {
+        auto& character = _impl->characterMap[handle.index];
+        if (character != nullptr && Physics::BodyHandle::Unpack(character->GetUserData()).generation == handle.generation) {
+            // Shapes are authored centred on the body origin, so the local
+            // bounds' +Y half-extent is the centre-to-feet distance: for the
+            // player capsule that is the cylinder half-height plus the cap
+            // radius. The shape offset is included because a shifted shape
+            // moves the feet without moving the body origin.
+            const JPH::AABox bounds = character->GetShape()->GetLocalBounds();
+            return bounds.mMax.GetY() - character->GetShapeOffset().GetY();
+        }
+    }
+    return 0.0f;
 }
 
 auto PhysicsContext::IsCharacterOnGround(Physics::BodyHandle handle) const -> bool {

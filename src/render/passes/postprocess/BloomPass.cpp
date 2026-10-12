@@ -17,6 +17,19 @@ struct KawasePushConstants {
 };
 static_assert(GpuAbi::ScenePassPayload<KawasePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
+// The threshold pass additionally needs the camera exposure: it reads the
+// raw, pre-exposure HDR scene and must convert luma to display units before
+// applying the bloom knee. The Kawase taps below stay on the 16-byte struct
+// so their pipeline layouts are untouched.
+struct ThresholdPushConstants {
+    int   mode;
+    float rcpWidth;
+    float rcpHeight;
+    float glowIntensity;
+    float exposure;
+};
+static_assert(GpuAbi::ScenePassPayload<ThresholdPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
 void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
@@ -43,8 +56,13 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
         };
     };
 
-    auto thresholdPush          = Kawase(0, srcHdr);
-    thresholdPush.glowIntensity = std::max(impl.settings.post.glowIntensity, 0.0f);
+    ThresholdPushConstants thresholdPush {
+        .mode          = 0,
+        .rcpWidth      = 1.0f / static_cast<float>(srcHdr.Extent().width),
+        .rcpHeight     = 1.0f / static_cast<float>(srcHdr.Extent().height),
+        .glowIntensity = std::max(impl.settings.post.glowIntensity, 0.0f),
+        .exposure      = std::max(impl.settings.post.exposure, 1e-4f)
+    };
 
     thresholdChain.Step<Shaders::BloomThreshold>(
         impl.postProcess.BloomThreshold(), impl.postProcess.BloomThresholdHeapBindings(), thresh.Extent(), thresholdPush,

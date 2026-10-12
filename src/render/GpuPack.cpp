@@ -96,6 +96,20 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView) noexcept ->
     desc.direction.StoreFloat3(&packed.direction);
     desc.color.StoreFloat3(&packed.color);
 
+    // Spot cone cosines. Lights without an authored cone pack -1/-1, which
+    // lighting.slang reads as "no cone" (full sphere) -- packing cos(0) = 1
+    // instead would collapse the cone to zero angle and make untagged spots
+    // invisible.
+    if (desc.type == LightType::Spot && desc.outerConeRadians > 0.0f) {
+        const float outer   = std::min(desc.outerConeRadians, JPH::JPH_PI * 0.5f);
+        const float inner   = JPH::Clamp(desc.innerConeRadians, 0.0f, outer);
+        packed.outerConeCos = JPH::Cos(outer);
+        packed.innerConeCos = JPH::Cos(inner);
+    } else {
+        packed.innerConeCos = -1.0f;
+        packed.outerConeCos = -1.0f;
+    }
+
     // The shader reads a light's position in view space (w = 1, which the shader
     // ignores but costs nothing to define). The engine has the world position; the
     // view matrix is the renderer's, so this is the one place the two meet.
@@ -122,9 +136,8 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     // Named fields become lanes here and nowhere else: the clock rides camPos.w,
     // the sun's intensity rides lightDir.w, the probe flag rides probeMin.w. That
     // is the shader's layout, and this is the boundary it belongs to.
-    packed.camPos = JPH::Float4 {frame.camPosition.GetX(), frame.camPosition.GetY(), frame.camPosition.GetZ(), frame.frameClock};
-    packed.lightDir =
-        JPH::Float4 {frame.sunDirection.GetX(), frame.sunDirection.GetY(), frame.sunDirection.GetZ(), frame.sunIntensity};
+    packed.camPos      = JPH::Float4 {frame.camPosition.GetX(), frame.camPosition.GetY(), frame.camPosition.GetZ(), frame.frameClock};
+    packed.lightDir    = JPH::Float4 {frame.sunDirection.GetX(), frame.sunDirection.GetY(), frame.sunDirection.GetZ(), frame.sunIntensity};
     packed.sunRadiance = JPH::Float4 {frame.sunRadiance.GetX(), frame.sunRadiance.GetY(), frame.sunRadiance.GetZ(), 0.0f};
 
     packed.probeMin = JPH::Float4 {frame.probeMin.GetX(), frame.probeMin.GetY(), frame.probeMin.GetZ(), static_cast<float>(frame.useLocalProbe)};

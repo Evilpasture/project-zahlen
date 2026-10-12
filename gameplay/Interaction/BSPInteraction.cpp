@@ -4,10 +4,12 @@
 #include "BSPInteraction.hpp"
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPRead.hpp>
+#include <BSP/BSPScene.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -21,36 +23,72 @@ auto ParseFloat(std::string_view sv, float defaultVal = 0.0f) noexcept -> float 
     if (sv.empty()) {
         return defaultVal;
     }
-    const std::string s(sv);
-    char*             end = nullptr;
-    const float       val = std::strtof(s.c_str(), &end);
-    return (end != s.c_str()) ? val : defaultVal;
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    float val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
 }
 
 auto ParseUInt(std::string_view sv, uint32_t defaultVal = 0) noexcept -> uint32_t {
     if (sv.empty()) {
         return defaultVal;
     }
-    const std::string s(sv);
-    char*             end = nullptr;
-    const auto        val = static_cast<uint32_t>(std::strtoul(s.c_str(), &end, 10));
-    return (end != s.c_str()) ? val : defaultVal;
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    uint32_t val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
+}
+
+auto ParseInt(std::string_view sv, int32_t defaultVal = 0) noexcept -> int32_t {
+    if (sv.empty()) {
+        return defaultVal;
+    }
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    int32_t val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
 }
 
 auto ParseMoveDir(std::string_view movedirStr, const BSP::ImportOptions& opts) -> JPH::Vec3 {
     if (movedirStr.empty()) {
         return ConvertDirection(opts, JPH::Vec3::sAxisX());
     }
-    float             v[3] = {0.0f, 0.0f, 0.0f};
-    const std::string s(movedirStr);
-    const char*       cur = s.c_str();
-    char*             end = nullptr;
+    float       v[3] = {0.0f, 0.0f, 0.0f};
+    const char* cur  = movedirStr.data();
+    const char* end  = movedirStr.data() + movedirStr.size();
     for (float& component: v) {
-        component = std::strtof(cur, &end);
-        if (end == cur) {
+        while (cur < end && (*cur == ' ' || *cur == '\t')) {
+            cur++;
+        }
+        if (cur >= end) {
             break;
         }
-        cur = end;
+        auto [ptr, ec] = std::from_chars(cur, end, component);
+        if (ec != std::errc {}) {
+            break;
+        }
+        cur = ptr;
     }
     // Special Source conventions:
     // -1 0 0 => UP (+Z in Source Z-up)
@@ -79,9 +117,20 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
         }
     }
     if (!modelSource.empty()) {
+        // Brush entities reference their submodel as "*N". Placeholder boxes
+        // are stamped with that exact string; authored-geometry submodel
+        // prefabs are stamped "<map path>#model_N", so match the suffix too.
+        std::string modelSuffix;
+        if (modelSource.starts_with('*')) {
+            modelSuffix = "#model_" + std::string(modelSource.substr(1));
+        }
         for (const Entity e: registry.GetEntitiesWith<Components::SceneSourceComponent>()) {
             const auto srcComp = registry.Get<Components::SceneSourceComponent>(e);
-            if (srcComp && std::string_view(srcComp->source) == modelSource) {
+            if (!srcComp) {
+                continue;
+            }
+            const std::string_view source(srcComp->source);
+            if (source == modelSource || (!modelSuffix.empty() && source.ends_with(modelSuffix))) {
                 return e;
             }
         }
@@ -93,27 +142,24 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
 
 void FireEntityInput(
     ECS::Registry&                registry,
-    std::string_view              targetname,
+    Entity                        entity,
     std::string_view              input,
     std::string_view              parameter,
     ZHLN::Optional<AudioContext&> audio
 ) {
-    if (targetname.empty()) {
-        return;
+    const Entity e = entity;
+    std::string_view label = "<unnamed>";
+    if (const auto nameComp = registry.Get<Components::NameComponent>(e)) {
+        label = std::string_view(nameComp->name);
     }
 
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
-        if (!nameComp) {
-            continue;
-        }
-
-        if (std::string_view(nameComp->name) == targetname || targetname == "*") {
+    {
+        {
             // Check DoorComponent
             if (auto door = registry.Get<DoorComponent>(e)) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None && input != "Unlock") {
-                    Log("[Interaction] Door '{}' is locked", targetname);
-                    continue;
+                    Log("[Interaction] Door '{}' is locked", label);
+                    return;
                 }
 
                 if (input == "Open") {
@@ -146,8 +192,8 @@ void FireEntityInput(
             // Check ButtonComponent
             if (auto button = registry.Get<ButtonComponent>(e)) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None && input != "Unlock") {
-                    Log("[Interaction] Button '{}' is locked", targetname);
-                    continue;
+                    Log("[Interaction] Button '{}' is locked", label);
+                    return;
                 }
 
                 if (input == "Press") {
@@ -200,9 +246,32 @@ void FireEntityInput(
             // Check UsableComponent
             if (auto usable = registry.Get<UsableComponent>(e)) {
                 if (usable->scriptHash != 0) {
-                    Log("[Interaction] Script triggered on {}: {:#X}", targetname, usable->scriptHash);
+                    Log("[Interaction] Script triggered on {}: {:#X}", label, usable->scriptHash);
                 }
             }
+        }
+    }
+}
+
+void FireEntityInput(
+    ECS::Registry&                registry,
+    std::string_view              targetname,
+    std::string_view              input,
+    std::string_view              parameter,
+    ZHLN::Optional<AudioContext&> audio
+) {
+    if (targetname.empty()) {
+        return;
+    }
+
+    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
+        const auto nameComp = registry.Get<Components::NameComponent>(e);
+        if (!nameComp) {
+            continue;
+        }
+
+        if (std::string_view(nameComp->name) == targetname || targetname == "*") {
+            FireEntityInput(registry, e, input, parameter, audio);
         }
     }
 }
@@ -229,11 +298,37 @@ void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view 
 }
 
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    size_t interactiveIndex = 0;
-
     for (const BSP::BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
+            continue;
+        }
+
+        // Teleport landing points are pure logic: DescribeScene deliberately
+        // keeps info_* classes out of the scene entities, so the interaction
+        // layer creates its own lightweight entity here -- a name and a
+        // transform, no mesh and no physics. trigger_teleport resolves its
+        // `target` keyvalue against these names.
+        if (className == "info_teleport_destination") {
+            const auto destName = entity.Find("targetname");
+            if (destName.empty()) {
+                continue; // unnamed destinations are not addressable
+            }
+            const auto  originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
+            const auto  anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
+            // Exact conjugated Source rotation: TeleportPlayer recovers the
+            // post-teleport view direction from this transform's +X axis.
+            const JPH::Vec3 engineAngles  = BSP::EngineEulerAnglesFromSourceAngles(JPH::Vec3(anglesArr[0], anglesArr[1], anglesArr[2]), options);
+            const JPH::Vec3 enginePos     = BSP::ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
+            registry.Create(
+                Components::NameComponent {.name = String64(destName)},
+                // Source stores the origin at the feet; keep it that way and
+                // let the teleport lift the character by its own ground offset.
+                Components::TransformComponent {
+                    .position = enginePos, .rotation = Math::EulerDegreesToQuat(engineAngles), .scale = JPH::Vec3::sReplicate(1.0f)
+                },
+                TeleportDestinationComponent {}
+            );
             continue;
         }
 
@@ -247,8 +342,21 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
         }
 
         const auto        targetName = entity.Find("targetname");
-        const std::string matchName  = targetName.empty() ? (std::string(className) + "_" + std::to_string(interactiveIndex++)) : std::string(targetName);
         const std::string modelStr   = std::string(entity.Find("model"));
+        // Unnamed brush entities fall back to the deterministic name that
+        // DescribeScene generates: "<classname>_<modelIndex>". The previous
+        // per-map counter did not match DescribeScene's naming, leaving every
+        // unnamed entity addressable only through the model-source fallback.
+        std::string matchName = std::string(targetName);
+        if (matchName.empty()) {
+            matchName = std::string(className);
+            if (modelStr.size() > 1 && modelStr[0] == '*') {
+                int         modelIndex = -1;
+                const char* beg        = modelStr.c_str() + 1;
+                std::from_chars(beg, beg + (modelStr.size() - 1), modelIndex);
+                matchName += "_" + std::to_string(modelIndex);
+            }
+        }
 
         const Entity e = FindMatchingEntity(registry, matchName, modelStr);
         if (e == Entity::Null()) {
@@ -270,8 +378,23 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
 
         // 2. Parse Connections & Outputs
         EntityConnectionComponent conn;
-        for (const auto& [key, val]: entity.keys) {
-            if (key.starts_with("On") && !val.empty()) {
+        for (const auto& [key, valRaw]: entity.keys) {
+            if (key.starts_with("On") && !valRaw.empty()) {
+                // GMod-branch VBSP writes the output fields separated by 0x1B
+                // instead of ',' ("Door3\x1bToggle\x1b\x1b0\x1b-1"). Splitting
+                // on comma alone turned every such output into one unmatchable
+                // target string, silently severing button/trigger -> door wiring.
+                std::string        normalized;
+                std::string_view   val = valRaw;
+                if (valRaw.find('\x1b') != std::string_view::npos) {
+                    normalized.assign(valRaw);
+                    for (char& c: normalized) {
+                        if (c == '\x1b') {
+                            c = ',';
+                        }
+                    }
+                    val = normalized;
+                }
                 EntityOutput out;
                 out.event = String64(key);
 
@@ -287,7 +410,7 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
                             const size_t c4 = val.find(',', c3 + 1);
                             if (c4 != std::string::npos) {
                                 out.delay       = ParseFloat(val.substr(c3 + 1, c4 - c3 - 1));
-                                out.timesToFire = static_cast<int32_t>(ParseUInt(val.substr(c4 + 1)));
+                                out.timesToFire = ParseInt(val.substr(c4 + 1), -1);
                             } else {
                                 out.delay = ParseFloat(val.substr(c3 + 1));
                             }
@@ -466,6 +589,9 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
             TriggerFlags trigFlags = TriggerFlags::Active;
             if (className == "trigger_once") {
                 trigFlags |= TriggerFlags::TriggerOnce;
+            }
+            if (className == "trigger_teleport") {
+                trigFlags |= TriggerFlags::Teleports;
             }
 
             auto            srcComp = registry.Get<Components::SceneSourceComponent>(e);

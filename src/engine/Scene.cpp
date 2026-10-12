@@ -78,11 +78,13 @@ static_assert(
 
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
     return PrefabFactory::SpawnParams {
-        .position        = ToRVec3(entity.transform.position),
-        .rotation        = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
-        .scale           = JPH::Vec3 {entity.transform.scale},
-        .createPhysics   = entity.body != BodyKind::None,
-        .isStaticPhysics = entity.body != BodyKind::Dynamic,
+        .position           = ToRVec3(entity.transform.position),
+        .rotation           = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
+        .scale              = JPH::Vec3 {entity.transform.scale},
+        .createPhysics      = entity.body != BodyKind::None,
+        .isStaticPhysics    = entity.body != BodyKind::Dynamic,
+        .isKinematicPhysics = entity.body == BodyKind::Kinematic,
+        .startAsleep        = entity.startsAsleep,
 
         .emissiveVirtualLights = entity.material.emissiveVirtualLights,
 
@@ -184,8 +186,27 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 break;
             }
             case ShapeKind::Prefab: {
-                std::array<Entity, 256> parts {};
-                const uint32_t count = PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                // Kinematic prefab entities (BSP doors/buttons) have their root
+                // transform driven per-frame by gameplay systems; per-part
+                // bodies could never follow. Instantiate the visuals without
+                // physics and hang a single kinematic box collider on the root.
+                const bool kinematicRootCollider = (entity.body == BodyKind::Kinematic);
+                if (kinematicRootCollider) {
+                    params.createPhysics = false;
+                }
+
+                std::vector<Entity> parts;
+                uint32_t            count        = 0;
+                auto                loadedPrefab = PrefabFactory::LoadModelPrefab(engine, entity.source);
+                if (loadedPrefab) {
+                    const uint32_t expectedCount = static_cast<uint32_t>(loadedPrefab->parts.size() * 2 + loadedPrefab->lights.size() + 1);
+                    parts.resize(std::max(256u, expectedCount));
+                    count = PrefabFactory::InstantiatePrefab(engine, *loadedPrefab, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                } else {
+                    parts.resize(256);
+                    count = PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                }
+
                 if (count == 0) {
                     ZHLN::Log("[Scene] entity '{}': prefab '{}' produced nothing", entity.name, entity.source);
                     return std::unexpected(SceneError::PrefabNotFound);
@@ -199,9 +220,58 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 const uint32_t recorded = std::min(count, static_cast<uint32_t>(parts.size()));
                 NameEntity(registry, parts[0], entity.name);
                 StampSource(registry, parts[0], entity);
+
+                if (kinematicRootCollider) {
+                    // Collider extent: union of the prefab's part bounds when
+                    // available (correct for BSP submodel prefabs and .mdl
+                    // props alike), otherwise the description's halfExtents.
+                    JPH::Vec3 half {entity.halfExtents.x, entity.halfExtents.y, entity.halfExtents.z};
+                    if (loadedPrefab && !loadedPrefab->parts.empty()) {
+                        JPH::Vec3 lo = JPH::Vec3::sReplicate(1e30f);
+                        JPH::Vec3 hi = JPH::Vec3::sReplicate(-1e30f);
+                        for (const ModelPart& part: loadedPrefab->parts) {
+                            lo = JPH::Vec3::sMin(lo, JPH::Vec3(part.localMin.x, part.localMin.y, part.localMin.z));
+                            hi = JPH::Vec3::sMax(hi, JPH::Vec3(part.localMax.x, part.localMax.y, part.localMax.z));
+                        }
+                        half = (hi - lo) * 0.5f * std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+                    }
+                    half = JPH::Vec3::sMax(half, JPH::Vec3::sReplicate(0.05f));
+
+                    auto&                physics = engine.GetPhysicsContext();
+                    const JPH::ShapeRefC shape   = physics.GetOrCreateShape(Physics::ShapeType::Box, half.GetX(), half.GetY(), half.GetZ());
+                    if (shape != nullptr) {
+                        registry.Add(
+                            parts[0], Components::PhysicsComponent {
+                                          .physicsHandle = physics.CreateRigidBody(
+                                              shape, params.position, params.rotation, JPH::EMotionType::Kinematic, Layers::ID::MOVING, 0,
+                                              params.physicsCategory, params.physicsMask
+                                          ),
+                                          .isStatic = true
+                                      }
+                        );
+                    }
+                }
+
                 for (uint32_t i = 0; i < recorded; ++i) {
                     instance.entities.push_back(parts[i]);
                 }
+                break;
+            }
+            case ShapeKind::Empty: {
+                // Logic-only entity (trigger volumes): transform + source stamp,
+                // no rendered geometry and no physics.
+                const JPH::Vec3  position = JPH::Vec3 {entity.transform.position};
+                const JPH::Quat  rotation = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation});
+                const JPH::Vec3  scale    = JPH::Vec3 {entity.transform.scale};
+                const JPH::Mat44 world    = Math::CreateTransform(position, rotation, scale);
+
+                const Entity created = registry.Create(
+                    Components::TransformComponent {.position = position, .rotation = rotation, .scale = scale},
+                    Components::WorldTransformComponent {.world = world, .previous = world}
+                );
+                NameEntity(registry, created, entity.name);
+                StampSource(registry, created, entity);
+                instance.entities.push_back(created);
                 break;
             }
         }
@@ -232,7 +302,9 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 .radius      = light.radius,
                 .direction   = direction,
                 .range       = light.range,
-                .shadowLayer = light.shadowLayer
+                .shadowLayer = light.shadowLayer,
+                .innerConeRadians = light.innerConeRadians,
+                .outerConeRadians = light.outerConeRadians
             },
             Components::SceneLightTagComponent {}
         );

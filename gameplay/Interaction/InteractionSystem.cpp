@@ -15,8 +15,93 @@
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cmath>
+#include <string>
 
 namespace ZHLN::Interaction {
+namespace {
+
+// Debug aid: a readable label for whatever entity "E" is being aimed at.
+// Prefers the Source targetname the interaction code dispatches on, then the
+// ECS name, then the raw entity id so an unnamed entity is still traceable.
+std::string DebugLabel(const ECS::Registry& registry, Entity e) {
+    if (const auto meta = registry.Get<BSPEntityMetadataComponent>(e)) {
+        if (!meta->className.empty()) {
+            return std::string(meta->className.c_str()) +
+                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
+        }
+    }
+    if (const auto name = registry.Get<Components::NameComponent>(e); name && !name->name.empty()) {
+        return std::string(name->name.c_str());
+    }
+    return "entity#" + std::to_string(e.index);
+}
+
+// Move the player to a named info_teleport_destination: repositions the
+// CharacterVirtual body so its feet land on the destination's floor-level
+// origin, zeroes carried-over velocity so arrival momentum cannot fling the
+// player through the exit room, syncs the ECS transform in the same frame so
+// the view does not lag the physics body, and snaps the camera to the
+// destination's facing the way Source does.
+void TeleportPlayer(
+    ECS::Registry&                  registry,
+    ZHLN::Optional<PhysicsContext&> physics,
+    Entity                          playerEnt,
+    std::string_view                destination,
+    ZHLN::Optional<AudioContext&>   audio
+) {
+    if (destination.empty() || !physics) {
+        return;
+    }
+    const auto playerPhys = registry.Get<Components::PhysicsComponent>(playerEnt);
+    if (!playerPhys || playerPhys->physicsHandle == Physics::BodyHandle::Null()) {
+        return;
+    }
+
+    Entity destEnt = Entity::Null();
+    for (const Entity e: registry.GetEntitiesWith<TeleportDestinationComponent>()) {
+        const auto nameComp = registry.Get<Components::NameComponent>(e);
+        if (nameComp && std::string_view(nameComp->name) == destination) {
+            destEnt = e;
+            break;
+        }
+    }
+    if (destEnt == Entity::Null()) {
+        Log("[Interaction] trigger_teleport target '{}' not found -- no info_teleport_destination with that name", destination);
+        return;
+    }
+    const auto destTrans = registry.Get<Components::TransformComponent>(destEnt);
+    if (!destTrans) {
+        return;
+    }
+
+    // The destination origin is at floor level while the character body origin
+    // sits at the capsule centre, so lift by the shape's own ground offset.
+    const JPH::Vec3 center = destTrans->position + JPH::Vec3(0.0f, physics->GetCharacterGroundOffset(playerPhys->physicsHandle) + 0.05f, 0.0f);
+    physics->SetCharacterPosition(playerPhys->physicsHandle, JPH::RVec3(center));
+    physics->SetCharacterVelocity(playerPhys->physicsHandle, JPH::Vec3::sZero());
+
+    if (const auto playerTrans = registry.Get<Components::TransformComponent>(playerEnt)) {
+        playerTrans->position = center;
+    }
+
+    // View snap: the destination's Euler triplet rotates +X to
+    // (cos p cos y, sin p, cos p sin y) -- exactly SceneCamera's direction
+    // formula -- so the camera's yaw/pitch invert straight out of it.
+    const JPH::Vec3 forward = destTrans->rotation.RotateAxisX();
+    if (const Entity camEnt = registry.SingletonEntity<Components::MainCameraTagComponent>(); camEnt != Entity::Null()) {
+        registry.Patch<Components::CameraComponent>(camEnt, [&](Components::CameraComponent& cc) {
+            cc.camera.yaw   = std::atan2(forward.GetZ(), forward.GetX()) * 57.29577951308232f;
+            cc.camera.pitch = std::asin(std::clamp(forward.GetY(), -1.0f, 1.0f)) * 57.29577951308232f;
+        });
+    }
+
+    if (audio) {
+        audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.15f, .param1 = 440.0f, .duration = 0.06f});
+    }
+    Log("[Interaction] Teleported player to '{}'", destination);
+}
+
+} // namespace
 
 void InteractionSystem::Update(
     ECS::Query<
@@ -91,10 +176,20 @@ void InteractionSystem::Update(
             const bool newlyEntered = ((trigger.flags & TriggerFlags::PlayerInside) == TriggerFlags::None);
             trigger.flags |= TriggerFlags::PlayerInside;
 
+            if (interactJustPressed) {
+                Log("[Interaction] E -> {} (trigger) flags={:#x} target='{}' touchOpens={} useOpens={} once={}", DebugLabel(registry, triggerEnt),
+                    static_cast<uint32_t>(trigger.flags), std::string_view(trigger.target),
+                    (trigger.flags & TriggerFlags::TouchOpens) != TriggerFlags::None,
+                    (trigger.flags & TriggerFlags::UseOpens) != TriggerFlags::None,
+                    (trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None);
+            }
+
             if (newlyEntered) {
                 FireEntityOutputs(registry, triggerEnt, "OnTrigger", audio);
                 FireEntityOutputs(registry, triggerEnt, "OnStartTouch", audio);
-                if (!trigger.target.empty()) {
+                if ((trigger.flags & TriggerFlags::Teleports) != TriggerFlags::None) {
+                    TeleportPlayer(registry, physics, playerEnt, std::string_view(trigger.target), audio);
+                } else if (!trigger.target.empty()) {
                     FireEntityInput(registry, std::string_view(trigger.target), "Toggle", "", audio);
                 }
                 if ((trigger.flags & TriggerFlags::TriggerOnce) != TriggerFlags::None) {
@@ -177,8 +272,24 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
+            const auto doorStateName = [](DoorState s) -> const char* {
+                switch (s) {
+                    case DoorState::Closed: return "Closed";
+                    case DoorState::Opening: return "Opening";
+                    case DoorState::Open: return "Open";
+                    case DoorState::Closing: return "Closing";
+                }
+                return "?";
+            };
+            Log("[Interaction] E -> {} (door) dist={:.2f} state={} progress={:.2f} flags={:#x} startsOpen={} touchOpens={} useOpens={} "
+                "closed=({:.1f},{:.1f},{:.1f}) open=({:.1f},{:.1f},{:.1f})",
+                DebugLabel(registry, doorEnt), dist, doorStateName(door.state), door.progress, static_cast<uint32_t>(door.flags),
+                (door.flags & DoorFlags::StartsOpen) != DoorFlags::None, (door.flags & DoorFlags::TouchOpens) != DoorFlags::None,
+                (door.flags & DoorFlags::UseOpens) != DoorFlags::None, door.closedPosition.GetX(), door.closedPosition.GetY(),
+                door.closedPosition.GetZ(), door.openPosition.GetX(), door.openPosition.GetY(), door.openPosition.GetZ());
+
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
-                FireEntityInput(registry, std::string_view(door.targetname), "Open", "", audio);
+                FireEntityInput(registry, doorEnt, "Open", "", audio);
             }
 
             if (interactJustPressed && (door.flags & DoorFlags::UseOpens) != DoorFlags::None) {
@@ -192,7 +303,7 @@ void InteractionSystem::Update(
                     }
                 } else {
                     const std::string_view action = ((door.flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
-                    FireEntityInput(registry, std::string_view(door.targetname), action, "", audio);
+                    FireEntityInput(registry, doorEnt, action, "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 600.0f, .duration = 0.08f});
                     }
@@ -216,8 +327,10 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
+            Log("[Interaction] E -> {} (button) dist={:.2f} state={} progress={:.2f} flags={:#x}", DebugLabel(registry, buttonEnt), dist,
+                static_cast<uint32_t>(button.state), button.progress, static_cast<uint32_t>(button.flags));
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
-                FireEntityInput(registry, std::string_view(button.targetname), "Press", "", audio);
+                FireEntityInput(registry, buttonEnt, "Press", "", audio);
             }
 
             if (interactJustPressed && (button.flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
@@ -227,7 +340,7 @@ void InteractionSystem::Update(
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 250.0f, .duration = 0.10f});
                     }
                 } else {
-                    FireEntityInput(registry, std::string_view(button.targetname), "Press", "", audio);
+                    FireEntityInput(registry, buttonEnt, "Press", "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 700.0f, .duration = 0.08f});
                     }
@@ -297,11 +410,15 @@ void DoorMovementSystem::Update(
             trans->position = door->closedPosition + (door->openPosition - door->closedPosition) * door->progress;
         }
 
-        // Sync with physics body if present
+        // Sync the physics body with the animated transform. Door bodies are
+        // kinematic rigid bodies, so the old SetCharacterPosition call was a
+        // no-op (characters only) and the collider stayed frozen at the closed
+        // pose. Push position and rotation together so rotating doors sweep
+        // their collision as well.
         if (physics) {
             if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
                 if (phys->physicsHandle.Pack() != 0) {
-                    physics->SetCharacterPosition(phys->physicsHandle, JPH::RVec3(trans->position));
+                    physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
                 }
             }
         }
@@ -309,10 +426,11 @@ void DoorMovementSystem::Update(
 }
 
 void ButtonMovementSystem::Update(
-    ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent> query,
-    ECS::Registry&                                                                                 registry,
-    FrameDt                                                                                        dt,
-    ZHLN::Optional<AudioContext&>                                                                  audio
+    ECS::Query<ButtonComponent&, Components::TransformComponent&, const EntityConnectionComponent, const Components::PhysicsComponent> query,
+    ECS::Registry&                                                                                                                   registry,
+    FrameDt                                                                                                                          dt,
+    ZHLN::Optional<PhysicsContext&>                                                                                                  physics,
+    ZHLN::Optional<AudioContext&>                                                                                                    audio
 ) {
     const float deltaTime = dt.value;
     for (Entity e: query.Entities<ButtonComponent>()) {
@@ -365,6 +483,14 @@ void ButtonMovementSystem::Update(
 
         if ((button->flags & ButtonFlags::DontMove) == ButtonFlags::None) {
             trans->position = button->unpressedPosition + (button->pressedPosition - button->unpressedPosition) * button->progress;
+            // Keep the kinematic collider in sync with the moving button.
+            if (physics) {
+                if (const auto phys = query.Get<Components::PhysicsComponent>(e)) {
+                    if (phys->physicsHandle.Pack() != 0) {
+                        physics->SetKinematicPose(phys->physicsHandle, JPH::RVec3(trans->position), trans->rotation);
+                    }
+                }
+            }
         }
     }
 }
@@ -390,6 +516,7 @@ void Install(Engine& engine) {
     reg.RegisterComponent<ButtonComponent>();
     reg.RegisterComponent<EntityConnectionComponent>();
     reg.RegisterComponent<BSPEntityMetadataComponent>();
+    reg.RegisterComponent<TeleportDestinationComponent>();
 
     engine.AddSystemGraphsExtension(&AddSystems);
 }

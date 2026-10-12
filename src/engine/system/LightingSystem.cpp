@@ -137,6 +137,8 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             desc.shadowLayer = light.shadowLayer;
             desc.direction   = light.direction;
             desc.color       = light.color;
+            desc.innerConeRadians = light.innerConeRadians;
+            desc.outerConeRadians = light.outerConeRadians;
 
             JPH::Vec3  pos          = JPH::Vec3::sZero();
             JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();

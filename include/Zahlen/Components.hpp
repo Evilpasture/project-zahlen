@@ -433,7 +433,11 @@ struct Components {
         float      range       = 0.0f;
         JPH::Mat44 points      = JPH::Mat44::sIdentity();
         uint32_t   twoSided    = 0;
-        int32_t    shadowLayer = -1;
+        int32_t   shadowLayer = -1;
+        // Spot cone angles in radians from the axis (0 = no authored cone:
+        // the packer emits the -1/-1 "full sphere" sentinel instead).
+        float innerConeRadians = 0.0f;
+        float outerConeRadians = 0.0f;
     };
 
     // Particle components are authoring/runtime data only. Persistent simulation
