@@ -79,7 +79,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 
         float3x3 toWorld = transpose(toLocal);
 
         float3 V_local = mul(toLocal, V);
-        float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
+        float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, WrapFrameIndex(frame.frameIndex)).zw;
         float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
@@ -349,8 +349,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             } else if (wantRTR) {
                 float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
-                confidence     = halfRtr.a;
-                if (confidence > 0.0f) {
+                confidence     = saturate(halfRtr.a);
+                if (confidence > 1e-4f) {
                     reflectionColor = halfRtr.rgb;
                 }
             } else
@@ -382,7 +382,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float zSlice = log(max(viewDepth, frame.nearZ) / frame.nearZ) / log(frame.farZ / frame.nearZ);
         zSlice -= 0.5f / 64.0f;
 
-        float ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
+        float ignFrame  = float(WrapFrameIndex(frame.frameIndex));
         float2 noisePos = input.pos.xy;
         noisePos.x += ignFrame * 5.588238f;
         noisePos.y += ignFrame * 5.588238f;

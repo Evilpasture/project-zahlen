@@ -53,6 +53,40 @@ struct AppendUnique<TypeList<Ts...>, T> {
     using type                     = std::conditional_t<contains, TypeList<Ts...>, TypeList<Ts..., T>>;
 };
 
+template <typename Existing, typename Incoming>
+struct CombineSameResourceUsage {
+    using type = Existing;
+};
+
+template <typename Existing, typename Incoming>
+    requires std::is_same_v<typename Existing::Resource, typename Incoming::Resource>
+struct CombineSameResourceUsage<Existing, Incoming> {
+    static_assert(
+        Existing::layout == Incoming::layout && Existing::final_layout == Incoming::final_layout,
+        "Concurrent passes in a ParallelPass cannot require different layouts for the same resource."
+    );
+    using type = Usage<
+        typename Existing::Resource,
+        Existing::layout,
+        Existing::stage | Incoming::stage,
+        Existing::access | Incoming::access,
+        Existing::final_layout,
+        Existing::final_stage | Incoming::final_stage,
+        Existing::final_access | Incoming::final_access>;
+};
+
+template <typename List, typename T>
+struct MergeUsageIntoList;
+
+template <typename... Ts, typename T>
+struct MergeUsageIntoList<TypeList<Ts...>, T> {
+    static constexpr bool contains_resource = (std::is_same_v<typename Ts::Resource, typename T::Resource> || ...);
+    using type                              = std::conditional_t<
+                                     contains_resource,
+                                     TypeList<typename CombineSameResourceUsage<Ts, T>::type...>,
+                                     TypeList<Ts..., T>>;
+};
+
 template <typename List1>
 struct MergeLists<List1, TypeList<>> {
     using type = List1;
@@ -60,7 +94,7 @@ struct MergeLists<List1, TypeList<>> {
 
 template <typename List1, typename Head, typename... Tail>
 struct MergeLists<List1, TypeList<Head, Tail...>> {
-    using HeadResources = typename AppendUnique<List1, Head>::type;
+    using HeadResources = typename MergeUsageIntoList<List1, Head>::type;
     using type          = typename MergeLists<HeadResources, TypeList<Tail...>>::type;
 };
 

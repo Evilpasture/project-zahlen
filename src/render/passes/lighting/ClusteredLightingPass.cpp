@@ -9,17 +9,12 @@ namespace ZHLN::Passes {
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
-    // The pipeline has a ray-traced variant that shadows the rasterizer's
-    // reflection term with a traced one; which specialization the graph runs
-    // is this frame's setting, resolved here rather than being baked in.
-    const bool   rtrActive    = impl.settings.rayTracing.enableReflections && impl.ctx.RayTracingSupported();
+    // The pipeline has a ray-traced variant that reads the denoised RT shadow
+    // mask; which specialization the graph runs is this frame's setting,
+    // resolved here rather than being baked in.
+    const bool     rtrActive    = (impl.settings.rayTracing.enableReflections || impl.settings.rayTracing.enableShadows) && impl.ctx.RayTracingSupported();
     const uint32_t lightVariant = rtrActive ? 1 : 0;
 
-    const Vk::AsAddressWrite tlas {
-        .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas[fIdx]) ?
-                       Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get()) :
-                       0
-    };
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(
         impl.ctx, impl.heapManager,
         Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
@@ -34,13 +29,12 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"clusterIndexList">(impl.frames.lightIndexListBuffers[fIdx]),
         Vk::Slot<"punctualShadowCube">(impl.targets.AtlasCubeView()),
         Vk::Slot<"punctualShadow2D">(impl.targets.Atlas2DView()),
-        Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx)),
         Vk::Slot<"texEmissive">(Vk::Assume<Vk::ShaderRead<Res_Emissive>>(impl.graphResources.emissiveBuffer)),
         Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(impl.graphResources.ao)),
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
         Vk::Slot<"texSheen">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Sheen>>(impl.graphResources.sheenBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
-        Vk::Slot<"tlas">(tlas)
+        Vk::Slot<"texRtShadowMask">(Vk::Assume<Vk::ShaderRead<Res_RtShadowMask>>(impl.graphResources.rtShadowMask))
     );
     impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(impl.ctx, ctx.Cmd(), lightVariant, pc, block);
 }

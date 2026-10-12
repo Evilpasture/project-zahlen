@@ -236,8 +236,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointConfig));
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
         heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),

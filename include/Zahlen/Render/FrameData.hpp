@@ -64,6 +64,7 @@ struct FrameData {
     int32_t  useLocalProbe = 0;
     int32_t  enableRTR = 0;
     int32_t  fullBright = 0;
+    uint32_t frameIndex = 0;
 };
 
 // One scene light. `shadowLayer` is the renderer's own state riding along: it is

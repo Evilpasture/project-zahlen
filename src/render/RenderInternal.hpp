@@ -527,6 +527,7 @@ struct RenderContext::Impl {
     uint64_t                            nextAcquisition = 1;
     std::atomic<uint32_t> invalidDrawWarningCount {0};
     bool warnedUnwrittenTarget = false;
+    bool rtHistoryValid        = false;
 
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {

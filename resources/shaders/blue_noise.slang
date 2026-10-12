@@ -13,8 +13,8 @@ public static const float FRAME_RATE_HZ   = 64.0f;
 public static const uint FRAME_INDEX_PERIOD = 4096u;
 
 [ForceInline]
-public uint FrameIndexFromCamPosW(float camPosW) {
-    return uint(max(camPosW, 0.0f) * FRAME_RATE_HZ + 0.5f) & (FRAME_INDEX_PERIOD - 1u);
+public uint WrapFrameIndex(uint frameIndex) {
+    return frameIndex & (FRAME_INDEX_PERIOD - 1u);
 }
 
 [ForceInline]
@@ -23,8 +23,9 @@ public float4 SampleBlueNoise(Texture2D<float4> noiseTex, SamplerState repeatPoi
     noiseTex.GetDimensions(width, height);
     float2 invExtent = 1.0f / float2(float(max(width, 1u)), float(max(height, 1u)));
 
-    float2 scroll = frac(float2(float(frameIndex), float(frameIndex)) * R2_OFFSET);
-    float2 uv = (float2(pixelPos) + 0.5f) * invExtent + scroll;
+    uint   wrappedFrame = WrapFrameIndex(frameIndex);
+    float2 scroll       = frac(float2(float(wrappedFrame), float(wrappedFrame)) * R2_OFFSET);
+    float2 uv           = (float2(pixelPos) + 0.5f) * invExtent + scroll;
     return noiseTex.SampleLevel(repeatPoint, uv, 0.0f);
 }
 
@@ -34,9 +35,10 @@ public float4 SampleBlueNoiseAt(Texture2D<float4> noiseTex, SamplerState repeatP
     noiseTex.GetDimensions(width, height);
     float2 invExtent = 1.0f / float2(float(max(width, 1u)), float(max(height, 1u)));
 
-    float2 scroll = frac(float2(float(frameIndex), float(frameIndex)) * R2_OFFSET +
-                         float2(float(sampleIndex), float(sampleIndex)) * R2_SAMPLE_OFFSET);
-    float2 uv     = (float2(pixelPos) + 0.5f) * invExtent + scroll;
+    uint   wrappedFrame = WrapFrameIndex(frameIndex);
+    float2 scroll       = frac(float2(float(wrappedFrame), float(wrappedFrame)) * R2_OFFSET +
+                               float2(float(sampleIndex), float(sampleIndex)) * R2_SAMPLE_OFFSET);
+    float2 uv           = (float2(pixelPos) + 0.5f) * invExtent + scroll;
     return noiseTex.SampleLevel(repeatPoint, uv, 0.0f);
 }
 

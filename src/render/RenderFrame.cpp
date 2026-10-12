@@ -227,6 +227,9 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.unjitteredViewProj = unjittered;
     currentUniforms.invViewProj        = unjittered.Inversed();
     currentUniforms.camPos = JPH::Float4 {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time};
+    if (view.frameIndex != 0) {
+        currentUniforms.frameIndex = view.frameIndex;
+    }
 
     auto mapped = frames.frameUniformBuffers[presenter.frameIndex].Map(allocator);
     if (!mapped) {
@@ -238,6 +241,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     gpu->invViewProj        = unjittered.Inversed();
     gpu->invProj            = view.projMatrix.Inversed();
     gpu->camPos             = currentUniforms.camPos;
+    gpu->frameIndex         = currentUniforms.frameIndex;
 }
 
 
@@ -500,6 +504,12 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
+    if (_impl->ctx.RayTracingSupported()) {
+        std::swap(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);
+        std::swap(_impl->graphResources.rtrHalf, _impl->graphResources.rtrHistory);
+        std::swap(_impl->graphResources.rtgiHalf, _impl->graphResources.rtgiHistory);
+        _impl->rtHistoryValid = _impl->settings.rayTracing.denoiserPasses > 0;
+    }
 
     return presented;
 }
@@ -533,6 +543,14 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     const VkCommandBuffer cmd = resolved->recorder.Handle();
     _impl->destinations.SetActive(resolved->window.id);
     _impl->sceneTarget = resolved->image;
+    if (_impl->settings.post.enableRTR != settings.post.enableRTR ||
+        _impl->settings.rayTracing.enableReflections != settings.rayTracing.enableReflections ||
+        _impl->settings.rayTracing.enableShadows != settings.rayTracing.enableShadows ||
+        _impl->settings.rayTracing.enableDiffuseGI != settings.rayTracing.enableDiffuseGI ||
+        _impl->settings.rayTracing.denoiserPasses != settings.rayTracing.denoiserPasses ||
+        settings.rayTracing.denoiserPasses == 0) {
+        _impl->rtHistoryValid = false;
+    }
     _impl->settings = settings;
 
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);

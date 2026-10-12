@@ -484,6 +484,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     frame.jitter                 = JPH::Vec4 {aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY};
     frame.enableRTR              = gfx.post.enableRTR;
     frame.fullBright             = gfx.environment.fullBright;
+    frame.frameIndex             = static_cast<uint32_t>(engine.GetCurrentFrame());
     frame.shadowWidth            = gfx.shadows.width;
     frame.shadowResolution       = gfx.shadows.resolution;
     frame.sunSize                = gfx.shadows.sunSize;

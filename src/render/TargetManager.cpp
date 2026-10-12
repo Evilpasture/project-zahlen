@@ -73,8 +73,14 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (Tag::scale_divisor > 1) {
                 extra |= Vk::ImageUsage::Storage;
             }
-            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB>) {
-                extra |= Vk::ImageUsage::Storage;
+            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB> ||
+                          std::is_same_v<Tag, Res_RtShadowMask> || std::is_same_v<Tag, Res_RtShadowHistory> ||
+                          std::is_same_v<Tag, Res_ShadowDenoiseA> || std::is_same_v<Tag, Res_ShadowDenoiseB>) {
+                extra |= Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst;
+            }
+            if constexpr (std::is_same_v<Tag, Res_RtrHalf> || std::is_same_v<Tag, Res_RtrHistory> ||
+                          std::is_same_v<Tag, Res_RtgiHalf> || std::is_same_v<Tag, Res_RtgiHistory>) {
+                extra |= Vk::ImageUsage::TransferDst;
             }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
             result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, scaled, extra));
@@ -269,11 +275,19 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
     }
 
     const std::array denoiseTargets = {
-        _graph.denoiseA.image.Handle(), _graph.denoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(), _graph.rtgiDenoiseB.image.Handle()
+        _graph.denoiseA.image.Handle(),       _graph.denoiseB.image.Handle(),       _graph.shadowDenoiseA.image.Handle(),
+        _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(),   _graph.rtgiDenoiseB.image.Handle()
     };
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
+
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+        cmd, Color4 {1.0f, 1.0f, 1.0f, 1.0f}, _graph.rtShadowMask, _graph.rtShadowHistory
+    );
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.rtgiHalf, _graph.rtgiHistory
+    );
 
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT

@@ -74,6 +74,10 @@ void RenderContext::SetFrameData(
 
     gpuUniforms.nearZ = cam.nearZ;
     gpuUniforms.farZ  = cam.farZ;
+    if (gpuUniforms.frameIndex == 0) {
+        gpuUniforms.frameIndex            = static_cast<uint32_t>(_impl->frameSerial);
+        _impl->currentUniforms.frameIndex = gpuUniforms.frameIndex;
+    }
 
     auto mappedUniforms = _impl->frames.frameUniformBuffers[_impl->presenter.frameIndex].Map(_impl->allocator);
     if (!mappedUniforms) return;

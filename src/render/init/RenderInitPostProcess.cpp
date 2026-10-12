@@ -205,8 +205,9 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, ErrorCode> { return postProcess.Build(*this); },
                 {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path,
-                 Shaders::Modules::HdrDenoiseAtrousCS::Path, Shaders::Modules::RtrHalfCS::Path, Shaders::Modules::RtgiHalfCS::Path,
-                 Shaders::Modules::RtgiDenoiseCS::Path, Shaders::Modules::RtgiCompositeCS::Path, Shaders::Modules::GtaoCS::Path}
+                 Shaders::Modules::HdrDenoiseAtrousCS::Path, Shaders::Modules::RtShadowCS::Path, Shaders::Modules::ShadowDenoiseAtrousCS::Path,
+                 Shaders::Modules::RtrHalfCS::Path, Shaders::Modules::RtgiHalfCS::Path, Shaders::Modules::RtgiDenoiseCS::Path,
+                 Shaders::Modules::RtgiCompositeCS::Path, Shaders::Modules::GtaoCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

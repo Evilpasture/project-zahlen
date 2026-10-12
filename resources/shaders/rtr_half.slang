@@ -66,7 +66,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3x3 toWorld = transpose(toLocal);
 
     float3 V_local = mul(toLocal, V);
-    float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, fullPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
+    float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, fullPos, WrapFrameIndex(frame.frameIndex)).zw;
     float2 alpha   = strength > 1.0f / 255.0f ? AnisotropicAlphas(roughness, strength) : float2(max(roughness * roughness, 1e-5f));
     float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
     float3 H       = normalize(mul(toWorld, H_local));
@@ -199,5 +199,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    outImage[tid.xy] = float4(reflectionColor, confidence);
+    float reflLum = dot(max(reflectionColor, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f));
+    if (reflLum > 256.0f) {
+        reflectionColor *= 256.0f / max(reflLum, 1e-4f);
+    }
+
+    outImage[tid.xy] = float4(max(reflectionColor, float3(0.0f)), confidence);
 }

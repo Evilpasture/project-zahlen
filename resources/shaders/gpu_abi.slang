@@ -32,6 +32,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     uint acc = 0;
     acc += asuint(abi.frame.camPos.x);
     acc += asuint(abi.frame.invProj[0][0]);
+    acc += abi.frame.frameIndex;
     acc += abi.light.type;
     acc += abi.instance.vertexCount;
     acc += abi.meshlet.vertexCount;

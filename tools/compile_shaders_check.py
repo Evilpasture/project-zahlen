@@ -15,12 +15,25 @@ import tempfile
 from pathlib import Path
 
 import ctypes
+import importlib.util
 
 REPO = Path(__file__).resolve().parent.parent
 CMAKE = REPO / "cmake" / "ShaderCompilation.cmake"
-SLANG_LIB = next(
-    iter(sorted(Path("/usr/local/lib/python3.11/dist-packages/slangpy").glob("libslang-compiler.so*"))), None
-)
+
+
+def _find_slang_lib() -> Path | None:
+    spec = importlib.util.find_spec("slangpy")
+    if spec and spec.submodule_search_locations:
+        for loc in spec.submodule_search_locations:
+            matches = sorted(Path(loc).glob("libslang-compiler.so*"))
+            if matches:
+                return matches[0]
+    return next(
+        iter(sorted(Path("/usr/local/lib/python3.11/dist-packages/slangpy").glob("libslang-compiler.so*"))), None
+    )
+
+
+SLANG_LIB = _find_slang_lib()
 
 # SLANG_SPIRV
 SLANG_SPIRV = 8  # verified against SlangCompileTarget: 0=none..? set via CLI anyway

@@ -148,6 +148,7 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
 
     packed.enableRTR        = frame.enableRTR;
     packed.fullBright       = frame.fullBright;
+    packed.frameIndex       = frame.frameIndex;
     packed.shadowWidth      = frame.shadowWidth;
     packed.shadowResolution = frame.shadowResolution;
     packed.sunSize          = frame.sunSize;

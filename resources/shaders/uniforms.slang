@@ -39,6 +39,7 @@ public struct FrameUniforms {
     public float nearZ;
     public float farZ;
     public int environmentMode;
+    public uint frameIndex;
 };
 
 public struct GISettings {

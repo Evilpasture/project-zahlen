@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // scene while keeping the bilateral GI upsample edge-aware.
 struct RtgiDenoisePass: Vk::RenderPass<
                             "RtgiDenoise", Vk::ComputeWrite<Res_RtgiHalf>, Vk::ComputeWrite<Res_RtgiDenoiseA>, Vk::ComputeWrite<Res_RtgiDenoiseB>,
-                            Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>> {
+                            Vk::ComputeRead<Res_RtgiHistory>, Vk::ComputeRead<Res_Velocity>, Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

@@ -151,14 +151,14 @@ public float CalculateShadowPCSS(float4 shadowPos, float3 N, float3 L, float2 sc
 }
 
 #ifndef DISABLE_RTR
-public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, float time, RaytracingAccelerationStructure tlas,
+public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float2 screenPos, uint frameIndex, RaytracingAccelerationStructure tlas,
                                       Texture2D<float4> blueNoiseTex, SamplerState blueNoiseSampler, float sunSize = 0.001f, uint samples = 1u) {
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 right     = normalize(cross(up, L));
     float3 bitangent = cross(L, right);
 
     uint2 pixelPos  = uint2(screenPos);
-    uint  frameIdx  = FrameIndexFromCamPosW(time);
+    uint  frameIdx  = WrapFrameIndex(frameIndex);
     float spread    = max(sunSize, 0.00001f);
     uint  spp       = max(samples, 1u);
 

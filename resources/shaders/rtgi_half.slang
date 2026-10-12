@@ -24,7 +24,16 @@ SamplerState blueNoiseSampler;
 RWTexture2D<float4> outImage;
 RaytracingAccelerationStructure tlas;
 
-static const float PI = 3.14159265358979323846f;
+static const float PI         = 3.14159265358979323846f;
+static const float MAX_GI_LUM = 10.0f;
+
+float3 ClampFireflies(float3 color, float maxLum) {
+    float lum = dot(max(color, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f));
+    if (lum > maxLum) {
+        color *= maxLum / max(lum, 1e-4f);
+    }
+    return color;
+}
 
 float3 DirectSunFallback(float3 hitPos, float3 hitNormal, float3 baseColor, float3 diffuseWeight) {
     float3 L = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
@@ -47,7 +56,7 @@ float3 DirectSunFallback(float3 hitPos, float3 hitNormal, float3 baseColor, floa
     if (shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         return float3(0.0f);
     }
-    return baseColor * diffuseWeight * frame.sunRadiance.xyz * (nDotL / PI);
+    return ClampFireflies(baseColor * diffuseWeight * frame.sunRadiance.xyz * (nDotL / PI), MAX_GI_LUM);
 }
 
 float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal, float3 viewDirection) {
@@ -131,7 +140,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
 
     float4 random = SampleBlueNoiseAt(
-        blueNoiseTex, blueNoiseSampler, fullPos, FrameIndexFromCamPosW(frame.camPos.w), 0u
+        blueNoiseTex, blueNoiseSampler, fullPos, WrapFrameIndex(frame.frameIndex), 0u
     );
     float radius = sqrt(saturate(random.z));
     float angle = 2.0f * PI * random.w;
@@ -197,5 +206,5 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         radiance = float3(0.0f);
     }
 
-    outImage[tid.xy] = float4(max(radiance, float3(0.0f)), 1.0f);
+    outImage[tid.xy] = float4(ClampFireflies(max(radiance, float3(0.0f)), MAX_GI_LUM), 1.0f);
 }

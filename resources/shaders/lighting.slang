@@ -26,9 +26,6 @@ SamplerState pointSampler;
 TextureCubeArray<float> punctualShadowCube;
 Texture2DArray<float> punctualShadow2D;
 
-Texture2D<float4> blueNoiseTex;
-SamplerState blueNoiseSampler;
-
 Texture2D<float4> texEmissive;
 
 Texture2D<float> texAo;
@@ -38,7 +35,7 @@ Texture2D<float4> texSheen;
 Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
-RaytracingAccelerationStructure tlas;
+Texture2D<float> texRtShadowMask;
 #endif
 
 [[vk::constant_id(0)]]
@@ -247,10 +244,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 #ifndef DISABLE_RTR
     if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
+        float rtrShadow = texRtShadowMask.SampleLevel(pointSampler, input.uv, 0).r;
         if (viewDepth < 80.0f) {
-            shadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
+            shadow = rtrShadow;
         } else {
-            float rtrShadow = CalculateShadowRayTraced(worldPos, N, L_sun, input.pos.xy, pc.camPos.w, tlas, blueNoiseTex, blueNoiseSampler, frame.sunSize);
             float t         = saturate((viewDepth - 80.0f) / 80.0f);
             t               = t * t * (3.0f - 2.0f * t);
             shadow          = lerp(rtrShadow, cascadeShadow, t);

@@ -46,6 +46,24 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
                 if (!impl.ctx.RayTracingSupported()) {
                     return {};
                 }
+                return BuildCompute(impl, _rtShadowCS, _rtShadowCSLayout, _rtShadowHeapBindings, Shaders::Modules::RtShadowCS::Bytes());
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
+                return BuildCompute(
+                    impl, _shadowDenoiseCS, _shadowDenoiseCSLayout, _shadowDenoiseHeapBindings, Shaders::Modules::ShadowDenoiseAtrousCS::Bytes()
+                );
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
                 return BuildCompute(impl, _rtrHalfCS, _rtrHalfCSLayout, _rtrHalfHeapBindings, Shaders::Modules::RtrHalfCS::Bytes());
             }
         )
@@ -127,12 +145,33 @@ void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
     Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::BloomDown>(impl.heapManager, _bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::BloomUp>(impl.heapManager, _bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-        impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
-    );
-    Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
-        impl.heapManager, _rtgiHalfHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
-    );
+    if (impl.ctx.RayTracingSupported()) {
+        Vk::InitHeapPassSamplers<Shaders::RtShadow>(
+            impl.heapManager, _rtShadowHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        );
+        Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
+            impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        );
+        Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
+            impl.heapManager, _rtgiHalfHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        );
+    }
+}
+
+auto PostProcessFeature::RtShadow() noexcept -> Vk::DynamicComputePass& {
+    return _rtShadowCS;
+}
+
+auto PostProcessFeature::ShadowDenoise() noexcept -> Vk::DynamicComputePass& {
+    return _shadowDenoiseCS;
+}
+
+auto PostProcessFeature::RtShadowHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _rtShadowHeapBindings;
+}
+
+auto PostProcessFeature::ShadowDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _shadowDenoiseHeapBindings;
 }
 
 auto PostProcessFeature::BloomThreshold() noexcept -> Vk::DynamicComputePass& {

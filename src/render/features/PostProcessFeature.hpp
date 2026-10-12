@@ -16,6 +16,8 @@ using BloomDownCSLayout      = Vk::ReflectedLayout;
 using BloomUpCSLayout        = Vk::ReflectedLayout;
 using HdrDenoiseCSLayout     = Vk::ReflectedLayout;
 using GtaoCSLayout           = Vk::ReflectedLayout;
+using RtShadowCSLayout       = Vk::ReflectedLayout;
+using ShadowDenoiseCSLayout  = Vk::ReflectedLayout;
 using RtrHalfCSLayout        = Vk::ReflectedLayout;
 using RtgiHalfCSLayout       = Vk::ReflectedLayout;
 using RtgiDenoiseCSLayout    = Vk::ReflectedLayout;
@@ -59,6 +61,8 @@ class PostProcessFeature {
     [[nodiscard]] auto BloomUp() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto HdrDenoise() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto Gtao() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto RtShadow() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto ShadowDenoise() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtrHalf() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtgiHalf() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtgiDenoise() noexcept -> Vk::DynamicComputePass&;
@@ -69,6 +73,8 @@ class PostProcessFeature {
     [[nodiscard]] auto BloomUpHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto HdrDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto GtaoHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto RtShadowHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto ShadowDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtrHalfHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtgiHalfHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtgiDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
@@ -89,6 +95,8 @@ class PostProcessFeature {
     Vk::DynamicComputePass _bloomUpCS;
     Vk::DynamicComputePass _hdrDenoiseCS;
     Vk::DynamicComputePass _gtaoCS;
+    Vk::DynamicComputePass _rtShadowCS;
+    Vk::DynamicComputePass _shadowDenoiseCS;
     Vk::DynamicComputePass _rtrHalfCS;
     Vk::DynamicComputePass _rtgiHalfCS;
     Vk::DynamicComputePass _rtgiDenoiseCS;
@@ -99,6 +107,8 @@ class PostProcessFeature {
     Vk::HeapPassBindings _bloomUpHeapBindings;
     Vk::HeapPassBindings _hdrDenoiseHeapBindings;
     Vk::HeapPassBindings _gtaoHeapBindings;
+    Vk::HeapPassBindings _rtShadowHeapBindings;
+    Vk::HeapPassBindings _shadowDenoiseHeapBindings;
     Vk::HeapPassBindings _rtrHalfHeapBindings;
     Vk::HeapPassBindings _rtgiHalfHeapBindings;
     Vk::HeapPassBindings _rtgiDenoiseHeapBindings;
@@ -109,6 +119,8 @@ class PostProcessFeature {
     Vk::ReflectedLayout _bloomUpCSLayout;
     Vk::ReflectedLayout _hdrDenoiseCSLayout;
     Vk::ReflectedLayout _gtaoCSLayout;
+    Vk::ReflectedLayout _rtShadowCSLayout;
+    Vk::ReflectedLayout _shadowDenoiseCSLayout;
     Vk::ReflectedLayout _rtrHalfCSLayout;
     Vk::ReflectedLayout _rtgiHalfCSLayout;
     Vk::ReflectedLayout _rtgiDenoiseCSLayout;

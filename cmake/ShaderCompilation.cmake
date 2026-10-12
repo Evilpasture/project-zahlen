@@ -962,6 +962,8 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomDown=BloomDownCS"
     "BloomUp=BloomUpCS"
     "HdrDenoise=HdrDenoiseAtrousCS"
+    "RtShadow=RtShadowCS"
+    "ShadowDenoise=ShadowDenoiseAtrousCS"
     "RtrHalf=RtrHalfCS"
     "RtgiHalf=RtgiHalfCS"
     "RtgiDenoise=RtgiDenoiseCS"
