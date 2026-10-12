@@ -221,7 +221,11 @@ class ZHLN_API PhysicsContext {
         Layers::ID            layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
-        uint32_t              mask       = 0xFFFFFFFF
+        uint32_t              mask       = 0xFFFFFFFF,
+        // Activation for non-static bodies. Pass DontActivate to spawn the
+        // body asleep; it wakes on contact with active bodies or on
+        // impulse/velocity changes.
+        JPH::EActivation      activation = JPH::EActivation::Activate
     ) -> Physics::BodyHandle;
 
     auto CreateMeshBody(

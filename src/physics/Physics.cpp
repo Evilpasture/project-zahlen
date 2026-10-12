@@ -447,7 +447,8 @@ auto PhysicsContext::CreateRigidBody(
     Layers::ID            layer,
     uint32_t              materialID,
     uint32_t              category,
-    uint32_t              mask
+    uint32_t              mask,
+    JPH::EActivation      activation
 ) -> Physics::BodyHandle {
     auto&                 world = _impl->world;
     Physics::MaterialData mat {};
@@ -462,10 +463,14 @@ auto PhysicsContext::CreateRigidBody(
 
         if (motion == JPH::EMotionType::Dynamic) {
             settings.mAllowSleeping = true;
+            // Continuous collision detection. Brush-world floors are thin
+            // one-sided triangle meshes; with discrete stepping a small prop
+            // moving fast enough tunnels straight through them.
+            settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
         }
 
         JPH::BodyID id =
-            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+            world.bodyInterface->CreateAndAddBody(settings, (motion == JPH::EMotionType::Static) ? JPH::EActivation::DontActivate : activation);
 
         auto dense                      = static_cast<uint32_t>(world.count.fetch_add(1, std::memory_order::relaxed));
         world.bodyIDs[dense]            = id;
@@ -737,6 +742,10 @@ void PhysicsContext::SetKinematicPose(Physics::BodyHandle handle, JPH::RVec3Arg 
 void PhysicsContext::SetLinearVelocity(Physics::BodyHandle handle, JPH::Vec3Arg velocity) {
     JPH::BodyID id = Physics::GetBodyID(_impl->world, handle);
     if (!id.IsInvalid()) {
+        // Jolt's SetLinearVelocity does not wake the body; a sleeping prop
+        // that gets an explicit velocity (thrown, pushed by script) must
+        // actually start simulating.
+        _impl->world.bodyInterface->ActivateBody(id);
         _impl->world.bodyInterface->SetLinearVelocity(id, velocity);
     }
 }

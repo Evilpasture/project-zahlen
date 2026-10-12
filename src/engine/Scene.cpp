@@ -84,6 +84,7 @@ static_assert(
         .createPhysics      = entity.body != BodyKind::None,
         .isStaticPhysics    = entity.body != BodyKind::Dynamic,
         .isKinematicPhysics = entity.body == BodyKind::Kinematic,
+        .startAsleep        = entity.startsAsleep,
 
         .emissiveVirtualLights = entity.material.emissiveVirtualLights,
 

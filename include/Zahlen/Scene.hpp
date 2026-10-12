@@ -59,6 +59,10 @@ struct SceneEntity {
 
     Transform     transform;
     BodyKind      body = BodyKind::None;
+    // Dynamic bodies start dormant: the body exists and collides, but does
+    // not simulate until a force or an active body disturbs it. Mirrors the
+    // Source prop_physics "Start Asleep" behaviour.
+    bool          startsAsleep = false;
     SceneMaterial material;
 };
 

@@ -70,6 +70,11 @@ struct SpawnParams {
     // pose can be teleported via SetKinematicPose. isStaticPhysics must stay
     // true so VisualInterpolationSystem leaves their TransformComponent alone.
     bool isKinematicPhysics = false;
+    // Dynamic bodies are added to the physics system asleep (Jolt
+    // EActivation::DontActivate). They wake when an active body or an
+    // impulse/velocity change disturbs them. Static/kinematic bodies are
+    // unaffected (they never activate anyway).
+    bool startAsleep        = false;
     bool isAnimated         = false;
     uint32_t physicsCategory = 0xFFFFFFFF;
     uint32_t physicsMask     = 0xFFFFFFFF;

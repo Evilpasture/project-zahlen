@@ -393,11 +393,24 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // Props reference a model asset; the instantiator resolves the path.
         const std::string_view modelName = entity.Find("model");
         if ((className == "prop_static" || className == "prop_physics" || className == "prop_dynamic") && !modelName.empty()) {
+            // Source prop_physics spawnflags: 1 = "Start Asleep" (dynamic but
+            // dormant until a force acts on it), 8 = "Motion Disabled" (frozen
+            // until an EnableMotion input, which this importer never fires).
+            // A motion-disabled prop is static furniture; simulating it as a
+            // live rigid body lets it grind through the thin one-sided floor
+            // meshes of the brush world. Genuinely dynamic props spawn asleep
+            // so they only simulate when disturbed.
+            uint32_t             propFlags = 0;
+            const std::string_view flagsText = entity.Find("spawnflags");
+            std::from_chars(flagsText.data(), flagsText.data() + flagsText.size(), propFlags);
+            const bool motionDisabled = (propFlags & 8) != 0;
+
             Scene::SceneEntity prop;
             prop.name   = std::string(entity.Find("targetname"));
             prop.shape  = Scene::ShapeKind::Prefab;
             prop.source = std::string(modelName);
-            prop.body   = (className == "prop_physics") ? Scene::BodyKind::Dynamic : Scene::BodyKind::Static;
+            prop.body   = (className == "prop_physics" && !motionDisabled) ? Scene::BodyKind::Dynamic : Scene::BodyKind::Static;
+            prop.startsAsleep = prop.body == Scene::BodyKind::Dynamic;
 
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             prop.transform.position        = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};

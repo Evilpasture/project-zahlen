@@ -346,7 +346,8 @@ auto InstantiateMeshPart(
                        prep.shape, JPH::RVec3(prep.translation), prep.rotation,
                        params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
                        (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory,
-                       params.physicsMask
+                       params.physicsMask,
+                       (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
                    ),
                    .isStatic = params.isStaticPhysics
                }
@@ -492,7 +493,8 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, ZHLN::Optional<PhysicsCon
         auto body = pc->CreateRigidBody(
             shape, params.position, params.rotation,
             params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
@@ -554,7 +556,8 @@ auto SpawnPrimitive(
         auto body      = pc->CreateRigidBody(
             bodyShape, params.position, params.rotation,
             params.isStaticPhysics ? (params.isKinematicPhysics ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static) : JPH::EMotionType::Dynamic,
-            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask
+            (params.isStaticPhysics && !params.isKinematicPhysics) ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask,
+            (params.isStaticPhysics || params.startAsleep) ? JPH::EActivation::DontActivate : JPH::EActivation::Activate
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
