@@ -53,6 +53,23 @@ auto ParseUInt(std::string_view sv, uint32_t defaultVal = 0) noexcept -> uint32_
     return val;
 }
 
+auto ParseInt(std::string_view sv, int32_t defaultVal = 0) noexcept -> int32_t {
+    if (sv.empty()) {
+        return defaultVal;
+    }
+    const char* cur = sv.data();
+    const char* end = sv.data() + sv.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return defaultVal;
+    }
+    int32_t val = defaultVal;
+    std::from_chars(cur, end, val);
+    return val;
+}
+
 auto ParseMoveDir(std::string_view movedirStr, const BSP::ImportOptions& opts) -> JPH::Vec3 {
     if (movedirStr.empty()) {
         return ConvertDirection(opts, JPH::Vec3::sAxisX());
@@ -330,8 +347,23 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
 
         // 2. Parse Connections & Outputs
         EntityConnectionComponent conn;
-        for (const auto& [key, val]: entity.keys) {
-            if (key.starts_with("On") && !val.empty()) {
+        for (const auto& [key, valRaw]: entity.keys) {
+            if (key.starts_with("On") && !valRaw.empty()) {
+                // GMod-branch VBSP writes the output fields separated by 0x1B
+                // instead of ',' ("Door3\x1bToggle\x1b\x1b0\x1b-1"). Splitting
+                // on comma alone turned every such output into one unmatchable
+                // target string, silently severing button/trigger -> door wiring.
+                std::string        normalized;
+                std::string_view   val = valRaw;
+                if (valRaw.find('\x1b') != std::string_view::npos) {
+                    normalized.assign(valRaw);
+                    for (char& c: normalized) {
+                        if (c == '\x1b') {
+                            c = ',';
+                        }
+                    }
+                    val = normalized;
+                }
                 EntityOutput out;
                 out.event = String64(key);
 
@@ -347,7 +379,7 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
                             const size_t c4 = val.find(',', c3 + 1);
                             if (c4 != std::string::npos) {
                                 out.delay       = ParseFloat(val.substr(c3 + 1, c4 - c3 - 1));
-                                out.timesToFire = static_cast<int32_t>(ParseUInt(val.substr(c4 + 1)));
+                                out.timesToFire = ParseInt(val.substr(c4 + 1), -1);
                             } else {
                                 out.delay = ParseFloat(val.substr(c3 + 1));
                             }
