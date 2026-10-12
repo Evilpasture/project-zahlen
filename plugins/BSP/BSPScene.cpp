@@ -9,6 +9,9 @@
 // here; Scene::Instantiate consumes the description.
 
 #include "BSPScene.hpp"
+
+#include "BSPLighting.hpp"
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <algorithm>
 #include <charconv>
@@ -20,6 +23,13 @@ namespace ZHLN::BSP {
 namespace {
 
 constexpr float kRadiansToDegrees = 57.29577951308232f;
+
+// Source's brightness ladder: `_ambient`'s fourth component runs 0-255 over
+// the same 30-units-per-255 scale `_light` uses, so both normalise identically.
+constexpr float kAmbientBrightnessNormalisation = 30.0f;
+// SceneEnvironment::ambientExposure, the divisor the renderer applies to an
+// environment-derived irradiance before it becomes sky radiance.
+constexpr float kAmbientExposure = 25.0f;
 
 // Analytic inverse of JPH::Quat::sEulerAngles, which Scene::Instantiate uses
 // to rebuild the transform (Math::EulerDegreesToQuat). sEulerAngles(x,y,z)
@@ -123,6 +133,40 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
     bool cameraSet = false;
 
+    // The sun's direction comes from the map's light_environment, and it has to
+    // be known before the entity loop reaches it (the loop builds the sun
+    // SceneLight in place). EnvironmentSunDirection falls back to a 45-degree
+    // elevation when the map carries no light_environment at all.
+    const JPH::Vec3 sunDirection = EnvironmentSunDirection(map);
+    uint32_t        sceneLightSuppressed = 0;
+
+    // The sky gradient is the light_environment's ambient term, converted the
+    // same way the renderer converts it (RenderSystem.cpp:439):
+    // ambientIrradiance = colour * brightness/30, then skyRadiance =
+    // irradiance / ambientExposure. Reading it here rather than hard-coding
+    // the engine default is what makes an outdoor section of a Source map read
+    // as the sky its author lit it with.
+    const AmbientTerm ambient = ReadEnvironmentAmbient(map);
+    if (ambient.authored) {
+        // The renderer's own ladder, spelled out so the numbers can be checked
+        // against a map: ambientIrradiance = colour * brightness/30
+        // (RenderSystem.cpp:439, IBLProcessor.hpp:371), then skyRadiance =
+        // irradiance / ambientExposure. ReadEnvironmentAmbient returns the raw
+        // 0-255 brightness, so both divisions happen here. This map's
+        // `_ambient "64 95 166 10"` lands at (0.0033, 0.0050, 0.0087), which is
+        // the same irradiance VRAD baked its LDR lightmaps against.
+        const float ladder = 1.0f / (kAmbientBrightnessNormalisation * kAmbientExposure);
+        const JPH::Float3 sky = {ambient.color.GetX() * ambient.intensity * ladder,
+                                 ambient.color.GetY() * ambient.intensity * ladder,
+                                 ambient.color.GetZ() * ambient.intensity * ladder};
+        // Keep the authored chromaticity, keep the authored magnitude: the
+        // engine's defaults are a blue-grey noon, and a map that authored
+        // something else should not be quietly replaced by them.
+        scene.environment.skyZenith  = sky;
+        scene.environment.skyHorizon = {sky.x * 4.0f, sky.y * 4.0f, sky.z * 4.0f};
+        scene.environment.skyGround  = {sky.x * 0.35f, sky.y * 0.35f, sky.z * 0.35f};
+    }
+
     // Interactive brush submodels: doors/buttons get the authored submodel
     // prefab the importer caches under "<map>#model_<N>"; their pivots decide
     // where the entity transform sits.
@@ -139,51 +183,66 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         const JPH::Vec3 origin(originArr[0], originArr[1], originArr[2]);
         JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
-        if (className == "light" || className == "light_spot" || className == "light_environment") {
-            const auto lightName = entity.Find("targetname");
+        // ---- lights ------------------------------------------------------
+        // BSPLighting owns the rules (classname classification, colour
+        // parsing, attenuation, radius); this site only maps the result onto
+        // the scene description and fills the fields the engine reads that
+        // the .bsp does not carry.
+        const LightEntityKind lightKind = ClassifyLightEntity(className);
+        if (lightKind != LightEntityKind::NotALight) {
+            const SourceLightValue value = ParseSourceLightValue(entity);
+            const SourceAttenuation atten = ParseSourceAttenuation(entity);
+
+            // Source's `_light` is a colour plus a brightness in 0-255; a
+            // 3-component value (which this map's 19 `_light` entities use)
+            // means "full brightness", not "black". ParseSourceLightValue
+            // defaults the alpha lane to 255 when it is missing.
+            const bool   hasColour  = value.rgba[0] > 0.0f || value.rgba[1] > 0.0f || value.rgba[2] > 0.0f;
+            const bool   hasBright  = value.rgba[3] > 0.0f;
+            const bool   disabled   = (entity.FindInt("spawnflags").value_or(0) & 1) != 0;
+            if (!hasColour || !hasBright || disabled) {
+                ++sceneLightSuppressed;
+                continue;
+            }
 
             Scene::SceneLight light;
-            light.name = lightName.empty() ? std::string(className) : std::string(lightName);
+            light.name = entity.Find("targetname").empty() ? std::string(className) : std::string(entity.Find("targetname"));
 
-            LightType lightType = LightType::Point;
-            if (className == "light_spot") {
-                lightType  = LightType::Spot;
-                light.type = "Spot";
-            } else if (className == "light_environment") {
-                lightType  = LightType::Sun;
-                light.type = "Sun";
-            } else {
-                light.type = "Point";
+            // Sun, not a point at infinity: the engine's directional light is
+            // placed at the sky and shoots along -direction, so a Source sun
+            // direction is stored negated. The light_environment entity's
+            // origin is a mapper hint, not the light's position.
+            if (lightKind == LightEntityKind::Sun) {
+                light.type     = "Sun";
+                light.direction = {-sunDirection.GetX(), -sunDirection.GetY(), -sunDirection.GetZ()};
+                light.position = {0.0f, 0.0f, 0.0f};
+                // Calibration: Source's stock 200-brightness sun maps onto the
+                // engine's LightingSystem default of 180, and the exposure the
+                // renderer applies to an environment-derived sun is 25x the
+                // scene's ambientExposure. Without this the noon sun lands at
+                // 1/150th of a default sun and every outdoor surface reads as
+                // dusk.
+                light.intensity = value.rgba[3] * kSourceSunBrightnessToEngine;
+                light.color     = {value.rgba[0] / 255.0f, value.rgba[1] / 255.0f, value.rgba[2] / 255.0f};
+                light.range     = 1000.0f;
+                light.radius    = 0.0f;
+                scene.lights.push_back(std::move(light));
+                continue;
             }
+
+            light.type = (lightKind == LightEntityKind::Spot) ? "Spot" : "Point";
 
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
+            light.color                    = {value.rgba[0] / 255.0f, value.rgba[1] / 255.0f, value.rgba[2] / 255.0f};
+            light.intensity                = value.rgba[3] * kSourceBrightnessToEngine;
 
-            std::array<float, 4>   color4   = {255.0f, 255.0f, 255.0f, 200.0f};
-            const std::string_view lightVal = entity.Find("_light");
-            if (!lightVal.empty()) {
-                const char* cur = lightVal.data();
-                const char* end = lightVal.data() + lightVal.size();
-                for (float& component: color4) {
-                    while (cur < end && (*cur == ' ' || *cur == '\t')) {
-                        cur++;
-                    }
-                    if (cur >= end) {
-                        break;
-                    }
-                    auto [ptr, ec] = std::from_chars(cur, end, component);
-                    if (ec != std::errc {}) {
-                        break;
-                    }
-                    cur = ptr;
-                }
-            }
-            light.color     = {color4[0] / 255.0f, color4[1] / 255.0f, color4[2] / 255.0f};
-            light.intensity = color4[3] * kSourceBrightnessToEngine;
+            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
+            light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
-            JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
-            if (lightType != LightType::Point) {
-                float pitchDeg = angles.GetX();
+            if (light.type == "Spot") {
+                JPH::Vec3 direction(0.0f, 0.0f, -1.0f);
+                float     pitchDeg = angles.GetX();
                 if (const auto p = entity.FindFloat("pitch")) {
                     pitchDeg = *p;
                 }
@@ -191,22 +250,16 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
                 const float cp    = std::cos(pitch);
                 direction         = JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-            }
-            const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
-            light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
+                const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
+                light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
 
-            const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
-            light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
-
-            if (lightType == LightType::Spot) {
-                // Cone angles in degrees (_cone outer, _cone2 inner), the
-                // same convention BSPGeometry::GatherLights uses. The old
+                // Cone angles in degrees (_cone outer, _cone2 inner). The old
                 // code assigned the cone WIDTH to light.range -- a 60-degree
                 // cone became a 60-metre throw.
-                const float outerDegrees = entity.FindFloat("_cone").value_or(45.0f);
+                const float outerDegrees = entity.FindFloat("_cone").or_else([&] { return entity.FindFloat("lightfov"); }).value_or(45.0f);
                 const float innerDegrees = entity.FindFloat("_cone2").value_or(outerDegrees * (2.0f / 3.0f));
-                light.outerConeRadians = outerDegrees * (3.14159265358979323846f / 180.0f);
-                light.innerConeRadians = innerDegrees * (3.14159265358979323846f / 180.0f);
+                light.outerConeRadians   = outerDegrees * (3.14159265358979323846f / 180.0f);
+                light.innerConeRadians   = innerDegrees * (3.14159265358979323846f / 180.0f);
             }
 
             // Range: Source's authored cutoff when present
@@ -215,18 +268,12 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // inverse-square attenuation (atten = 1/(d^2+1)) drops below a
             // ~0.05 cutoff, clamped to indoor sanity -- the 20-metre default
             // let one closet lamp reach through five rooms of unshadowed
-            // concrete.
-            const auto distanceKey = entity.FindFloat("_zero_percent_distance")
-                                         .or_else([&] { return entity.FindFloat("_distance"); })
-                                         .or_else([&] { return entity.FindFloat("_falloff"); });
-            if (distanceKey && *distanceKey > 0.0f) {
-                light.range = *distanceKey * options.unitScale;
-            } else {
-                constexpr float kCutoff = 0.05f;
-                light.range = (light.intensity > kCutoff) ?
-                                  std::clamp(std::sqrt((light.intensity / kCutoff) - 1.0f), 3.0f, 12.0f) :
-                                  3.0f;
-            }
+            // concrete. The radius follows the same distance: it is the
+            // renderer's specular/probe footprint, and a 5 cm point light
+            // inside a 3 m lamp shade is what makes the highlight a dot.
+            const float engineIntensity = light.intensity;
+            light.range                 = AttenuationRangeMetres(atten, engineIntensity, options.unitScale);
+            light.radius                = std::max(light.range * 0.05f, 0.05f);
 
             scene.lights.push_back(std::move(light));
             continue;
@@ -445,6 +492,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         };
 
         scene.entities.push_back(std::move(propEntity));
+    }
+
+    // Lighting accounting, same contract as the importer's: the number of
+    // lights that did not make it into the scene, and why, is the difference
+    // between "the map has no lights" and "the map's lights were suppressed
+    // here".
+    if (sceneLightSuppressed > 0) {
+        Log("BSP Scene: {} -> {} lights ({} entity lights suppressed: disabled spawnflag or zero colour/brightness)", virtualPath,
+            scene.lights.size(), sceneLightSuppressed);
     }
 
     return scene;

@@ -10,6 +10,7 @@
 // one node per light so ModelLight's node chain carries its transform.
 
 #include "BSPImporter.hpp"
+#include "BSPLighting.hpp"
 #include "BSPRead.hpp"
 #include "SourceVFS.hpp"
 #include "StudioModelImporter.hpp"
@@ -24,15 +25,15 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stb_image.h>
 #include <string>
 #include <vector>
-
-#include <stb_image.h>
 
 namespace ZHLN::BSP {
 namespace {
@@ -66,12 +67,11 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     int            width    = 0;
     int            height   = 0;
     int            channels = 0;
-    unsigned char* pixels   = stbi_load_from_memory(
-        reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4
-    );
+    unsigned char* pixels =
+        stbi_load_from_memory(reinterpret_cast<const unsigned char*>(bytes.data()), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
     if (pixels) {
         const std::span<const std::byte> rgba(reinterpret_cast<const std::byte*>(pixels), static_cast<size_t>(width) * height * 4);
-        auto texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
+        auto                             texRes = ctx.CreateTexture(name, rgba, Extent2D {static_cast<uint32_t>(width), static_cast<uint32_t>(height)}, isSRGB);
         stbi_image_free(pixels);
         if (texRes.has_value()) {
             return *texRes;
@@ -81,7 +81,178 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     return TextureHandle::Invalid;
 }
 
-auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part) -> MaterialDesc {
+// A material's .vmt, resolved and parsed once per import. Source's `patch`
+// shader is an include-plus-replace indirection that roughly a sixth of the
+// materials in a shipped map use (every cubemap-patched surface), so the
+// resolver follows it instead of treating the patch as the material.
+auto LoadMaterialVmt(const SourceVFS& vfs, std::string_view materialName) -> std::optional<VMTMaterial> {
+    for (int depth = 0; depth < 4; ++depth) {
+        const auto vmtPath = vfs.ResolveMaterial(materialName);
+        if (!vmtPath.has_value()) {
+            return std::nullopt;
+        }
+        const auto vmtBytes = vfs.ReadFile(*vmtPath);
+        if (!vmtBytes.has_value() || vmtBytes->empty()) {
+            return std::nullopt;
+        }
+        const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
+        const auto             vmtMatExp = ParseVMT(vmtText);
+        if (!vmtMatExp.has_value()) {
+            return std::nullopt;
+        }
+        if (vmtMatExp->shader != "patch") {
+            return std::optional<VMTMaterial>(*vmtMatExp);
+        }
+        // `include` points at the real material; the patch's own `replace`
+        // block overlays it, so merge the patch's parameters on top of the
+        // parent's rather than dropping either.
+        const auto include = vmtMatExp->Find("include");
+        if (!include || include->empty()) {
+            return std::optional<VMTMaterial>(*vmtMatExp);
+        }
+        std::string parent(*include);
+        if (!parent.ends_with(".vmt")) {
+            parent += ".vmt";
+        }
+        const auto parentBytes = vfs.ReadFile(parent);
+        if (!parentBytes.has_value() || parentBytes->empty()) {
+            return std::nullopt;
+        }
+        const std::string_view parentText(reinterpret_cast<const char*>(parentBytes->data()), parentBytes->size());
+        const auto             parentExp = ParseVMT(parentText);
+        if (!parentExp.has_value()) {
+            return std::nullopt;
+        }
+        VMTMaterial merged = *parentExp;
+        for (const auto& [key, value]: vmtMatExp->parameters) {
+            if (key == "include" || key == "replace") {
+                continue;
+            }
+            merged.parameters[key] = value;
+        }
+        return merged;
+    }
+    return std::nullopt;
+}
+
+// Measured Rec.709 luma of a material's base texture, or -1 when it cannot be
+// resolved or decoded. This is the most direct evidence a surface actually
+// emits: a lamp panel's VTF is a white sheet, a poster's is not.
+auto TextureLuma(const SourceVFS& vfs, const VMTMaterial& vmt) -> float {
+    if (vmt.baseTexture.empty()) {
+        return -1.0f;
+    }
+    const auto texPath = vfs.ResolveTexture(vmt.baseTexture);
+    if (!texPath.has_value()) {
+        return -1.0f;
+    }
+    const auto texBytes = vfs.ReadFile(*texPath);
+    if (!texBytes.has_value() || texBytes->empty()) {
+        return -1.0f;
+    }
+    const auto decoded = DecodeVTF(*texBytes);
+    if (!decoded.has_value() || decoded->rgba8.empty()) {
+        return -1.0f;
+    }
+    const size_t pixelCount = decoded->rgba8.size() / 4;
+    if (pixelCount == 0) {
+        return -1.0f;
+    }
+    // Stride over the texture: a 2048x512 VTF is a megapixel, and the mean over
+    // every 97th pixel is stable to three decimals while touching ~1% of it.
+    double   sum   = 0.0;
+    uint64_t count = 0;
+    for (uint64_t i = 0; i < pixelCount; i += 97) {
+        const size_t offset = static_cast<size_t>(i) * 4;
+        const auto   r      = static_cast<double>(static_cast<uint8_t>(decoded->rgba8[offset + 0]));
+        const auto   g      = static_cast<double>(static_cast<uint8_t>(decoded->rgba8[offset + 1]));
+        const auto   b      = static_cast<double>(static_cast<uint8_t>(decoded->rgba8[offset + 2]));
+        const auto   a      = static_cast<double>(static_cast<uint8_t>(decoded->rgba8[offset + 3])) / 255.0;
+        sum += (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255.0 * a;
+        ++count;
+    }
+    return (count > 0) ? static_cast<float>(sum / static_cast<double>(count)) : -1.0f;
+}
+
+// The engine's own luminance, so the emissive ranking here and the renderer's
+// light-importance sort agree on what "bright" means.
+// Below this, a surface is not emitting anything the renderer can see.
+constexpr float kEmissiveStrengthEpsilon = 0.02f;
+
+// Leading scalar of a KeyValues value, or nullopt when it is not a number.
+// Source writes `$selfillum 1`, `$selfillum 0.35`, `$selfillum "255 255 255
+// 255"` and the texture-path form; the first token is the one that matters.
+[[nodiscard]] auto ParseFloatScalar(std::string_view text) noexcept -> std::optional<float> {
+    const auto* begin = text.data();
+    const auto* end   = text.data() + text.size();
+    while (begin < end && (*begin == ' ' || *begin == '\t' || *begin == '[' || *begin == '"')) {
+        ++begin;
+    }
+    float value          = 0.0f;
+    const auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc {}) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+// 0..1 for a material that declares self-illumination, or -1 when it does not.
+// Reads every spelling Source uses: the plain `$selfillum <0|1|scalar>` mask
+// switch, the mask texture form, and the `$selfillummaskscale` multiplier that
+// a lot of ported content pairs with it.
+[[nodiscard]] auto SelfIllumStrength(const VMTMaterial& vmt) noexcept -> float {
+    static constexpr std::string_view kKeys[] = {"$selfillum", "$selfillummask", "$selfillummaskscale", "$emissiveblendstrength"};
+    float                             found   = -1.0f;
+    for (const std::string_view key: kKeys) {
+        const auto value = vmt.Find(key);
+        if (!value || value->empty()) {
+            continue;
+        }
+        // A texture path is a mask, not a magnitude: the surface emits, at full
+        // mask strength, wherever the mask is not black.
+        if (value->find('/') != std::string_view::npos || value->ends_with(".vtf")) {
+            found = std::max(found, 0.0f);
+            continue;
+        }
+        if (const auto scalar = ParseFloatScalar(*value)) {
+            found = std::max(found, *scalar);
+        } else {
+            found = std::max(found, 1.0f);
+        }
+    }
+    return found;
+}
+
+// How emissive each Source shader is when it carries no self-illumination
+// keyvalues of its own. Ordered by construction: UnlitGeneric, Sprite, Cable
+// and Beam have no lighting path at all (every pixel is the albedo, at full
+// scale), MonitorScreen samples its framebuffer and modulates it by the albedo,
+// VertexLitGeneric is per-vertex lit with a dark ambient, and
+// LightmappedGeneric is baked and dark unless it self-illuminates.
+[[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
+    if (shader == "UnlitGeneric" || shader == "Sprite" || shader == "Cable" || shader == "Beam") {
+        return 1.0f;
+    }
+    if (shader == "MonitorScreen") {
+        return 1.0f;
+    }
+    if (shader == "VertexLitGeneric") {
+        return 0.55f;
+    }
+    if (shader == "LightmappedGeneric") {
+        return 0.35f;
+    }
+    if (shader == "Water" || shader == "Refract") {
+        return 0.40f;
+    }
+    return 0.0f; // WorldVertexTransition, Patch, EyeRefract, ... : not emitters
+}
+
+auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
+    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
+}
+
+auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
@@ -91,39 +262,27 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     // into a blinding surface under direct light.
     MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
 
-    const auto vmtPath = vfs.ResolveMaterial(part.materialName);
-    if (!vmtPath.has_value()) {
+    if (vmt == nullptr) {
         return desc;
     }
 
-    const auto vmtBytes = vfs.ReadFile(*vmtPath);
-    if (!vmtBytes.has_value() || vmtBytes->empty()) {
-        return desc;
-    }
-
-    const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-    const auto             vmtMatExp = ParseVMT(vmtText);
-    if (!vmtMatExp.has_value()) {
-        return desc;
-    }
-
-    const auto& vmt   = *vmtMatExp;
-    desc.baseColor   = vmt.baseColor;
+    const VMTMaterial& material = *vmt;
+    desc.baseColor              = material.baseColor;
     // $nocull from the VMT, or the importer's single-sheet wall audit marking
     // this part: Source draws undercovered faces from their back side (the
     // vbsp leaffaces of the room include them), so honours match by rendering
     // the whole material group double-sided. Backface physics is handled
     // separately via reversed triangles in the collision stream.
-    desc.doubleSided = vmt.noCull || part.forceDoubleSided;
-    if (vmt.isTranslucent) {
+    desc.doubleSided = material.noCull || part.forceDoubleSided;
+    if (material.isTranslucent) {
         desc.alphaBlend = true;
         desc.alphaMode  = 2;
-    } else if (vmt.isAlphaTest) {
+    } else if (material.isAlphaTest) {
         desc.alphaMode   = 1;
-        desc.alphaCutoff = vmt.alphaCutoff;
+        desc.alphaCutoff = material.alphaCutoff;
     }
 
-    if (vmt.shader == "UnlitGeneric") {
+    if (material.shader == "UnlitGeneric") {
         desc.unlit = true;
         desc.baseColor.x *= kUnlitDim;
         desc.baseColor.y *= kUnlitDim;
@@ -131,12 +290,12 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     }
 
     // Resolve base texture (albedo)
-    if (!vmt.baseTexture.empty()) {
-        const auto texPath = vfs.ResolveTexture(vmt.baseTexture);
+    if (!material.baseTexture.empty()) {
+        const auto texPath = vfs.ResolveTexture(material.baseTexture);
         if (texPath.has_value()) {
             const auto texBytes = vfs.ReadFile(*texPath);
             if (texBytes.has_value()) {
-                desc.albedoMap = LoadTextureFromBytes(ctx, vmt.baseTexture, *texBytes, true);
+                desc.albedoMap = LoadTextureFromBytes(ctx, material.baseTexture, *texBytes, true);
             }
         }
         if (desc.albedoMap == TextureHandle::Invalid) {
@@ -150,13 +309,66 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     }
 
     // Resolve normal/bump map
-    if (!vmt.bumpMap.empty()) {
-        const auto bumpPath = vfs.ResolveTexture(vmt.bumpMap);
+    if (!material.bumpMap.empty()) {
+        const auto bumpPath = vfs.ResolveTexture(material.bumpMap);
         if (bumpPath.has_value()) {
             const auto bumpBytes = vfs.ReadFile(*bumpPath);
             if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, vmt.bumpMap, *bumpBytes, false);
+                desc.normalMap = LoadTextureFromBytes(ctx, material.bumpMap, *bumpBytes, false);
             }
+        }
+    }
+
+    // ---- emission ---------------------------------------------------------
+    // Source maps carry their emission in three places, and this pass reads all
+    // three because a mapper only has to use one of them for the surface to be
+    // dark without them:
+    //
+    //   1. `$selfillum` / `$selfillummask` on a LightmappedGeneric or
+    //      VertexLitGeneric -- the authored case. Self-illuminated
+    //      LightmappedGeneric is not unlit (it still receives light), so it is
+    //      flagged with `unlit = false` plus a non-zero emissive term; an
+    //      UnlitGeneric stays unlit and gets the term as well.
+    //   2. The shader class itself: UnlitGeneric / Sprite / Cable / Beam /
+    //      MonitorScreen are emissive by construction, whatever the keyvalues
+    //      say.
+    //   3. The measured luminance of the base texture and the texdata
+    //      reflectivity vbsp baked, for the maps that ship neither.
+    //
+    // The emissive term is emitted in the material's own colour, scaled by the
+    // strength, and `emissiveFactorScale` stays at 1.0 so Source's authored
+    // linear values survive to the renderer unchanged.
+    // `$selfillum` is either a bare 0/1 mask switch, a single scalar, or a
+    // full "r g b a" colour; all three spell the same intent, so take the
+    // alpha/scalar when there is one and fall back to a plain 1.0 mask.
+    const float shaderStrength    = ShaderEmissiveStrength(material.shader);
+    const float selfIllumStrength = SelfIllumStrength(material);
+    const float textureLuma       = (material.baseTexture.empty()) ? -1.0f : TextureLuma(vfs, material);
+
+    float strength = 0.0f;
+    if (selfIllumStrength >= 0.0f) {
+        strength = selfIllumStrength * std::max(shaderStrength, 0.35f);
+    } else if (textureLuma > 0.0f) {
+        // No authored emission, so the surface emits only as much as its own
+        // texture is bright. A white panel on a dark wall is the case this
+        // catches -- the mapper never wrote a keyvalue, and the panel still
+        // has to glow.
+        strength = textureLuma * shaderStrength;
+    }
+
+    if (strength > kEmissiveStrengthEpsilon) {
+        JPH::Vec3 tint = JPH::Vec3(material.baseColor.x, material.baseColor.y, material.baseColor.z);
+        if (Rec709Luma(tint) < 1e-4f) {
+            tint = JPH::Vec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
+        }
+        // Keep the term at the material's own chromaticity and let its
+        // luminance set the magnitude: a red neon sign emits red, not a grey
+        // scaled by red.
+        const float luma  = std::max(Rec709Luma(tint), kEmissiveStrengthEpsilon);
+        const float scale = strength / luma;
+        desc.emissive     = JPH::Float4(tint.GetX() * scale, tint.GetY() * scale, tint.GetZ() * scale, 1.0f);
+        if (material.shader == "UnlitGeneric" || material.shader == "Sprite" || material.shader == "Cable" || material.shader == "Beam") {
+            desc.unlit = true;
         }
     }
 
@@ -180,6 +392,61 @@ auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte
     return out;
 }
 
+// The second stage of the emissive heuristic: the geometry pass only applied
+// the material-name gate (it has no VFS), so this is where the evidence that
+// actually decides the strength is read -- the .vmt's shader class and
+// self-illumination keys, the measured luminance of the base .vtf, and the
+// texdata reflectivity vbsp baked. Every candidate is re-probed through
+// BSPLighting::ProbeEmissiveMaterial, and the ones that clear no threshold are
+// dropped: a `lights/white` sheet with reflectivity (1,1,1) and no
+// self-illumination is a lit surface, not a lamp, and spawning a light at its
+// centroid would double the map's illumination.
+//
+// Runs before the prefab is built so the parts' `unlit` flag and the spawned
+// lights agree on which surfaces are emitters.
+auto RefineEmissiveSurfaces(const SourceVFS& vfs, const BSPMap& map, std::vector<EmissiveSurface>& surfaces, ImportedMapData& data) -> uint32_t {
+    if (surfaces.empty()) {
+        return 0;
+    }
+    std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
+    std::vector<EmissiveSurface>                                kept;
+    kept.reserve(surfaces.size());
+
+    for (EmissiveSurface& surface: surfaces) {
+        const auto vmtIt = vmtCache.try_emplace(surface.materialName, std::nullopt);
+        if (vmtIt.second) {
+            vmtIt.first->second = LoadMaterialVmt(vfs, surface.materialName);
+        }
+        const VMTMaterial* vmt = vmtIt.first->second.has_value() ? &*vmtIt.first->second : nullptr;
+
+        // Measured luminance of the material's own base texture: the most
+        // direct evidence a surface emits, and it overrides the family name
+        // when the .vmt declares no self-illumination of its own.
+        const float luma = (vmt != nullptr && !vmt->baseTexture.empty()) ? TextureLuma(vfs, *vmt) : -1.0f;
+
+        const EmissiveMaterialProbe probe = ProbeEmissiveMaterial(surface.materialName, surface.reflectivityLuma, vmt, surface.noLightFlag);
+        if (!probe.isEmissive || probe.strength <= 0.0f) {
+            continue;
+        }
+        surface.strength = std::max(probe.strength, (luma > 0.0f) ? luma * 0.85f : 0.0f);
+        surface.color    = probe.tint;
+        if (surface.reflectivityLuma < 0.0f) {
+            surface.reflectivityLuma = 0.0f;
+        }
+        kept.push_back(std::move(surface));
+    }
+
+    const uint32_t dropped   = static_cast<uint32_t>(surfaces.size() - kept.size());
+    surfaces                 = std::move(kept);
+    data.stats.emissiveFaces = 0;
+    for (const EmissiveSurface& surface: surfaces) {
+        data.stats.emissiveFaces += surface.faceCount;
+    }
+    data.stats.emissiveSurfaces = static_cast<uint32_t>(surfaces.size());
+    (void) map;
+    return dropped;
+}
+
 // Fills prefab->parts from imported material streams: one compiled part per
 // material group (GPU buffers, material, meshlets, BLAS, colliders), then
 // folds the invisible-but-solid tool faces into the first part collider.
@@ -192,6 +459,11 @@ void AssemblePrefabParts(
     const ImportOptions&   options,
     ModelPrefab&           prefab
 ) {
+    // One .vmt per material group, not one per face: a map with 40 lamp panels
+    // still resolves 40 identical files once. `patch` is followed through so
+    // the probe sees the material the surface actually renders with.
+    std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
+
     for (const MaterialStreams& part: data.parts) {
         if (part.VertexCount() == 0 || part.IndexCount() == 0) {
             continue;
@@ -207,16 +479,18 @@ void AssemblePrefabParts(
         const bool hasMeshlets    = !meshletResult.Empty();
         const auto packedMeshlets = PackMeshlets(meshletResult.meshlets);
 
-        BufferHandle meshletVbo       = hasMeshlets ? ctx.CreateBuffer(BufferDesc {
-                                                          .usage  = BufferUsage::Storage,
-                                                          .data   = std::as_bytes(std::span {packedMeshlets}),
-                                                          .stride = kMeshletPackedBytes,
-                                                }) :
+        BufferHandle meshletVbo       = hasMeshlets ? ctx.CreateBuffer(
+                                                          BufferDesc {
+                                                              .usage  = BufferUsage::Storage,
+                                                              .data   = std::as_bytes(std::span {packedMeshlets}),
+                                                              .stride = kMeshletPackedBytes,
+                                                          }
+                                                      ) :
                                                       BufferHandle::Invalid;
         BufferHandle meshletVertexVbo = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.vertices}) : BufferHandle::Invalid;
         BufferHandle meshletTriVbo    = hasMeshlets ? ctx.CreateBuffer<BufferUsage::Storage>(std::span {meshletResult.triangles}) : BufferHandle::Invalid;
         const bool   completeMeshlets = hasMeshlets && meshletVbo != BufferHandle::Invalid && meshletVertexVbo != BufferHandle::Invalid &&
-                                      meshletTriVbo != BufferHandle::Invalid;
+                                        meshletTriVbo != BufferHandle::Invalid;
 
         Mesh subMesh = {
             .posBuffer           = posVbo,
@@ -238,7 +512,13 @@ void AssemblePrefabParts(
             }
         }
 
-        const Material subMaterial = ctx.CreateMaterial(ResolveMaterialDesc(ctx, vfs, part)).value_or(Material {});
+        const auto vmtIt = vmtCache.try_emplace(part.materialName, std::nullopt);
+        if (vmtIt.second) {
+            vmtIt.first->second = LoadMaterialVmt(vfs, part.materialName);
+        }
+        const VMTMaterial* vmt = vmtIt.first->second.has_value() ? &*vmtIt.first->second : nullptr;
+
+        const Material subMaterial = ctx.CreateMaterial(ResolveMaterialDesc(ctx, vfs, part, vmt)).value_or(Material {});
 
         ModelPart modelPart;
         modelPart.name            = String64(part.materialName.c_str());
@@ -287,8 +567,7 @@ void AssemblePrefabParts(
     // for mesh queries and CharacterVirtual alike.
     if (options.buildColliders && data.collisionOnly.IndexCount() > 0) {
         if (JPH::ShapeRefC collisionShape = Physics::CreateMeshShape(
-                data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(),
-                data.collisionOnly.IndexCount()
+                data.collisionOnly.positions.data(), data.collisionOnly.VertexCount(), data.collisionOnly.indices.data(), data.collisionOnly.IndexCount()
             )) {
             bool folded = false;
             for (ModelPart& part: prefab.parts) {
@@ -307,12 +586,13 @@ void AssemblePrefabParts(
                 break;
             }
             if (!folded) {
-                LogWarning("BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
-                           data.collisionOnly.indices.size() / 3);
+                LogWarning(
+                    "BSP Importer: {} collision-only tool faces could not be folded into any part collider; invisible walls are lost",
+                    data.collisionOnly.indices.size() / 3
+                );
             }
         }
     }
-
 }
 
 // Translates every stream (render parts and the collision-only fold) by
@@ -365,7 +645,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         worldOptions.skipModels.push_back(sub.modelIndex);
     }
 
-    const ImportedMapData imported = ImportMapGeometry(map, worldOptions);
+    ImportedMapData imported = ImportMapGeometry(map, worldOptions);
     if (imported.parts.empty()) {
         LogWarning("BSP Importer: no importable surfaces in {}", virtualPath);
         return std::nullopt;
@@ -374,14 +654,14 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // Face-pipeline accounting: when a wall seems to be missing in-game, this
     // line proves whether it was dropped here (and by which stage) or is
     // present and the problem is downstream of this import.
-    Log(
-        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided",
-        virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
-                         imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
+    Log("BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} "
+        "tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided",
+        virtualPath,
+        imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
+            imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
         imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
         imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
-        imported.stats.singleSidedSheets
-    );
+        imported.stats.singleSidedSheets);
 
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);
@@ -398,6 +678,27 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
             vfs.AddSearchPath(bspPath.parent_path().parent_path().string());
         }
     }
+
+    // Stage two of the emissive heuristic: re-probe the name-gated candidates
+    // against the materials they actually render with (see
+    // RefineEmissiveSurfaces). The count of candidates the probe rejected is
+    // reported in the lighting line below.
+    uint32_t emissiveProbeDropped = 0;
+    if (worldOptions.gatherEmissiveSurfaces) {
+        emissiveProbeDropped = RefineEmissiveSurfaces(vfs, map, imported.emissive, imported);
+    }
+
+    // Lighting accounting: this line is the answer to "why is my scene dark?".
+    // Every light the entity lump offered leaves through exactly one counter.
+    const LightingDiagnostics& lighting = imported.lighting;
+    Log("BSP Importer: {} lighting -> {} entity lights emitted ({} offered: {} beam cones without a dynamic light, {} disabled/black); "
+        "ambient {}{}; {} emissive faces -> {} area-light proxies over {:.3f} m2 ({} dropped by the probe, {} by the cap); "
+        "{} fixtures damped{}",
+        virtualPath, lighting.entityLightsEmitted, lighting.entityLightsOffered, lighting.droppedBeamCone, lighting.droppedDisabled,
+        lighting.ambientAuthored ? "authored" : "default",
+        (imported.ambient.color.GetX() + imported.ambient.color.GetY() + imported.ambient.color.GetZ() > 0.0f) ? "" : " (zero)", lighting.emissiveFaces,
+        lighting.emissiveSurfaces, lighting.emissiveAreaSquareMetres, emissiveProbeDropped, lighting.emissiveDroppedCap, lighting.emissiveFixtureDamped,
+        lighting.floorEnforced ? " [floor enforced]" : "");
 
     // One identity root; parts hang off it directly (part.localTransform does
     // the placement), lights get their own translated nodes because ModelLight
@@ -435,8 +736,8 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // just the movement delta); rotating doors are re-based on their hinge.
     for (const InteractiveSubmodel& sub: interactiveSubmodels) {
         ImportOptions subOptions = options;
-        subOptions.onlyModel    = sub.modelIndex;
-        subOptions.gatherLights = false;
+        subOptions.onlyModel     = sub.modelIndex;
+        subOptions.gatherLights  = false;
 
         ImportedMapData subImported = ImportMapGeometry(map, subOptions);
         if (subImported.parts.empty()) {
@@ -446,8 +747,8 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
             ShiftImportedGeometry(subImported, -sub.pivot);
         }
 
-        const std::string subPath = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
-        auto              subPrefab                 = std::make_unique<ModelPrefab>();
+        const std::string subPath      = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
+        auto              subPrefab    = std::make_unique<ModelPrefab>();
         subPrefab->virtualPath         = String256(subPath);
         subPrefab->emissiveFactorScale = 1.0f;
         subPrefab->nodes.push_back(
@@ -499,12 +800,7 @@ auto LoadBSPPrefabFromMemory(
     return BuildModelPrefab(ctx, assetMgr, *parsed, virtualPath, options);
 }
 
-auto PreloadStaticProps(
-    RenderContext&       ctx,
-    AssetManager&        assetMgr,
-    const BSPMap&        map,
-    const ImportOptions& options
-) -> size_t {
+auto PreloadStaticProps(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& map, const ImportOptions& options) -> size_t {
     SourceVFS vfs;
     if (!options.assetRoot.empty()) {
         vfs.AddSearchPath(options.assetRoot);

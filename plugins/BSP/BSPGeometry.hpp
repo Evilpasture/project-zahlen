@@ -46,6 +46,25 @@ struct ImportOptions {
     bool        buildColliders       = true;
     std::string assetRoot;
 
+    // Self-illuminated surfaces (lamp panels, screens, signs) become area-light
+    // proxies for the PBR / RTGI / DDGI pipeline. Off means the map contributes
+    // nothing but its entity lights -- useful when the scene already has its own
+    // emissive budget and the panels would double-count it.
+    bool gatherEmissiveSurfaces = true;
+    // Mirrors BSPLighting.hpp's kEmissiveMaxLights; declared here because
+    // ImportOptions cannot include BSPLighting.hpp.
+    uint32_t maxEmissiveLights = 192;
+
+    // The light_environment ambient term drives the scene's sky gradient and
+    // the SH irradiance the DDGI probes start from. Off keeps the engine's own
+    // environment defaults.
+    bool deriveAmbient = true;
+
+    // Guarantee a non-black scene: lift a black ambient to a visible floor and
+    // synthesise a fill light when the map offers no light at all. See
+    // BSPLighting.hpp's EnforceLightingFloor.
+    bool enforceLightingFloor = true;
+
     // Restrict the import to one submodel (index into BSPMap::models); -1
     // imports every model not listed in skipModels. Interactive brush
     // entities (func_door, func_button, ...) get their own prefab per
@@ -88,6 +107,16 @@ struct MaterialStreams {
 };
 
 // A light recovered from the entity lump.
+//
+// `range` and `radius` are the engine's own windowed inverse-square terms
+// (LightDesc: 0 range = infinite / default falloff), derived by
+// BSPLighting.hpp from Source's attenuation coefficients. `castShadows` /
+// `startsOn` come from the entity's spawnflags and keyvalues so a mapper's
+// "no shadow" or "start off" intent survives the import. `className` is kept
+// for diagnostics and for deterministic naming in the scene description;
+// `fromEmissive` separates the lights this pass derived from self-illuminated
+// geometry from the ones an entity authored, so the audit's counters stay
+// exhaustive when both end up in the same vector.
 struct BspPointLight {
     std::string name;
     LightType   type = LightType::Point; // Direct reuse of engine enum
@@ -98,6 +127,46 @@ struct BspPointLight {
     float     intensity        = 1.0f;
     float     innerConeRadians = 0.0f;
     float     outerConeRadians = 0.78539816339f; // Default 45 deg
+
+    float  range       = 0.0f; // Metres; 0 = engine default falloff
+    float  radius      = 0.0f; // Metres; 0 = point
+    bool   castShadows = true;
+    bool   startsOn    = true;
+    int32_t spawnFlags = 0;
+    // True for a light this pass derived from geometry rather than read from an
+    // entity (an emissive-surface proxy, or the guarantee's fill light). The
+    // audit uses it to keep "how many entity lights survived" answerable after
+    // the proxies are appended to the same vector.
+    bool        fromEmissive = false;
+    std::string className;
+};
+
+// The light_environment ambient term: Source's `_ambient` colour and
+// brightness, plus the HDR scale. This is what the engine's sky gradient and
+// the SH irradiance RTGI/DDGI probes start from, so a map with no sun still
+// has an irradiance floor. See BSPLighting.hpp for the reading rules.
+struct AmbientTerm {
+    JPH::Vec3 color {0.0f, 0.0f, 0.0f};
+    float     intensity = 0.0f;
+    bool      authored  = false; // a light_environment was found
+};
+
+// One self-illuminated surface after accumulation: the area-weighted centroid
+// and normal of every face that uses the material, in engine space. These are
+// the area-light proxies the PBR path emits and RTGI/DDGI trace. See
+// BSPLighting.hpp for the material heuristics that decide a face belongs here.
+struct EmissiveSurface {
+    std::string materialName;
+    JPH::Vec3   position {0.0f, 0.0f, 0.0f};
+    JPH::Vec3   normal {0.0f, 1.0f, 0.0f};
+    JPH::Vec3   color {1.0f, 1.0f, 1.0f};
+    float       areaSquareMetres = 0.0f;
+    float       areaSquareInches = 0.0f;
+    float       strength         = 0.0f;   // authored self-illumination, 0..1
+    float       fixtureDamping   = 1.0f;   // <1 when an entity light already covers this fixture
+    float       reflectivityLuma = -1.0f;  // mean texdata reflectivity luma of the faces, -1 when unmeasured
+    bool        noLightFlag      = false;  // vbsp set SURF_NOLIGHT on these texinfos
+    uint32_t    faceCount        = 0;
 };
 
 // Bookkeeping for the face pipeline. Every face in every model leaves through
@@ -112,11 +181,51 @@ struct ImportStats {
     uint32_t droppedNoProjection = 0;     // texinfo/texdata index problems (includes tree-only kTexInfoNode faces)
     uint32_t displacementFallbacks = 0;   // invalid disp records rendered as flat quads instead of being lost
     uint32_t singleSidedSheets = 0;       // faces with no opposite-facing twin; forced double-sided + backside collision
+    uint32_t emissiveFaces = 0;           // faces on a self-illuminated material (lamp panels, screens, signs)
+    uint32_t emissiveSurfaces = 0;        // area-light proxies produced from them (after clustering and the cap)
+    uint32_t emissiveDroppedCap = 0;      // proxies dropped because maxEmissiveLights was reached
+};
+
+// Exhaustive bookkeeping for the lighting pass, mirroring ImportStats' role for
+// the face pipeline: every light the entity lump offered leaves through exactly
+// one counter, so a log line proves where the light went. See BSPLighting.hpp
+// for the rules that produce each number.
+struct LightingDiagnostics {
+    uint32_t entityLightsOffered      = 0;
+    uint32_t entityLightsEmitted      = 0;
+    uint32_t droppedBeamCone          = 0; // point_spotlight with "No Dynamic Light"
+    uint32_t droppedDisabled          = 0; // spawnflag "start disabled" / zero brightness
+    uint32_t droppedBlack             = 0; // zero colour or zero brightness
+    uint32_t droppedNoPosition        = 0;
+    uint32_t ambientAuthored          = 0;
+    uint32_t emissiveFaces            = 0;
+    uint32_t emissiveSurfaces         = 0;
+    uint32_t emissiveDroppedCap       = 0;
+    uint32_t emissiveFixtureDamped    = 0;
+    float    emissiveAreaSquareMetres = 0.0f;
+    float    totalEntityIntensity     = 0.0f;
+    float    totalEmissiveIntensity   = 0.0f;
+    bool     floorEnforced            = false;
 };
 
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
+
+    // Self-illuminated surfaces, clustered per material and grid cell, in
+    // engine space. These are the area-light proxies the PBR path emits and
+    // RTGI/DDGI trace; empty unless options.gatherEmissiveSurfaces is set and
+    // the map actually has emissive geometry.
+    std::vector<EmissiveSurface> emissive;
+
+    // The light_environment ambient term (colour + brightness), used to seed
+    // the scene's sky gradient and the SH irradiance the probes start from.
+    // Zero when options.deriveAmbient is off or the map has no
+    // light_environment.
+    AmbientTerm ambient;
+
+    // Where the light came from, and what the guarantee had to do.
+    LightingDiagnostics lighting;
 
     // Invisible-but-solid tool faces (toolsnodraw, toolsskybox, toolsinvisible,
     // toolsclip...): Source strips these from the visual mesh but keeps them in
@@ -139,6 +248,13 @@ struct ImportedMapData {
 // Y-up metres by default). Exposed so scene importing converts identically.
 [[nodiscard]] auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
 [[nodiscard]] auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3;
+
+// Rec.709 luma of the texdata reflectivity vbsp baked for a face's material.
+// Source's `reflectivity` is the material's diffuse albedo in linear 0-1 and is
+// the only per-material brightness signal that reaches the BSP without a .vmt,
+// which is what makes it usable as an emissive gate. Exposed so the importer
+// adapter can run the same probe the geometry pass does.
+[[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float;
 
 // One interactive brush submodel (func_door / func_button family) recovered
 // from the entity lump: its model index, whether the entity rotates about a

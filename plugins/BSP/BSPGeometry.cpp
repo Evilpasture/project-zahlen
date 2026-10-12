@@ -5,10 +5,14 @@
 //
 // Face windings from surfedges, texture axes applied forward (texinfo is
 // already the projection matrix -- none of the VMF inverse-recovery problem),
-// displacement grids bilinearly interpolated from their four base corners, and
-// lights read from the entity lump. See BSPGeometry.hpp for the contract.
+// displacement grids bilinearly interpolated from their four base corners,
+// lights read from the entity lump, and self-illuminated surfaces accumulated
+// into area-light proxies. See BSPGeometry.hpp for the contract and
+// BSPLighting.hpp for the lighting rules.
 
 #include "BSPGeometry.hpp"
+
+#include "BSPLighting.hpp"
 
 #include <algorithm>
 #include <array>
@@ -58,29 +62,6 @@ void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, J
     const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
     const float cp    = std::cos(pitch);
     return JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-}
-
-[[nodiscard]] auto ParseColor4(std::string_view text) -> std::optional<std::array<float, 4>> {
-    if (text.empty()) {
-        return std::nullopt;
-    }
-    std::array<float, 4> out {};
-    const char*          cur = text.data();
-    const char*          end = text.data() + text.size();
-    for (size_t k = 0; k < 4; ++k) {
-        while (cur < end && (*cur == ' ' || *cur == '\t')) {
-            cur++;
-        }
-        if (cur >= end) {
-            return (k == 0) ? std::nullopt : std::optional(out);
-        }
-        auto [ptr, ec] = std::from_chars(cur, end, out[k]);
-        if (ec != std::errc {}) {
-            return (k == 0) ? std::nullopt : std::optional(out);
-        }
-        cur = ptr;
-    }
-    return out;
 }
 
 // The closed vertex loop of one face, in face winding order, source space.
@@ -180,6 +161,34 @@ struct FaceProjection {
         }
     }
     return true;
+}
+
+// Vertex centroid of a winding (unweighted -- the caller weights by area).
+[[nodiscard]] auto WindingCentroid(const std::vector<JPH::Vec3>& winding) noexcept -> JPH::Vec3 {
+    if (winding.empty()) {
+        return JPH::Vec3::sZero();
+    }
+    JPH::Vec3 sum = JPH::Vec3::sZero();
+    for (const JPH::Vec3& corner: winding) {
+        sum += corner;
+    }
+    return sum / static_cast<float>(winding.size());
+}
+
+// Planar area of a closed convex winding (Source faces are convex planar
+// polygons), in square Source units. Used for the twin audit's coverage test
+// and for the emissive surfaces' area budget.
+[[nodiscard]] auto WindingArea(const std::vector<JPH::Vec3>& winding) noexcept -> double {
+    if (winding.size() < 3) {
+        return 0.0;
+    }
+    double area = 0.0;
+    for (size_t i = 1; i + 1 < winding.size(); ++i) {
+        const JPH::Vec3 a = winding[i] - winding[0];
+        const JPH::Vec3 b = winding[i + 1] - winding[0];
+        area += 0.5 * static_cast<double>(a.Cross(b).Length());
+    }
+    return area;
 }
 
 enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
@@ -453,60 +462,38 @@ void EmitVertex(
     UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
 }
 
-[[nodiscard]] auto GatherLights(const BSPMap& map, const ImportOptions& options) -> std::vector<BspPointLight> {
-    std::vector<BspPointLight> out;
-    for (const BSPEntity& entity: map.entities) {
-        const std::string_view className = entity.Find("classname");
-        LightType              type;
-        if (className == "light") {
-            type = LightType::Point;
-        } else if (className == "light_spot") {
-            type = LightType::Spot;
-        } else if (className == "light_environment") {
-            type = LightType::Sun;
-        } else {
-            continue;
-        }
-
-        BspPointLight light;
-        light.type = type;
-        light.name = std::string(entity.Find("targetname"));
-        if (light.name.empty()) {
-            light.name = std::string(className);
-        }
-
-        const auto originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-        light.position       = ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
-
-        const auto color4 = ParseColor4(entity.Find("_light")).value_or(std::array<float, 4> {255.0f, 255.0f, 255.0f, 200.0f});
-        light.color =
-            JPH::Vec3(std::clamp(color4[0] / 255.0f, 0.0f, 1.0f), std::clamp(color4[1] / 255.0f, 0.0f, 1.0f), std::clamp(color4[2] / 255.0f, 0.0f, 1.0f));
-        light.intensity = color4[3] * kSourceBrightnessToEngine;
-
-        auto anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-        if (entity.Find("angles").empty()) {
-            if (const auto pitch = entity.FindFloat("pitch")) {
-                anglesArr[0] = *pitch;
-            }
-        }
-        const JPH::Vec3 direction = AngleDirection(JPH::Vec3(anglesArr[0], anglesArr[1], anglesArr[2]));
-        light.direction           = ConvertDirection(options, direction);
-
-        if (type == LightType::Spot) {
-            if (const auto outerDegrees = entity.FindFloat("_cone"); outerDegrees && *outerDegrees > 0.0f) {
-                light.outerConeRadians = *outerDegrees * (3.14159265358979323846f / 180.0f);
-            }
-            if (const auto innerDegrees = entity.FindFloat("_cone2"); innerDegrees && *innerDegrees > 0.0f) {
-                light.innerConeRadians = *innerDegrees * (3.14159265358979323846f / 180.0f);
-            }
-        }
-
-        out.push_back(std::move(light));
-    }
-    return out;
-}
+// Light harvesting and the emissive-surface rules live in BSPLighting.hpp: this
+// file only supplies the geometry they read (face windings, texdata
+// reflectivity, the conversion helpers above).
 
 } // namespace
+
+// True when the face's texinfo carries SURF_NOLIGHT (0x400). vbsp sets it on
+// every surface a mapper excluded from the lightmap bake, which for a non-tool
+// material means the surface is its own light source. Every self-illuminated
+// face in a compiled map carries it; an ordinary wall never does.
+[[nodiscard]] auto HasSurfNoLight(const BSPMap& map, const DFace& face) noexcept -> bool {
+    if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
+        return false;
+    }
+    return (map.texInfos[static_cast<size_t>(face.texinfo)].flags & kSurfNolight) != 0;
+}
+
+// Rec.709 luma of the texdata reflectivity vbsp baked for a face's material.
+// Source's `reflectivity` is the material's diffuse albedo in linear 0-1, and
+// it is the only per-material brightness signal that survives into the BSP
+// without a .vmt -- which is what makes it usable as an emissive gate.
+[[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float {
+    if (face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
+        return 0.0f;
+    }
+    const int32_t texDataIndex = map.texInfos[static_cast<size_t>(face.texinfo)].texdata;
+    if (texDataIndex < 0 || static_cast<size_t>(texDataIndex) >= map.texDatas.size()) {
+        return 0.0f;
+    }
+    const auto& refl = map.texDatas[static_cast<size_t>(texDataIndex)].reflectivity;
+    return refl[0] * 0.2126f + refl[1] * 0.7152f + refl[2] * 0.0722f;
+}
 
 auto ConvertPosition(const ImportOptions& options, JPH::Vec3 in) noexcept -> JPH::Vec3 {
     const float s = options.unitScale;
@@ -574,9 +561,20 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     ImportedMapData result;
     bool            globalBoundsFirst = true;
 
+    // Filled in as the pass runs; EnforceLightingFloor refreshes it at the end.
+    LightingDiagnostics diagnostics;
+
     // Post-pass input for the single-sheet wall audit (one record per
     // undisplaced render face; see ApplyTwinAudit).
     std::vector<TwinRecord> twinRecords;
+
+    // Emissive-surface accumulator: one record per face the name gate admitted,
+    // in engine space. Clustering, area weighting, fixture damping and the cap
+    // all happen in BSPLighting::FinalizeEmissiveSurfaces, which needs the
+    // per-face positions to do any of them -- collapsing to one record per
+    // material here would put a single proxy at the map-wide centroid of every
+    // panel that shares a name.
+    std::vector<EmissiveSurface> emissiveFaces;
 
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
@@ -670,6 +668,35 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
+            }
+
+            // Self-illuminated surface accumulation. The geometry pass has no
+            // VFS, so it only applies the name gate and records the face's
+            // geometry; the importer adapter refines strength and tint from the
+            // .vmt / .vtf and drops the candidates that clear no threshold
+            // (BSPLighting::ProbeEmissiveMaterial).
+            if (options.gatherEmissiveSurfaces && disposition == FaceDisposition::Render && IsEmissiveMaterialName(materialName)) {
+                const double areaInches = WindingArea(*winding);
+                if (areaInches > 0.0) {
+                    const float areaMetres      = static_cast<float>(areaInches) * options.unitScale * options.unitScale;
+                    EmissiveSurface surface;
+                    surface.materialName       = std::string(materialName);
+                    surface.position           = ConvertPosition(options, WindingCentroid(*winding));
+                    surface.normal             = ConvertDirection(options, faceNormal);
+                    surface.areaSquareInches   = static_cast<float>(areaInches);
+                    surface.areaSquareMetres   = areaMetres;
+                    surface.faceCount          = 1;
+                    // Texdata reflectivity: a (1,1,1) panel is a lit white
+                    // surface, not necessarily a lamp, and the probe uses that
+                    // to damp the strength.
+                    surface.reflectivityLuma   = TexDataReflectivityLuma(map, face);
+                    // SURF_NOLIGHT is vbsp saying "do not bake light onto this
+                    // surface" -- the only per-surface self-illumination bit in
+                    // the whole .bsp, and the one that separates a real emitter
+                    // from a bright albedo.
+                    surface.noLightFlag        = HasSurfNoLight(map, face);
+                    emissiveFaces.push_back(std::move(surface));
+                }
             }
 
             const uint32_t baseVertex      = part.VertexCount();
@@ -834,8 +861,64 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     ApplyTwinAudit(map, result, twinRecords, options);
 
     if (options.gatherLights) {
-        result.lights = GatherLights(map, options);
+        result.lights = GatherEntityLights(map, options);
     }
+
+    if (options.deriveAmbient) {
+        result.ambient = ReadEnvironmentAmbient(map);
+    }
+
+    // Turn the per-material accumulator into clustered area-light proxies. The
+    // strength is still zero here (this layer has no .vmt), so the proxies are
+    // emitted at the family-name strength and the importer adapter re-probes
+    // them with ProbeEmissiveMaterial, dropping the ones that turn out to be
+    // ordinary lit surfaces. A `lights/white` sheet with reflectivity (1,1,1)
+    // is exactly that case, which is why the probe exists rather than the name
+    // gate being the last word.
+    if (options.gatherEmissiveSurfaces && !emissiveFaces.empty()) {
+        const size_t before    = result.lights.size();
+        const size_t faceCount = emissiveFaces.size();
+        result.emissive =
+            FinalizeEmissiveSurfaces(std::move(emissiveFaces), result.lights, options.unitScale, options.maxEmissiveLights);
+
+        // One point light per surviving proxy. These are the lights that carry
+        // a self-illuminated surface into the PBR path, and the ones RTGI/DDGI
+        // trace as virtual point lights -- the emissive VPLs PrefabFactory
+        // spawns for glTF prefabs have no BSP-side equivalent, because a BSP
+        // has no part hierarchy to walk.
+        if (options.gatherLights) {
+            for (const EmissiveSurface& surface: result.emissive) {
+                if (surface.strength <= 0.0f) {
+                    continue;
+                }
+                result.lights.push_back(EmissiveLightFor(surface, options));
+            }
+        }
+
+        result.stats.emissiveSurfaces  = static_cast<uint32_t>(result.emissive.size());
+        result.stats.emissiveFaces     = 0;
+        float areaMetres               = 0.0f;
+        uint32_t damped                = 0;
+        for (const EmissiveSurface& surface: result.emissive) {
+            result.stats.emissiveFaces += surface.faceCount;
+            areaMetres += surface.areaSquareMetres;
+            damped += (surface.fixtureDamping < 1.0f) ? 1u : 0u;
+        }
+        diagnostics.emissiveFaces           = result.stats.emissiveFaces;
+        diagnostics.emissiveSurfaces        = result.stats.emissiveSurfaces;
+        diagnostics.emissiveAreaSquareMetres = areaMetres;
+        diagnostics.emissiveFixtureDamped   = damped;
+        diagnostics.emissiveDroppedCap = (faceCount > result.emissive.size()) ? static_cast<uint32_t>(faceCount - result.emissive.size()) : 0u;
+        diagnostics.totalEmissiveIntensity = 0.0f;
+        for (size_t i = before; i < result.lights.size(); ++i) {
+            diagnostics.totalEmissiveIntensity += result.lights[i].intensity;
+        }
+    }
+
+    // The guarantee runs last so it sees the final light set, and the
+    // diagnostics travel with the imported data so the importer can log them.
+    diagnostics.floorEnforced = EnforceLightingFloor(result, map, options, diagnostics);
+    result.lighting           = diagnostics;
     return result;
 }
 
