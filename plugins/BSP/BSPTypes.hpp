@@ -16,6 +16,8 @@
 // field-wise reader in BSPRead.hpp read any of these in one code path
 // instead of one hand-written reader per lump, per version.
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 
 namespace ZHLN::BSP {
@@ -275,5 +277,26 @@ static_assert(sizeof(DBrush) == 12);
 static_assert(sizeof(DBrushSide) == 8);
 static_assert(sizeof(DOverlay) == 352);
 static_assert(sizeof(DGameLump) == 16);
+
+// Source's ColorRGBExp32, the on-disk unit of LUMP_LIGHTING_HDR and
+// LUMP_LIGHTING: linear value = byte * 2^E with E the exponent byte read as
+// SIGNED (Source SDK's ColorRGBExp32ToVector does ldexp(byte, exponent) with
+// the signed char directly -- no 128 bias, no /255). Measured on
+// gm_murder_drones: mantissas 16-21 with exponents 245-252 (int8 -11..-4),
+// i.e. dim luxels around 0.1; a bias-128 read of the same bytes inflates them
+// by 2^121 (saturating the whole atlas white), while byte/255 shrinks them by
+// 255x (the original near-black interiors).
+struct ColorRGBExp32 {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    int8_t  exponent;
+};
+static_assert(sizeof(ColorRGBExp32) == 4);
+
+// Decode one RGBE texel to linear RGB (VRAD radiosity, Source units).
+[[nodiscard]] inline auto DecodeRGBE(const ColorRGBExp32& s) -> std::array<float, 3> {
+    return {std::ldexp(static_cast<float>(s.r), s.exponent), std::ldexp(static_cast<float>(s.g), s.exponent), std::ldexp(static_cast<float>(s.b), s.exponent)};
+}
 
 } // namespace ZHLN::BSP

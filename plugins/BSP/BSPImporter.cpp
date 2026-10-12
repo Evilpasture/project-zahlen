@@ -83,16 +83,6 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
 }
 
 // One VRAD luxel: RGB mantissas sharing a signed power-of-two exponent.
-// Linear value = ldexp(byte / 255, exponent). This is the on-disk unit of
-// LUMP_LIGHTING_HDR (and LUMP_LIGHTING, which uses the same encoding).
-struct ColorRGBExp32 {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-    int8_t  exponent;
-};
-static_assert(sizeof(ColorRGBExp32) == 4);
-
 [[nodiscard]] inline auto LinearToSRGB8(float linear) -> uint8_t {
     const float c = std::max(linear, 0.0f);
     const float s = (c <= 0.0031308f) ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
@@ -173,9 +163,7 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
                 const ColorRGBExp32& s = luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride];
-                tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = {std::ldexp(s.r / 255.0f, s.exponent),
-                                                                                                 std::ldexp(s.g / 255.0f, s.exponent),
-                                                                                                 std::ldexp(s.b / 255.0f, s.exponent)};
+                tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = DecodeRGBE(s);
             }
         }
         for (int32_t y = 0; y < h; ++y) {
