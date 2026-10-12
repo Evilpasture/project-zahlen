@@ -427,6 +427,26 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights",
         instance.entities.size(), instance.lights.size());
 
+    // The G-buffer now adds the baked VRAD radiosity (sun included) back as
+    // outgoing radiance. LightingSystem::GetSun otherwise falls back to a
+    // synthetic intensity-180 sun when no sun entity exists -- light_environment
+    // arrives as Directional, which the punctual loop ignores -- so on a baked
+    // map that default would double-light every exterior surface. Register an
+    // explicit zero-intensity sun so the bake is the only sun; maps without a
+    // lighting lump keep the synthetic default.
+    if (!bspMap.lighting.empty()) {
+        engine->GetRegistry().Create(
+            ZHLN::Components::SunTagComponent {},
+            ZHLN::Components::LightComponent {
+                .type      = ZHLN::LightType::Sun,
+                .color     = JPH::Vec3::sZero(),
+                .intensity = 0.0f,
+                .direction = JPH::Vec3(0.0f, 1.0f, 0.0f),
+            }
+        );
+        ZHLN::Log("[BSPSample] Baked lighting present: registered zero-intensity sun (sun is in the bake)");
+    }
+
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
     ZHLN::Interaction::InitializeBSPEntities(engine->GetRegistry(), bspMap, instance, importOpts);
     ZHLN::Log("[BSPSample] Interactive entity components attached and wired.");

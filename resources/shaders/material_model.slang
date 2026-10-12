@@ -152,6 +152,19 @@ public static const float kBakedRadiosityScale = 4.0f;
 // the atlas edges. LOD 0 plus clamp-to-edge keeps each tap inside its own
 // cell; the 1-luxel gutter then supplies the border colour bilinear wants.
 
+// Outgoing radiance a surface contributes from its baked irradiance:
+// albedo * radiosity, routed into the G-buffer's emissive slot so baked
+// rooms read lit even where no real-time light reaches, exactly like
+// self-emission. Materials without a lightmap slot contribute nothing;
+// unlit ones must not double their flat output.
+[ForceInline]
+public float3 BakedOutgoingRadiance(MaterialSampleInputs i, float3 rawAlbedo) {
+    if (i.lightmapTexIndex == 0xFFFFu || i.isUnlit) {
+        return float3(0.0f, 0.0f, 0.0f);
+    }
+    return rawAlbedo * SampleBakedRadiosity(i);
+}
+
 [ForceInline]
 public float3 SampleBakedRadiosity(MaterialSampleInputs i) {
     // Unlit materials (KHR_materials_unlit, Source's UnlitGeneric) return their
@@ -199,15 +212,19 @@ public bool RejectMaskedAlpha(MaterialSampleInputs i, float alpha) {
 public struct StandardPBRMaterial : IMaterial {
     [ForceInline]
     public static float4 sampleAlbedo(MaterialSampleInputs i) {
-        // Baked radiosity modulates the surface colour, matching Source's
-        // lightmap * texture. Doing it here rather than as an additive term
-        // keeps dark surfaces dark: an added lightmap flattens every material
-        // towards the same milky grey regardless of its albedo. Alpha is left
-        // alone -- coverage is a property of the material, not of the light.
-        float3 baked = SampleBakedRadiosity(i);
-        float4 base  = SampleMaterialTexture(i.albedoIndex, MaterialTextureUV(i, kSamplerAlbedo), i.samplerCodes, kSamplerAlbedo) *
+        // The albedo buffer must carry the raw material colour: VRAD
+        // radiosity is incoming irradiance and is added separately as
+        // outgoing radiance (see BakedOutgoingRadiance), not multiplied in
+        // here. Gating the albedo with the bake only scaled whatever
+        // real-time lights reached the surface, so a baked room with no
+        // runtime lights -- the normal state of a Source map under
+        // onlyInteractiveLights -- evaluated to black no matter how bright
+        // the bake was, while sun-lit exteriors looked fine because the sun
+        // carried the product. Alpha is left alone -- coverage is a
+        // property of the material, not of the light.
+        float4 base = SampleMaterialTexture(i.albedoIndex, MaterialTextureUV(i, kSamplerAlbedo), i.samplerCodes, kSamplerAlbedo) *
                       i.baseColorFactor * i.vertexColor;
-        return float4(base.rgb * baked, base.a);
+        return base;
     }
 
     [ForceInline]
