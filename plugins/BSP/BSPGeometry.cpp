@@ -9,6 +9,8 @@
 // lights read from the entity lump. See BSPGeometry.hpp for the contract.
 
 #include "BSPGeometry.hpp"
+
+#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -34,13 +36,11 @@ constexpr float kEpsilon = 1e-6f;
 //   * one rect per face with lightofs >= 0 and sizeU,sizeV > 0, dims size+1
 //   * stable sort by height descending; ties keep ascending face index
 //   * next-fit shelves left to right over the atlas width, rects packed tight
-constexpr int32_t kLightmapAtlasWidth  = 2048;
+constexpr int32_t kLightmapAtlasWidth  = 4096;
 // Rows 0..kPropAmbientRows (declared in BSPGeometry.hpp) stay free of face
 // tiles: they hold the prop-ambient cell sampled by studio props.
-constexpr int32_t kLightmapAtlasHeight = 2048;
-// One luxel of padding reserved on each side of every packed face cell, so a
-// bilinear lightmap sample at a face border cannot reach a neighbouring face.
-inline constexpr int32_t kLightmapGutter = 1;
+constexpr int32_t kLightmapAtlasHeight = 4096;
+// kLightmapGutter lives in BSPGeometry.hpp (shared with the importer's gutter fill).
 
 // texinfo flags, Source bspflags.h. Only the routing-relevant bits are
 // listed; the rest (SURF_WARP for water, SURF_TRANS...) do not change which
@@ -159,7 +159,7 @@ struct FaceProjection {
     int32_t   lightmapSize[2] {0, 0};
     bool      hasLightmap = false;
     // Repacked shelf-atlas origin for this face's sample rect in the
-    // engine-side 2048x2048 lightmap atlas (see ComputeLightmapAtlas); -1/-1
+    // engine-side 4096x4096 lightmap atlas (see ComputeLightmapAtlas); -1/-1
     // when the face has no atlas placement.
     int32_t atlasOrigin[2] {-1, -1};
 };
@@ -481,7 +481,7 @@ void EmitVertex(
             // dot(p, lightmapS/TDir) + offset is the absolute luxel coordinate
             // in the raw page; subtracting the face's mins corner gives the
             // in-rect luxel, and the repacked atlas origin places it on the
-            // 2048x2048 engine atlas alongside the baked image.
+            // 4096x4096 engine atlas alongside the baked image.
             lmU = std::clamp((projection.atlasOrigin[0] + (sLuxel - projection.lightmapMins[0]) + 0.5f) / kLightmapAtlasWidth, 0.0f, 1.0f);
             lmV = std::clamp((projection.atlasOrigin[1] + (tLuxel - projection.lightmapMins[1]) + 0.5f) / kLightmapAtlasHeight, 0.0f, 1.0f);
         } else {
@@ -610,17 +610,27 @@ struct LightmapAtlasEntry {
         // luxels bleed onto dark interior walls as glowing outlines. The
         // gutter itself is filled by the importer with the duplicated edge
         // luxel, so it is the face's own border colour, not a neighbour's.
-        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 3, face.lightmapTextureSizeInLuxels[1] + 3, static_cast<int32_t>(i)});
+        // (W+1)x(H+1) sample grid plus kLightmapGutter luxels of own-edge
+        // colour on every side; see kLightmapGutter for why three.
+        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 1 + 2 * kLightmapGutter,
+                         face.lightmapTextureSizeInLuxels[1] + 1 + 2 * kLightmapGutter, static_cast<int32_t>(i)});
     }
     std::stable_sort(rects.begin(), rects.end(), [](const Rect& a, const Rect& b) { return a.h > b.h; });
 
     std::vector<LightmapAtlasEntry> placements(map.faces.size());
     int32_t                         x = 0, y = kPropAmbientRows, shelfH = 0;
+    int32_t                         overflowed = 0;
     for (const Rect& r: rects) {
         if (x + r.w > kLightmapAtlasWidth) {
             x = 0;
             y += shelfH;
             shelfH = 0;
+        }
+        if (y + r.h > kLightmapAtlasHeight) {
+            // Out of atlas space: the face keeps its -1 placement and samples
+            // the page-space fallback instead of clamped garbage rows.
+            ++overflowed;
+            continue;
         }
         // Store the cell's top-left content texel, inset past the gutter.
         // Vertex UVs derive from this, so the inset needs no compensation
@@ -628,6 +638,10 @@ struct LightmapAtlasEntry {
         placements[static_cast<size_t>(r.faceIndex)] = {x + kLightmapGutter, y + kLightmapGutter};
         x += r.w;
         shelfH = std::max(shelfH, r.h);
+    }
+    if (overflowed > 0) {
+        LogWarning("BSP: {} lightmapped faces do not fit the {}x{} lightmap atlas and fall back to page-space UVs; raise kLightmapAtlasWidth/Height for this map",
+                   overflowed, kLightmapAtlasWidth, kLightmapAtlasHeight);
     }
     return placements;
 }

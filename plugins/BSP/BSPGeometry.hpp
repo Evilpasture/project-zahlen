@@ -77,6 +77,15 @@ struct ImportOptions {
 // (0,0) lightmap UVs (see BuildLightmapAtlasTexture / ResolveStudioMaterial).
 inline constexpr int32_t kPropAmbientRows = 4;
 
+// Padding reserved on each side of every packed lightmap face cell. One
+// luxel would suffice for the bilinear sample at a face border, but uv1 is a
+// PackedHalf2: near u = 1 the half float quantises to ~1/2048 of UV space,
+// i.e. up to one atlas texel at 4096, so an edge tap can land ~1.5 texels
+// outside the cell once bilinear centre offset is added. Two luxels of
+// own-edge colour absorb that error instead of letting it read a neighbour's
+// light (and three luxels per side no longer fits this map's 38k faces).
+inline constexpr int32_t kLightmapGutter = 2;
+
 // One material group: the concatenated, de-indexed-then-reindexed streams of
 // every face that uses one texdata name.
 struct MaterialStreams {

@@ -177,29 +177,30 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
                 putPixel(origin[0] + x, origin[1] + y, c[0], c[1], c[2]);
             }
         }
-        // Duplicate the border luxels into the reserved gutter so a bilinear
-        // tap just outside the cell reads this face's own edge colour.
-        for (int32_t x = 0; x < w; ++x) {
-            const auto top = tile[static_cast<size_t>(x)];
-            const auto bot = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(x)];
-            putPixel(origin[0] + x, origin[1] - 1, top[0], top[1], top[2]);
-            putPixel(origin[0] + x, origin[1] + h, bot[0], bot[1], bot[2]);
-        }
-        for (int32_t y = 0; y < h; ++y) {
-            const auto lft = tile[static_cast<size_t>(y) * static_cast<size_t>(w)];
-            const auto rgt = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
-            putPixel(origin[0] - 1, origin[1] + y, lft[0], lft[1], lft[2]);
-            putPixel(origin[0] + w, origin[1] + y, rgt[0], rgt[1], rgt[2]);
-        }
-        {
+        // Duplicate the border luxels into the reserved gutter rings so any
+        // tap landing outside the cell (bilinear, half-float UV error) reads
+        // this face's own edge colour, never a neighbour's light.
+        for (int32_t d = 1; d <= kLightmapGutter; ++d) {
+            for (int32_t x = 0; x < w; ++x) {
+                const auto top = tile[static_cast<size_t>(x)];
+                const auto bot = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+                putPixel(origin[0] + x, origin[1] - d, top[0], top[1], top[2]);
+                putPixel(origin[0] + x, origin[1] + h - 1 + d, bot[0], bot[1], bot[2]);
+            }
+            for (int32_t y = 0; y < h; ++y) {
+                const auto lft = tile[static_cast<size_t>(y) * static_cast<size_t>(w)];
+                const auto rgt = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
+                putPixel(origin[0] - d, origin[1] + y, lft[0], lft[1], lft[2]);
+                putPixel(origin[0] + w - 1 + d, origin[1] + y, rgt[0], rgt[1], rgt[2]);
+            }
             const auto cornerTL = tile[0];
             const auto cornerTR = tile[static_cast<size_t>(w - 1)];
             const auto cornerBL = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w)];
             const auto cornerBR = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
-            putPixel(origin[0] - 1, origin[1] - 1, cornerTL[0], cornerTL[1], cornerTL[2]);
-            putPixel(origin[0] + w, origin[1] - 1, cornerTR[0], cornerTR[1], cornerTR[2]);
-            putPixel(origin[0] - 1, origin[1] + h, cornerBL[0], cornerBL[1], cornerBL[2]);
-            putPixel(origin[0] + w, origin[1] + h, cornerBR[0], cornerBR[1], cornerBR[2]);
+            putPixel(origin[0] - d, origin[1] - d, cornerTL[0], cornerTL[1], cornerTL[2]);
+            putPixel(origin[0] + w - 1 + d, origin[1] - d, cornerTR[0], cornerTR[1], cornerTR[2]);
+            putPixel(origin[0] - d, origin[1] + h - 1 + d, cornerBL[0], cornerBL[1], cornerBL[2]);
+            putPixel(origin[0] + w - 1 + d, origin[1] + h - 1 + d, cornerBR[0], cornerBR[1], cornerBR[2]);
         }
         ++facesUnpacked;
     }
