@@ -76,9 +76,8 @@ enum class Lump : uint32_t {
     LeafMinDistToWater          = 46,
     FaceMacroTextureInfo        = 47,
     DispTris                    = 48,
-    LightingHDR                 = 58, // v20+: VRAD radiosity (ColorRGBExp32). Was misnamed
-                                      // FacesHDR here; FACES_HDR is 63 in v20+.
-    FacesHDR                    = 63,
+    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR, VRAD radiosity (ColorRGBExp32)
+    FacesHDR                    = 58, // v20+: LUMP_FACES_HDR, face list whose lightofs address LightingHDR
     Count                       = 64
 };
 

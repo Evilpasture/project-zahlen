@@ -117,17 +117,22 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
 // bump-lit faces store 4 samples per luxel (flat + three directional) and the
 // flat one is taken. Linear radiance is scaled down and encoded to sRGB8; the
 // sampler's sRGB->linear decode round-trips the encode.
-[[nodiscard]] auto BuildLightmapAtlasTexture(RenderContext& ctx, const BSPMap& map, const ImportedMapData& imported) -> TextureHandle {
+} // namespace (BuildLightmapAtlasPixels is public: declared in BSPImporter.hpp)
+
+// Rasterizes the VRAD radiosity into the atlas pixel buffer that
+// BSPGeometry's TEXCOORD_1 UVs reference. Split out of the texture-creation
+// wrapper so the decode can be exercised without a RenderContext.
+[[nodiscard]] auto BuildLightmapAtlasPixels(const BSPMap& map, const ImportedMapData& imported, std::vector<uint8_t>& pixels) -> size_t {
     if (map.lighting.empty() || imported.lightmapOrigins.size() != map.faces.size()) {
-        return TextureHandle::Invalid;
+        return 0;
     }
     const auto atlasW = static_cast<int32_t>(imported.lightmapPageWidth);
     const auto atlasH = static_cast<int32_t>(imported.lightmapPageHeight);
     if (atlasW <= 0 || atlasH <= 0) {
-        return TextureHandle::Invalid;
+        return 0;
     }
 
-    std::vector<uint8_t> pixels(static_cast<size_t>(atlasW) * static_cast<size_t>(atlasH) * 4, 0);
+    pixels.assign(static_cast<size_t>(atlasW) * static_cast<size_t>(atlasH) * 4, 0);
     const auto           putPixel = [&](int32_t x, int32_t y, float r, float g, float b) {
         if (x < 0 || y < 0 || x >= atlasW || y >= atlasH) {
             return;
@@ -165,7 +170,15 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
         std::vector<std::array<float, 3>> tile(static_cast<size_t>(w) * static_cast<size_t>(h));
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
-                const ColorRGBExp32& s = luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride];
+                // Bump-lit faces store 4 ColorRGBExp32 per luxel: three
+                // tangent-space directional slices followed by the flat
+                // isotropic one. The flat slice is what a non-bumpmapped
+                // diffuse pass wants; slice 0 is lit along bump vector 0 and
+                // alternates bright/dark across brushes whose tangent axes
+                // differ -- the blocky banding visible on brush-aligned
+                // floors and walls.
+                const ColorRGBExp32& s =
+                    luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride + (bumpLit ? 3 : 0)];
                 tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = DecodeRGBE(s);
             }
         }
@@ -205,7 +218,7 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
         ++facesUnpacked;
     }
     if (facesUnpacked == 0) {
-        return TextureHandle::Invalid;
+        return 0;
     }
 
     // Prop-ambient cell: the map's mean baked radiosity, written into the
@@ -220,6 +233,19 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
             }
         }
     }
+    return facesUnpacked;
+}
+
+namespace {
+
+[[nodiscard]] auto BuildLightmapAtlasTexture(RenderContext& ctx, const BSPMap& map, const ImportedMapData& imported) -> TextureHandle {
+    std::vector<uint8_t> pixels;
+    const auto          facesUnpacked = BuildLightmapAtlasPixels(map, imported, pixels);
+    if (facesUnpacked == 0) {
+        return TextureHandle::Invalid;
+    }
+    const auto atlasW = static_cast<int32_t>(imported.lightmapPageWidth);
+    const auto atlasH = static_cast<int32_t>(imported.lightmapPageHeight);
 
     Log("BSP Importer: decoded {} lightmapped faces from {} lighting into a {}x{} atlas", facesUnpacked, map.lightingHDR ? "HDR" : "LDR",
         atlasW, atlasH);
