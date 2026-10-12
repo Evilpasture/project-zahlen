@@ -28,8 +28,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <cstddef>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -70,9 +72,9 @@ struct RgbImage {
     }
 };
 
-[[nodiscard]] inline RgbImage LoadPPM(const std::string& path) {
+[[nodiscard]] inline RgbImage LoadPPM(std::string_view path) {
     RgbImage      img;
-    std::ifstream ppm(path, std::ios::binary);
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return img;
     }
@@ -94,11 +96,11 @@ struct RgbImage {
     return img;
 }
 
-[[nodiscard]] inline bool WritePPM(const std::string& path, const RgbImage& img) {
+[[nodiscard]] inline bool WritePPM(std::string_view path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
     }
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out(std::filesystem::path(path), std::ios::binary);
     if (!out.is_open()) {
         return false;
     }
@@ -118,11 +120,12 @@ struct RgbImage {
     return png;
 }
 
-[[nodiscard]] inline bool SavePNG(const std::string& path, const RgbImage& img) {
+[[nodiscard]] inline bool SavePNG(std::string_view path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
     }
-    return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
+    const std::string pathStr(path);
+    return stbi_write_png(pathStr.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
 }
 
 // `--convert-ppm FILE...`: convert already-captured PPM frames to PNG without
@@ -534,7 +537,7 @@ struct ChangedRegion {
 
 // Dumps the changed-pixel bounding box as .ppm + .png, so an instability can
 // be looked at rather than inferred from a count.
-inline void WriteRegionCrop(const std::string& path, const RgbImage& img, const ChangedRegion& region) {
+inline void WriteRegionCrop(std::string_view path, const RgbImage& img, const ChangedRegion& region) {
     if (!img.Valid() || region.count == 0) {
         return;
     }
@@ -566,7 +569,7 @@ inline void WriteRegionCrop(const std::string& path, const RgbImage& img, const 
 }
 
 // Writes |a - b| scaled 4x, so sub-visible drift becomes inspectable.
-inline void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
+inline void WriteAmplifiedDiff(std::string_view path, const RgbImage& a, const RgbImage& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
     }
@@ -586,7 +589,7 @@ inline void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const
 // Series Statistics
 // ============================================================================
 
-[[nodiscard]] inline double Mean(const std::vector<double>& values) {
+[[nodiscard]] inline double Mean(std::span<const double> values) {
     if (values.empty()) {
         return 0.0;
     }
@@ -597,7 +600,7 @@ inline void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const
     return sum / static_cast<double>(values.size());
 }
 
-[[nodiscard]] inline double StdDev(const std::vector<double>& values, double mean) {
+[[nodiscard]] inline double StdDev(std::span<const double> values, double mean) {
     if (values.size() < 2) {
         return 0.0;
     }
@@ -609,7 +612,7 @@ inline void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const
     return std::sqrt(sumSq / static_cast<double>(values.size() - 1));
 }
 
-[[nodiscard]] inline double CoefficientOfVariation(const std::vector<double>& values) {
+[[nodiscard]] inline double CoefficientOfVariation(std::span<const double> values) {
     const double mean = Mean(values);
     if (mean <= 1e-9) {
         return 0.0;
@@ -815,7 +818,7 @@ struct TemporalMoments {
 // feedbackWeight * sigma and plateaus once the history is full, so a fitted
 // trend can never account for much of the mean.
 [[nodiscard]] inline std::vector<double> RunningMeanResidualSeries(
-    const std::vector<std::pair<int, std::vector<double>>>& snapshots, const std::vector<double>& finalMean, int width, const BBox& b
+    std::span<const std::pair<int, std::vector<double>>> snapshots, std::span<const double> finalMean, int width, const BBox& b
 ) {
     std::vector<double> out;
     out.reserve(snapshots.size());
@@ -985,7 +988,7 @@ struct SeriesStats {
 
 // Mean/stddev/min/max of a metric series, e.g. per-frame mean luma over a
 // warmup window. The stddev is what noise-relative gates scale against.
-[[nodiscard]] inline SeriesStats DescribeSeries(const std::vector<double>& values) {
+[[nodiscard]] inline SeriesStats DescribeSeries(std::span<const double> values) {
     SeriesStats stats;
     stats.count = values.size();
     if (values.empty()) {
@@ -1028,7 +1031,7 @@ struct SeriesStats {
 
 // Monotonicity with a slack band, for sweeps that must move one way
 // (roughness rows, radius responses, LOD steps) without pinning the values.
-[[nodiscard]] inline bool IsMonotonicNonDecreasing(const std::vector<double>& values, double tolerance = 0.0) noexcept {
+[[nodiscard]] inline bool IsMonotonicNonDecreasing(std::span<const double> values, double tolerance = 0.0) noexcept {
     for (size_t i = 1; i < values.size(); ++i) {
         if (values[i] + tolerance < values[i - 1]) {
             return false;
@@ -1037,7 +1040,7 @@ struct SeriesStats {
     return true;
 }
 
-[[nodiscard]] inline bool IsMonotonicNonIncreasing(const std::vector<double>& values, double tolerance = 0.0) noexcept {
+[[nodiscard]] inline bool IsMonotonicNonIncreasing(std::span<const double> values, double tolerance = 0.0) noexcept {
     for (size_t i = 1; i < values.size(); ++i) {
         if (values[i] > values[i - 1] + tolerance) {
             return false;
@@ -1058,7 +1061,7 @@ struct NoiseFloor {
     size_t pairs       = 0;
 };
 
-[[nodiscard]] inline NoiseFloor MeasureNoiseFloor(const std::vector<RgbImage>& frames) {
+[[nodiscard]] inline NoiseFloor MeasureNoiseFloor(std::span<const RgbImage> frames) {
     NoiseFloor floor;
     if (frames.size() < 2) {
         return floor;

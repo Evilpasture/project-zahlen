@@ -20,6 +20,8 @@
 #include <functional>
 #include <memory>
 #include <new>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -272,12 +274,11 @@ auto ReadNumber(lua_State* state, int index, float& out) -> bool {
     return true;
 }
 
-auto ReadString(lua_State* state, int index, std::string& out) -> bool {
-    if (lua_type(state, index) != LUA_TSTRING) return false;
+auto ReadString(lua_State* state, int index) -> std::optional<std::string> {
+    if (lua_type(state, index) != LUA_TSTRING) return std::nullopt;
     size_t length = 0;
     const char* value = lua_tolstring(state, index, &length);
-    out.assign(value != nullptr ? value : "", length);
-    return true;
+    return std::string(value != nullptr ? value : "", length);
 }
 
 auto ReadInstance(lua_State* state, int index, InstancePtr& out) -> bool {
@@ -410,7 +411,7 @@ void PushHumanoidState(lua_State* state, HumanoidState value) {
     PushEnum(state, value);
 }
 
-void PushInstanceArray(lua_State* state, const std::vector<InstancePtr>& instances) {
+void PushInstanceArray(lua_State* state, std::span<const InstancePtr> instances) {
     lua_createtable(state, static_cast<int>(instances.size()), 0);
     int index = 1;
     for (const InstancePtr& instance: instances) {
@@ -913,7 +914,7 @@ int InstanceIndex(lua_State* state) {
     else if (instance->IsA("Part") && property == "LeftSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->LeftSurface());
     else if (instance->IsA("Part") && property == "RightSurface") PushPartSurface(state, static_cast<Part*>(instance.GetPtr())->RightSurface());
     else if (instance->IsA("MeshPart") && property == "MeshId") {
-        const std::string& meshId = static_cast<MeshPart*>(instance.GetPtr())->MeshId();
+        const std::string_view meshId = static_cast<MeshPart*>(instance.GetPtr())->MeshId();
         lua_pushlstring(state, meshId.data(), meshId.size());
     } else if (instance->IsA("SpawnPoint") && property == "Position") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Position());
     else if (instance->IsA("SpawnPoint") && property == "Rotation") PushVector3(state, static_cast<SpawnPoint*>(instance.GetPtr())->Rotation());
@@ -930,13 +931,13 @@ int InstanceIndex(lua_State* state) {
     else if (instance->IsA("WorkspaceService") && property == "CurrentCamera") PushInstance(state, static_cast<WorkspaceService*>(instance.GetPtr())->CurrentCamera());
     else if (instance->IsA("PhysicsService") && property == "ServerAuthority") lua_pushboolean(state, static_cast<PhysicsService*>(instance.GetPtr())->ServerAuthority());
     else if (instance->IsA("Sound") && property == "SoundId") {
-        const std::string& soundId = static_cast<Sound*>(instance.GetPtr())->SoundId();
+        const std::string_view soundId = static_cast<Sound*>(instance.GetPtr())->SoundId();
         lua_pushlstring(state, soundId.data(), soundId.size());
     } else if (instance->IsA("Sound") && property == "Volume") lua_pushnumber(state, static_cast<Sound*>(instance.GetPtr())->Volume());
     else if (instance->IsA("Sound") && property == "Loops") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Loops());
     else if (instance->IsA("Sound") && property == "Playing") lua_pushboolean(state, static_cast<Sound*>(instance.GetPtr())->Playing());
     else if (instance->IsA("Decal") && property == "TextureId") {
-        const std::string& textureId = static_cast<Decal*>(instance.GetPtr())->TextureId();
+        const std::string_view textureId = static_cast<Decal*>(instance.GetPtr())->TextureId();
         lua_pushlstring(state, textureId.data(), textureId.size());
     } else if (instance->IsA("Decal") && property == "Color") {
         const JPH::Vec3& color = static_cast<Decal*>(instance.GetPtr())->Color();
@@ -979,8 +980,7 @@ int InstanceNewIndex(lua_State* state) {
     Instance& instance = *self->instance;
 
     if (property == "Name") {
-        std::string name;
-        if (ReadString(state, 3, name)) instance.SetName(std::move(name));
+        if (auto name = ReadString(state, 3)) instance.SetName(std::move(*name));
     } else if (property == "Parent") {
         if (lua_isnil(state, 3)) {
             [[maybe_unused]] const auto result = instance.SetParent({});
@@ -1033,8 +1033,7 @@ int InstanceNewIndex(lua_State* state) {
         PartSurface surface {};
         if (ReadPartSurface(state, 3, surface)) static_cast<Part&>(instance).SetRightSurface(surface);
     } else if (instance.IsA("MeshPart") && property == "MeshId") {
-        std::string meshId;
-        if (ReadString(state, 3, meshId)) static_cast<MeshPart&>(instance).SetMeshId(std::move(meshId));
+        if (auto meshId = ReadString(state, 3)) static_cast<MeshPart&>(instance).SetMeshId(std::move(*meshId));
     } else if (instance.IsA("SpawnPoint") && property == "Position") {
         JPH::Vec3 vector;
         if (ReadVector3(state, 3, vector)) static_cast<SpawnPoint&>(instance).SetPosition(vector);
@@ -1090,16 +1089,14 @@ int InstanceNewIndex(lua_State* state) {
     } else if (instance.IsA("PhysicsService") && property == "ServerAuthority") {
         static_cast<PhysicsService&>(instance).SetServerAuthority(lua_toboolean(state, 3) != 0);
     } else if (instance.IsA("Sound") && property == "SoundId") {
-        std::string soundId;
-        if (ReadString(state, 3, soundId)) static_cast<Sound&>(instance).SetSoundId(std::move(soundId));
+        if (auto soundId = ReadString(state, 3)) static_cast<Sound&>(instance).SetSoundId(std::move(*soundId));
     } else if (instance.IsA("Sound") && property == "Volume") {
         float number = 0.0f;
         if (ReadNumber(state, 3, number)) static_cast<Sound&>(instance).SetVolume(number);
     } else if (instance.IsA("Sound") && property == "Loops") static_cast<Sound&>(instance).SetLoops(lua_toboolean(state, 3) != 0);
     else if (instance.IsA("Sound") && property == "Playing") static_cast<Sound&>(instance).SetPlaying(lua_toboolean(state, 3) != 0);
     else if (instance.IsA("Decal") && property == "TextureId") {
-        std::string textureId;
-        if (ReadString(state, 3, textureId)) static_cast<Decal&>(instance).SetTextureId(std::move(textureId));
+        if (auto textureId = ReadString(state, 3)) static_cast<Decal&>(instance).SetTextureId(std::move(*textureId));
     } else if (instance.IsA("Decal") && property == "Color") {
         JPH::Vec3 color;
         if (ReadColor3(state, 3, color)) static_cast<Decal&>(instance).SetColor(color);
@@ -1164,16 +1161,20 @@ int InstanceNew(lua_State* state) {
     std::string name;
     int parentIndex = 2;
     if (lua_type(state, 2) == LUA_TSTRING && (lua_isnoneornil(state, 3))) {
-        if (!ReadString(state, 2, name)) {
+        auto parsed = ReadString(state, 2);
+        if (!parsed) {
             lua_pushnil(state);
             return 1;
         }
+        name = std::move(*parsed);
         parentIndex = 0;
     } else if (lua_type(state, 3) == LUA_TSTRING) {
-        if (!ReadString(state, 3, name)) {
+        auto parsed = ReadString(state, 3);
+        if (!parsed) {
             lua_pushnil(state);
             return 1;
         }
+        name = std::move(*parsed);
     }
 
     auto created = context->dataModel->CreateInstance(className, std::move(name));
@@ -1242,7 +1243,7 @@ int SignalConnect(lua_State* state) {
         return 1;
     case SignalKind::PropertyChanged:
         ConnectSignal(state, *context, owner->PropertyChanged, 2,
-            [](lua_State* target, const std::string& property) { lua_pushlstring(target, property.data(), property.size()); });
+            [](lua_State* target, std::string_view property) { lua_pushlstring(target, property.data(), property.size()); });
         return 1;
     case SignalKind::HumanoidStateChanged:
         if (owner->IsA("Humanoid")) {

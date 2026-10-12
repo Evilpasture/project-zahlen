@@ -67,7 +67,7 @@ auto main(int argc, char* argv[]) -> int {
 
     std::vector<char*> filteredArgPointers;
     filteredArgPointers.reserve(filtered->size());
-    for (std::string& argument: *filtered) filteredArgPointers.push_back(argument.data());
+    for (auto& argument: *filtered) filteredArgPointers.push_back(argument.data());
 
     auto options = ZHLN::HandleCommandLine(std::span<char* const>(filteredArgPointers.data(), filteredArgPointers.size()));
     if (!options) {

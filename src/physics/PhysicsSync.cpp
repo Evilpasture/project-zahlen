@@ -192,7 +192,7 @@ inline void ExecuteSyncPass(
 }
 
 [[gnu::always_inline]]
-inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters, const MappingDataCreateInfo& map, const WorldDataCreateInfo& world) noexcept {
+inline void SyncCharacters(std::span<JPH::CharacterVirtual* const> characters, const MappingDataCreateInfo& map, const WorldDataCreateInfo& world) noexcept {
     for (auto* character: characters) {
         const Physics::BodyHandle h = Physics::BodyHandle::Unpack(character->GetUserData());
 
@@ -230,7 +230,7 @@ inline void SyncCharacters(const JPH::Array<JPH::CharacterVirtual*>& characters,
 #endif
     gnu::hot,
     gnu::nonnull(2)]]
-void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const inSystem, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept {
+void PhysicsWorld::Synchronize(const JPH::PhysicsSystem* const inSystem, std::span<JPH::CharacterVirtual* const> activeCharacters) noexcept {
 
     const uint32_t activeRigids = inSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody);
 

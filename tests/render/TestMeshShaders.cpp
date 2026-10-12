@@ -35,11 +35,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <numbers>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ============================================================================
@@ -72,9 +74,9 @@ struct Image {
     }
 };
 
-[[nodiscard]] Image LoadPPM(const std::string& path) {
+[[nodiscard]] Image LoadPPM(std::string_view path) {
     Image         img;
-    std::ifstream ppm(path, std::ios::binary);
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return img;
     }
@@ -188,11 +190,11 @@ struct ImageDiff {
 
 // Writes an amplified absolute-difference image so a failing run leaves
 // something inspectable behind instead of just a number.
-void WriteDiffImage(const std::string& path, const Image& a, const Image& b) {
+void WriteDiffImage(std::string_view path, const Image& a, const Image& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
     }
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out(std::filesystem::path(path), std::ios::binary);
     if (!out.is_open()) {
         return;
     }
@@ -542,7 +544,7 @@ struct MeshShaderTestSuite {
             };
 
             constexpr float dt = 1.0f / 60.0f;
-            auto            capture = [&](ZHLN::Engine& engine, const std::string& path) -> Image {
+            auto            capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
                 auto& rc = engine.GetRenderContext();
                 for (uint32_t frame = 0; frame < 6; ++frame) {
                     engine.ProcessEvents();
@@ -770,7 +772,7 @@ struct MeshShaderTestSuite {
             };
 
             constexpr float dt = 1.0f / 60.0f;
-            auto capture = [&](ZHLN::Engine& engine, const std::string& path) -> Image {
+            auto capture = [&](ZHLN::Engine& engine, std::string_view path) -> Image {
                 auto& rc = engine.GetRenderContext();
                 for (uint32_t f = 0; f < 6; ++f) {
                     engine.ProcessEvents();

@@ -78,9 +78,7 @@ int main() {
     Check("all-alpha-0 -> ratio 1.0", RmsDistanceRatio(allClear, gold) == 1.0);
 
     // --- deltas pass agrees with the rms pass ---
-    double             rms2 = 0.0;
-    std::vector<double> deltas;
-    RmsAndDeltas(cand, gold, rms2, deltas);
+    const auto [rms2, deltas] = RmsAndDeltas(cand, gold);
     Check("RmsAndDeltas agrees with RmsDistanceRatio", rms2 == rms);
     Check("delta count == pixel count", deltas.size() == static_cast<size_t>(W) * H);
 

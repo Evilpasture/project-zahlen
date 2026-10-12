@@ -274,8 +274,8 @@ void CmdList(
 // ---------------------------------------------------------------------------
 
 struct GoldensArg {
-    const std::string& name;
-    const fs::path&    goldensDir;
+    std::string_view name;
+    const fs::path&  goldensDir;
 };
 
 void CmdCompare(std::string_view candidatePpm, std::string_view goldensDir, std::string_view name, std::string_view outDir) {
@@ -355,9 +355,8 @@ void CmdCompare(std::string_view candidatePpm, std::string_view goldensDir, std:
 
     // Diff image against the closest golden (reconciled views, so sizes match).
     {
-        double              rms2;
-        std::vector<double> deltas;
-        ZHLN::Fidelity::RmsAndDeltas(closest.candRGBA, closest.goldRGBA, rms2, deltas);
+        const auto [rms2, deltas] = ZHLN::Fidelity::RmsAndDeltas(closest.candRGBA, closest.goldRGBA);
+        (void)rms2;
         const uint32_t        dw = closest.width, dh = closest.height;
         std::vector<uint8_t>  rgba(static_cast<size_t>(dw) * dh * 4);
         for (size_t i = 0; i < deltas.size(); ++i) {

@@ -279,7 +279,7 @@ void LoopbackServer::Handle(std::intptr_t connection) {
     CloseSocket(Listener(connection));
 }
 
-void LoopbackServer::SendAll(std::intptr_t connection, const std::string& answer) {
+void LoopbackServer::SendAll(std::intptr_t connection, std::string_view answer) {
     size_t sent = 0;
     while (sent < answer.size()) {
         const auto count = Transmit(Listener(connection), answer.data() + sent, answer.size() - sent);
@@ -290,7 +290,7 @@ void LoopbackServer::SendAll(std::intptr_t connection, const std::string& answer
     }
 }
 
-std::string LoopbackServer::Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body) {
+std::string LoopbackServer::Route(std::string_view requestLine, std::span<const std::string> headerLines, std::string_view body) {
     std::string path;
     {
         const auto first = requestLine.find(' ');

@@ -34,8 +34,10 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 enum class ViewportSubregionError : uint8_t {
@@ -57,8 +59,8 @@ struct PpmImage {
     std::vector<uint8_t> pixels;
 };
 
-[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
-    std::ifstream ppm(path, std::ios::binary);
+[[nodiscard]] auto LoadPPM(std::string_view path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return std::unexpected(ViewportSubregionError::RenderOutputBlank);
     }
@@ -232,7 +234,7 @@ struct ViewportSubregionTestSuite {
             const Band     bandA {320, 320};
             const Band     bandB {160, 640};
 
-            auto renderBand = [&](const Band& band, const std::string& ppmPath) -> std::expected<PpmImage, ZHLN::ErrorCode> {
+            auto renderBand = [&](const Band& band, std::string_view ppmPath) -> std::expected<PpmImage, ZHLN::ErrorCode> {
                 rc.SetViewport(ZHLN::RenderContext::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
                 if (!rc.CaptureScreenshotPPM(ppmPath)) {

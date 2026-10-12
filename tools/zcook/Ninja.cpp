@@ -83,7 +83,7 @@ std::string Escape(std::string_view path) {
     return escaped;
 }
 
-std::string Join(const std::vector<std::string>& parts, std::string_view separator) {
+std::string Join(std::span<const std::string> parts, std::string_view separator) {
     std::string joined;
     for (size_t i = 0; i < parts.size(); ++i) {
         if (i > 0) {
@@ -95,7 +95,7 @@ std::string Join(const std::vector<std::string>& parts, std::string_view separat
 }
 
 // Join raw paths into one ninja list, escaping each as it is written.
-std::string JoinEscaped(const std::vector<std::string>& paths, std::string_view separator) {
+std::string JoinEscaped(std::span<const std::string> paths, std::string_view separator) {
     std::string joined;
     for (size_t i = 0; i < paths.size(); ++i) {
         if (i > 0) {
@@ -113,7 +113,7 @@ std::string Slashed(const fs::path& path) {
 // Absolute, forward-slashed, no trailing separator. The asset root arrives from
 // CMake absolute already; normalizing means a generator invoked by hand from
 // inside the tree writes the same graph the build does.
-std::string Normalized(const std::string& raw) {
+std::string Normalized(std::string_view raw) {
     std::error_code ec;
     fs::path        absolute = fs::absolute(fs::path(raw), ec);
     if (ec) {
@@ -130,11 +130,11 @@ std::string Normalized(const std::string& raw) {
 // not under the root is returned unchanged: every caller here discovered its
 // input under the root, and inventing a "../" spelling for a case that cannot
 // happen would be a lie in the graph.
-std::string RelativeTo(const std::string& full, const std::string& root) {
+std::string RelativeTo(std::string_view full, std::string_view root) {
     if (full.size() > root.size() + 1 && full.starts_with(root) && full[root.size()] == '/') {
-        return full.substr(root.size() + 1);
+        return std::string(full.substr(root.size() + 1));
     }
-    return full;
+    return std::string(full);
 }
 
 // A blend file's level name: its path under the asset root, extensionless, with
@@ -191,7 +191,7 @@ bool WriteIfChanged(const fs::path& path, std::string_view content) {
 
 // --- Discovery -------------------------------------------------------------------------
 
-std::vector<std::string> DiscoverBlendFiles(const std::string& sourceDir) {
+std::vector<std::string> DiscoverBlendFiles(std::string_view sourceDir) {
     std::vector<std::string> found;
     std::error_code          ec;
     const fs::path           root(sourceDir);
@@ -248,7 +248,7 @@ struct LooseAssets {
     std::vector<std::string> fontPayloads; // .fnt/.png/.zfont under fonts/ to pack raw
 };
 
-LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
+LooseAssets DiscoverLooseAssets(std::string_view assetsRoot) {
     LooseAssets     assets;
     std::error_code ec;
     const fs::path  root(assetsRoot);
@@ -365,7 +365,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
 
     std::vector<BlendUnit> units;
-    for (const std::string& blend: DiscoverBlendFiles(sourceDir)) {
+    for (const auto& blend: DiscoverBlendFiles(sourceDir)) {
         const std::string relative = RelativeTo(blend, sourceDir);
         const std::string level    = LevelName(relative);
         const std::string levelDir = intermediateRoot + "/" + level;
@@ -492,7 +492,7 @@ int GenerateAssetNinja(int argc, char** argv) {
         // step does not have.
         const fs::path textureDir = fs::path(unit.levelDir) / "textures";
         if (Exists(textureDir)) {
-            for (const std::string& texture: ListEntriesSorted(textureDir)) {
+            for (const auto& texture: ListEntriesSorted(textureDir)) {
                 const std::string input  = unit.levelDir + "/textures/" + texture;
                 const std::string output = "build_assets/" + unit.level + "/lvl_" + texture + ".ztex";
 
@@ -520,7 +520,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
 
     const LooseAssets loose = DiscoverLooseAssets(assetsRoot);
-    for (const std::string& texture: loose.textures) {
+    for (const auto& texture: loose.textures) {
         const std::string relative = RelativeTo(texture, assetsRoot);
         const std::string output   = "build_assets/raw/" + relative + ".ztex";
 
@@ -530,7 +530,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
     // A .glb is packed where it lies: it is already the runtime container the
     // engine loads, so there is nothing to compile and no target to build.
-    for (const std::string& model: loose.models) {
+    for (const auto& model: loose.models) {
         const std::string relative = RelativeTo(model, assetsRoot);
         compiledTargets.push_back(model);
         manifestEntries.push_back(relative + "=" + model);
@@ -540,7 +540,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     // never parses an outline font, so `zcook font` bakes the SDF atlas and
     // the cooked container lands as fonts/<name>.zfont (the virtual path
     // PrimeDefaultBakedFont looks up).
-    for (const std::string& font: loose.fonts) {
+    for (const auto& font: loose.fonts) {
         const std::string relative    = RelativeTo(font, assetsRoot);
         const size_t      dot         = relative.find_last_of('.');
         const std::string virtualPath = (dot == std::string::npos) ? (relative + ".zfont") : (relative.substr(0, dot) + ".zfont");
@@ -552,7 +552,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
     // fontbm pairs and pre-cooked containers are runtime-ready: pack them
     // byte-for-byte under their fonts/ virtual paths.
-    for (const std::string& payload: loose.fontPayloads) {
+    for (const auto& payload: loose.fontPayloads) {
         const std::string relative = RelativeTo(payload, assetsRoot);
         compiledTargets.push_back(payload);
         manifestEntries.push_back(relative + "=" + payload);
@@ -564,8 +564,8 @@ int GenerateAssetNinja(int argc, char** argv) {
     // pak valid and eliminates the WARNING: BMFont/cooked font failed warnings
     // in standalone builds that have no game fonts. If an existing payload for
     // fonts/default.zfont exists but is invalid (not FNT0), replace it.
-    auto isValidZFont = [](const std::string& path) -> bool {
-        std::ifstream f(path, std::ios::binary);
+    auto isValidZFont = [](std::string_view path) -> bool {
+        std::ifstream f(fs::path(path), std::ios::binary);
         if (!f) {
             return false;
         }
@@ -587,9 +587,9 @@ int GenerateAssetNinja(int argc, char** argv) {
 
     if (!hasValidDefaultZFont) {
         // Remove any existing invalid fonts/default.zfont entries
-        std::erase_if(manifestEntries, [](const std::string& e) { return e.starts_with("fonts/default.zfont="); });
-        std::erase_if(compiledTargets, [](const std::string& p) {
-            return p.find("fonts/default.zfont") != std::string::npos || p.find("fonts/default.fnt") != std::string::npos;
+        std::erase_if(manifestEntries, [](std::string_view e) { return e.starts_with("fonts/default.zfont="); });
+        std::erase_if(compiledTargets, [](std::string_view p) {
+            return p.find("fonts/default.zfont") != std::string_view::npos || p.find("fonts/default.fnt") != std::string_view::npos;
         });
 
         const std::string embeddedSrc = sourceDir + "/resources/fonts/DefaultFont.zfont";
@@ -611,7 +611,7 @@ int GenerateAssetNinja(int argc, char** argv) {
             }
         }
         if (haveZFontNow) {
-            std::erase_if(manifestEntries, [](const std::string& e) { return e.starts_with("fonts/default.fnt="); });
+            std::erase_if(manifestEntries, [](std::string_view e) { return e.starts_with("fonts/default.fnt="); });
         }
     }
 

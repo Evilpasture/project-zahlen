@@ -795,7 +795,7 @@ export class ExplosionSystem {
         }
     }
 
-    static void UpdateGroup(std::vector<ExplosionParticle>& group, float dt, bool isSmoke) noexcept {
+    static void UpdateGroup(std::span<ExplosionParticle> group, float dt, bool isSmoke) noexcept {
         for (auto& p: group) {
             p.life += dt;
             if (p.life > p.maxLife) {

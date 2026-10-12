@@ -631,7 +631,7 @@ namespace TemplatedDetail {
     // One sub-table, whatever shape it takes: struct, map of structs, or a
     // sequence that becomes [[array of tables]].
     template <typename T>
-    void AppendTOMLSubTable(std::string& out, const T& value, const std::string& path) {
+    void AppendTOMLSubTable(std::string& out, const T& value, std::string_view path) {
         using Decayed = std::remove_cvref_t<T>;
 
         if constexpr (IsTOMLTableArray<Decayed>()) {

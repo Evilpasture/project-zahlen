@@ -147,11 +147,11 @@ void UploadPosePalettes(Engine& engine) {
     engine.GetPoseUploads().Drain([&](const PoseUpload& upload) { rc.UpdateJointMatrices(upload.jointOffset, upload.matrices); });
 }
 
-void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {
+void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, std::span<const Entity> shadowVisible) {
     auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
-    auto IsInList = [](const JPH::Array<Entity>& list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
+    auto IsInList = [](std::span<const Entity> list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
 
     for (Entity e: reg.GetEntitiesWith<Components::MeshComponent>()) {
         bool inMain   = IsInList(mainVisible, e);

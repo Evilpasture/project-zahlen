@@ -303,7 +303,7 @@ auto RunCommandLine(int argc, char** argv) -> int {
         ReflectModule(module, found->second, slangSearch);
     }
     for (const auto& [name, members]: options.sets) {
-        for (const std::string& member: members) {
+        for (const auto& member: members) {
             if (options.catalog.find(member) == options.catalog.end()) {
                 Fail("--set {} names {}, which is not a --module", name, member);
             }

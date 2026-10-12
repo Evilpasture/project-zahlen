@@ -369,7 +369,7 @@ struct PerfBaselineFile {
 // non-throwing filesystem overloads: the engine builds with -fno-exceptions,
 // so the throwing rename/remove are as banned as try/catch itself. Failures
 // are reported as stderr warnings — a stale cache file must never fail a test.
-inline void WriteBaselineAtomically(const std::filesystem::path& path, const std::string& text) {
+inline void WriteBaselineAtomically(const std::filesystem::path& path, std::string_view text) {
     const std::filesystem::path temporary {path.string() + ".tmp"};
     {
         std::ofstream file {temporary, std::ios::binary | std::ios::trunc};

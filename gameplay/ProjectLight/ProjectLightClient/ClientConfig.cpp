@@ -6,6 +6,7 @@
 #include <array>
 #include <charconv>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -190,15 +191,12 @@ auto BuildSettings(const Variables& variables, std::filesystem::path loadedFrom)
 
     const std::string_view server = valueFor("PROJECT_LIGHT_SERVER");
     if (!server.empty()) {
-        std::string host;
-        uint16_t    port = 0;
+        std::string_view host;
+        uint16_t         port = 0;
         if (!ParseHostPort(server, host, port)) {
             return std::unexpected("PROJECT_LIGHT_SERVER must be a host or host:port endpoint");
         }
-        if (host == "0.0.0.0") {
-            host = "127.0.0.1";
-        }
-        settings.launch.host = std::move(host);
+        settings.launch.host = (host == "0.0.0.0") ? std::string("127.0.0.1") : std::string(host);
         if (port != 0) {
             settings.launch.port = port;
         }

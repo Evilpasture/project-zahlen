@@ -19,7 +19,7 @@ namespace {
     return true;
 }
 
-void SortByBase(std::vector<GpuAllocationSymbol>& entries) noexcept {
+void SortByBase(std::span<GpuAllocationSymbol> entries) noexcept {
     std::ranges::sort(entries, [](const GpuAllocationSymbol& a, const GpuAllocationSymbol& b) {
         if (a.baseAddress != b.baseAddress) {
             return a.baseAddress < b.baseAddress;

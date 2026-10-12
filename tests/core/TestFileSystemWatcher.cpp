@@ -28,7 +28,7 @@ enum class FileSystemWatcherTestError : uint8_t {
     return temporary / ("zahlen-file-system-watcher-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 }
 
-[[nodiscard]] bool DispatchUntil(ZHLN::FS::FileSystemWatcher& watcher, const std::vector<ZHLN::FS::FileWatchEvent>& events, size_t expectedCount) {
+[[nodiscard]] bool DispatchUntil(ZHLN::FS::FileSystemWatcher& watcher, std::span<const ZHLN::FS::FileWatchEvent> events, size_t expectedCount) {
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() < deadline) {
         watcher.DispatchEvents();

@@ -10,6 +10,9 @@
 #include <Zahlen/Math3D.hpp>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
+#include <span>
+#include <string_view>
 #include <vector>
 
 namespace ZHLN {
@@ -34,15 +37,17 @@ void AppendRawBytes(std::vector<std::byte>& buf, const void* data, size_t size) 
 
 // Builds a synthetic minimal .MDL buffer
 auto BuildSyntheticMDL(
-    int32_t checksum,
-    std::string_view modelName,
-    const std::vector<std::string>& cdTextures,
-    const std::vector<std::string>& textureNames,
-    int32_t numBodyParts = 1
+    int32_t                                 checksum,
+    std::string_view                        modelName,
+    std::initializer_list<std::string_view> cdTextures,
+    std::initializer_list<std::string_view> textureNames,
+    int32_t                                 numBodyParts = 1
 ) -> std::vector<std::byte> {
     std::vector<std::byte> buf;
+    const std::span<const std::string_view> cdTexSpan  {cdTextures.begin(), cdTextures.size()};
+    const std::span<const std::string_view> texNameSpan {textureNames.begin(), textureNames.size()};
 
-    auto align4 = [](std::vector<std::byte>& b) {
+    auto align4 = [](auto& b) {
         while (b.size() % 4 != 0) {
             b.push_back(std::byte {0});
         }
@@ -64,37 +69,39 @@ auto BuildSyntheticMDL(
     buf.resize(sizeof(ZHLN::BSP::StudioHdr), std::byte {0});
 
     // 1. cdtextures
-    hdr.numcdtextures = static_cast<int32_t>(cdTextures.size());
+    hdr.numcdtextures = static_cast<int32_t>(cdTexSpan.size());
     hdr.cdtextureindex = static_cast<int32_t>(buf.size());
 
     // Vector of offsets followed by strings
     const size_t offsetTablePos = buf.size();
-    const size_t offsetTableSize = cdTextures.size() * sizeof(int32_t);
+    const size_t offsetTableSize = cdTexSpan.size() * sizeof(int32_t);
     buf.resize(offsetTablePos + offsetTableSize, std::byte {0});
 
-    for (size_t i = 0; i < cdTextures.size(); ++i) {
+    for (size_t i = 0; i < cdTexSpan.size(); ++i) {
         const int32_t strOffset = static_cast<int32_t>(buf.size());
         std::memcpy(buf.data() + offsetTablePos + i * sizeof(int32_t), &strOffset, sizeof(int32_t));
-        AppendRawBytes(buf, cdTextures[i].c_str(), cdTextures[i].size() + 1);
+        AppendRawBytes(buf, cdTexSpan[i].data(), cdTexSpan[i].size());
+        buf.push_back(std::byte {0});
         align4(buf);
     }
 
     // 2. textures
     align4(buf);
-    hdr.numtextures = static_cast<int32_t>(textureNames.size());
+    hdr.numtextures = static_cast<int32_t>(texNameSpan.size());
     hdr.textureindex = static_cast<int32_t>(buf.size());
 
     const size_t texArrayStart = buf.size();
-    const size_t texArraySize = textureNames.size() * sizeof(ZHLN::BSP::StudioTexture);
+    const size_t texArraySize = texNameSpan.size() * sizeof(ZHLN::BSP::StudioTexture);
     buf.resize(texArrayStart + texArraySize, std::byte {0});
 
-    for (size_t i = 0; i < textureNames.size(); ++i) {
+    for (size_t i = 0; i < texNameSpan.size(); ++i) {
         const size_t texStructPos = texArrayStart + i * sizeof(ZHLN::BSP::StudioTexture);
         const int32_t relOffset = static_cast<int32_t>(buf.size() - texStructPos);
         ZHLN::BSP::StudioTexture tex {};
         tex.sznameindex = relOffset;
         std::memcpy(buf.data() + texStructPos, &tex, sizeof(tex));
-        AppendRawBytes(buf, textureNames[i].c_str(), textureNames[i].size() + 1);
+        AppendRawBytes(buf, texNameSpan[i].data(), texNameSpan[i].size());
+        buf.push_back(std::byte {0});
         align4(buf);
     }
 
@@ -143,9 +150,9 @@ auto BuildSyntheticMDL(
 
 // Builds a synthetic minimal .VVD buffer
 auto BuildSyntheticVVD(
-    int32_t checksum,
-    const std::vector<ZHLN::BSP::StudioVertex>& vertices,
-    const std::vector<ZHLN::BSP::VvdFixup>& fixups = {}
+    int32_t                                    checksum,
+    std::span<const ZHLN::BSP::StudioVertex>   vertices,
+    std::span<const ZHLN::BSP::VvdFixup>       fixups = {}
 ) -> std::vector<std::byte> {
     std::vector<std::byte> buf;
 
@@ -182,10 +189,10 @@ auto BuildSyntheticVVD(
 
 // Builds a synthetic minimal .VTX buffer (LOD 0, 1 bodypart, 1 model, 1 mesh, 1 stripgroup)
 auto BuildSyntheticVTX(
-    int32_t checksum,
-    const std::vector<ZHLN::BSP::VtxVertex>& vertices,
-    const std::vector<uint16_t>& indices,
-    bool isTriStrip = false
+    int32_t                                 checksum,
+    std::span<const ZHLN::BSP::VtxVertex>   vertices,
+    std::span<const uint16_t>               indices,
+    bool                                    isTriStrip = false
 ) -> std::vector<std::byte> {
     std::vector<std::byte> buf;
 

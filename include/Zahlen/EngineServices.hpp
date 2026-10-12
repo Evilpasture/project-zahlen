@@ -43,7 +43,7 @@ class Registry;
 // animator. The callback may mutate worldTransforms, but must not retain either
 // the span or references/pointers into the vector after it returns.
 using BonePosePostProcessor = void (*)(
-    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
+    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
 );
 
 // Distinct parameter types for the two otherwise identically typed output

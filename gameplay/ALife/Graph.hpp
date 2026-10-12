@@ -10,6 +10,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <cstddef>
 #include <memory_resource>
+#include <span>
 #include <vector>
 
 namespace ZHLN::ALife {
@@ -56,7 +57,7 @@ class ZHLN_STATIC_API LevelGraph {
     auto FindPath(uint32_t start, uint32_t end, uint32_t* out_path, PathWorkspace& ws) const -> uint32_t;
 
     // Encapsulated accessors
-    [[nodiscard]] auto GetNodes() const noexcept -> const std::vector<Node>& {
+    [[nodiscard]] auto GetNodes() const noexcept -> std::span<const Node> {
         return _nodes;
     }
     [[nodiscard]] auto GetNode(uint32_t index) -> Node& {

@@ -75,7 +75,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
         return;
     }
 
-    const std::string& cmd = tokens[0];
+    std::string_view cmd = tokens[0];
     ScriptECSBridge    bridge(reg);
 
     // ========================================================================

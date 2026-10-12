@@ -22,6 +22,7 @@
 #include <deque>
 #include <format>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <toml/TOML.hpp>
@@ -190,7 +191,7 @@ class Parser {
 
     // Walks `path` from `root`, creating intermediate tables. Stops one short
     // of the end and returns the parent plus the final segment.
-    [[nodiscard]] auto ResolveParent(Node& root, const std::vector<std::string>& path) -> std::expected<Node*, ErrorCode> {
+    [[nodiscard]] auto ResolveParent(Node& root, std::span<const std::string> path) -> std::expected<Node*, ErrorCode> {
         Node* current = &root;
         for (size_t i = 0; i + 1 < path.size(); ++i) {
             Node* child = current->Find(path[i]);
@@ -241,13 +242,13 @@ class Parser {
             return std::unexpected(parent.error());
         }
 
-        const std::string& leaf     = path->back();
-        Node*              existing = (*parent)->Find(leaf);
+        const std::string_view leaf     = path->back();
+        Node*                  existing = (*parent)->Find(leaf);
 
         if (arrayOfTables) {
             if (existing == nullptr) {
                 existing = NewNode(Kind::Array);
-                (*parent)->members.emplace_back(leaf, existing);
+                (*parent)->members.emplace_back(std::string(leaf), existing);
             }
             if (existing->kind != Kind::Array) {
                 return Fail(std::format("'{}' was already defined as something other than an array of tables", leaf), TOMLError::DuplicateKey);
@@ -259,7 +260,7 @@ class Parser {
 
         if (existing == nullptr) {
             existing = NewNode(Kind::Table);
-            (*parent)->members.emplace_back(leaf, existing);
+            (*parent)->members.emplace_back(std::string(leaf), existing);
         } else if (existing->kind != Kind::Table || existing->explicitTable) {
             return Fail(std::format("table '{}' is defined twice", leaf), TOMLError::DuplicateKey);
         }

@@ -20,7 +20,7 @@ namespace ZHLN::Vk {
 class ExtensionResult {
   public:
     ExtensionResult() = default;
-    explicit ExtensionResult(std::vector<std::string>&& strings) noexcept;
+    explicit ExtensionResult(std::vector<std::string> strings) noexcept;
 
     ExtensionResult(const ExtensionResult&)                    = delete;
     auto operator=(const ExtensionResult&) -> ExtensionResult& = delete;
@@ -28,7 +28,7 @@ class ExtensionResult {
     ExtensionResult(ExtensionResult&& other) noexcept;
     auto operator=(ExtensionResult&& other) noexcept -> ExtensionResult&;
 
-    operator const std::vector<const char*>&() const noexcept {
+    operator std::span<const char* const>() const noexcept {
         return _ptrs;
     }
 
@@ -87,7 +87,7 @@ class ExtensionBuilder {
     [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ErrorCode>;
 
   private:
-    explicit ExtensionBuilder(std::vector<std::string>&& available) noexcept;
+    explicit ExtensionBuilder(std::vector<std::string> available) noexcept;
 
     [[nodiscard]] bool IsSupported(std::string_view name) const noexcept;
 

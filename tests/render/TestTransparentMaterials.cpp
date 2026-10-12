@@ -153,7 +153,7 @@ struct PaneMeasurement {
     bool                     valid = false;
 };
 
-[[nodiscard]] auto MeasurePane(PaneKind pane, const std::string& ppmPath) -> PaneMeasurement {
+[[nodiscard]] auto MeasurePane(PaneKind pane, std::string_view ppmPath) -> PaneMeasurement {
     PaneMeasurement out;
     const char*     name = pane == PaneKind::Glass ? "Headless Transparent Glass" :
                            pane == PaneKind::Opaque ? "Headless Transparent Opaque Twin" :

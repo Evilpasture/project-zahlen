@@ -63,7 +63,7 @@ struct TwoBoneIKComponent {
 // only reads the registry and writes the caller-owned transform vectors,
 // matching the parallel context it runs in.
 void ApplyTwoBoneIK(
-    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
+    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
 );
 
 // Composition-root entry point: registers TwoBoneIKComponent and installs

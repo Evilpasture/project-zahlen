@@ -14,7 +14,7 @@
 
 namespace ZHLN {
 
-auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> Physics::RagdollHandle {
+auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollHandle {
     auto& joltSystem = GetInternalSystem();
     auto& world      = GetInternalWorld();
 

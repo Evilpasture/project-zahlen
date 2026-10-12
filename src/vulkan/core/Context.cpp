@@ -80,7 +80,7 @@ namespace {
 }
 
 [[nodiscard]] auto ExtensionEnabled(const std::span<const std::string> enabled, const std::string_view name) noexcept -> bool {
-    return std::ranges::any_of(enabled, [name](const std::string& entry) { return entry == name; });
+    return std::ranges::any_of(enabled, [name](std::string_view entry) { return entry == name; });
 }
 
 [[nodiscard]] auto FeatureBitEnabled(const VkPhysicalDeviceFeatures2* root, const VkStructureType sType, const size_t bitOffset) noexcept -> bool {
@@ -179,7 +179,7 @@ namespace {
     const VkPhysicalDeviceFeatures2* enabled_features = features != nullptr ? features : &default_features;
     std::vector<const char*>         extension_pointers;
     extension_pointers.reserve(extensionNames.size());
-    for (const std::string& name: extensionNames) {
+    for (const auto& name: extensionNames) {
         extension_pointers.push_back(name.c_str());
     }
 
@@ -324,8 +324,8 @@ auto ContextBuilder::Build() noexcept -> std::expected<Context, ErrorCode> {
         return std::unexpected(configured.error());
     }
 
-    std::vector<const char*>        requested_extensions  = _deviceExtensions;
-    const std::vector<const char*>& configured_extensions = configured->extensions;
+    std::vector<const char*>           requested_extensions  = _deviceExtensions;
+    const std::span<const char* const> configured_extensions = configured->extensions;
     requested_extensions.insert(requested_extensions.end(), configured_extensions.begin(), configured_extensions.end());
 
     const VkPhysicalDeviceFeatures2* configured_root = configured->features.GetRoot(_features);

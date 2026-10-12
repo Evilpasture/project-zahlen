@@ -201,7 +201,7 @@ class Instance: public JPH::RefTarget<Instance> {
     [[nodiscard]] virtual auto IsService() const noexcept -> bool {
         return false;
     }
-    [[nodiscard]] auto Name() const noexcept -> const std::string& {
+    [[nodiscard]] auto Name() const noexcept -> std::string_view {
         return m_name;
     }
     void               SetName(std::string name);
@@ -365,7 +365,7 @@ class SoundService final: public Service {
 class OpaqueService final: public Service {
   private:
     friend class DataModel;
-    OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, const std::string& className, std::string name);
+    OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name);
 };
 
 class Folder final: public Instance {
@@ -509,7 +509,7 @@ class Part final: public BasePart {
 class MeshPart final: public BasePart {
   public:
     [[nodiscard]] auto IsA(std::string_view className) const noexcept -> bool override;
-    [[nodiscard]] auto MeshId() const noexcept -> const std::string& {
+    [[nodiscard]] auto MeshId() const noexcept -> std::string_view {
         return m_meshId;
     }
     void SetMeshId(std::string value);
@@ -544,7 +544,7 @@ enum class DecalWrapMode : uint8_t { Stretch, Repeat };
 
 class Decal final: public Instance {
   public:
-    [[nodiscard]] auto TextureId() const noexcept -> const std::string& {
+    [[nodiscard]] auto TextureId() const noexcept -> std::string_view {
         return m_textureId;
     }
     void               SetTextureId(std::string value);
@@ -582,7 +582,7 @@ class Decal final: public Instance {
 
 class Sound final: public Instance {
   public:
-    [[nodiscard]] auto SoundId() const noexcept -> const std::string& {
+    [[nodiscard]] auto SoundId() const noexcept -> std::string_view {
         return m_soundId;
     }
     void               SetSoundId(std::string value);

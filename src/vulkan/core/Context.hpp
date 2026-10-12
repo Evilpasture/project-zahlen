@@ -163,10 +163,6 @@ class ContextBuilder {
         _deviceExtensions.assign(extensions.begin(), extensions.end());
         return *this;
     }
-    constexpr auto DeviceExtensions(const std::vector<const char*>& extensions) noexcept -> ContextBuilder& {
-        _deviceExtensions.assign(extensions.begin(), extensions.end());
-        return *this;
-    }
 
     template <typename... Ts>
     auto DeviceFeatures(FeatureChain<Ts...>& chain) noexcept -> ContextBuilder& {

@@ -109,7 +109,7 @@ static_assert(
     );
 }
 
-void NameEntity(ECS::Registry& registry, Entity entity, const std::string& name) {
+void NameEntity(ECS::Registry& registry, Entity entity, std::string_view name) {
     if (name.empty() || entity == Entity::Null()) {
         return;
     }

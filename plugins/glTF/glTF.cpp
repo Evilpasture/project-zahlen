@@ -232,18 +232,19 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
 void TreeRow(
     ZHLN::GUI::Context& ui,
     InspectorState&     state,
-    const std::string&  path,
+    std::string_view    path,
     int                 depth,
-    const std::string&  label,
+    std::string_view    label,
     bool                expandable,
-    const std::string&  selectTitle,
-    const std::string&  selectDetails,
+    std::string_view    selectTitle,
+    std::string_view    selectDetails,
     const JPH::Vec4& /*textColor*/,
     int32_t clipIndex = -1
 ) {
-    const bool expanded = state.expanded.contains(path);
-    const bool selected = (state.selectedPath == path);
-    const bool playing  = (clipIndex >= 0 && state.playingClip == clipIndex);
+    const std::string pathStr(path);
+    const bool        expanded = state.expanded.contains(pathStr);
+    const bool        selected = (state.selectedPath == path);
+    const bool        playing  = (clipIndex >= 0 && state.playingClip == clipIndex);
 
     std::string text(static_cast<size_t>(depth) * 2, ' ');
     text += expandable ? (expanded ? "v " : "> ") : "  ";
@@ -254,18 +255,18 @@ void TreeRow(
 
     if (ui.Button(text, btnColor)) {
         if (expandable) {
-            if (state.expanded.contains(path)) {
-                state.expanded.erase(path);
+            if (state.expanded.contains(pathStr)) {
+                state.expanded.erase(pathStr);
             } else {
-                state.expanded.insert(path);
+                state.expanded.insert(pathStr);
             }
         }
         if (clipIndex >= 0) {
             ToggleClipPlayback(state, clipIndex);
         }
-        state.selectedPath    = path;
-        state.selectedTitle   = selectTitle;
-        state.selectedDetails = selectDetails;
+        state.selectedPath    = pathStr;
+        state.selectedTitle   = std::string(selectTitle);
+        state.selectedDetails = std::string(selectDetails);
     }
 }
 
@@ -273,7 +274,7 @@ void DrawModelNodeRows(
     ZHLN::GUI::Context&      ui,
     InspectorState&          state,
     const ZHLN::ModelPrefab& prefab,
-    const std::string&       basePath,
+    std::string_view         basePath,
     int32_t                  nodeIndex,
     int                      depth
 ) {
@@ -334,9 +335,9 @@ void DrawModelNodeRows(
     return std::format("{}: {}", slot, (handle != ZHLN::TextureHandle::Invalid) ? std::format("#{}", static_cast<uint64_t>(handle)) : std::string("-"));
 }
 
-void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const ZHLN::ModelPrefab& prefab, const std::string& modelPath, int depth) {
+void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const ZHLN::ModelPrefab& prefab, std::string_view modelPath, int depth) {
     // ---- NODES ----
-    const std::string nodesPath = modelPath + "/nodes";
+    const std::string nodesPath = std::format("{}/nodes", modelPath);
     const bool        nodesOpen = state.expanded.contains(nodesPath);
     TreeRow(
         ui, state, nodesPath, depth, std::format("Nodes ({})", prefab.nodes.size()), !prefab.nodes.empty(), "Nodes",
@@ -351,7 +352,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     }
 
     // ---- SKELETONS ----
-    const std::string skeletonsPath = modelPath + "/skeletons";
+    const std::string skeletonsPath = std::format("{}/skeletons", modelPath);
     const bool        skeletonsOpen = state.expanded.contains(skeletonsPath);
     TreeRow(
         ui, state, skeletonsPath, depth, std::format("Skeletons ({})", prefab.skeletons.size()), !prefab.skeletons.empty(), "Skeletons",
@@ -403,7 +404,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         }
     }
 
-    const std::string materialsPath = modelPath + "/materials";
+    const std::string materialsPath = std::format("{}/materials", modelPath);
     const bool        materialsOpen = state.expanded.contains(materialsPath);
     TreeRow(
         ui, state, materialsPath, depth, std::format("Materials ({})", uniqueMaterials.size()), !uniqueMaterials.empty(), "Materials",
@@ -451,7 +452,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         std::string         parts;
     };
     std::vector<TextureEntry> textures;
-    auto                      addTextureSlot = [&](ZHLN::TextureHandle handle, const char* role, const std::string& partName) {
+    auto                      addTextureSlot = [&](ZHLN::TextureHandle handle, const char* role, std::string_view partName) {
         if (handle == ZHLN::TextureHandle::Invalid) {
             return;
         }
@@ -468,7 +469,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
                 return;
             }
         }
-        textures.push_back(TextureEntry {.handle = handle, .roles = role, .parts = partName});
+        textures.push_back(TextureEntry {.handle = handle, .roles = role, .parts = std::string(partName)});
     };
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
         const ZHLN::Material& mat   = prefab.parts[i].defaultMaterial;
@@ -480,7 +481,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         addTextureSlot(mat.transmissionMap, "transmission", pName);
     }
 
-    const std::string texturesPath = modelPath + "/textures";
+    const std::string texturesPath = std::format("{}/textures", modelPath);
     const bool        texturesOpen = state.expanded.contains(texturesPath);
     TreeRow(
         ui, state, texturesPath, depth, std::format("Textures ({})", textures.size()), !textures.empty(), "Textures",
@@ -498,7 +499,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     }
 
     // ---- ANIMATION GROUPS ----
-    const std::string animsPath = modelPath + "/animations";
+    const std::string animsPath = std::format("{}/animations", modelPath);
     const bool        animsOpen = state.expanded.contains(animsPath);
     TreeRow(
         ui, state, animsPath, depth, std::format("Animation Groups ({})", prefab.animations.size()), !prefab.animations.empty(), "Animation Groups",
@@ -525,7 +526,7 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     }
 
     // ---- LIGHTS ----
-    const std::string lightsPath = modelPath + "/lights";
+    const std::string lightsPath = std::format("{}/lights", modelPath);
     const bool        lightsOpen = state.expanded.contains(lightsPath);
     TreeRow(
         ui, state, lightsPath, depth, std::format("Lights ({})", prefab.lights.size()), !prefab.lights.empty(), "Lights",

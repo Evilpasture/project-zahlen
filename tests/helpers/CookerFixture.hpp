@@ -27,7 +27,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -140,8 +143,9 @@ inline void WriteArray(std::ostream& stream, const std::array<T, N>& arr) {
     }
 }
 
-template <typename T>
-inline void WriteVector(std::ostream& stream, const std::vector<T>& vec) {
+template <std::ranges::contiguous_range R>
+inline void WriteVector(std::ostream& stream, const R& vec) {
+    using T = std::ranges::range_value_t<R>;
     static_assert(std::is_trivially_copyable_v<T>);
     for (const auto& item: vec) {
         WriteValue(stream, item);
@@ -311,16 +315,12 @@ class BinaryStreamWriter {
     explicit BinaryStreamWriter(std::ostream& stream): m_stream(stream) {
     }
 
-    void WriteString(const std::string& s) {
+    void WriteString(std::string_view s) {
         const auto len = static_cast<uint32_t>(s.size());
         WriteValue(len);
         if (len > 0) {
-            m_stream.write(s.c_str(), static_cast<std::streamsize>(s.size()));
+            m_stream.write(s.data(), static_cast<std::streamsize>(s.size()));
         }
-    }
-
-    void WriteString(std::string_view sv) {
-        WriteString(std::string(sv));
     }
 
     template <typename T>
@@ -339,15 +339,16 @@ class BinaryStreamWriter {
         }
     }
 
-    template <typename T>
-    void WriteVector(const std::vector<T>& vec) {
+    template <std::ranges::contiguous_range R>
+    void WriteVector(const R& vec) {
+        using T = std::ranges::range_value_t<R>;
         static_assert(std::is_trivially_copyable_v<T>);
         for (const auto& item: vec) {
             WriteValue(item);
         }
     }
 
-    void WriteFloatVectorPrefixed(const std::vector<float>& vec) {
+    void WriteFloatVectorPrefixed(std::span<const float> vec) {
         const auto count = static_cast<uint32_t>(vec.size());
         WriteValue(count);
         WriteVector(vec);

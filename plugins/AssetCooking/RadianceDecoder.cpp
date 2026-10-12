@@ -68,11 +68,11 @@ struct Cursor {
         return true;
     }
 
-    auto ReadLine(std::string& out) -> bool {
-        out.clear();
+    auto ReadLine() -> std::optional<std::string> {
         if (pos >= bytes.size()) {
-            return false;
+            return std::nullopt;
         }
+        std::string out;
         while (pos < bytes.size()) {
             const char c = static_cast<char>(bytes[pos++]);
             if (c == '\n') {
@@ -82,7 +82,7 @@ struct Cursor {
                 out.push_back(c);
             }
         }
-        return true;
+        return out;
     }
 };
 
@@ -206,25 +206,26 @@ auto ReadRleChannel(Cursor& cur, uint8_t* dst, uint32_t width, int channel) -> b
 
 auto DecodeRgbe(std::span<const std::byte> bytes) -> std::expected<RadianceMap, ErrorCode> {
     Cursor cur {.bytes = bytes};
-    std::string line;
-    if (!cur.ReadLine(line) || (line.rfind("#?RADIANCE", 0) != 0 && line.rfind("#?RGBE", 0) != 0)) {
+    const auto firstLine = cur.ReadLine();
+    if (!firstLine || (firstLine->rfind("#?RADIANCE", 0) != 0 && firstLine->rfind("#?RGBE", 0) != 0)) {
         return std::unexpected(RadianceAssetError::BadHeader);
     }
 
     bool  formatOk = false;
     float exposure = 1.0f;
     for (;;) {
-        if (!cur.ReadLine(line)) {
+        const auto line = cur.ReadLine();
+        if (!line) {
             return std::unexpected(RadianceAssetError::Truncated);
         }
-        if (line.empty()) {
+        if (line->empty()) {
             break;
         }
-        if (line == "FORMAT=32-bit_rle_rgbe") {
+        if (*line == "FORMAT=32-bit_rle_rgbe") {
             formatOk = true;
-        } else if (line.rfind("EXPOSURE=", 0) == 0) {
+        } else if (line->rfind("EXPOSURE=", 0) == 0) {
             float        value = 0.0f;
-            const auto   tail  = std::string_view(line).substr(9);
+            const auto   tail  = std::string_view(*line).substr(9);
             const auto [ptr, ec] = std::from_chars(tail.data(), tail.data() + tail.size(), value);
             (void)ptr;
             if (ec == std::errc {} && value > 0.0f) {
@@ -235,7 +236,8 @@ auto DecodeRgbe(std::span<const std::byte> bytes) -> std::expected<RadianceMap, 
     if (!formatOk) {
         return std::unexpected(RadianceAssetError::UnsupportedFormat);
     }
-    if (!cur.ReadLine(line)) {
+    const auto resLine = cur.ReadLine();
+    if (!resLine) {
         return std::unexpected(RadianceAssetError::Truncated);
     }
 
@@ -243,7 +245,7 @@ auto DecodeRgbe(std::span<const std::byte> bytes) -> std::expected<RadianceMap, 
     uint32_t height = 0;
     bool     flipX = false;
     bool     flipY = false;
-    if (!ParseResolution(line, width, height, flipX, flipY) || width > kMaxRadianceExtent || height > kMaxRadianceExtent) {
+    if (!ParseResolution(*resLine, width, height, flipX, flipY) || width > kMaxRadianceExtent || height > kMaxRadianceExtent) {
         return std::unexpected(RadianceAssetError::BadDimensions);
     }
 

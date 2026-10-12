@@ -57,7 +57,7 @@ struct TaskSystemSchedulerAdapter {
 // pipeline-sorted runs are drawn from it. The HiZ pyramid is the rejection
 // test, so this is also the point where the second-pass candidate list is
 // produced for the resolve pass to pick up.
-void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd        = passCtx.Cmd();
     auto&           ctx        = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;

@@ -71,9 +71,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <numbers>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -168,9 +170,9 @@ struct RgbImage {
     }
 };
 
-[[nodiscard]] RgbImage LoadPPM(const std::string& path) {
+[[nodiscard]] RgbImage LoadPPM(std::string_view path) {
     RgbImage      img;
-    std::ifstream ppm(path, std::ios::binary);
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return img;
     }
@@ -199,11 +201,12 @@ struct RgbImage {
     return png;
 }
 
-[[nodiscard]] bool SavePNG(const std::string& path, const RgbImage& img) {
+[[nodiscard]] bool SavePNG(std::string_view path, const RgbImage& img) {
     if (!img.Valid()) {
         return false;
     }
-    return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
+    const std::string pathStr(path);
+    return stbi_write_png(pathStr.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
 }
 
 struct FrameDiff {
@@ -244,7 +247,7 @@ struct FrameDiff {
     return d;
 }
 
-[[nodiscard]] double Mean(const std::vector<double>& values) {
+[[nodiscard]] double Mean(std::span<const double> values) {
     if (values.empty()) {
         return 0.0;
     }
@@ -255,7 +258,7 @@ struct FrameDiff {
     return sum / static_cast<double>(values.size());
 }
 
-[[nodiscard]] double StdDev(const std::vector<double>& values, double mean) {
+[[nodiscard]] double StdDev(std::span<const double> values, double mean) {
     if (values.size() < 2) {
         return 0.0;
     }
@@ -267,7 +270,7 @@ struct FrameDiff {
     return std::sqrt(sumSq / static_cast<double>(values.size() - 1));
 }
 
-[[nodiscard]] double CoefficientOfVariation(const std::vector<double>& values) {
+[[nodiscard]] double CoefficientOfVariation(std::span<const double> values) {
     const double mean = Mean(values);
     if (mean <= 1e-9) {
         return 0.0;
@@ -474,7 +477,7 @@ void DisableTAA(ZHLN::Engine& engine) {
 // Captures through Engine::GetRenderContext() so the call always uses the
 // CURRENT context, never a reference that may dangle after a hot-rebuild.
 // Every capture is exported as PPM (engine-native) plus a PNG twin.
-[[nodiscard]] RgbImage Capture(ZHLN::Engine& engine, const std::string& path) {
+[[nodiscard]] RgbImage Capture(ZHLN::Engine& engine, std::string_view path) {
     if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
         return {};
     }

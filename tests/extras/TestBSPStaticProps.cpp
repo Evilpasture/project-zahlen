@@ -41,11 +41,11 @@ void AppendRawBytes(std::vector<std::byte>& buf, const void* data, size_t size) 
 
 // Builds a synthetic BSP file buffer containing a LUMP_GAMELUMP with static props
 auto BuildSyntheticBspWithStaticProps(
-    uint16_t sprpVersion,
-    const std::vector<std::string>& dictModels,
-    const std::vector<uint16_t>& leafIndices,
-    const std::vector<std::byte>& propDataBytes,
-    int32_t propCount
+    uint16_t                        sprpVersion,
+    std::span<const std::string>    dictModels,
+    std::span<const uint16_t>       leafIndices,
+    std::span<const std::byte>      propDataBytes,
+    int32_t                         propCount
 ) -> std::vector<std::byte> {
     std::vector<std::byte> fileBytes;
 

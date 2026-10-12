@@ -42,13 +42,9 @@ class ZHLN_API AnimationSystem {
         void ResetForUpdate() noexcept;
         auto GetChunkArena(uint32_t chunkIndex, size_t minimumCapacity) -> LinearArena&;
         auto GetJointOutputArena(size_t minimumCapacity) -> LinearArena&;
-        auto GetCallbackWorldTransforms(uint32_t chunkIndex) noexcept -> std::vector<JPH::Mat44>&;
 
       private:
         std::array<std::unique_ptr<LinearArena>, TaskSystem::MaxParallelForChunks> _chunkArenas {};
-        // Keep the public std::vector callback signature while reusing its
-        // capacity per task chunk rather than allocating one vector per entity.
-        std::array<std::vector<JPH::Mat44>, TaskSystem::MaxParallelForChunks> _callbackWorldTransforms {};
         // Shared across chunks; PoseUploadQueue copies it before the next reset.
         std::unique_ptr<LinearArena> _jointOutputArena;
     };

@@ -387,7 +387,7 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
 }
 
 // Renders, reads the frame back, and mirrors it to .png for inspection.
-[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, const std::string& ppmPath) -> Image::RgbImage {
+[[nodiscard]] inline auto Capture(ZHLN::Engine& engine, std::string_view ppmPath) -> Image::RgbImage {
     if (!engine.GetRenderContext().CaptureScreenshotPPM(ppmPath)) {
         return {};
     }

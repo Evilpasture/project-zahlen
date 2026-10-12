@@ -96,11 +96,11 @@ struct ResponsePolicy {
     bool        noStore = false;
 };
 
-[[nodiscard]] auto OriginFor(const HTTP::Response& response, const std::string& url, const CacheOrigin* previous = nullptr) -> ResponsePolicy {
+[[nodiscard]] auto OriginFor(const HTTP::Response& response, std::string_view url, const CacheOrigin* previous = nullptr) -> ResponsePolicy {
     ResponsePolicy policy;
     if (previous != nullptr)
         policy.origin = *previous; // 304 can omit stored headers.
-    policy.origin.url = url;
+    policy.origin.url = std::string(url);
     if (const auto etag = response.FindHeader("ETag")) {
         policy.origin.etag = EntityTag(*etag) ? std::string(*etag) : std::string {};
     }

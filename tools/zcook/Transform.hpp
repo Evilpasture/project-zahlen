@@ -8,6 +8,7 @@
 #include "Zahlen/Vertex.hpp"
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ZHLN {
@@ -33,5 +34,5 @@ struct CompiledMesh {
     bool  isSkinned = false;
 };
 
-CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& binPath);
+CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPath);
 } // namespace ZHLN

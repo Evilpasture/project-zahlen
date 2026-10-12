@@ -10,7 +10,7 @@
 
 namespace ZHLN {
 
-void ShaderReloadRegistry::Register(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback) {
+void ShaderReloadRegistry::Register(std::string_view name, std::span<const char* const> paths, std::function<void()> callback) {
     if constexpr (isDev) {
         if (name.empty() || !callback || paths.empty()) {
             return;
@@ -37,7 +37,7 @@ void ShaderReloadRegistry::Register(std::string_view name, const std::vector<con
     }
 }
 
-void ShaderReloadRegistry::Dispatch(const std::string& changedPath, const std::function<void()>& onFirstMatch) {
+void ShaderReloadRegistry::Dispatch(std::string_view changedPath, const std::function<void()>& onFirstMatch) {
     const size_t count = _entries.size();
     bool         matched = false;
 

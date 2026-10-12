@@ -232,12 +232,10 @@ class TargetManager {
     [[nodiscard]] auto ShadowMapPrev() noexcept -> Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
     [[nodiscard]] auto ShadowMapPrev() const noexcept -> const Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
 
-    [[nodiscard]] auto CascadeViews() noexcept -> ZHLN::Array<Vk::ImageView>& { return _shadowCascadeViews; }
-    [[nodiscard]] auto CascadeViews() const noexcept -> const ZHLN::Array<Vk::ImageView>& { return _shadowCascadeViews; }
-    [[nodiscard]] auto CascadeViewsPrev() noexcept -> ZHLN::Array<Vk::ImageView>& { return _shadowCascadeViewsPrev; }
-    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> const ZHLN::Array<Vk::ImageView>& { return _shadowCascadeViewsPrev; }
-    [[nodiscard]] auto PunctualViews() noexcept -> ZHLN::Array<Vk::ImageView>& { return _punctualShadowViews; }
-    [[nodiscard]] auto PunctualViews() const noexcept -> const ZHLN::Array<Vk::ImageView>& { return _punctualShadowViews; }
+    [[nodiscard]] auto CascadeViews() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViews; }
+    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViewsPrev; }
+    [[nodiscard]] auto PunctualViews() const noexcept -> std::span<const Vk::ImageView> { return _punctualShadowViews; }
+    void               SwapCascadeViews() noexcept { std::swap(_shadowCascadeViews, _shadowCascadeViewsPrev); }
 
     [[nodiscard]] auto AtlasCubeView() noexcept -> Vk::ImageView& { return _shadowAtlasCubeView; }
     [[nodiscard]] auto AtlasCubeView() const noexcept -> const Vk::ImageView& { return _shadowAtlasCubeView; }
@@ -245,7 +243,7 @@ class TargetManager {
     [[nodiscard]] auto Atlas2DView() const noexcept -> const Vk::ImageView& { return _shadowAtlas2DView; }
 
   private:
-    [[nodiscard]] auto CreateCascadeViews(const Vk::Image& image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode>;
 
     Vk::Context&                             _ctx;
     Vk::Allocator&                           _allocator;

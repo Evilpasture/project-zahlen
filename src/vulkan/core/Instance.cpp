@@ -241,7 +241,7 @@ auto Instance::Create(
 
     std::vector<const char*> enabled_extensions;
     enabled_extensions.reserve(enabled_extension_names.size());
-    for (const std::string& name: enabled_extension_names) {
+    for (const auto& name: enabled_extension_names) {
         enabled_extensions.push_back(name.c_str());
     }
 

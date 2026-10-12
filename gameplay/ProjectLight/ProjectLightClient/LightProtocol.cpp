@@ -1120,7 +1120,7 @@ auto DecodeStreamFrame(std::span<const uint8_t> frameBytes, size_t maxOutputByte
 // Launch URL parsing
 // ============================================================================
 
-auto ParseHostPort(std::string_view endpoint, std::string& host, uint16_t& port) -> bool {
+auto ParseHostPort(std::string_view endpoint, std::string_view& host, uint16_t& port) -> bool {
     endpoint = std::string_view(endpoint.data(), endpoint.size());
     if (endpoint.empty()) {
         return false;
@@ -1157,7 +1157,7 @@ auto ParseHostPort(std::string_view endpoint, std::string& host, uint16_t& port)
         return false;
     }
 
-    host.assign(hostPart);
+    host = hostPart;
 
     // If we have a port, it must parse successfully; otherwise, we succeed without a port
     if (hasPort) {

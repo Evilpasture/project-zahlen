@@ -110,7 +110,7 @@ constexpr int kSize = 128;
 
 // Builds an RGB8 image whose luma equals `field`, so the ResidualStats path
 // (which takes RGB) is exercised rather than bypassed.
-[[nodiscard]] std::vector<uint8_t> ToRgb(const std::vector<double>& field) {
+[[nodiscard]] std::vector<uint8_t> ToRgb(std::span<const double> field) {
     std::vector<uint8_t> rgb(field.size() * 3u, 0);
     for (std::size_t i = 0; i < field.size(); ++i) {
         const auto v     = static_cast<uint8_t>(std::clamp(field[i], 0.0, 255.0));
@@ -299,10 +299,10 @@ struct NoiseMetricTestSuite {
 
         // Convergence detector: a shrinking residual series must read negative.
         std::expected<void, ZHLN::ErrorCode> slope_detects_convergence() {
-            ZHLN::Test::ExpectLt(ZHLN::Test::Noise::LinearSlope({8.0, 4.0, 2.0, 1.0}), 0.0);
-            ZHLN::Test::ExpectGt(ZHLN::Test::Noise::LinearSlope({1.0, 2.0, 4.0, 8.0}), 0.0);
-            ZHLN::Test::ExpectLt(std::abs(ZHLN::Test::Noise::LinearSlope({3.0, 3.0, 3.0, 3.0})), 1e-9);
-            ZHLN::Test::ExpectTrue(ZHLN::Test::Noise::LinearSlope({1.0}) == 0.0);
+            ZHLN::Test::ExpectLt(ZHLN::Test::Noise::LinearSlope(std::array {8.0, 4.0, 2.0, 1.0}), 0.0);
+            ZHLN::Test::ExpectGt(ZHLN::Test::Noise::LinearSlope(std::array {1.0, 2.0, 4.0, 8.0}), 0.0);
+            ZHLN::Test::ExpectLt(std::abs(ZHLN::Test::Noise::LinearSlope(std::array {3.0, 3.0, 3.0, 3.0})), 1e-9);
+            ZHLN::Test::ExpectTrue(ZHLN::Test::Noise::LinearSlope(std::array {1.0}) == 0.0);
             return {};
         }
     };

@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -76,9 +77,9 @@ struct RegionStats {
     uint32_t yellow   = 0;
 };
 
-[[nodiscard]] RgbImage LoadPPM(const std::string& path) {
+[[nodiscard]] RgbImage LoadPPM(std::string_view path) {
     RgbImage      img;
-    std::ifstream ppm(path, std::ios::binary);
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return img;
     }
@@ -292,7 +293,7 @@ struct RTRPBRReflectionTestSuite {
         return true;
     }
 
-    static auto Capture(ZHLN::Engine& engine, const std::string& path) -> RgbImage {
+    static auto Capture(ZHLN::Engine& engine, std::string_view path) -> RgbImage {
         if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
             return {};
         }
@@ -349,7 +350,7 @@ struct RTRPBRReflectionTestSuite {
         return {};
     }
 
-    static auto CaptureRTR(Session& s, const std::string& path) -> std::expected<RgbImage, ZHLN::ErrorCode> {
+    static auto CaptureRTR(Session& s, std::string_view path) -> std::expected<RgbImage, ZHLN::ErrorCode> {
         if (!TickFrames(*s.engine, 2, s.lostBefore)) {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }

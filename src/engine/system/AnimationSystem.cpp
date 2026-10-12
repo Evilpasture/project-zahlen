@@ -174,9 +174,6 @@ void AnimationSystem::ScratchStorage::ResetForUpdate() noexcept {
             arena->Reset();
         }
     }
-    for (auto& transforms: _callbackWorldTransforms) {
-        transforms.clear();
-    }
     if (_jointOutputArena != nullptr) {
         _jointOutputArena->Reset();
     }
@@ -191,13 +188,6 @@ auto AnimationSystem::ScratchStorage::GetChunkArena(uint32_t chunkIndex, size_t 
 
 auto AnimationSystem::ScratchStorage::GetJointOutputArena(size_t minimumCapacity) -> LinearArena& {
     return EnsureArenaCapacity(_jointOutputArena, minimumCapacity);
-}
-
-auto AnimationSystem::ScratchStorage::GetCallbackWorldTransforms(uint32_t chunkIndex) noexcept -> std::vector<JPH::Mat44>& {
-    if (chunkIndex >= _callbackWorldTransforms.size()) {
-        Panic("Animation ParallelFor chunk index {} exceeds its callback scratch", chunkIndex);
-    }
-    return _callbackWorldTransforms[chunkIndex];
 }
 
 void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Components::SkeletalMeshComponent,
@@ -251,21 +241,15 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
 
         LinearArena* chunkArena = nullptr;
         if (maxNodeCount != 0) {
-            chunkArena = &scratchStorage->GetChunkArena(chunkIndex, AnimationScratchCapacity(maxNodeCount, postProcessor == nullptr));
+            chunkArena = &scratchStorage->GetChunkArena(chunkIndex, AnimationScratchCapacity(maxNodeCount, true));
         }
 
         ScratchVector<AnimationNodeScratch> nodeScratch {ArenaAllocator<AnimationNodeScratch> {chunkArena}};
         nodeScratch.resize(maxNodeCount);
 
-        const size_t matrixCount = maxNodeCount * (postProcessor == nullptr ? 2u : 1u);
+        const size_t matrixCount = maxNodeCount * 2u;
         ScratchVector<JPH::Mat44> matrixScratch {ArenaAllocator<JPH::Mat44> {chunkArena}};
         matrixScratch.resize(matrixCount);
-
-        std::vector<JPH::Mat44>* callbackWorldTransforms = nullptr;
-        if (postProcessor != nullptr) {
-            callbackWorldTransforms = &scratchStorage->GetCallbackWorldTransforms(chunkIndex);
-            callbackWorldTransforms->reserve(maxNodeCount);
-        }
 
         for (uint32_t i = start; i < end; ++i) {
             Entity                         rootEntity = entities[i];
@@ -279,18 +263,10 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
 
             std::span<AnimationNodeScratch> nodeStates;
             std::span<JPH::Mat44>           localTransforms;
+            std::span<JPH::Mat44>           worldTransforms;
             if (nodeCount != 0) {
-                nodeStates       = std::span<AnimationNodeScratch> {nodeScratch.data(), nodeCount};
-                localTransforms  = std::span<JPH::Mat44> {matrixScratch.data(), nodeCount};
-            }
-
-            if (callbackWorldTransforms != nullptr) {
-                callbackWorldTransforms->resize(nodeCount);
-            }
-            std::span<JPH::Mat44> worldTransforms;
-            if (callbackWorldTransforms != nullptr) {
-                worldTransforms = std::span<JPH::Mat44> {*callbackWorldTransforms};
-            } else if (nodeCount != 0) {
+                nodeStates      = std::span<AnimationNodeScratch> {nodeScratch.data(), nodeCount};
+                localTransforms = std::span<JPH::Mat44> {matrixScratch.data(), nodeCount};
                 worldTransforms = std::span<JPH::Mat44> {matrixScratch.data() + maxNodeCount, nodeCount};
             }
 
@@ -400,10 +376,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
             }
 
             if (postProcessor != nullptr) {
-                postProcessor(registry, rootEntity, prefab, localTransforms, *callbackWorldTransforms);
-                // The callback may resize or reallocate its vector, so rebuild
-                // the view before using its (possibly changed) result below.
-                worldTransforms = std::span<JPH::Mat44> {*callbackWorldTransforms};
+                postProcessor(registry, rootEntity, prefab, localTransforms, worldTransforms);
             }
 
             for (Entity childEnt: allMeshEntities) {
@@ -442,12 +415,6 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                         childTrans->scale    = trs.scale;
                     }
                 }
-            }
-
-            // The callback receives a short-lived, reused per-chunk vector. Clear
-            // its elements after this entity while retaining capacity for the next.
-            if (callbackWorldTransforms != nullptr) {
-                callbackWorldTransforms->clear();
             }
         }
     });

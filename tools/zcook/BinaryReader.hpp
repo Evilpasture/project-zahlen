@@ -5,6 +5,7 @@
 #pragma once
 #include "IR.hpp"
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
@@ -14,7 +15,7 @@ namespace Compiler {
 
 class BinaryReader {
   public:
-    explicit BinaryReader(const std::string& filepath): m_stream(filepath, std::ios::binary), m_path(filepath) {
+    explicit BinaryReader(std::string_view filepath): m_stream(std::filesystem::path(filepath), std::ios::binary), m_path(filepath) {
     }
 
     std::string ReadString() {

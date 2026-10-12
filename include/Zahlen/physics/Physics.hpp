@@ -242,7 +242,7 @@ class ZHLN_API PhysicsContext {
     auto CreateCharacter(JPH::RVec3Arg position, const Physics::CharacterParams& params = {}) -> Physics::BodyHandle;
 
     // Physics owns the Jolt instance; ECS components borrow a generational handle.
-    auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> Physics::RagdollHandle;
+    auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, std::span<const Physics::RagdollPartParams> parts) -> Physics::RagdollHandle;
     void DestroyRagdoll(Physics::RagdollHandle handle) noexcept;
     void DestroyRagdolls(std::span<const Physics::RagdollHandle> handles) noexcept;
     // Borrowed until DestroyRagdoll; use only while the owning component is live.

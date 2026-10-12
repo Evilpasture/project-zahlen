@@ -44,7 +44,7 @@ SubmittedStagingWork::SubmittedStagingWork(
     Allocator&                         allocator,
     const Context&                     ctx,
     CommandPool<QueueType::Graphics>&& pool,
-    std::vector<Buffer>&&              buffers,
+    std::vector<Buffer>                buffers,
     VkFence                            fence
 ) noexcept: _allocator(&allocator), _ctx(&ctx), _cmdPool(std::move(pool)), _stagingBuffers(std::move(buffers)), _fence(fence) {
 }

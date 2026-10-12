@@ -15,8 +15,11 @@
 #include <Zahlen/Core/Ranges.hpp>
 
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string_view>
+#include <utility>
 
 namespace ZHLN::ZShader {
 
@@ -65,8 +68,8 @@ auto AsLiteral(std::string_view text) -> std::string {
     return out;
 }
 
-auto ReadFile(const std::string& path) -> std::vector<uint8_t> {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+auto ReadFile(std::string_view path) -> std::vector<uint8_t> {
+    std::ifstream file(std::filesystem::path(path), std::ios::binary | std::ios::ate);
     if (!file) {
         Fail("cannot open {}", path);
     }
@@ -125,9 +128,10 @@ auto ModuleFor(const Options& options, std::string_view type, std::string_view m
     return *found;
 }
 
-auto WriteFileIfChanged(const std::string& path, const std::string& content) -> bool {
+auto WriteFileIfChanged(std::string_view path, std::string_view content) -> bool {
+    const std::filesystem::path fsPath(path);
     {
-        std::ifstream existing(path, std::ios::binary);
+        std::ifstream existing(fsPath, std::ios::binary);
         if (existing) {
             const std::string current {std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
             if (current == content) {
@@ -136,7 +140,7 @@ auto WriteFileIfChanged(const std::string& path, const std::string& content) -> 
             }
         }
     }
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    std::ofstream file(fsPath, std::ios::binary | std::ios::trunc);
     if (!file) {
         Fail("cannot write {}", path);
     }

@@ -537,7 +537,7 @@ auto EmitField(std::string& out, const Field& field, std::string_view structName
     std::format_to(std::back_inserter(out), "; // offset {}, size {}\n", field.offset, field.size);
 }
 
-auto EmitInventory(std::string& out, const std::vector<StructDef>& defs) -> void {
+auto EmitInventory(std::string& out, std::span<const StructDef> defs) -> void {
     std::format_to(
         std::back_inserter(out),
         "\n// The ABI inventory, for the GpuAbi walk (src/render/GpuAbi.hpp): every struct\n"
@@ -565,7 +565,7 @@ auto EmitInventory(std::string& out, const std::vector<StructDef>& defs) -> void
 // offsets Slang seated them, the _padN between them, the alignment each lane
 // carries. The asserts that follow are the contract with the reflection this
 // emission came from -- and with the host compiler that has to reproduce it.
-auto EmitStructsHeader(const std::vector<StructDef>& defs) -> std::string {
+auto EmitStructsHeader(std::span<const StructDef> defs) -> std::string {
     std::string text {kStructsPreamble};
     bool        first = true;
     for (const StructDef& def: defs) {

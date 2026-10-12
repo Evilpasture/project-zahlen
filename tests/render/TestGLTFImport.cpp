@@ -594,8 +594,8 @@ struct GltfLightDocument {
 // Synthesizing the input is not the same as reimplementing the importer: this
 // only produces bytes a conformant loader must accept, so the extension
 // behaviour under test stays the importer's own.
-[[nodiscard]] auto MakeGlb(const std::string& json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
-    std::string paddedJson = json;
+[[nodiscard]] auto MakeGlb(std::string_view json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
+    std::string paddedJson(json);
     while (paddedJson.size() % 4 != 0) {
         paddedJson.push_back(' ');
     }

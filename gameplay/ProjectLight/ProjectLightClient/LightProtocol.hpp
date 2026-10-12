@@ -131,7 +131,7 @@ struct LaunchConfig {
 };
 
 [[nodiscard]] auto ParseLaunchUrl(std::string_view url, std::string_view scheme, LaunchConfig base = {}) -> std::expected<LaunchConfig, std::string>;
-[[nodiscard]] auto ParseHostPort(std::string_view endpoint, std::string& host, uint16_t& port) -> bool;
+[[nodiscard]] auto ParseHostPort(std::string_view endpoint, std::string_view& host, uint16_t& port) -> bool;
 [[nodiscard]] auto ExtractLaunchUrlArgs(std::span<const std::string_view> rawArgs, LaunchConfig& config, std::string_view scheme)
     -> std::expected<std::vector<std::string>, std::string>;
 

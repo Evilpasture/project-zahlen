@@ -184,7 +184,7 @@ void Kernel::RemoveWindow(Window& window) {
     if (_impl->renderContext != nullptr) {
         _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(window));
     }
-    std::erase_if(_impl->secondaryWindows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
+    std::erase_if(_impl->secondaryWindows, [&](const auto& owned) -> bool { return owned.get() == &window; });
 }
 
 

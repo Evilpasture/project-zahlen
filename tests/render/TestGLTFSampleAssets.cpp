@@ -71,14 +71,14 @@ constexpr std::array kModelCandidates {
 #endif
 }
 
-[[nodiscard]] std::vector<uint8_t> ReadModelBytes(std::string& outPath) {
+[[nodiscard]] std::pair<std::string, std::vector<uint8_t>> ReadModelBytes() {
     const std::string dir = SampleAssetsDir();
     if (dir.empty()) {
         return {};
     }
     for (const char* candidate: kModelCandidates) {
-        const std::string path = dir + "/" + candidate;
-        std::ifstream     stream(path, std::ios::binary);
+        std::string   path = dir + "/" + candidate;
+        std::ifstream stream(path, std::ios::binary);
         if (!stream.is_open()) {
             continue;
         }
@@ -86,8 +86,7 @@ constexpr std::array kModelCandidates {
         if (bytes.size() < 4 || std::string_view(reinterpret_cast<const char*>(bytes.data()), 4) != "glTF") {
             continue;
         }
-        outPath = path;
-        return bytes;
+        return {std::move(path), std::move(bytes)};
     }
     return {};
 }
@@ -130,8 +129,7 @@ struct GLTFSampleAssetsTestSuite {
 
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> khronos_sample_model_imports_spawns_and_renders() {
-            std::string              modelPath;
-            const std::vector<uint8_t> bytes = ReadModelBytes(modelPath);
+            const auto [modelPath, bytes] = ReadModelBytes();
             if (bytes.empty()) {
                 ZHLN::Println("    [SKIP] No glTF-Sample-Assets checkout (set $ZHLN_SAMPLE_ASSETS or configure with -DZHLN_FETCH_SAMPLE_ASSETS=ON).");
                 return {};

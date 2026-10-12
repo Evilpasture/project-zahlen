@@ -142,7 +142,7 @@ void WalkPushBlock(
 // carries the dotted path (scene.frame); `block` carries the seat a member's
 // slot composes from, and is null at the top.
 void WalkGlobal(
-    slang::VariableLayoutReflection* var, const std::string& prefix, SlangEntryInfo& info, const BlockSeat* block,
+    slang::VariableLayoutReflection* var, std::string_view prefix, SlangEntryInfo& info, const BlockSeat* block,
     slang::IMetadata* metadata, std::string_view file, std::string_view entry
 ) {
     using enum slang::TypeReflection::Kind;
@@ -150,7 +150,7 @@ void WalkGlobal(
     if (raw == nullptr || *raw == '\0') {
         Fail("'{}' entry '{}': Slang reports an unnamed global", file, entry);
     }
-    std::string          name = prefix.empty() ? raw : std::format("{}.{}", prefix, raw);
+    std::string            name = prefix.empty() ? std::string(raw) : std::format("{}.{}", prefix, raw);
     slang::TypeReflection* type = var->getType();
     if (type == nullptr) {
         Fail("'{}' entry '{}': Slang reports '{}' without a type", file, entry, name);
@@ -275,7 +275,7 @@ auto CompileSlangEntry(const SlangCompileArgs& args) -> SlangProgram {
 
     std::vector<const char*> searchDirs;
     searchDirs.reserve(args.searchPaths.size());
-    for (const std::string& dir : args.searchPaths) {
+    for (const auto& dir : args.searchPaths) {
         searchDirs.push_back(dir.c_str());
     }
     std::vector<slang::PreprocessorMacroDesc> macros;

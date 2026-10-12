@@ -251,14 +251,13 @@ struct PreparedPart {
     JPH::ShapeRefC shape    = nullptr;
 };
 
-void PreparePrefabPhysics(
-    const ModelPrefab&         prefab,
-    const JPH::Mat44&          baseTransform,
-    bool                       createPhysics,
-    bool                       useBoxColliders,
-    std::vector<PreparedPart>& outPrepared
-) {
-    outPrepared.resize(prefab.parts.size());
+auto PreparePrefabPhysics(
+    const ModelPrefab& prefab,
+    const JPH::Mat44&  baseTransform,
+    bool               createPhysics,
+    bool               useBoxColliders
+) -> std::vector<PreparedPart> {
+    std::vector<PreparedPart> outPrepared(prefab.parts.size());
 
     TaskSystem::ParallelFor(prefab.parts.size(), 16, [&](uint32_t start, uint32_t end, uint32_t) -> void {
         for (uint32_t i = start; i < end; ++i) {
@@ -283,6 +282,7 @@ void PreparePrefabPhysics(
             }
         }
     });
+    return outPrepared;
 }
 
 auto InstantiateMeshPart(
@@ -707,8 +707,7 @@ auto InstantiatePrefab(
     }
 
     JPH::Mat44                baseTransform = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
-    std::vector<PreparedPart> preparedParts;
-    PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders, preparedParts);
+    std::vector<PreparedPart> preparedParts = PreparePrefabPhysics(prefab, baseTransform, params.createPhysics, params.useBoxColliders);
 
     float                                 scaleMult = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
     std::unordered_map<int32_t, uint32_t> allocatedSkeletons;

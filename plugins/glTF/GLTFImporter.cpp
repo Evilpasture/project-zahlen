@@ -881,7 +881,9 @@ struct ImportedTextureRef {
     return result;
 }
 
-void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTextureRef>& outUniqueImages, std::vector<CPUPrimitiveJob>& outPrimitiveJobs) {
+auto GatherImagesAndPrimitiveJobs(const cgltf_data* data) -> std::pair<std::vector<ImportedTextureRef>, std::vector<CPUPrimitiveJob>> {
+    std::vector<ImportedTextureRef> outUniqueImages;
+    std::vector<CPUPrimitiveJob>    outPrimitiveJobs;
     auto RegisterTexture = [&](CPUPrimitiveJob& job, const cgltf_texture_view& view, cgltf_image*& image, MaterialTextureSlot slot) -> void {
         cgltf_texture* texture = view.texture;
         if (texture == nullptr) {
@@ -950,20 +952,24 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<ImportedTe
             outPrimitiveJobs.push_back(std::move(job));
         }
     }
+    return {std::move(outUniqueImages), std::move(outPrimitiveJobs)};
 }
 
-void ProcessCPUTasks(
-    const std::string&                     textureSearchPath,
-    const std::vector<ImportedTextureRef>& uniqueImages,
-    std::vector<CPUPrimitiveJob>&          primitiveJobs,
-    JPH::Array<CPUTextureJob>&             outTextureJobs,
-    float                                  emissiveFactorScale,
-    uint32_t                               maxTextureDimension
-) {
+auto ProcessCPUTasks(
+    std::string_view                    textureSearchPath,
+    std::span<const ImportedTextureRef> uniqueImages,
+    std::span<CPUPrimitiveJob>          primitiveJobs,
+    float                               emissiveFactorScale,
+    uint32_t                            maxTextureDimension
+) -> JPH::Array<CPUTextureJob> {
+    JPH::Array<CPUTextureJob> outTextureJobs;
     outTextureJobs.resize(uniqueImages.size());
     for (size_t i = 0; i < uniqueImages.size(); ++i) {
         outTextureJobs[i] = {
-            .image = uniqueImages[i].image, .glbPath = textureSearchPath, .isSRGB = uniqueImages[i].srgb, .maxTextureDimension = maxTextureDimension
+            .image               = uniqueImages[i].image,
+            .glbPath             = std::string(textureSearchPath),
+            .isSRGB              = uniqueImages[i].srgb,
+            .maxTextureDimension = maxTextureDimension
         };
     }
 
@@ -982,9 +988,10 @@ void ProcessCPUTasks(
             }
         });
     }
+    return outTextureJobs;
 }
 
-auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, JPH::Array<CPUTextureJob>& textureJobs)
+auto UploadTexturesToGPU(RenderContext& ctx, std::string_view virtualPath, std::span<CPUTextureJob> textureJobs)
     -> std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>> {
     std::unordered_map<cgltf_image*, std::array<TextureHandle, 2>> imageToHandle;
     imageToHandle.reserve(textureJobs.size());
@@ -1390,12 +1397,9 @@ auto BuildModelPrefab(
     // ------------------------------------------------------------------------
     // 4. Process GPU Textures & Geometry
     // ------------------------------------------------------------------------
-    std::vector<ImportedTextureRef> uniqueImages;
-    std::vector<CPUPrimitiveJob>    primitiveJobs;
-    GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
+    auto [uniqueImages, primitiveJobs] = GatherImagesAndPrimitiveJobs(data);
 
-    JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(std::string(textureSearchPath), uniqueImages, primitiveJobs, textureJobs, options.emissiveFactorScale, options.maxTextureDimension);
+    auto       textureJobs        = ProcessCPUTasks(textureSearchPath, uniqueImages, primitiveJobs, options.emissiveFactorScale, options.maxTextureDimension);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, virtualPath, textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;
@@ -1461,7 +1465,7 @@ auto BuildModelPrefab(
 // Cached parts share uploaded primitives across all of their instances. Reuse
 // the same ModelPrefab object on a GPU refresh so live animator pointers stay
 // valid; release old aliases before new allocations may reuse pool slots.
-void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_data* data, const std::string& rawPath) {
+void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_data* data, std::string_view rawPath) {
     // This can also be invoked for a still-live cache: retire every old
     // alias before any replacement allocation can reuse its pool slot.
     for (const auto& part: prefab.parts) {
@@ -1472,12 +1476,9 @@ void RefreshPrefabGPUResources(RenderContext& ctx, ModelPrefab& prefab, cgltf_da
         part.mesh = {};
     }
 
-    std::vector<ImportedTextureRef> uniqueImages;
-    std::vector<CPUPrimitiveJob>    primitiveJobs;
-    GatherImagesAndPrimitiveJobs(data, uniqueImages, primitiveJobs);
+    auto [uniqueImages, primitiveJobs] = GatherImagesAndPrimitiveJobs(data);
 
-    JPH::Array<CPUTextureJob> textureJobs;
-    ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, textureJobs, prefab.emissiveFactorScale, prefab.maxTextureDimension);
+    auto       textureJobs        = ProcessCPUTasks(rawPath, uniqueImages, primitiveJobs, prefab.emissiveFactorScale, prefab.maxTextureDimension);
     const auto imageToBindlessIdx = UploadTexturesToGPU(ctx, prefab.virtualPath.c_str(), textureJobs);
 
     std::unordered_map<const cgltf_primitive*, CompiledPrimitive> primCache;

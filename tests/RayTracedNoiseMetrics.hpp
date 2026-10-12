@@ -32,6 +32,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace ZHLN::Test::Noise {
@@ -266,7 +267,7 @@ struct DirectionalEnergy {
 // is shrinking over time, which is what a temporal accumulator should do on a
 // static scene; a positive or oscillating slope means the noise is being
 // regenerated rather than converged.
-[[nodiscard]] inline double LinearSlope(const std::vector<double>& y) noexcept {
+[[nodiscard]] inline double LinearSlope(std::span<const double> y) noexcept {
     const auto n = static_cast<double>(y.size());
     if (n < 2.0) {
         return 0.0;

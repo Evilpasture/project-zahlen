@@ -80,7 +80,7 @@ class Writer {
 // against, in the order the module declares them (set and binding ascending,
 // which ReflectModule sorted). A module that declares none gets an empty list
 // rather than a list with no entries.
-auto BindingList(const std::vector<Descriptor>& descriptors, bool sampler, std::string_view indent) -> std::string {
+auto BindingList(std::span<const Descriptor> descriptors, bool sampler, std::string_view indent) -> std::string {
     if (descriptors.empty()) {
         return "Vk::BindingList<>";
     }
@@ -99,7 +99,7 @@ auto BindingList(const std::vector<Descriptor>& descriptors, bool sampler, std::
 }
 
 // One set's members: the modules whose bindings that descriptor block serves.
-auto ModuleList(const std::vector<std::string>& types) -> std::string {
+auto ModuleList(std::span<const std::string> types) -> std::string {
     std::string text;
     Writer      out(text);
     for (size_t index = 0; index < types.size(); ++index) {

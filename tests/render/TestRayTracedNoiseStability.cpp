@@ -291,7 +291,7 @@ struct RayTracedNoiseStabilityTestSuite {
         }
     }
 
-    static RgbImage Capture(ZHLN::Engine& engine, const std::string& name) {
+    static RgbImage Capture(ZHLN::Engine& engine, std::string_view name) {
         const auto res = engine.GetRenderContext().CaptureScreenshotPPM(name);
         if (!res) {
             return {};
@@ -302,7 +302,7 @@ struct RayTracedNoiseStabilityTestSuite {
     // Settles the scene, then grabs one frame. Two ticks after a settings
     // change so the delta-detected GraphicsSettings apply and the history
     // buffers have caught up before anything is measured.
-    static RgbImage SettleAndCapture(ZHLN::Engine& engine, const std::string& name) {
+    static RgbImage SettleAndCapture(ZHLN::Engine& engine, std::string_view name) {
         TickFrames(engine, 2);
         return Capture(engine, name);
     }

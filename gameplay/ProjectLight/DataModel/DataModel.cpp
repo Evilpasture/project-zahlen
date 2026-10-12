@@ -512,8 +512,8 @@ SoundService::SoundService(const JPH::Ref<DataModelState>& state, InstanceId id,
     Service(state, id, std::string(ReflectedClassName<SoundService>()), WithDefaultName(std::move(name), "SoundService")) {
 }
 
-OpaqueService::OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, const std::string& className, std::string name):
-    Service(state, id, className, DefaultServiceName(className, std::move(name))) {
+OpaqueService::OpaqueService(const JPH::Ref<DataModelState>& state, InstanceId id, std::string_view className, std::string name):
+    Service(state, id, std::string(className), DefaultServiceName(className, std::move(name))) {
 }
 
 Folder::Folder(const JPH::Ref<DataModelState>& state, InstanceId id, std::string name):

@@ -41,39 +41,42 @@ namespace {
 
 // --- Byte sources: mounted paks first, then unpacked files -------------------
 
-auto ReadVirtual(AssetManager& mgr, std::string_view path, std::vector<uint8_t>& out) -> bool {
+auto ReadVirtual(AssetManager& mgr, std::string_view path) -> std::optional<std::vector<uint8_t>> {
     AssetLoadRequest req;
     req.assetID = HashAssetPath(path);
     if (!mgr.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
-        return false;
+        return std::nullopt;
     }
-    const auto* bytes = static_cast<const uint8_t*>(req.outData);
-    out.assign(bytes, bytes + req.outSize);
+    const auto*          bytes = static_cast<const uint8_t*>(req.outData);
+    std::vector<uint8_t> out(bytes, bytes + req.outSize);
     mgr.FreeMemory(req);
-    return true;
+    return out;
 }
 
-auto ReadUnpacked(std::string_view path, std::vector<uint8_t>& out) -> bool {
+auto ReadUnpacked(std::string_view path) -> std::optional<std::vector<uint8_t>> {
     std::ifstream file(fs::path(path), std::ios::binary | std::ios::ate);
     if (!file) {
-        return false;
+        return std::nullopt;
     }
     const std::streamsize size = file.tellg();
     if (size <= 0) {
-        return false;
+        return std::nullopt;
     }
-    out.resize(static_cast<size_t>(size));
+    std::vector<uint8_t> out(static_cast<size_t>(size));
     file.seekg(0, std::ios::beg);
-    return static_cast<bool>(file.read(reinterpret_cast<char*>(out.data()), size));
+    if (!file.read(reinterpret_cast<char*>(out.data()), size)) {
+        return std::nullopt;
+    }
+    return out;
 }
 
-auto ReadBytes(const BakedFontSource& source, AssetManager* assets, std::string_view path, std::vector<uint8_t>& out) -> bool {
+auto ReadBytes(const BakedFontSource& source, AssetManager* assets, std::string_view path) -> std::optional<std::vector<uint8_t>> {
     if (assets != nullptr) {
-        if (ReadVirtual(*assets, path, out)) {
-            return true;
+        if (auto out = ReadVirtual(*assets, path)) {
+            return out;
         }
     }
-    return source.allowUnpackedFallback && ReadUnpacked(path, out);
+    return source.allowUnpackedFallback ? ReadUnpacked(path) : std::nullopt;
 }
 
 auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string {
@@ -93,27 +96,27 @@ struct LoaderInstance {
 };
 
 auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    std::vector<uint8_t> fntBytes;
-    if (!ReadBytes(self.source, self.assets, self.source.fntPath, fntBytes)) {
+    const auto fntBytes = ReadBytes(self.source, self.assets, self.source.fntPath);
+    if (!fntBytes) {
         return std::unexpected(FontBMError::MissingMetrics);
     }
 
-    const std::string_view text(reinterpret_cast<const char*>(fntBytes.data()), fntBytes.size());
+    const std::string_view text(reinterpret_cast<const char*>(fntBytes->data()), fntBytes->size());
     auto descExp = ParseFontBMDescriptor(text);
     if (!descExp.has_value()) {
         return std::unexpected(descExp.error());
     }
 
-    std::vector<uint8_t> pngBytes;
     const std::string pagePath = JoinVirtualDir(self.source.fntPath, descExp->pageFile);
-    if (!ReadBytes(self.source, self.assets, pagePath, pngBytes)) {
+    const auto        pngBytes = ReadBytes(self.source, self.assets, pagePath);
+    if (!pngBytes) {
         return std::unexpected(FontBMError::BadPage);
     }
 
     int width = 0;
     int height = 0;
     int channels = 0;
-    unsigned char* pixels = stbi_load_from_memory(pngBytes.data(), static_cast<int>(pngBytes.size()), &width, &height, &channels, 4);
+    unsigned char* pixels = stbi_load_from_memory(pngBytes->data(), static_cast<int>(pngBytes->size()), &width, &height, &channels, 4);
     if (pixels == nullptr) {
         return std::unexpected(FontBMError::BadPage);
     }
@@ -130,11 +133,11 @@ auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, 
 }
 
 auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
-    std::vector<uint8_t> zfontBytes;
-    if (!ReadBytes(self.source, self.assets, self.source.zfontPath, zfontBytes)) {
+    const auto zfontBytes = ReadBytes(self.source, self.assets, self.source.zfontPath);
+    if (!zfontBytes) {
         return std::unexpected(FontBMError::MissingMetrics);
     }
-    auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes.data()), zfontBytes.size()));
+    auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes->data()), zfontBytes->size()));
     if (!bakedExp.has_value()) {
         return std::unexpected(bakedExp.error());
     }
@@ -148,8 +151,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
         self.cache = GUI::BakedFontAsset {};
 
         // Try BMFont pair first, but only warn if file exists and fails to parse
-        std::vector<uint8_t> fntProbe;
-        bool fntExists = ReadBytes(self.source, self.assets, self.source.fntPath, fntProbe);
+        bool fntExists = ReadBytes(self.source, self.assets, self.source.fntPath).has_value();
         if (fntExists) {
             if (auto bm = LoadFontBMPair(self); bm.has_value()) {
                 self.cache = std::move(*bm);
@@ -163,16 +165,14 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                     Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
                 } else {
                     // Only warn for cooked font if it exists
-                    std::vector<uint8_t> zProbe;
-                    if (ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe)) {
+                    if (ReadBytes(self.source, self.assets, self.source.zfontPath)) {
                         LogWarning("Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
                     }
                 }
             }
         } else {
             // BMFont not present, try cooked font silently
-            std::vector<uint8_t> zProbe;
-            bool zExists = ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe);
+            bool zExists = ReadBytes(self.source, self.assets, self.source.zfontPath).has_value();
             if (zExists) {
                 if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
                     self.cache = std::move(*cooked);

@@ -32,12 +32,15 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
 #include <numbers>
 #include <numeric>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ============================================================================
@@ -74,8 +77,8 @@ struct PpmImage {
     }
 };
 
-[[nodiscard]] PpmImage LoadPPM(const std::string& path) {
-    std::ifstream ppm(path, std::ios::binary);
+[[nodiscard]] PpmImage LoadPPM(std::string_view path) {
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return {};
     }

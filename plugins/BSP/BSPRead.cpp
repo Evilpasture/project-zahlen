@@ -51,36 +51,35 @@ auto ReadQuotedString(std::string_view& text) noexcept -> std::optional<std::str
 }
 
 template <typename T>
-auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry, std::vector<T>& out) -> std::expected<void, ErrorCode> {
+auto ReadLumpArray(std::span<const std::byte> file, const LumpEntry& entry) -> std::expected<std::vector<T>, ErrorCode> {
     if (entry.filelen < 0 || entry.fileofs < 0 || static_cast<size_t>(entry.fileofs) + static_cast<size_t>(entry.filelen) > file.size()) {
         return std::unexpected(BSPError::LumpOutOfBounds);
     }
     if (entry.filelen == 0) {
-        return {};
+        return std::vector<T> {};
     }
     if (entry.filelen % static_cast<int32_t>(sizeof(T)) != 0) {
         return std::unexpected(BSPError::MalformedLump);
     }
-    const size_t count = static_cast<size_t>(entry.filelen) / sizeof(T);
-    out.resize(count);
-    ByteReader in(file.subspan(static_cast<size_t>(entry.fileofs), static_cast<size_t>(entry.filelen)));
+    const size_t   count = static_cast<size_t>(entry.filelen) / sizeof(T);
+    std::vector<T> out(count);
+    ByteReader     in(file.subspan(static_cast<size_t>(entry.fileofs), static_cast<size_t>(entry.filelen)));
     for (T& element: out) {
         if (!ReadStruct(in, element)) {
             return std::unexpected(BSPError::ShortRead);
         }
     }
-    return {};
+    return out;
 }
 
 // Texdata names live in a string table: LUMP_TEXDATA_STRING_TABLE is int32
 // offsets into LUMP_TEXDATA_STRING_DATA (NUL-terminated).
 auto ReadTexNames(
-    std::span<const std::byte>   file,
-    const LumpEntry&             dataEntry,
-    const LumpEntry&             tableEntry,
-    const std::vector<DTexData>& texDatas,
-    std::vector<std::string>&    out
-) -> std::expected<void, ErrorCode> {
+    std::span<const std::byte> file,
+    const LumpEntry&           dataEntry,
+    const LumpEntry&           tableEntry,
+    std::span<const DTexData>  texDatas
+) -> std::expected<std::vector<std::string>, ErrorCode> {
     if (dataEntry.filelen < 0 || tableEntry.filelen < 0 || dataEntry.fileofs < 0 || tableEntry.fileofs < 0 ||
         static_cast<size_t>(dataEntry.fileofs) + static_cast<size_t>(dataEntry.filelen) > file.size() ||
         static_cast<size_t>(tableEntry.fileofs) + static_cast<size_t>(tableEntry.filelen) > file.size()) {
@@ -89,7 +88,7 @@ auto ReadTexNames(
     const auto dataSpan  = file.subspan(static_cast<size_t>(dataEntry.fileofs), static_cast<size_t>(dataEntry.filelen));
     const auto tableSpan = file.subspan(static_cast<size_t>(tableEntry.fileofs), static_cast<size_t>(tableEntry.filelen));
 
-    out.clear();
+    std::vector<std::string> out;
     out.reserve(texDatas.size());
     for (const DTexData& texData: texDatas) {
         std::string name;
@@ -111,7 +110,7 @@ auto ReadTexNames(
         }
         out.push_back(std::move(name));
     }
-    return {};
+    return out;
 }
 
 } // namespace
@@ -439,59 +438,87 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         map.entities        = ParseEntities(std::string_view(reinterpret_cast<const char*>(textSpan.data()), textSpan.size()));
     }
 
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Planes), map.planes); !res) {
+    if (auto res = ReadLumpArray<DPlane>(bytes, lump(Lump::Planes)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.planes = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Vertexes), map.vertices); !res) {
+    if (auto res = ReadLumpArray<DVertex>(bytes, lump(Lump::Vertexes)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.vertices = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Edges), map.edges); !res) {
+    if (auto res = ReadLumpArray<DEdge>(bytes, lump(Lump::Edges)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.edges = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::SurfEdges), map.surfEdges); !res) {
+    if (auto res = ReadLumpArray<int32_t>(bytes, lump(Lump::SurfEdges)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.surfEdges = std::move(*res);
     }
 
     const LumpEntry* facesLump = &lump(Lump::Faces);
     if (lump(Lump::FacesHDR).filelen > 0) {
         facesLump = &lump(Lump::FacesHDR);
     }
-    if (auto res = ReadLumpArray(bytes, *facesLump, map.faces); !res) {
-        if (facesLump != &lump(Lump::Faces)) {
-            if (auto fallbackRes = ReadLumpArray(bytes, lump(Lump::Faces), map.faces); !fallbackRes) {
-                return std::unexpected(res.error());
-            }
+    if (auto res = ReadLumpArray<DFace>(bytes, *facesLump); res) {
+        map.faces = std::move(*res);
+    } else if (facesLump != &lump(Lump::Faces)) {
+        if (auto fallbackRes = ReadLumpArray<DFace>(bytes, lump(Lump::Faces)); fallbackRes) {
+            map.faces = std::move(*fallbackRes);
         } else {
             return std::unexpected(res.error());
         }
+    } else {
+        return std::unexpected(res.error());
     }
 
-    if (auto res = ReadLumpArray(bytes, lump(Lump::TexInfo), map.texInfos); !res) {
+    if (auto res = ReadLumpArray<DTexInfo>(bytes, lump(Lump::TexInfo)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.texInfos = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::TexData), map.texDatas); !res) {
+    if (auto res = ReadLumpArray<DTexData>(bytes, lump(Lump::TexData)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.texDatas = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Models), map.models); !res) {
+    if (auto res = ReadLumpArray<DModel>(bytes, lump(Lump::Models)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.models = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::DispInfo), map.dispInfos); !res) {
+    if (auto res = ReadLumpArray<DDispInfo>(bytes, lump(Lump::DispInfo)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.dispInfos = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::DispVerts), map.dispVerts); !res) {
+    if (auto res = ReadLumpArray<DDispVert>(bytes, lump(Lump::DispVerts)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.dispVerts = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Nodes), map.nodes); !res) {
+    if (auto res = ReadLumpArray<DNode>(bytes, lump(Lump::Nodes)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.nodes = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Brushes), map.brushes); !res) {
+    if (auto res = ReadLumpArray<DBrush>(bytes, lump(Lump::Brushes)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.brushes = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::BrushSides), map.brushSides); !res) {
+    if (auto res = ReadLumpArray<DBrushSide>(bytes, lump(Lump::BrushSides)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.brushSides = std::move(*res);
     }
-    if (auto res = ReadLumpArray(bytes, lump(Lump::Overlays), map.overlays); !res) {
+    if (auto res = ReadLumpArray<DOverlay>(bytes, lump(Lump::Overlays)); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.overlays = std::move(*res);
     }
 
     // Leaves: support version 0 (30 bytes or 32/56 with padding/ambient) and version 1 (32 bytes).
@@ -526,8 +553,10 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         }
     }
 
-    if (auto res = ReadTexNames(bytes, lump(Lump::TexDataStringData), lump(Lump::TexDataStringTable), map.texDatas, map.texNames); !res) {
+    if (auto res = ReadTexNames(bytes, lump(Lump::TexDataStringData), lump(Lump::TexDataStringTable), map.texDatas); !res) {
         return std::unexpected(res.error());
+    } else {
+        map.texNames = std::move(*res);
     }
 
     if (auto res = ParseGameLump(bytes, lump(Lump::GameLump), map); !res) {

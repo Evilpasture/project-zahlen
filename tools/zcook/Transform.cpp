@@ -60,10 +60,11 @@ struct RawLoopVertexHash {
 
 namespace ZHLN {
 
-CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, const std::string& binPath) {
+CompiledMesh CompileRawMesh(const Compiler::IRMesh& mesh, std::string_view binPath) {
     CompiledMesh result;
 
-    FILE* bf = std::fopen(binPath.c_str(), "rb");
+    const std::string binPathStr(binPath);
+    FILE*             bf = std::fopen(binPathStr.c_str(), "rb");
     if (bf == nullptr) {
         std::println(stderr, "[zcook] ERROR: Failed to open intermediate bin file '{}': {}", binPath, std::strerror(errno));
         return result;

@@ -19,10 +19,12 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <mutex>
 #include <print>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -234,8 +236,8 @@ int CookAnimation(int argc, char** argv) {
     std::vector<CookedAnimTrack> tracks;
     std::vector<uint8_t>         payloadData;
 
-    auto appendPayload = [&](const std::string& binFile, uint32_t offset, uint32_t length) -> uint32_t {
-        std::string fullBinPath = levelFolder + "/" + binFile;
+    auto appendPayload = [&](std::string_view binFile, uint32_t offset, uint32_t length) -> uint32_t {
+        std::string fullBinPath = std::format("{}/{}", levelFolder, binFile);
         FILE*       bf          = std::fopen(fullBinPath.c_str(), "rb");
         if (!bf) {
             return 0;

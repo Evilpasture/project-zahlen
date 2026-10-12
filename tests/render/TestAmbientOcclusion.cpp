@@ -39,7 +39,7 @@ namespace {
 // The screenshot API reads the current frame back without advancing the
 // engine, so each capture is preceded by one tick -- the same rhythm the
 // other headless suites use when sampling consecutive frames.
-[[nodiscard]] RgbImage CaptureAveraged(ZHLN::Engine& engine, uint32_t frames, const std::string& rawPath) {
+[[nodiscard]] RgbImage CaptureAveraged(ZHLN::Engine& engine, uint32_t frames, std::string_view rawPath) {
     std::vector<double> acc;
     RgbImage            avg;
     for (uint32_t f = 0; f < frames; ++f) {

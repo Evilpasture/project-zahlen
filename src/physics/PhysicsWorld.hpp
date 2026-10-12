@@ -14,6 +14,7 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <cstdint>
+#include <span>
 #include <type_traits>
 
 namespace ZHLN {
@@ -195,7 +196,7 @@ struct PhysicsWorld {
         JPH::Array<JPH::CharacterVirtual*>& activeCharacters
     );
 
-    void Synchronize(const JPH::PhysicsSystem* inSystem, const JPH::Array<JPH::CharacterVirtual*>& activeCharacters) noexcept;
+    void Synchronize(const JPH::PhysicsSystem* inSystem, std::span<JPH::CharacterVirtual* const> activeCharacters) noexcept;
 
     auto SaveState() const -> JPH::Array<std::byte>;
     auto LoadState(const uint8_t* data, size_t size) -> bool;

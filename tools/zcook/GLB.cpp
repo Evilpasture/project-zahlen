@@ -19,9 +19,13 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <map>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -109,7 +113,7 @@ inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
 
 // stb_image_write appends through a context pointer; this is the only
 // result sink the emitter needs (BIN chunk bytes, and the baked .ztex copy).
-std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uint32_t width, uint32_t height) {
+std::vector<uint8_t> CreatePNGBytes(std::span<const uint32_t> rgbaPixels, uint32_t width, uint32_t height) {
     std::vector<uint8_t> pngBytes;
     auto                 append = [](void* ctx, void* data, int size) {
         auto*       out       = static_cast<std::vector<uint8_t>*>(ctx);
@@ -124,7 +128,7 @@ std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uin
 
 } // namespace
 
-bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder, const std::string& outputPath) {
+bool EmitGLB(const Compiler::IRManifest& manifest, std::string_view levelFolder, std::string_view outputPath) {
     std::vector<uint8_t> binBuffer;
     binBuffer.reserve(static_cast<size_t>(16 * 1024 * 1024));
 
@@ -146,7 +150,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
     };
     std::vector<PackedImage> packedImages;
 
-    auto getTextureIndex = [&](const std::string& relativeUri) -> int {
+    auto getTextureIndex = [&](std::string_view relativeUri) -> int {
         if (relativeUri.empty())
             return -1;
         for (size_t i = 0; i < packedImages.size(); ++i) {
@@ -154,7 +158,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
                 return static_cast<int>(i);
         }
 
-        std::string fullPath = levelFolder + "/" + relativeUri;
+        std::string fullPath = std::format("{}/{}", levelFolder, relativeUri);
         FILE*       f        = std::fopen(fullPath.c_str(), "rb");
         if (f == nullptr)
             return -1;
@@ -182,7 +186,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         uint32_t imgBViewIdx = bViewIndex++;
 
         int idx = static_cast<int>(packedImages.size());
-        packedImages.push_back({.relativeUri = relativeUri});
+        packedImages.push_back({.relativeUri = std::string(relativeUri)});
         doc.textures.push_back(GlbTexture {.sampler = 0, .source = static_cast<uint32_t>(idx)});
         doc.images.push_back(GlbImage {.bufferView = imgBViewIdx, .mimeType = mimeType});
 
@@ -327,7 +331,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         std::vector<uint8_t> pngBytes = CreatePNGBytes(pixels, width, height);
 
-        std::string     texDir = levelFolder + "/textures";
+        std::string     texDir = std::format("{}/textures", levelFolder);
         std::error_code ec;
         std::filesystem::create_directories(texDir, ec);
         std::string ztexPath = texDir + "/baked_" + mat.id + ".ztex";
@@ -435,7 +439,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
     }
 
     for (const auto& mesh: manifest.meshes) {
-        std::string  binPath  = levelFolder + "/" + mesh.binFile;
+        std::string  binPath  = std::format("{}/{}", levelFolder, mesh.binFile);
         CompiledMesh compiled = CompileRawMesh(mesh, binPath);
         if (compiled.positions.empty()) {
             continue;
@@ -593,7 +597,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         // Compile morph targets (shape keys)
         std::vector<GlbMorphTarget> targets;
         for (const auto& target: mesh.morphTargets) {
-            std::string targetBinPath = levelFolder + "/" + target.binFile;
+            std::string targetBinPath = std::format("{}/{}", levelFolder, target.binFile);
             FILE*       tbf           = std::fopen(targetBinPath.c_str(), "rb");
             if (tbf == nullptr) {
                 continue;
@@ -787,9 +791,9 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
         doc.skins.push_back(glbSkin);
     }
 
-    auto childrenOf = [&](const std::string& nodeId) -> std::vector<uint32_t> {
+    auto childrenOf = [&](std::string_view nodeId) -> std::vector<uint32_t> {
         std::vector<uint32_t> activeChildren;
-        auto                  cIt = nodeChildren.find(nodeId);
+        auto                  cIt = nodeChildren.find(std::string(nodeId));
         if (cIt == nodeChildren.end() || cIt->second.empty()) {
             return activeChildren;
         }
@@ -856,7 +860,7 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
 
         for (size_t sIdx = 0; sIdx < anim.samplers.size(); ++sIdx) {
             const auto& s           = anim.samplers[sIdx];
-            std::string fullBinPath = levelFolder + "/" + s.binFile;
+            std::string fullBinPath = std::format("{}/{}", levelFolder, s.binFile);
 
             FILE* abf = std::fopen(fullBinPath.c_str(), "rb");
             if (!abf)
@@ -1021,7 +1025,8 @@ bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolde
     auto     binChunkLength  = static_cast<uint32_t>(binBuffer.size());
     uint32_t totalFileLength = 12 + 8 + jsonChunkLength + 8 + binChunkLength;
 
-    FILE* out = std::fopen(outputPath.c_str(), "wb");
+    const std::string outputPathStr(outputPath);
+    FILE*             out = std::fopen(outputPathStr.c_str(), "wb");
     if (out == nullptr)
         return false;
 

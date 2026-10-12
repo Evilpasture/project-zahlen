@@ -255,7 +255,7 @@ struct Metadata {
     return false;
 }
 
-[[nodiscard]] auto BytesOf(const std::string& text) -> std::span<const uint8_t> {
+[[nodiscard]] auto BytesOf(std::string_view text) -> std::span<const uint8_t> {
     return {reinterpret_cast<const uint8_t*>(text.data()), text.size()};
 }
 

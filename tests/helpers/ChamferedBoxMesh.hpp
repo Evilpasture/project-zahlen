@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace ZHLN::Test::GltfFixtures {
@@ -108,13 +109,14 @@ struct ChamferedBoxBuilder {
                 for (const float sz: {-1.0f, 1.0f}) {
                     // One full coordinate per vertex: the cut meets the three
                     // edge chamfers, e.g. (+1,+c,+c), (+c,+1,+c), (+c,+c,+1).
+                    const std::array<Vec3, 3> cornerVerts {{
+                        {sx * kHalf, sy * kChamfer, sz * kChamfer},
+                        {sx * kChamfer, sy * kHalf, sz * kChamfer},
+                        {sx * kChamfer, sy * kChamfer, sz * kHalf},
+                    }};
                     emitter.Emit(
                         {sx * kCorner, sy * kCorner, sz * kCorner},
-                        {
-                            {sx * kHalf, sy * kChamfer, sz * kChamfer},
-                            {sx * kChamfer, sy * kHalf, sz * kChamfer},
-                            {sx * kChamfer, sy * kChamfer, sz * kHalf},
-                        }
+                        cornerVerts
                     );
                 }
             }
@@ -162,7 +164,7 @@ private:
         // by angle around the normal, so the fan triangulation is
         // counter-clockwise seen from outside whatever order the caller
         // enumerated them in.
-        void Emit(const Vec3& normal, const std::vector<Vec3>& corners) {
+        void Emit(const Vec3& normal, std::span<const Vec3> corners) {
             Vec3 centroid {};
             for (const Vec3& corner: corners) {
                 centroid.x += corner.x;
@@ -176,7 +178,7 @@ private:
             const Vec3 tangent   = Normalize(Cross(normal, helper));
             const Vec3 bitangent = Cross(normal, tangent);
 
-            std::vector<Vec3> ordered = corners;
+            std::vector<Vec3> ordered(corners.begin(), corners.end());
             for (size_t i = 1; i < ordered.size(); ++i) {
                 const Vec3  key       = ordered[i];
                 const Vec3  keyDelta  = Sub(key, centroid);

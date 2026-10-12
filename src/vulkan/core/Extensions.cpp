@@ -33,7 +33,7 @@ template <typename Enumerate>
     }
 }
 
-[[nodiscard]] auto ExtensionNames(const std::vector<VkExtensionProperties>& props) -> std::vector<std::string> {
+[[nodiscard]] auto ExtensionNames(std::span<const VkExtensionProperties> props) -> std::vector<std::string> {
     std::vector<std::string> names;
     names.reserve(props.size());
     for (const auto& prop: props) {
@@ -76,7 +76,7 @@ auto IsDeviceExtensionSupported(const VkPhysicalDevice physical, const std::stri
     return HasExtension(EnumerateDeviceExtensions(physical), extension);
 }
 
-ExtensionResult::ExtensionResult(std::vector<std::string>&& strings) noexcept: _strings(std::move(strings)) {
+ExtensionResult::ExtensionResult(std::vector<std::string> strings) noexcept: _strings(std::move(strings)) {
     RebuildPointers();
 }
 
@@ -103,7 +103,7 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
-ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {}
+ExtensionBuilder::ExtensionBuilder(std::vector<std::string> available) noexcept: _available(std::move(available)) {}
 
 auto ExtensionBuilder::ForDevice(const VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
     return ExtensionBuilder(ExtensionNames(EnumerateDeviceExtensions(physical)));

@@ -231,14 +231,14 @@ enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
     return FaceDisposition::Render;
 }
 
-auto FindOrMakePart(ImportedMapData& result, const std::string& name) -> MaterialStreams& {
+auto FindOrMakePart(ImportedMapData& result, std::string_view name) -> MaterialStreams& {
     for (MaterialStreams& part: result.parts) {
         if (part.materialName == name) {
             return part;
         }
     }
     result.parts.push_back(MaterialStreams {});
-    result.parts.back().materialName = name;
+    result.parts.back().materialName = std::string(name);
     return result.parts.back();
 }
 
@@ -328,7 +328,7 @@ constexpr int32_t kContentsSolid = 0x1;
 // it, the marks land exactly on single-sheet walls players can stand behind
 // (gm_murder_drones: ~5000 audit hits, only the spawn-building subset is
 // reachable, the rest sits in sealed chases -- harmless but inclusive).
-void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::vector<TwinRecord>& records, const ImportOptions& options) {
+void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::span<const TwinRecord> records, const ImportOptions& options) {
     if (records.empty()) {
         return;
     }
@@ -341,7 +341,7 @@ void ApplyTwinAudit(const BSPMap& map, ImportedMapData& result, std::vector<Twin
     }
     for (auto& kv: buckets) {
         for (const size_t a: kv.second) {
-            TwinRecord& rec = records[a];
+            const TwinRecord& rec = records[a];
             if (rec.area < kMinSheetArea) {
                 continue;
             }

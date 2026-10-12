@@ -7,8 +7,11 @@
 #include "PipelineCache.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -17,27 +20,26 @@ namespace {
 
 constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
 
-[[nodiscard]] auto ReadWholeFile(std::string_view path, std::vector<uint8_t>& out) -> bool {
+[[nodiscard]] auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<uint8_t>> {
     std::error_code             ec;
     const std::filesystem::path file(path);
 
     const auto size = std::filesystem::file_size(file, ec);
     if (ec || size == 0 || size > kMaxCacheBytes) {
-        return false;
+        return std::nullopt;
     }
 
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        return false;
+        return std::nullopt;
     }
 
-    out.resize(static_cast<size_t>(size));
+    std::vector<uint8_t> out(static_cast<size_t>(size));
     in.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size));
     if (in.gcount() != static_cast<std::streamsize>(size)) {
-        out.clear();
-        return false;
+        return std::nullopt;
     }
-    return true;
+    return out;
 }
 
 [[nodiscard]] auto MatchesDevice(const VkPipelineCacheHeaderVersionOne& header, const VkPhysicalDeviceProperties& props) noexcept -> bool {
@@ -51,18 +53,19 @@ constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
 auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& props, const std::string_view path) noexcept -> PipelineCache {
     std::vector<uint8_t> data;
 
-    if (!path.empty() && ReadWholeFile(path, data)) {
-        VkPipelineCacheHeaderVersionOne header {};
-        if (data.size() < sizeof(header)) {
-            ZHLN::Log("[PipelineCache] '{}' is smaller than a cache header; starting empty.", path);
-            data.clear();
-        } else {
-            std::memcpy(&header, data.data(), sizeof(header));
-            if (MatchesDevice(header, props)) {
-                ZHLN::Log("[PipelineCache] Reused {} KB from '{}'.", data.size() / 1024, path);
+    if (!path.empty()) {
+        if (auto loaded = ReadWholeFile(path)) {
+            VkPipelineCacheHeaderVersionOne header {};
+            if (loaded->size() < sizeof(header)) {
+                ZHLN::Log("[PipelineCache] '{}' is smaller than a cache header; starting empty.", path);
             } else {
-                ZHLN::Log("[PipelineCache] '{}' was written by a different driver or GPU; discarding.", path);
-                data.clear();
+                std::memcpy(&header, loaded->data(), sizeof(header));
+                if (MatchesDevice(header, props)) {
+                    ZHLN::Log("[PipelineCache] Reused {} KB from '{}'.", loaded->size() / 1024, path);
+                    data = std::move(*loaded);
+                } else {
+                    ZHLN::Log("[PipelineCache] '{}' was written by a different driver or GPU; discarding.", path);
+                }
             }
         }
     }

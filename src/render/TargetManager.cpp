@@ -9,8 +9,8 @@
 
 namespace ZHLN {
 
-auto TargetManager::CreateCascadeViews(const Vk::Image& image, ZHLN::Array<Vk::ImageView>& out) const -> std::expected<void, ErrorCode> {
-    out.clear();
+auto TargetManager::CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode> {
+    ZHLN::Array<Vk::ImageView> out;
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
         auto view_res =
@@ -20,7 +20,7 @@ auto TargetManager::CreateCascadeViews(const Vk::Image& image, ZHLN::Array<Vk::I
         }
         out[i] = std::move(*view_res);
     }
-    return {};
+    return out;
 }
 
 auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::expected<void, ErrorCode> {
@@ -129,11 +129,15 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
-    if (auto r = CreateCascadeViews(_graph.shadowMap.image, _shadowCascadeViews); !r) {
-        return r;
+    if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+        return std::unexpected(r.error());
+    } else {
+        _shadowCascadeViews = std::move(*r);
     }
-    if (auto r = CreateCascadeViews(_shadowMapPrev.image, _shadowCascadeViewsPrev); !r) {
-        return r;
+    if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+        return std::unexpected(r.error());
+    } else {
+        _shadowCascadeViewsPrev = std::move(*r);
     }
     for (uint32_t i = 0; i < kCascades; ++i) {
         if (!_shadowCascadeViews[i].Valid() || !_shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
@@ -216,11 +220,15 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         _graph.shadowMap = std::move(*sm_res);
         _shadowMapPrev   = std::move(*smp_res);
 
-        if (auto r = CreateCascadeViews(_graph.shadowMap.image, _shadowCascadeViews); !r) {
-            return r;
+        if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+            return std::unexpected(r.error());
+        } else {
+            _shadowCascadeViews = std::move(*r);
         }
-        if (auto r = CreateCascadeViews(_shadowMapPrev.image, _shadowCascadeViewsPrev); !r) {
-            return r;
+        if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+            return std::unexpected(r.error());
+        } else {
+            _shadowCascadeViewsPrev = std::move(*r);
         }
 
         Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {

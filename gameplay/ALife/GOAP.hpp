@@ -6,6 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -59,6 +60,6 @@ struct PlanRequest {
     WorldState goal;
 };
 
-[[nodiscard]] ZHLN_STATIC_API auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan;
+[[nodiscard]] ZHLN_STATIC_API auto SolvePlan(const PlanRequest& request, std::span<const Action> actions) -> Plan;
 
 } // namespace ZHLN::ALife

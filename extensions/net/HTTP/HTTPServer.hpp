@@ -125,9 +125,9 @@ class LoopbackServer {
     // here on.
     void Handle(std::intptr_t connection);
 
-    static void SendAll(std::intptr_t connection, const std::string& answer);
+    static void SendAll(std::intptr_t connection, std::string_view answer);
 
-    std::string Route(std::string_view requestLine, std::span<const std::string> headerLines, const std::string& body);
+    std::string Route(std::string_view requestLine, std::span<const std::string> headerLines, std::string_view body);
 
     using HeaderPair = std::pair<std::string_view, std::string_view>;
 

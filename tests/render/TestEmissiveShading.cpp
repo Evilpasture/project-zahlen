@@ -190,7 +190,7 @@ struct UnlitMeasurement {
 
 // Renders the unlit scene once and measures it.
 [[nodiscard]] auto MeasureUnlitBox(
-    const JPH::Float4& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt,
+    const JPH::Float4& emissiveFactor, std::string_view ppmPath, std::optional<float> glowIntensity = std::nullopt,
     std::optional<float> bloomStrength = std::nullopt
 )
     -> UnlitMeasurement {

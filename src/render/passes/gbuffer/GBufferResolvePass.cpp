@@ -13,7 +13,7 @@ namespace {
 // Second GPU-culling dispatch: `passIndex = 1` makes the shader read the
 // candidate list the base pass's dispatch produced instead of testing every
 // instance again, and the draw reads the second indirect buffer.
-void RecordGpuCulled(PassContext& passCtx, const ZHLN::Array<GroupRange>& groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;

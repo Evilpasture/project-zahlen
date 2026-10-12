@@ -6,6 +6,7 @@
 #include "DrawCommands.hpp"
 
 #include <Zahlen/Core/RadixSort.hpp>
+#include <span>
 
 namespace ZHLN {
 
@@ -20,19 +21,19 @@ class DrawQueueManager {
 
 
     [[nodiscard]] auto Draws() noexcept -> ZHLN::Array<DrawCommand>& { return _queues.drawQueue; }
-    [[nodiscard]] auto Draws() const noexcept -> const ZHLN::Array<DrawCommand>& { return _queues.drawQueue; }
+    [[nodiscard]] auto Draws() const noexcept -> std::span<const DrawCommand> { return _queues.drawQueue; }
 
     [[nodiscard]] auto CsgDraws() noexcept -> ZHLN::Array<CSGDrawCommand>& { return _queues.csgDrawQueue; }
-    [[nodiscard]] auto CsgDraws() const noexcept -> const ZHLN::Array<CSGDrawCommand>& { return _queues.csgDrawQueue; }
+    [[nodiscard]] auto CsgDraws() const noexcept -> std::span<const CSGDrawCommand> { return _queues.csgDrawQueue; }
 
     [[nodiscard]] auto ParticleEmitters() noexcept -> ZHLN::Array<ParticleEmitterCommand>& { return _queues.particleEmittersQueue; }
-    [[nodiscard]] auto ParticleEmitters() const noexcept -> const ZHLN::Array<ParticleEmitterCommand>& { return _queues.particleEmittersQueue; }
+    [[nodiscard]] auto ParticleEmitters() const noexcept -> std::span<const ParticleEmitterCommand> { return _queues.particleEmittersQueue; }
 
     [[nodiscard]] auto MeshParticleEmitters() noexcept -> ZHLN::Array<MeshParticleEmitterCommand>& { return _queues.meshParticleQueue; }
-    [[nodiscard]] auto MeshParticleEmitters() const noexcept -> const ZHLN::Array<MeshParticleEmitterCommand>& { return _queues.meshParticleQueue; }
+    [[nodiscard]] auto MeshParticleEmitters() const noexcept -> std::span<const MeshParticleEmitterCommand> { return _queues.meshParticleQueue; }
 
     [[nodiscard]] auto Decals() noexcept -> ZHLN::Array<DecalDrawCommand>& { return _queues.decalQueue; }
-    [[nodiscard]] auto Decals() const noexcept -> const ZHLN::Array<DecalDrawCommand>& { return _queues.decalQueue; }
+    [[nodiscard]] auto Decals() const noexcept -> std::span<const DecalDrawCommand> { return _queues.decalQueue; }
 
     void Sort();
 

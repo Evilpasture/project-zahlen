@@ -304,7 +304,7 @@ struct RayTracedReflectionNoiseTestSuite {
         }
     }
 
-    static RgbImage Capture(ZHLN::Engine& engine, const std::string& name) {
+    static RgbImage Capture(ZHLN::Engine& engine, std::string_view name) {
         const auto res = engine.GetRenderContext().CaptureScreenshotPPM(name);
         if (!res) {
             return {};
@@ -312,14 +312,14 @@ struct RayTracedReflectionNoiseTestSuite {
         return LoadPPM(name);
     }
 
-    static RgbImage SettleAndCapture(ZHLN::Engine& engine, const std::string& name) {
+    static RgbImage SettleAndCapture(ZHLN::Engine& engine, std::string_view name) {
         TickFrames(engine, 2);
         return Capture(engine, name);
     }
 
     // Changed fraction restricted to the top probe rows (sky / box / rough
     // far floor): the part of the frame the RTR switch must not touch.
-    static double ChangedFractionInTopRows(const std::vector<double>& diff) {
+    static double ChangedFractionInTopRows(std::span<const double> diff) {
         std::size_t changed = 0;
         for (int y = 0; y < kCutoffProbeRows; ++y) {
             for (int x = 0; x < kWidth; ++x) {
@@ -408,7 +408,7 @@ struct RayTracedReflectionNoiseTestSuite {
             // a ~0 on/on points at). MeanAbs sizes the leak: sub-luma means
             // a benign post coupling, several luma means a gross leak.
             const double topChangedOnOn = ChangedFractionInTopRows(LumaDifference(a, c));
-            const auto   meanAbsTop     = [](const std::vector<double>& diff) {
+            const auto   meanAbsTop     = [](std::span<const double> diff) {
                 double sum = 0.0;
                 for (int y = 0; y < kCutoffProbeRows; ++y) {
                     for (int x = 0; x < kWidth; ++x) {

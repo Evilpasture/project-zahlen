@@ -253,7 +253,7 @@ auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg
     resvg_options_set_text_rendering_mode(native, ToNative(settings.textRendering));
     resvg_options_set_image_rendering_mode(native, ToNative(settings.imageRendering));
 
-    for (const std::string& fontFile: settings.fontFiles) {
+    for (const auto& fontFile: settings.fontFiles) {
         if (fontFile.empty()) {
             continue;
         }

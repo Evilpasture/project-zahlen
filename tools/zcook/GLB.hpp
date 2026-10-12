@@ -4,8 +4,8 @@
 
 #pragma once
 #include "IR.hpp"
-#include <string>
+#include <string_view>
 
 namespace ZHLN::GLB {
-bool EmitGLB(const Compiler::IRManifest& manifest, const std::string& levelFolder, const std::string& outputPath);
+bool EmitGLB(const Compiler::IRManifest& manifest, std::string_view levelFolder, std::string_view outputPath);
 }

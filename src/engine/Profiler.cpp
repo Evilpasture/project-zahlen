@@ -59,7 +59,7 @@ void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexce
         return;
     }
 
-    s_Metrics.Iterate([&](const std::string& name, const ProfileDataInternal<100>& data) {
+    s_Metrics.Iterate([&](const auto& name, const ProfileDataInternal<100>& data) {
         float cpuTime    = data.latestValue.load(std::memory_order::relaxed);
         float rollingAvg = data.rollingAverageMS.load(std::memory_order::relaxed);
 

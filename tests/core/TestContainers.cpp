@@ -582,7 +582,7 @@ struct ContainersTestSuite {
 
             // Verify strictly sorted traversal via Iterate
             std::vector<int> traversedKeys;
-            sl.Iterate([&](int key, const std::string&) { traversedKeys.push_back(key); });
+            sl.Iterate([&](int key, const auto&) { traversedKeys.push_back(key); });
 
             ZHLN::Test::ExpectEq(traversedKeys.size(), static_cast<size_t>(4));
             if (traversedKeys.size() == 4) {

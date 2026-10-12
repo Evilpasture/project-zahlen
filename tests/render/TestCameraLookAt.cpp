@@ -17,9 +17,11 @@
 #include <cmath>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 enum class CameraLookAtError : uint8_t {
@@ -37,8 +39,8 @@ struct PpmImage {
     std::vector<uint8_t> pixels;
 };
 
-[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
-    std::ifstream ppm(path, std::ios::binary);
+[[nodiscard]] auto LoadPPM(std::string_view path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
+    std::ifstream ppm(std::filesystem::path(path), std::ios::binary);
     if (!ppm.is_open()) {
         return std::unexpected(CameraLookAtError::RenderOutputBlank);
     }

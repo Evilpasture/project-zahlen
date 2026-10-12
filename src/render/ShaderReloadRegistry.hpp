@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,12 +16,12 @@ namespace ZHLN {
 
 class ShaderReloadRegistry {
   public:
-    void Register(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
+    void Register(std::string_view name, std::span<const char* const> paths, std::function<void()> callback);
     void Register(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback) {
-        Register(name, std::vector<const char*> {paths}, std::move(callback));
+        Register(name, std::span<const char* const> {paths.begin(), paths.size()}, std::move(callback));
     }
 
-    void Dispatch(const std::string& changedPath, const std::function<void()>& onFirstMatch);
+    void Dispatch(std::string_view changedPath, const std::function<void()>& onFirstMatch);
 
     [[nodiscard]] auto Size() const noexcept -> size_t { return _entries.size(); }
 

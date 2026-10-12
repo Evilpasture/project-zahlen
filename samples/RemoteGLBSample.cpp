@@ -329,7 +329,7 @@ struct Catalog {
 // separates the rows -- subfolder names alone could collide across models. The
 // size rides on the label: the point of the list is that a pick happens before
 // a download, so the cost of the pick is visible on the pick.
-void BuildCatalogLabels(std::vector<GLBEntry>& entries) {
+void BuildCatalogLabels(std::span<GLBEntry> entries) {
     std::vector<std::string> folders(entries.size());
     for (size_t i = 0; i < entries.size(); ++i) {
         folders[i] = ModelFolder(entries[i].path);

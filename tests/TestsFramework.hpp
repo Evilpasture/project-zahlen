@@ -469,7 +469,7 @@ struct QuarantinedTest {
     std::string_view reason;
 };
 
-inline const std::vector<QuarantinedTest>& QuarantineList() {
+inline std::span<const QuarantinedTest> QuarantineList() {
     static const std::vector<QuarantinedTest> list {
         {"RayTracedReflectionNoiseTestSuite", "rtr_is_live_and_rough_surfaces_stay_still",
          "RTR switch shifts 3.4% of the roughness-cutoff probe rows through a non-dithering path (on/on-top control reads exactly 0 with "

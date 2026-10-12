@@ -87,7 +87,7 @@ auto RevalidatingCDN(ZHLN::HTTP::LoopbackServer& server, std::string_view name, 
     return ZHLN::CDN::CDNManager::Create({.baseURL = origin, .cacheDir = ScratchDir(name), .cachePolicy = {.revalidateAfter = interval}});
 }
 
-auto BodyText(const std::vector<uint8_t>& bytes) -> std::string_view {
+auto BodyText(std::span<const uint8_t> bytes) -> std::string_view {
     return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 

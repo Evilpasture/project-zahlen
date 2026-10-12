@@ -6,6 +6,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -83,7 +84,7 @@ class FrameScheduler {
     [[nodiscard]] auto IsEmpty() const noexcept -> bool {
         return _steps.empty();
     }
-    [[nodiscard]] auto GetSteps() const noexcept -> const std::vector<FrameStep>& {
+    [[nodiscard]] auto GetSteps() const noexcept -> std::span<const FrameStep> {
         return _steps;
     }
     void Clear() noexcept {

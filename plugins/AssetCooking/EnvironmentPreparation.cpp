@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <span>
 #include <vector>
 
 namespace ZHLN::AssetCooking {
@@ -55,7 +56,7 @@ constexpr std::array<double, 9> kCosineConvolution = {1.0, 2.0 / 3.0, 2.0 / 3.0,
 // hot region, with horizontal wrap at the panorama seam. This preserves the
 // actual surrounding HDR colors in both IBL paths instead of introducing a
 // black specular hole. Return false if a compact source has no local sky.
-[[nodiscard]] auto InpaintHotPixel(const EnvironmentImage& image, const std::vector<uint8_t>& mask,
+[[nodiscard]] auto InpaintHotPixel(const EnvironmentImage& image, std::span<const uint8_t> mask,
                                    uint32_t x, uint32_t y, float* replacement) noexcept -> bool {
     constexpr std::array<std::array<int, 2>, 8> rays {{
         {{-1, -1}}, {{0, -1}}, {{1, -1}}, {{-1, 0}},

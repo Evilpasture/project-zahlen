@@ -307,27 +307,22 @@ auto CarriesLineBreak(std::string_view text) noexcept -> bool {
 // MalformedRequest, so "the thing you are fetching from is wrong" and "the
 // thing you put in the request is wrong" stay two different answers. @p detail
 // names the field, which is the part an enumerator cannot carry.
-auto RequestFault(const NativeRequest& request, std::string& detail) noexcept -> std::optional<HTTPError> {
+auto RequestFault(const NativeRequest& request) noexcept -> std::optional<std::pair<HTTPError, std::string>> {
     if (request.url.empty()) {
-        detail = "URL is empty";
-        return HTTPError::InvalidURL;
+        return std::pair {HTTPError::InvalidURL, std::string("URL is empty")};
     }
     if (CarriesLineBreak(request.url)) {
-        detail = "URL carries a CR, LF or NUL";
-        return HTTPError::InvalidURL;
+        return std::pair {HTTPError::InvalidURL, std::string("URL carries a CR, LF or NUL")};
     }
     if (!IsToken(request.method)) {
-        detail = "method \"" + std::string(request.method) + "\" is not an HTTP token";
-        return HTTPError::MalformedRequest;
+        return std::pair {HTTPError::MalformedRequest, "method \"" + std::string(request.method) + "\" is not an HTTP token"};
     }
     for (const Header& header: request.headers) {
         if (!IsToken(header.name)) {
-            detail = "header name \"" + header.name + "\" is not an HTTP token";
-            return HTTPError::MalformedRequest;
+            return std::pair {HTTPError::MalformedRequest, "header name \"" + header.name + "\" is not an HTTP token"};
         }
         if (CarriesLineBreak(header.value)) {
-            detail = "value of header \"" + header.name + "\" carries a CR, LF or NUL";
-            return HTTPError::MalformedRequest;
+            return std::pair {HTTPError::MalformedRequest, "value of header \"" + header.name + "\" carries a CR, LF or NUL"};
         }
     }
     return std::nullopt;
@@ -337,23 +332,21 @@ auto RequestFault(const NativeRequest& request, std::string& detail) noexcept ->
 //
 // CURLE_OK means the transfer completed, whatever the server said about it: a
 // 404 is a completed transfer with statusCode 404. Anything else leaves
-// libcurl's own description of what went wrong in @p detail, which is the part
+// libcurl's own description of what went wrong in the second pair element, which is the part
 // HTTPError cannot express -- the host that did not resolve, the certificate
 // that did not verify.
-auto Perform(const NativeRequest& request, NativeResponse& response, std::string& detail) noexcept -> CURLcode {
+auto Perform(const NativeRequest& request, NativeResponse& response) noexcept -> std::pair<CURLcode, std::string> {
     // The request is expected to have been through RequestFault, which Fetch does
     // before it gets here: what follows builds a transfer, and building one out
     // of a string carrying a newline is what puts a second request on the wire.
     const CURLRuntime& runtime = Runtime();
     if (runtime.init != CURLE_OK) {
-        detail = curl_easy_strerror(runtime.init);
-        return runtime.init;
+        return {runtime.init, curl_easy_strerror(runtime.init)};
     }
 
     CURL* const easy = curl_easy_init();
     if (easy == nullptr) {
-        detail = "curl_easy_init returned no handle";
-        return CURLE_FAILED_INIT;
+        return {CURLE_FAILED_INIT, "curl_easy_init returned no handle"};
     }
     const EasyHandle easyGuard(easy);
 
@@ -452,8 +445,7 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
         // is why the result goes to a local rather than straight into the list.
         curl_slist* const appended = curl_slist_append(headerList.list, line.c_str());
         if (appended == nullptr) {
-            detail = "curl_slist_append could not allocate a header line";
-            return CURLE_OUT_OF_MEMORY;
+            return {CURLE_OUT_OF_MEMORY, "curl_slist_append could not allocate a header line"};
         }
         headerList.list = appended;
     }
@@ -468,8 +460,7 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
     }
 
     if (setup != CURLE_OK) {
-        detail = curl_easy_strerror(setup);
-        return setup;
+        return {setup, curl_easy_strerror(setup)};
     }
 
     const CURLcode performed = curl_easy_perform(easy);
@@ -479,38 +470,34 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
     // says only that the destination refused the data. Why it refused is worth
     // more than the code.
     if (transfer.overflow) {
-        detail = "response body exceeded " + std::to_string(kMaxBodyBytes) + " bytes";
-        return CURLE_WRITE_ERROR;
+        return {CURLE_WRITE_ERROR, "response body exceeded " + std::to_string(kMaxBodyBytes) + " bytes"};
     }
 
     if (performed != CURLE_OK) {
         // ERRORBUFFER carries what the code alone cannot; when curl left it
         // empty, its own text for the code is still better than nothing.
-        detail = (errorBuffer[0] != '\0') ? std::string(errorBuffer.data()) : std::string(curl_easy_strerror(performed));
-        return performed;
+        return {performed, (errorBuffer[0] != '\0') ? std::string(errorBuffer.data()) : std::string(curl_easy_strerror(performed))};
     }
     long           status = 0;
     const CURLcode info   = curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &status);
     if (info != CURLE_OK) {
-        detail = curl_easy_strerror(info);
-        return info;
+        return {info, curl_easy_strerror(info)};
     }
     long           redirects    = 0;
     const CURLcode redirectInfo = curl_easy_getinfo(easy, CURLINFO_REDIRECT_COUNT, &redirects);
     if (redirectInfo != CURLE_OK) {
-        detail = curl_easy_strerror(redirectInfo);
-        return redirectInfo;
+        return {redirectInfo, curl_easy_strerror(redirectInfo)};
     }
     response.statusCode = static_cast<int32_t>(status);
     response.redirected = redirects != 0;
-    return CURLE_OK;
+    return {CURLE_OK, {}};
 }
 
 // HTTPError says which kind of thing went wrong; the detail says which host,
 // which field, which certificate. That text has nowhere to live in a
 // std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
 // whoever is debugging a fetch, silent by default.
-void LogFailure(const Request& request, HTTPError failure, const std::string& detail) {
+void LogFailure(const Request& request, HTTPError failure, std::string_view detail) {
     ZHLN::LogError<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, failure, detail);
 }
 
@@ -530,15 +517,14 @@ auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode
     };
 
     NativeResponse transferred;
-    std::string    detail;
 
     // Refused before a handle exists for it, and before anything is sent.
-    if (const auto fault = RequestFault(native, detail)) {
-        LogFailure(request, *fault, detail);
-        return std::unexpected(*fault);
+    if (const auto fault = RequestFault(native)) {
+        LogFailure(request, fault->first, fault->second);
+        return std::unexpected(fault->first);
     }
 
-    const CURLcode code = Perform(native, transferred, detail);
+    const auto [code, detail] = Perform(native, transferred);
     if (code != CURLE_OK) {
         const auto failure = MapCURLError(code);
         LogFailure(request, failure, detail);

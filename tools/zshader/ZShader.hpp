@@ -24,6 +24,7 @@
 #include <format>
 #include <map>
 #include <print>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -131,7 +132,7 @@ template <typename... Args>
 // point, stage, descriptors, push blocks. Refuses anything the engine's model
 // cannot carry -- a module is one entry point, and every descriptor must have
 // a name a write can be held against.
-void ReflectModule(Module& module, const SlangSource& source, const std::vector<std::string>& searchPaths);
+void ReflectModule(Module& module, const SlangSource& source, std::span<const std::string> searchPaths);
 
 // True when this translation unit can name enumerators at all: a compiler with
 // reflection, or a copy of this file that went through the AST transpiler. The
@@ -169,7 +170,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options);
 // generated files are inputs to the build, so rewriting an identical one
 // would recompile every translation unit that includes it. True when the
 // file was written.
-auto WriteFileIfChanged(const std::string& path, const std::string& content) -> bool;
+auto WriteFileIfChanged(std::string_view path, std::string_view content) -> bool;
 
 // `SHADER_FOO_BAR_PATH` -> `shader_foo_bar_path`, the name the byte span is
 // defined under.
@@ -185,7 +186,7 @@ auto AsLiteral(std::string_view text) -> std::string;
 // One file, verbatim. Fails the build when it cannot be read, because a tool
 // that skips a file it was told to read produces a catalog that silently lacks
 // it.
-auto ReadFile(const std::string& path) -> std::vector<uint8_t>;
+auto ReadFile(std::string_view path) -> std::vector<uint8_t>;
 
 // `Name=rest` split at the first separator, both halves empty when there is
 // none: the shape every `--flag Name=Value` argument has.

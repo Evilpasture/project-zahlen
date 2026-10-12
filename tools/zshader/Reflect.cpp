@@ -201,7 +201,7 @@ auto NamesEnumerators() -> bool {
     return !name.empty() && name != kUnnamedEnumerator;
 }
 
-void ReflectModule(Module& module, const SlangSource& source, const std::vector<std::string>& searchPaths) {
+void ReflectModule(Module& module, const SlangSource& source, std::span<const std::string> searchPaths) {
     const std::vector<uint8_t> bytes = ReadFile(module.path);
     module.byteSize                  = static_cast<uint32_t>(bytes.size());
 

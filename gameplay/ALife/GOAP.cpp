@@ -78,7 +78,7 @@ static inline auto ApplyAction(WorldState state, WorldState effects) noexcept ->
 
 // --- The A* Solver ---
 
-auto SolvePlan(const PlanRequest& request, const std::vector<Action>& actions) -> Plan {
+auto SolvePlan(const PlanRequest& request, std::span<const Action> actions) -> Plan {
     // Allocation-free static pools (Perfect for Fiber task safety)
     GOAPNode pool[GOAP_MAX_NODES];
     uint32_t pool_count = 0;

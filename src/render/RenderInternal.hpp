@@ -967,8 +967,8 @@ struct GroupRange {
     VkCullModeFlags       cullMode;
 };
 
-inline std::vector<uint32_t> LoadShaderSpv(const std::string& path) noexcept {
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
+inline std::vector<uint32_t> LoadShaderSpv(std::string_view path) noexcept {
+    std::ifstream file(std::filesystem::path(path), std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
         return {};
     }

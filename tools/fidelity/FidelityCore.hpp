@@ -28,6 +28,7 @@
 #include <cstring>
 #include <cstdint>
 #include <fstream>
+#include <utility>
 #include <limits>
 #include <optional>
 #include <span>
@@ -325,15 +326,15 @@ inline std::vector<uint8_t> AreaDownscale(std::span<const uint8_t> rgba, uint32_
     return std::sqrt(sum / static_cast<double>(count)) / kMaxColorDistance;
 }
 
-// Same pass as RmsDistanceRatio but also fills `deltas` (one per pixel, 0 where
+// Same pass as RmsDistanceRatio but also returns `deltas` (one per pixel, 0 where
 // the candidate alpha is 0) for the closest-golden diff image.
-inline void RmsAndDeltas(
-    std::span<const uint8_t> cand, std::span<const uint8_t> gold, double& outRms, std::vector<double>& outDeltas
-) {
-    const size_t pixels = cand.size() / 4;
-    outDeltas.assign(pixels, 0.0);
-    double   sum   = 0.0;
-    uint64_t count = 0;
+[[nodiscard]] inline auto RmsAndDeltas(
+    std::span<const uint8_t> cand, std::span<const uint8_t> gold
+) -> std::pair<double, std::vector<double>> {
+    const size_t        pixels = cand.size() / 4;
+    std::vector<double> outDeltas(pixels, 0.0);
+    double              sum   = 0.0;
+    uint64_t            count = 0;
     for (size_t i = 0; i < pixels; ++i) {
         const uint8_t* c = cand.data() + i * 4;
         if (c[3] == 0) {
@@ -344,7 +345,8 @@ inline void RmsAndDeltas(
         sum += d * d;
         ++count;
     }
-    outRms = (count == 0) ? 1.0 : std::sqrt(sum / static_cast<double>(count)) / kMaxColorDistance;
+    const double outRms = (count == 0) ? 1.0 : std::sqrt(sum / static_cast<double>(count)) / kMaxColorDistance;
+    return {outRms, std::move(outDeltas)};
 }
 
 [[nodiscard]] inline double ToDecibel(double rmsDistanceRatio) {

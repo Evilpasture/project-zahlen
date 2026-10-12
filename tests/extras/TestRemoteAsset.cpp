@@ -71,11 +71,6 @@ auto AgeFile(const std::filesystem::path& file, std::chrono::seconds age) -> boo
     return !ec;
 }
 
-template <typename T>
-auto AsSpan(std::vector<T>& vec) -> std::span<T> {
-    return std::span(vec);
-}
-
 // A GLB container of @p contentBytes around the 12-byte header: magic,
 // version 2, and a length field that agrees with the total size.
 auto MakeGLB(size_t contentBytes) -> std::vector<uint8_t> {
@@ -175,32 +170,32 @@ struct RemoteAssetTestSuite {
         std::expected<void, ZHLN::ErrorCode> the_glb_validator_checks_magic_version_and_length() {
             std::vector<uint8_t> full  = MakeGLB(100);
             std::vector<uint8_t> empty = MakeGLB(0);
-            ZHLN::Test::ExpectTrue(IsGLB(AsSpan(full)));
-            ZHLN::Test::ExpectTrue(IsGLB(AsSpan(empty)));
+            ZHLN::Test::ExpectTrue(IsGLB(full));
+            ZHLN::Test::ExpectTrue(IsGLB(empty));
 
             // The magic is gone.
             std::vector<uint8_t> bad = MakeGLB(16);
             bad[0] = 'X';
-            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(bad)));
+            ZHLN::Test::ExpectFalse(IsGLB(bad));
 
             // All four bytes of the version field must describe version 2.
             std::vector<uint8_t> old = MakeGLB(16);
             old[4] = 1;
-            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(old)));
+            ZHLN::Test::ExpectFalse(IsGLB(old));
             std::vector<uint8_t> badVersionHighByte = MakeGLB(16);
             badVersionHighByte[5] = 1;
-            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(badVersionHighByte)));
+            ZHLN::Test::ExpectFalse(IsGLB(badVersionHighByte));
 
             // The container disagrees with its own length.
             std::vector<uint8_t> shortByOne = MakeGLB(16);
             shortByOne.resize(shortByOne.size() - 1);
-            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(shortByOne)));
+            ZHLN::Test::ExpectFalse(IsGLB(shortByOne));
 
             // Shorter than the header.
             std::vector<uint8_t> tiny(4, 'g');
-            ZHLN::Test::ExpectFalse(IsGLB(AsSpan(tiny)));
+            ZHLN::Test::ExpectFalse(IsGLB(tiny));
 
-            ZHLN::Test::ExpectTrue(AnyNonEmpty(AsSpan(bad)));
+            ZHLN::Test::ExpectTrue(AnyNonEmpty(bad));
             ZHLN::Test::ExpectFalse(AnyNonEmpty(std::span<const uint8_t> {}));
             return {};
         }
@@ -561,7 +556,7 @@ struct RemoteAssetTestSuite {
             const auto                      a = MakeGLB(64);
             const auto                      b = MakeGLB(128);
             std::atomic<bool>               valid {true};
-            const auto                      writer = [&](ZHLN::Remote::DiskCache& target, const std::vector<uint8_t>& bytes) {
+            const auto                      writer = [&](ZHLN::Remote::DiskCache& target, std::span<const uint8_t> bytes) {
                 for (int i = 0; i < 50; ++i) {
                     if (!target.WriteAtomic("shared.bin", bytes)) {
                         valid.store(false, std::memory_order::relaxed);

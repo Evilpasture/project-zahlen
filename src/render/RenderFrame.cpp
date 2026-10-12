@@ -502,7 +502,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     // These histories remain named graph resources, so exchange their roles
     // explicitly. BeginFrame's preceding-frame waits protect their reuse.
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
-    std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
+    _impl->targets.SwapCascadeViews();
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
     if (_impl->ctx.RayTracingSupported()) {
         std::swap(_impl->graphResources.rtShadowMask, _impl->graphResources.rtShadowHistory);

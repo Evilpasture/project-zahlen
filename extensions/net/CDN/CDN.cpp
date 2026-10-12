@@ -107,7 +107,7 @@ inline constexpr char kCacheSubdir[] = "cdn";
     return std::string(baseURL);
 }
 
-[[nodiscard]] auto JoinURL(const std::string& base, std::string_view relativePath) -> std::string {
+[[nodiscard]] auto JoinURL(std::string_view base, std::string_view relativePath) -> std::string {
     std::string url;
     url.reserve(base.size() + 1 + relativePath.size());
     url += base;

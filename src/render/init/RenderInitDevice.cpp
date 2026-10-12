@@ -200,7 +200,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
             impl->presenter.surface = Vk::Surface(instanceView.Handle(), raw_surface);
             return ConfigureDevice(physicalInfo.handle, mode == PresentationMode::NativeSwapchain, cfg.validationMode)
                 .and_then([&](auto&& setup) -> std::expected<void, ErrorCode> {
-                    const std::vector<const char*>& devExtList = setup.extensions;
+                    const std::span<const char* const> devExtList = setup.extensions;
                     return Vk::ContextBuilder()
                         .Instance(std::move(instanceObject))
                         .Surface(raw_surface)

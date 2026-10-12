@@ -45,7 +45,7 @@ class SubmittedStagingWork {
   private:
     friend class StagingContext;
     SubmittedStagingWork(
-        Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer>&& buffers, VkFence fence
+        Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer> buffers, VkFence fence
     ) noexcept;
 
     Allocator*                       _allocator;

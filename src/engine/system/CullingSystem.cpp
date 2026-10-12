@@ -13,7 +13,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
-void VerifyCullingResults(CullingSystem::CullingQuery query, const JPH::Array<Entity>& visible, const Frustum& frustum, const CullingStats& stats) noexcept {
+void VerifyCullingResults(CullingSystem::CullingQuery query, std::span<const Entity> visible, const Frustum& frustum, const CullingStats& stats) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;

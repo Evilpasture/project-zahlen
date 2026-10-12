@@ -9,17 +9,18 @@
 #include <Jolt/Math/Vec4.h>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace ZHLN::GUI {
 
 auto AppendTextVertices(
-    VertexPosition*    outPos,
-    VertexSurface*     outSurface,
-    const FontAtlas&   font,
-    const std::string& text,
-    float              x,
-    float              y,
-    float              scale,
-    const JPH::Vec4&   color
+    VertexPosition*  outPos,
+    VertexSurface*   outSurface,
+    const FontAtlas& font,
+    std::string_view text,
+    float            x,
+    float            y,
+    float            scale,
+    const JPH::Vec4& color
 ) -> uint32_t;
 }
