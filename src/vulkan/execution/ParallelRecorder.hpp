@@ -72,6 +72,7 @@ class ParallelCommandRecorder {
     std::array<uint32_t, MaxFrameAddresses>        _frameAddressOffsets {};
     std::array<VkDeviceAddress, MaxFrameAddresses> _frameAddresses {};
     uint32_t                                            _frameAddressCount = 0;
+    uint32_t                                            _nextGroup         = 0;
 };
 
 }

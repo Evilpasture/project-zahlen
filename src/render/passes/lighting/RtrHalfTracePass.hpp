@@ -13,7 +13,7 @@ namespace ZHLN::Passes {
 // tracing at full rate.
 struct RtrHalfTracePass: Vk::RenderPass<
                              "RtrHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>, Vk::ComputeRead<Res_Lighting>,
-                             Vk::ComputeWrite<Res_RtrHalf>> {
+                             Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>, Vk::ComputeWrite<Res_RtrHalf>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

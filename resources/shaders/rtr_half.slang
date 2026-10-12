@@ -1,4 +1,5 @@
 
+import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
@@ -25,6 +26,8 @@ SamplerState blueNoiseSampler;
 
 RWTexture2D<float4> outImage;
 RaytracingAccelerationStructure tlas;
+Texture2D<float4> texDdgiIrradiance;
+Texture2D<float2> texDdgiDistance;
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
@@ -149,10 +152,14 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             hitNormal = -hitNormal;
         }
 
-        float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
-
-        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
+        float3 hitBaseColor = max(hitInst.baseColorFactor.rgb, float3(0.0f));
+        float3 emissive     = max(hitInst.emissiveFactor.rgb, float3(0.0f));
+        if (hitInst.isUnlit) {
+            fallbackColor = hitBaseColor + emissive;
+        } else {
+            float3 ambientLight = SampleDDGIOrSH(hitWorldPos, hitNormal, -ray.Direction, frame, texDdgiIrradiance, texDdgiDistance, smp);
+            fallbackColor       = hitBaseColor * (1.0f - saturate(hitInst.metallicFactor)) * ambientLight + emissive;
+        }
         confidence    = 0.0f;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
@@ -190,14 +197,16 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
+    float3 reflectionColor = fallbackColor;
     if (hitUV.x >= 0.0f && confidence > 0.0f) {
         float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
         if (hitNormRough.z != 0.0f) {
             float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
-            reflectionColor = lerp(screenColor * 0.5f, screenColor, confidence);
+            reflectionColor    = lerp(fallbackColor, screenColor, confidence);
         }
     }
+    float hitFade = saturate(1.0f - rayT / max(ray.TMax, 1e-3f));
+    confidence    = max(confidence, hitFade);
 
     float reflLum = dot(max(reflectionColor, float3(0.0f)), float3(0.2126f, 0.7152f, 0.0722f));
     if (reflLum > 256.0f) {

@@ -45,6 +45,9 @@ using Res_RtgiHalf       = Vk::GraphImage<"RtgiHalf", VK_FORMAT_R16G16B16A16_SFL
 using Res_RtgiHistory    = Vk::GraphImage<"RtgiHistory", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
 using Res_RtgiDenoiseA   = Vk::GraphImage<"RtgiDenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_RtgiDenoiseB   = Vk::GraphImage<"RtgiDenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+using Res_DdgiIrradiance = Vk::GraphImage<"DdgiIrradiance", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
+using Res_DdgiDistance   = Vk::GraphImage<"DdgiDistance", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
+using Res_DdgiRays       = Vk::GraphImage<"DdgiRays", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_LightingGI     = Vk::GraphImage<"LightingGI", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
@@ -111,6 +114,9 @@ class TargetManager {
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiHistory;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiDenoiseA;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiDenoiseB;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     ddgiIrradiance;
+        Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           ddgiDistance;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     ddgiRays;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingGI;
         Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
@@ -160,6 +166,9 @@ class TargetManager {
             Res_RtgiHistory   rtgiHistory;
             Res_RtgiDenoiseA  rtgiDenoiseA;
             Res_RtgiDenoiseB  rtgiDenoiseB;
+            Res_DdgiIrradiance ddgiIrradiance;
+            Res_DdgiDistance   ddgiDistance;
+            Res_DdgiRays       ddgiRays;
             Res_LightingGI    lightingGI;
             Res_Ao            ao;
             Res_BloomThresh   bloomThresholdTarget;

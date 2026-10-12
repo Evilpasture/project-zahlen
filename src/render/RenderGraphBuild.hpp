@@ -32,6 +32,8 @@
 #include "passes/lighting/RtgiHalfTracePass.hpp"
 #include "passes/lighting/RtgiDenoisePass.hpp"
 #include "passes/lighting/RtgiCompositePass.hpp"
+#include "passes/lighting/DdgiRayTracePass.hpp"
+#include "passes/lighting/DdgiUpdateAtlasPass.hpp"
 #include "passes/lighting/ShadowPass.hpp"
 #include "passes/postprocess/BloomPass.hpp"
 #include "passes/postprocess/TonemapBlitPass.hpp"
@@ -86,6 +88,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::ShadowPass {.impl = self}, Passes::GBufferBasePass {.impl = self}, Passes::HiZGeneratePass {.impl = self},
         Passes::GBufferResolvePass {.impl = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc},
+        Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.impl = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
         Passes::ClusteredLightingPass {.impl = self, .pc = pc},
         Passes::RtrHalfTracePass {.impl = self}, Passes::RtgiHalfTracePass {.impl = self},

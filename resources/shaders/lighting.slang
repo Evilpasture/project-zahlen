@@ -1,6 +1,7 @@
 
 import cluster_grid;
 import cluster_math;
+import ddgi_common;
 import descriptor_heap_layout;
 import pbr_helpers;
 import uniforms;
@@ -36,6 +37,8 @@ Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 Texture2D<float> texRtShadowMask;
+Texture2D<float4> texDdgiIrradiance;
+Texture2D<float2> texDdgiDistance;
 #endif
 
 [[vk::constant_id(0)]]
@@ -149,6 +152,12 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     }
 
     float3 baselineAmbient = EvaluateSH(N, frame.sh) * frame.ambientExposure;
+#ifndef DISABLE_RTR
+    if (ENABLE_RTR != 0 && frame.ddgiParams.w > 0.0f) {
+        float3 V_amb    = SafeNormalize(pc.camPos.xyz - worldPos, N);
+        baselineAmbient = SampleDDGIOrSH(worldPos, N, V_amb, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+    }
+#endif
     indirectLight += baselineAmbient;
 
     return float4(indirectLight, ao);

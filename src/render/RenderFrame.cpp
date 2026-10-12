@@ -212,7 +212,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
-        Vk::BarrierStage::Fragment, Vk::BarrierAccess::ShaderRead
+        Vk::BarrierStage::Fragment | Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::AccelerationStructureRead
     );
 }
 
@@ -326,7 +326,6 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     self.BindHeapsAndPushFrame(cmd);
 
     auto& rec = self.parallelRecorders[self.presenter.frameIndex];
-    rec.Reset();
 
     const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
@@ -429,6 +428,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
 
     _impl->gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
+    _impl->parallelRecorders[frame_index].Reset();
 
     for (auto& worker: _impl->workerCmds) {
         worker.cmdCount[frame_index].store(0, std::memory_order::relaxed);

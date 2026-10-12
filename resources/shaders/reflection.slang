@@ -1,4 +1,5 @@
 
+import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import math.transform;
@@ -57,6 +58,8 @@ Texture2D<float4> texAnisotropy;
 
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
+Texture2D<float4> texDdgiIrradiance;
+Texture2D<float2> texDdgiDistance;
 
 float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 anisT, float3 anisB, float strength,
                    out float confidence, out float3 fallbackColor, uint2 pixelPos) {
@@ -155,14 +158,16 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, float3 
             hitNormal = -hitNormal;
         }
 
-        float3 hitBaseColor = hitInst.baseColorFactor.rgb;
+        float3 hitBaseColor = max(hitInst.baseColorFactor.rgb, float3(0.0f));
+        float3 emissive     = max(hitInst.emissiveFactor.rgb, float3(0.0f));
         if (hitInst.isUnlit) {
-            fallbackColor = hitBaseColor;
+            fallbackColor = hitBaseColor + emissive;
         } else {
-            float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
-            fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
+            float3 ambientLight = SampleDDGIOrSH(hitWorldPos, hitNormal, -ray.Direction, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
+            fallbackColor       = hitBaseColor * (1.0f - saturate(hitInst.metallicFactor)) * ambientLight + emissive;
         }
-        confidence    = 0.0f;
+        float offscreenConfidence = saturate(1.0f - rayT / max(maxDist, 1e-3f));
+        confidence                = offscreenConfidence;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (hitClip.w < 0.1f) {

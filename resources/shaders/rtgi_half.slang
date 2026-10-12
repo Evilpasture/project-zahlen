@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
@@ -23,6 +24,9 @@ Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 RWTexture2D<float4> outImage;
 RaytracingAccelerationStructure tlas;
+Texture2D<float4> texDdgiIrradiance;
+Texture2D<float2> texDdgiDistance;
+SamplerState clampSampler;
 
 static const float PI         = 3.14159265358979323846f;
 static const float MAX_GI_LUM = 10.0f;
@@ -70,7 +74,7 @@ float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal
     float roughness = saturate(hitInst.roughnessFactor);
     float3 F0 = lerp(float3(0.04f), baseColor, metallic);
     float3 diffuseWeight = (1.0f - FresnelSchlickRoughness(saturate(dot(hitNormal, viewDirection)), F0, roughness)) * (1.0f - metallic);
-    float3 ambientIrradiance = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
+    float3 ambientIrradiance = SampleDDGIOrSH(hitPos, hitNormal, viewDirection, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
     float3 outgoing = baseColor * diffuseWeight * ambientIrradiance;
     outgoing += DirectSunFallback(hitPos, hitNormal, baseColor, diffuseWeight);
     return outgoing + emissive;
@@ -198,6 +202,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
         if (!TryReadVisibleLighting(hitPos, hitNormal, radiance)) {
             radiance = FallbackHitRadiance(hitInst, hitPos, hitNormal, -ray.Direction);
+        }
+        if (frame.ddgiParams.w > 0.0f) {
+            DDGIUniforms ddgi        = GetDDGIUniforms(frame);
+            float        ddgiWeight  = GetDDGIVolumeWeight(worldPos, ddgi);
+            float        contactFade = saturate(1.0f - rayT / max(ddgi.probeSpacing * 4.0f, 8.0f));
+            radiance *= lerp(1.0f, contactFade, ddgiWeight);
         }
     } else {
         // Clustered lighting already supplies baseline SH sky and direct sun.

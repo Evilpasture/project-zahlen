@@ -58,6 +58,15 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                 usage |= Vk::ImageUsage::Storage;
             }
             result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx, ext, usage));
+        } else if constexpr (std::is_same_v<Tag, Res_DdgiIrradiance>) {
+            const VkExtent2D ddgiIrrExt = {.width = 640u, .height = 320u};
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+        } else if constexpr (std::is_same_v<Tag, Res_DdgiDistance>) {
+            const VkExtent2D ddgiDistExt = {.width = 1024u, .height = 512u};
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+        } else if constexpr (std::is_same_v<Tag, Res_DdgiRays>) {
+            const VkExtent2D ddgiRaysExt = {.width = 2048u, .height = 64u};
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
@@ -276,7 +285,8 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
 
     const std::array denoiseTargets = {
         _graph.denoiseA.image.Handle(),       _graph.denoiseB.image.Handle(),       _graph.shadowDenoiseA.image.Handle(),
-        _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(),   _graph.rtgiDenoiseB.image.Handle()
+        _graph.shadowDenoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(),   _graph.rtgiDenoiseB.image.Handle(),
+        _graph.ddgiRays.image.Handle()
     };
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -286,7 +296,10 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, Color4 {1.0f, 1.0f, 1.0f, 1.0f}, _graph.rtShadowMask, _graph.rtShadowHistory
     );
     Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.rtgiHalf, _graph.rtgiHistory
+        cmd, Color4 {0.0f, 0.0f, 0.0f, 0.0f}, _graph.rtrHalf, _graph.rtrHistory, _graph.rtgiHalf, _graph.rtgiHistory, _graph.ddgiIrradiance
+    );
+    Vk::ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
+        cmd, _graph.ddgiDistance, Color4 {50.0f, 2500.0f, 0.0f, 0.0f}
     );
 
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(

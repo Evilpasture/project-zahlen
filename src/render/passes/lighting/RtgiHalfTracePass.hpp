@@ -12,7 +12,8 @@ namespace ZHLN::Passes {
 // composite resolves it into LightingGI without making the trace feed itself.
 struct RtgiHalfTracePass: Vk::RenderPass<
                               "RtgiHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>,
-                              Vk::ComputeRead<Res_Lighting>, Vk::ComputeWrite<Res_RtgiHalf>> {
+                              Vk::ComputeRead<Res_Lighting>, Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>,
+                              Vk::ComputeWrite<Res_RtgiHalf>> {
     RenderContext::Impl& impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;

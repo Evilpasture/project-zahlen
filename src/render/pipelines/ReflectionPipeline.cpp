@@ -37,7 +37,9 @@ void ReflectionPipeline::Dispatch(
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
         Vk::Slot<"texSheen">(surface.sheen),
         Vk::Slot<"texAnisotropy">(surface.anisotropy),
-        Vk::Slot<"tlas">(inputs.tlas)
+        Vk::Slot<"tlas">(inputs.tlas),
+        Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ShaderRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
+        Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ShaderRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );
 
     pass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(

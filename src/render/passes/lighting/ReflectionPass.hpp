@@ -22,6 +22,8 @@ struct ReflectionPass: Vk::RenderPass<
                           Vk::ShaderRead<Res_ShadowAtlas>,
                           Vk::ShaderReadGeneral<Res_VoxelResolved>,
                           Vk::ShaderRead<Res_RtrHalf>,
+                          Vk::ShaderRead<Res_DdgiIrradiance>,
+                          Vk::ShaderRead<Res_DdgiDistance>,
                           Vk::ColorWrite<OutputTag>> {
     RenderContext::Impl&                 impl;
     GeneratedGpu::ScenePassPushConstants pc {};

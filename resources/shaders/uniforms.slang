@@ -40,6 +40,10 @@ public struct FrameUniforms {
     public float farZ;
     public int environmentMode;
     public uint frameIndex;
+
+    public float4 ddgiOriginSpacing;
+    public float4 ddgiGridCounts;
+    public float4 ddgiParams;
 };
 
 public struct GISettings {

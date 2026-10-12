@@ -87,6 +87,26 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
         )
         .and_then(
             [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
+                return BuildCompute(
+                    impl, _ddgiTraceCS, _ddgiTraceCSLayout, _ddgiTraceHeapBindings, Shaders::Modules::DdgiTraceCS::Bytes()
+                );
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
+                return BuildCompute(
+                    impl, _ddgiUpdateCS, _ddgiUpdateCSLayout, _ddgiUpdateHeapBindings, Shaders::Modules::DdgiUpdateIrradianceCS::Bytes()
+                );
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
                 return BuildCompute(
                     impl, _rtgiCompositeCS, _rtgiCompositeCSLayout, _rtgiCompositeHeapBindings, Shaders::Modules::RtgiCompositeCS::Bytes()
                 );
@@ -137,9 +157,10 @@ auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expecte
 #endif
 
 void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
-    const Vk::SamplerConfig defaultConfig = impl.defaultSamplerConfig;
-    const Vk::SamplerConfig pointConfig = impl.pointSamplerConfig;
+    const Vk::SamplerConfig defaultConfig   = impl.defaultSamplerConfig;
+    const Vk::SamplerConfig pointConfig     = impl.pointSamplerConfig;
     const Vk::SamplerConfig blueNoiseConfig = impl.blueNoiseSamplerConfig;
+    const Vk::SamplerConfig clampConfig     = impl.clampSamplerConfig;
 
     Vk::InitHeapPassSamplers<Shaders::Gtao>(impl.heapManager, _gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig));
     Vk::InitHeapPassSamplers<Shaders::BloomThreshold>(impl.heapManager, _bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
@@ -150,12 +171,32 @@ void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
             impl.heapManager, _rtShadowHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
         );
         Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
-            impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+            impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
+            Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
         );
         Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
-            impl.heapManager, _rtgiHalfHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+            impl.heapManager, _rtgiHalfHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig), Vk::SamplerSlot<"clampSampler">(clampConfig)
+        );
+        Vk::InitHeapPassSamplers<Shaders::DdgiTrace>(
+            impl.heapManager, _ddgiTraceHeapBindings, Vk::SamplerSlot<"clampSampler">(clampConfig)
         );
     }
+}
+
+auto PostProcessFeature::DdgiTrace() noexcept -> Vk::DynamicComputePass& {
+    return _ddgiTraceCS;
+}
+
+auto PostProcessFeature::DdgiUpdate() noexcept -> Vk::DynamicComputePass& {
+    return _ddgiUpdateCS;
+}
+
+auto PostProcessFeature::DdgiTraceHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _ddgiTraceHeapBindings;
+}
+
+auto PostProcessFeature::DdgiUpdateHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _ddgiUpdateHeapBindings;
 }
 
 auto PostProcessFeature::RtShadow() noexcept -> Vk::DynamicComputePass& {

@@ -16,12 +16,13 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice 
         // AllocateSecondary internally EnsureValid()s the pool, so this both
         // reports PoolNotReady and CommandBufferAllocationFailed as domain
         // errors instead of leaking raw VkResult.
-        auto alloc = _pools[i].AllocateSecondary(1);
+        auto alloc = _pools[i].AllocateSecondary(8);
         if (!alloc) [[unlikely]] {
             return std::unexpected(alloc.error());
         }
         _cmds[i] = _pools[i][0];
     }
+    _nextGroup = 0;
     return {};
 }
 
@@ -30,6 +31,7 @@ void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Reset() noexce
     for (auto& pool: _pools) {
         pool.Reset();
     }
+    _nextGroup = 0;
 }
 
 template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
@@ -49,6 +51,11 @@ template <typename SchedulerPolicy, size_t... Is, typename... Callables>
 auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
     SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables
 ) -> std::expected<void, ErrorCode> {
+    const uint32_t groupIdx = (_pools[0].Size() > 0 && _nextGroup < _pools[0].Size()) ? _nextGroup++ : 0u;
+    for (size_t i = 0; i < ConcurrentSlots; ++i) {
+        _cmds[i] = _pools[i][groupIdx];
+    }
+
     auto task_tuple = std::forward_as_tuple(std::forward<Callables>(callables)...);
     // Each worker only writes its own error slot; Dispatch joins before we read.
     std::array<ErrorCode, ConcurrentSlots> errors {};

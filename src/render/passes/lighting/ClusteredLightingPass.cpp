@@ -12,7 +12,9 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     // The pipeline has a ray-traced variant that reads the denoised RT shadow
     // mask; which specialization the graph runs is this frame's setting,
     // resolved here rather than being baked in.
-    const bool     rtrActive    = (impl.settings.rayTracing.enableReflections || impl.settings.rayTracing.enableShadows) && impl.ctx.RayTracingSupported();
+    const bool rtrActive =
+        (impl.settings.rayTracing.enableReflections || impl.settings.rayTracing.enableShadows || impl.settings.rayTracing.enableDiffuseGI) &&
+        impl.ctx.RayTracingSupported();
     const uint32_t lightVariant = rtrActive ? 1 : 0;
 
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(
@@ -34,7 +36,9 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
         Vk::Slot<"texSheen">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Sheen>>(impl.graphResources.sheenBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
-        Vk::Slot<"texRtShadowMask">(Vk::Assume<Vk::ShaderRead<Res_RtShadowMask>>(impl.graphResources.rtShadowMask))
+        Vk::Slot<"texRtShadowMask">(Vk::Assume<Vk::ShaderRead<Res_RtShadowMask>>(impl.graphResources.rtShadowMask)),
+        Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
+        Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );
     impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(impl.ctx, ctx.Cmd(), lightVariant, pc, block);
 }

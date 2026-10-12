@@ -22,6 +22,8 @@ using RtrHalfCSLayout        = Vk::ReflectedLayout;
 using RtgiHalfCSLayout       = Vk::ReflectedLayout;
 using RtgiDenoiseCSLayout    = Vk::ReflectedLayout;
 using RtgiCompositeCSLayout  = Vk::ReflectedLayout;
+using DdgiTraceCSLayout      = Vk::ReflectedLayout;
+using DdgiUpdateCSLayout     = Vk::ReflectedLayout;
 
 // The image-space effects that are not a lighting model.
 //
@@ -67,6 +69,8 @@ class PostProcessFeature {
     [[nodiscard]] auto RtgiHalf() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtgiDenoise() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtgiComposite() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto DdgiTrace() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto DdgiUpdate() noexcept -> Vk::DynamicComputePass&;
 
     [[nodiscard]] auto BloomThresholdHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto BloomDownHeapBindings() noexcept -> Vk::HeapPassBindings&;
@@ -79,6 +83,8 @@ class PostProcessFeature {
     [[nodiscard]] auto RtgiHalfHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtgiDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtgiCompositeHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto DdgiTraceHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto DdgiUpdateHeapBindings() noexcept -> Vk::HeapPassBindings&;
 
     // Bindless slots of the baked SMAA lookup tables; `SmaaWeightPass` reads
     // both while computing blending weights.
@@ -101,6 +107,8 @@ class PostProcessFeature {
     Vk::DynamicComputePass _rtgiHalfCS;
     Vk::DynamicComputePass _rtgiDenoiseCS;
     Vk::DynamicComputePass _rtgiCompositeCS;
+    Vk::DynamicComputePass _ddgiTraceCS;
+    Vk::DynamicComputePass _ddgiUpdateCS;
 
     Vk::HeapPassBindings _bloomThresholdHeapBindings;
     Vk::HeapPassBindings _bloomDownHeapBindings;
@@ -113,6 +121,8 @@ class PostProcessFeature {
     Vk::HeapPassBindings _rtgiHalfHeapBindings;
     Vk::HeapPassBindings _rtgiDenoiseHeapBindings;
     Vk::HeapPassBindings _rtgiCompositeHeapBindings;
+    Vk::HeapPassBindings _ddgiTraceHeapBindings;
+    Vk::HeapPassBindings _ddgiUpdateHeapBindings;
 
     Vk::ReflectedLayout _bloomThresholdCSLayout;
     Vk::ReflectedLayout _bloomDownCSLayout;
@@ -125,6 +135,8 @@ class PostProcessFeature {
     Vk::ReflectedLayout _rtgiHalfCSLayout;
     Vk::ReflectedLayout _rtgiDenoiseCSLayout;
     Vk::ReflectedLayout _rtgiCompositeCSLayout;
+    Vk::ReflectedLayout _ddgiTraceCSLayout;
+    Vk::ReflectedLayout _ddgiUpdateCSLayout;
 
     uint32_t _smaaAreaTexIdx   = 0;
     uint32_t _smaaSearchTexIdx = 0;

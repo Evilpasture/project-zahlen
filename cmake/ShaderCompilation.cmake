@@ -46,6 +46,7 @@ set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/math/transform.slang"
     "${SHADER_SRC_DIR}/instance_data.slang"
     "${SHADER_SRC_DIR}/volumetric_grid.slang"
+    "${SHADER_SRC_DIR}/ddgi_common.slang"
 )
 
 # The vendored Slang's shape, stated once: both fallbacks below -- the slangc
@@ -642,6 +643,15 @@ add_shader_target(rtgi_composite_shader
     STAGES "${SHADER_SRC_DIR}/rtgi_composite.slang|CSMain|cs_6_0|SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
 )
 
+# World-space DDGI probe ray trace and octahedral irradiance/distance atlas update.
+add_shader_target(ddgi_trace_shader
+    STAGES "${SHADER_SRC_DIR}/ddgi_trace.slang|CSMain|cs_6_0|SHADER_DDGI_TRACE_SLANG_CS_PATH"
+)
+
+add_shader_target(ddgi_update_irradiance_shader
+    STAGES "${SHADER_SRC_DIR}/ddgi_update_irradiance.slang|CSMain|cs_6_0|SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
+)
+
 # Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
 # pass depth-weighted-upsamples the R8 result.
 add_shader_target(ao_gtao_shader
@@ -922,6 +932,8 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "GpuSceneCS=SHADER_GPU_SCENE_CS_PATH"
     "RtShadowCS=SHADER_RT_SHADOW_SLANG_CS_PATH"
     "ShadowDenoiseAtrousCS=SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
+    "DdgiTraceCS=SHADER_DDGI_TRACE_SLANG_CS_PATH"
+    "DdgiUpdateIrradianceCS=SHADER_DDGI_UPDATE_IRRADIANCE_SLANG_CS_PATH"
 )
 
 # A type whose macro no cook produced would reach the generator as `Type=` and
@@ -968,6 +980,8 @@ set(ZHLN_SHADER_CATALOG_SETS
     "RtgiHalf=RtgiHalfCS"
     "RtgiDenoise=RtgiDenoiseCS"
     "RtgiComposite=RtgiCompositeCS"
+    "DdgiTrace=DdgiTraceCS"
+    "DdgiUpdateIrradiance=DdgiUpdateIrradianceCS"
     "Gtao=GtaoCS"
     "Taa=TaaPS"
     "Fxaa=FxaaPS"
