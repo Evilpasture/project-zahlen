@@ -674,6 +674,12 @@ auto main(int argc, char* argv[]) -> int {
                 p.exposure        = 0.18f;
                 p.tonemapper      = 1;
                 p.ambientExposure = 1.2f;
+                // Ray-traced reflections, and -- less obviously -- the gate that
+                // makes lighting.slang *sample* the ray-traced shadow mask:
+                // RenderGraphBuild.hpp derives the shader's pc.enableRTR from
+                // post.enableRTR, so without this an enableShadows pass would
+                // trace a mask that nothing reads.
+                p.enableRTR       = 1;
             });
             const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
             reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::TAA; });
@@ -682,15 +688,37 @@ auto main(int argc, char* argv[]) -> int {
             // BSP lights. TAA above reuses motion vectors to stabilize the
             // blue-noise sequence, and the shared A-Trous pass handles
             // remaining spatial noise.
+            //
+            // enableShadows adds the ray-traced shadow mask: RtShadowPass traces
+            // it against the TLAS and lighting.slang uses it within 160 m,
+            // blending out to the sun's cascades beyond that. That replaces the
+            // rasterized punctual cubemaps entirely -- four 1024x1024x6 cubemap
+            // passes cost more than the rest of the frame on a low-end GPU and
+            // are far coarser than a ray query on a map of this magnitude.
+            //
+            // denoiserPasses > 0 is what makes RenderFrame.cpp treat rtHistoryValid
+            // as true, i.e. temporal accumulation and TAA reprojection across
+            // frames; leaving it at 0 would disable denoising but not the
+            // tracing, so it is pinned here rather than left to a default.
             const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
             if (rtSettings == ZHLN::Entity::Null()) {
-                reg.Create(ZHLN::Components::RayTracingSettingsComponent {.config = {.enableDiffuseGI = true}});
+                reg.Create(ZHLN::Components::RayTracingSettingsComponent {
+                    .config = {.enableShadows = true, .enableDiffuseGI = true, .denoiserPasses = 2}
+                });
             } else {
-                reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) { rt.config.enableDiffuseGI = true; });
+                reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) {
+                    rt.config.enableShadows   = true;
+                    rt.config.enableDiffuseGI = true;
+                    rt.config.denoiserPasses  = 2;
+                });
             }
             reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
-                s.shadowWidth      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
-                s.shadowResolution = 2048;
+                s.shadowWidth        = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
+                s.shadowResolution   = 2048;
+                // No rasterized punctual shadows: the ray-traced mask above
+                // covers them, and the cubemap atlas is the single most
+                // expensive thing this sample can ask for.
+                s.maxPunctualShadows = 0;
             });
         }
 
