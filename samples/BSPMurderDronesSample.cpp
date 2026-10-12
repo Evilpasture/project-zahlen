@@ -60,6 +60,13 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 
+// clang-format off
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+// clang-format on
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -67,10 +74,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -229,6 +239,134 @@ void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("  Escape        - Quit sample");
     ZHLN::Log("==================================================================");
 }
+
+// --- Void-fall diagnostic -----------------------------------------------------
+
+// Props whose physics hull slips through a visible floor fall forever: nothing
+// below the map can stop them. To put a name on them, the sample hangs an
+// invisible sensor slab a fixed drop below the map bounds. A dynamic prop that
+// touches it has fallen into the void; the listener pairs that contact with
+// the last surface the prop was in contact with -- the visible plane it
+// slipped through -- and queues exactly one log line per prop, so a prop
+// grinding on the catcher can never flood stdout.
+inline constexpr float kVoidCatcherDropMeters = 15.0f;
+
+class VoidCatcherContactListener final : public JPH::ContactListener {
+  public:
+    struct PropInfo {
+        std::string display;
+    };
+    struct PendingLog {
+        std::string display;
+        JPH::Vec3   fellPoint {0.0f, 0.0f, 0.0f};
+        bool        hadSurfaceTouch = false;
+        JPH::Vec3   surfaceTouch {0.0f, 0.0f, 0.0f};
+    };
+
+    VoidCatcherContactListener(JPH::ContactListener* inner, JPH::BodyID catcher, std::unordered_map<uint32_t, PropInfo> props)
+        : _inner(inner), _catcher(catcher), _props(std::move(props)) {}
+
+    [[nodiscard]] auto Inner() const noexcept -> JPH::ContactListener* {
+        return _inner;
+    }
+
+    [[nodiscard]] auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg baseOffset,
+                                         const JPH::CollideShapeResult& result) -> JPH::ValidateResult override {
+        return _inner != nullptr ? _inner->OnContactValidate(b1, b2, baseOffset, result)
+                                 : JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+    }
+
+    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override {
+        Record(b1, b2, manifold);
+        // The engine's listener never sees the debug catcher: gameplay must
+        // not react to a diagnostic sensor.
+        if (_inner != nullptr && !InvolvesCatcher(b1, b2)) {
+            _inner->OnContactAdded(b1, b2, manifold, settings);
+        }
+    }
+
+    void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override {
+        Record(b1, b2, manifold);
+        if (_inner != nullptr && !InvolvesCatcher(b1, b2)) {
+            _inner->OnContactPersisted(b1, b2, manifold, settings);
+        }
+    }
+
+    void OnContactRemoved(const JPH::SubShapeIDPair& pair) override {
+        if (_inner != nullptr) {
+            _inner->OnContactRemoved(pair);
+        }
+    }
+
+    // Drained once per frame from the main thread.
+    auto TakePendingLogs() -> std::vector<PendingLog> {
+        const std::lock_guard lock(_mutex);
+        std::vector<PendingLog> out;
+        out.swap(_pending);
+        return out;
+    }
+
+  private:
+    [[nodiscard]] auto InvolvesCatcher(const JPH::Body& b1, const JPH::Body& b2) const -> bool {
+        return b1.GetID() == _catcher || b2.GetID() == _catcher;
+    }
+
+    void Record(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold) {
+        const bool catcher1 = b1.GetID() == _catcher;
+        const bool catcher2 = b2.GetID() == _catcher;
+
+        const std::lock_guard lock(_mutex);
+        if (catcher1 || catcher2) {
+            const JPH::BodyID propId = catcher1 ? b2.GetID() : b1.GetID();
+            const auto        propIt = _props.find(propId.GetIndexAndSequenceNumber());
+            // Not a tracked prop, or this prop was already logged: the set
+            // insertion is the once-per-entity gate.
+            if (propIt == _props.end() || !_logged.insert(propId.GetIndexAndSequenceNumber()).second) {
+                return;
+            }
+            PendingLog entry;
+            entry.display   = propIt->second.display;
+            entry.fellPoint = manifold.mRelativeContactPointsOn1.empty()
+                                  ? JPH::Vec3(manifold.mBaseOffset)
+                                  : JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
+            const auto touchIt    = _lastTouch.find(propId.GetIndexAndSequenceNumber());
+            entry.hadSurfaceTouch = touchIt != _lastTouch.end();
+            if (entry.hadSurfaceTouch) {
+                entry.surfaceTouch = touchIt->second;
+            }
+            _pending.push_back(std::move(entry));
+            return;
+        }
+
+        // Real-surface contact: remember where, so a later void fall can name
+        // the visible plane the prop slipped through.
+        JPH::Vec3 point(manifold.mBaseOffset);
+        if (!manifold.mRelativeContactPointsOn1.empty()) {
+            point = JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
+        }
+        const uint32_t k1 = b1.GetID().GetIndexAndSequenceNumber();
+        const uint32_t k2 = b2.GetID().GetIndexAndSequenceNumber();
+        if (_props.count(k1) != 0) {
+            _lastTouch[k1] = point;
+        }
+        if (_props.count(k2) != 0) {
+            _lastTouch[k2] = point;
+        }
+    }
+
+    JPH::ContactListener*                   _inner;
+    JPH::BodyID                             _catcher;
+    std::unordered_map<uint32_t, PropInfo>  _props;
+    std::mutex                              _mutex;
+    std::unordered_set<uint32_t>            _logged;
+    std::unordered_map<uint32_t, JPH::Vec3> _lastTouch;
+    std::vector<PendingLog>                 _pending;
+};
+
+// File-static like g_player: Jolt owns the listener pointer from install until
+// the teardown after the frame loop, and the loop drains it every frame.
+VoidCatcherContactListener* g_voidListener = nullptr;
+JPH::BodyID                 g_voidCatcher {};
 
 } // namespace
 
@@ -474,6 +612,52 @@ auto main(int argc, char* argv[]) -> int {
         boundsMax.GetX(), boundsMax.GetY(), boundsMax.GetZ(),
         mapRadius);
 
+    // 7b. Void-fall diagnostic: an invisible sensor slab one fixed drop below
+    // the map bounds, plus a contact listener chained in front of the engine's
+    // own. Dynamic props that touch the slab fell through whatever visible
+    // geometry was above them; each is logged exactly once (see
+    // VoidCatcherContactListener). Static props and brush bodies can never
+    // reach it, and the player capsule is a CharacterVirtual, not a Jolt body.
+    {
+        auto& physics = engine->GetPhysicsContext();
+        auto& reg     = engine->GetRegistry();
+
+        std::unordered_map<uint32_t, VoidCatcherContactListener::PropInfo> propBodies;
+        for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+            const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
+            if (!phys || phys->isStatic || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
+                continue;
+            }
+            const auto source = reg.Get<ZHLN::Components::SceneSourceComponent>(e);
+            if (!source || !std::string_view(source->source.c_str()).ends_with(".mdl")) {
+                continue; // world brush geometry, doors, buttons: not props
+            }
+            const auto  name    = reg.Get<ZHLN::Components::NameComponent>(e);
+            std::string display = (name && name->name.c_str()[0] != '\0') ? name->name.c_str()
+                                                                           : source->source.c_str();
+            const JPH::BodyID id = ZHLN::Physics::GetBodyID(physics.GetWorld(), phys->physicsHandle);
+            propBodies[id.GetIndexAndSequenceNumber()] = VoidCatcherContactListener::PropInfo {std::move(display)};
+        }
+
+        JPH::PhysicsSystem& system = physics.GetInternalSystem();
+        const JPH::Vec3     center = (boundsMin + boundsMax) * 0.5f;
+        const JPH::Vec3     extent = (boundsMax - boundsMin) * 0.5f + JPH::Vec3::sReplicate(50.0f);
+
+        JPH::BodyCreationSettings catcherSettings;
+        catcherSettings.SetShape(new JPH::BoxShape(JPH::Vec3(extent.GetX(), 0.5f, extent.GetZ())));
+        catcherSettings.mPosition    = JPH::RVec3(center.GetX(), boundsMin.GetY() - kVoidCatcherDropMeters, center.GetZ());
+        catcherSettings.mRotation    = JPH::Quat::sIdentity();
+        catcherSettings.mMotionType  = JPH::EMotionType::Static;
+        catcherSettings.mObjectLayer = static_cast<JPH::ObjectLayer>(ZHLN::Layers::ID::NON_MOVING);
+        catcherSettings.mIsSensor    = true;
+        g_voidCatcher                = system.GetBodyInterface().CreateAndAddBody(catcherSettings, JPH::EActivation::DontActivate);
+
+        g_voidListener = new VoidCatcherContactListener(system.GetContactListener(), g_voidCatcher, std::move(propBodies));
+        system.SetContactListener(g_voidListener);
+        ZHLN::Log("[BSPSample] Void catcher armed {:.0f} m below the map: props that slip through visible geometry are logged once.",
+                  kVoidCatcherDropMeters);
+    }
+
     {
         auto& reg     = engine->GetRegistry();
         auto& physics = engine->GetPhysicsContext();
@@ -628,6 +812,32 @@ auto main(int argc, char* argv[]) -> int {
             engine->GetPlatformHost().Close();
             break;
         }
+
+        // Void-fall diagnostic drain: at most one line per prop per run, so a
+        // prop grinding on the catcher can never flood stdout.
+        if (g_voidListener != nullptr) {
+            for (const auto& entry : g_voidListener->TakePendingLogs()) {
+                if (entry.hadSurfaceTouch) {
+                    ZHLN::Log("[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); last surface contact at "
+                              "({:.2f}, {:.2f}, {:.2f}) -- it fell through visible geometry.",
+                              entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ(),
+                              entry.surfaceTouch.GetX(), entry.surfaceTouch.GetY(), entry.surfaceTouch.GetZ());
+                } else {
+                    ZHLN::Log("[BSPSample] VOID FALL: prop '{}' reached the void at ({:.2f}, {:.2f}, {:.2f}); no surface contact was "
+                              "recorded before the fall.",
+                              entry.display, entry.fellPoint.GetX(), entry.fellPoint.GetY(), entry.fellPoint.GetZ());
+                }
+            }
+        }
+    }
+
+    if (g_voidListener != nullptr) {
+        JPH::PhysicsSystem& system = engine->GetPhysicsContext().GetInternalSystem();
+        system.SetContactListener(g_voidListener->Inner());
+        system.GetBodyInterface().RemoveBody(g_voidCatcher);
+        system.GetBodyInterface().DestroyBody(g_voidCatcher);
+        delete g_voidListener;
+        g_voidListener = nullptr;
     }
 
     ZHLN::Log("[BSPSample] Exiting cleanly.");

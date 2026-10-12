@@ -289,6 +289,15 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 const std::string_view indexStr   = modelName.substr(1);
                 std::from_chars(indexStr.data(), indexStr.data() + indexStr.size(), modelIndex);
 
+                if (targetName.empty()) {
+                    // Deterministic fallback name. The bare classname would
+                    // collide for every unnamed entity of the same class
+                    // (this map has eight func_doors); the model index is
+                    // unique per brush entity, and InitializeBSPEntities
+                    // derives the exact same name.
+                    interactive.name = std::string(className) + "_" + std::to_string(modelIndex);
+                }
+
                 const InteractiveSubmodel* subRecord = nullptr;
                 for (const InteractiveSubmodel& sub: interactiveSubmodels) {
                     if (sub.modelIndex == modelIndex) {

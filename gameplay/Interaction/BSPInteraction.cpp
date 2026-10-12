@@ -142,27 +142,24 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
 
 void FireEntityInput(
     ECS::Registry&                registry,
-    std::string_view              targetname,
+    Entity                        entity,
     std::string_view              input,
     std::string_view              parameter,
     ZHLN::Optional<AudioContext&> audio
 ) {
-    if (targetname.empty()) {
-        return;
+    const Entity e = entity;
+    std::string_view label = "<unnamed>";
+    if (const auto nameComp = registry.Get<Components::NameComponent>(e)) {
+        label = std::string_view(nameComp->name);
     }
 
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
-        if (!nameComp) {
-            continue;
-        }
-
-        if (std::string_view(nameComp->name) == targetname || targetname == "*") {
+    {
+        {
             // Check DoorComponent
             if (auto door = registry.Get<DoorComponent>(e)) {
                 if ((door->flags & DoorFlags::Locked) != DoorFlags::None && input != "Unlock") {
-                    Log("[Interaction] Door '{}' is locked", targetname);
-                    continue;
+                    Log("[Interaction] Door '{}' is locked", label);
+                    return;
                 }
 
                 if (input == "Open") {
@@ -195,8 +192,8 @@ void FireEntityInput(
             // Check ButtonComponent
             if (auto button = registry.Get<ButtonComponent>(e)) {
                 if ((button->flags & ButtonFlags::Locked) != ButtonFlags::None && input != "Unlock") {
-                    Log("[Interaction] Button '{}' is locked", targetname);
-                    continue;
+                    Log("[Interaction] Button '{}' is locked", label);
+                    return;
                 }
 
                 if (input == "Press") {
@@ -249,9 +246,32 @@ void FireEntityInput(
             // Check UsableComponent
             if (auto usable = registry.Get<UsableComponent>(e)) {
                 if (usable->scriptHash != 0) {
-                    Log("[Interaction] Script triggered on {}: {:#X}", targetname, usable->scriptHash);
+                    Log("[Interaction] Script triggered on {}: {:#X}", label, usable->scriptHash);
                 }
             }
+        }
+    }
+}
+
+void FireEntityInput(
+    ECS::Registry&                registry,
+    std::string_view              targetname,
+    std::string_view              input,
+    std::string_view              parameter,
+    ZHLN::Optional<AudioContext&> audio
+) {
+    if (targetname.empty()) {
+        return;
+    }
+
+    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
+        const auto nameComp = registry.Get<Components::NameComponent>(e);
+        if (!nameComp) {
+            continue;
+        }
+
+        if (std::string_view(nameComp->name) == targetname || targetname == "*") {
+            FireEntityInput(registry, e, input, parameter, audio);
         }
     }
 }
@@ -278,8 +298,6 @@ void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view 
 }
 
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    size_t interactiveIndex = 0;
-
     for (const BSP::BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
@@ -324,8 +342,21 @@ void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, cons
         }
 
         const auto        targetName = entity.Find("targetname");
-        const std::string matchName  = targetName.empty() ? (std::string(className) + "_" + std::to_string(interactiveIndex++)) : std::string(targetName);
         const std::string modelStr   = std::string(entity.Find("model"));
+        // Unnamed brush entities fall back to the deterministic name that
+        // DescribeScene generates: "<classname>_<modelIndex>". The previous
+        // per-map counter did not match DescribeScene's naming, leaving every
+        // unnamed entity addressable only through the model-source fallback.
+        std::string matchName = std::string(targetName);
+        if (matchName.empty()) {
+            matchName = std::string(className);
+            if (modelStr.size() > 1 && modelStr[0] == '*') {
+                int         modelIndex = -1;
+                const char* beg        = modelStr.c_str() + 1;
+                std::from_chars(beg, beg + (modelStr.size() - 1), modelIndex);
+                matchName += "_" + std::to_string(modelIndex);
+            }
+        }
 
         const Entity e = FindMatchingEntity(registry, matchName, modelStr);
         if (e == Entity::Null()) {

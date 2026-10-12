@@ -289,7 +289,7 @@ void InteractionSystem::Update(
                 door.closedPosition.GetZ(), door.openPosition.GetX(), door.openPosition.GetY(), door.openPosition.GetZ());
 
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
-                FireEntityInput(registry, std::string_view(door.targetname), "Open", "", audio);
+                FireEntityInput(registry, doorEnt, "Open", "", audio);
             }
 
             if (interactJustPressed && (door.flags & DoorFlags::UseOpens) != DoorFlags::None) {
@@ -303,7 +303,7 @@ void InteractionSystem::Update(
                     }
                 } else {
                     const std::string_view action = ((door.flags & DoorFlags::Toggle) != DoorFlags::None) ? "Toggle" : "Open";
-                    FireEntityInput(registry, std::string_view(door.targetname), action, "", audio);
+                    FireEntityInput(registry, doorEnt, action, "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 600.0f, .duration = 0.08f});
                     }
@@ -330,7 +330,7 @@ void InteractionSystem::Update(
             Log("[Interaction] E -> {} (button) dist={:.2f} state={} progress={:.2f} flags={:#x}", DebugLabel(registry, buttonEnt), dist,
                 static_cast<uint32_t>(button.state), button.progress, static_cast<uint32_t>(button.flags));
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
-                FireEntityInput(registry, std::string_view(button.targetname), "Press", "", audio);
+                FireEntityInput(registry, buttonEnt, "Press", "", audio);
             }
 
             if (interactJustPressed && (button.flags & ButtonFlags::UseActivates) != ButtonFlags::None) {
@@ -340,7 +340,7 @@ void InteractionSystem::Update(
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 250.0f, .duration = 0.10f});
                     }
                 } else {
-                    FireEntityInput(registry, std::string_view(button.targetname), "Press", "", audio);
+                    FireEntityInput(registry, buttonEnt, "Press", "", audio);
                     if (audio) {
                         audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 700.0f, .duration = 0.08f});
                     }
