@@ -33,6 +33,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -140,6 +141,199 @@ void ComputeBounds(const ZHLN::ModelPrefab& prefab, JPH::Vec3& outMin, JPH::Vec3
     }
 }
 
+// --- Captured mouse, crosshair, crosshair pick ----------------------------------
+
+// Screen-centre reticle geometry, in pixels. The GUI has no line primitive --
+// a Box is a filled rounded quad -- so the reticle is five of those: four arms
+// with a hole in the middle and a dot in the hole. Zero texture, zero font, and
+// it survives a build with no font domain at all, which a text HUD would not.
+inline constexpr float kCrosshairArm       = 7.0f;   // px, centre to tip
+inline constexpr float kCrosshairThickness = 2.0f;   // px
+inline constexpr float kCrosshairGap       = 3.0f;   // px, hole radius
+inline constexpr float kCrosshairDot       = 2.0f;   // px, centre dot
+inline constexpr float kPickDistance       = 400.0f; // m, ray length
+
+// What the crosshair is over, refreshed once per frame after the camera has
+// been posed. Screen centre is where the camera looks, so this ray is exactly
+// what the eye is pointed at.
+struct CrosshairPick {
+    bool        hasHit    = false;
+    std::string label     = "world brush"; // entity name, or BSP world geometry
+    JPH::Vec3   position  = JPH::Vec3::sZero();
+    JPH::Vec3   normal    = JPH::Vec3::sAxisY();
+    float       distance  = 0.0f;
+    uint32_t    bodyIndex = 0;
+};
+
+CrosshairPick g_pick;
+
+// The captured mouse. Window::CaptureMouse is GLFW_CURSOR_DISABLED: the cursor
+// is hidden and the window is handed raw deltas, so looking around no longer
+// needs a button held down. InputStateComponent keeps reporting motion either
+// way -- this flag is only what stops the look code from *gating* on RMB.
+//
+// Note the trap this does NOT trip: InputStateComponent::wantCaptureMouse also
+// suppresses every delta and button read, but it is an editor concept
+// (app/main.cpp) and Engine::ProcessEvents clears it for any host with a real
+// window, so a sample never sees it set.
+bool g_mouseCaptured = false;
+
+// The frame's dt, for the UI callback's BeginFrame. The sample's own loop owns
+// the clock; the callback runs inside engine->Tick and has no clock of its own.
+float g_frameDt = 0.0f;
+
+void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
+    g_mouseCaptured = captured;
+    if (auto window = engine.GetWindow(); window) {
+        window->CaptureMouse(captured);
+    }
+}
+
+// Camera::GetViewMatrix builds its direction inline and exposes no accessor.
+// Same formula, so the ray and the view can never disagree about "forward".
+[[nodiscard]] auto CameraForward(const ZHLN::Camera& cam) -> JPH::Vec3 {
+    const float yawRad   = JPH::DegreesToRadians(cam.yaw);
+    const float pitchRad = JPH::DegreesToRadians(cam.pitch);
+    return JPH::Vec3(
+               JPH::Cos(yawRad) * JPH::Cos(pitchRad),
+               JPH::Sin(pitchRad),
+               JPH::Sin(yawRad) * JPH::Cos(pitchRad)
+    )
+        .Normalized();
+}
+
+// A readable label for whatever the crosshair is over. Prefers the Source
+// classname/targetname the interaction layer dispatches on, then the ECS name,
+// then the raw entity id -- the same ladder InteractionSystem's own debug aid
+// uses, so a name here means the same thing it means there.
+[[nodiscard]] auto PickLabel(const ZHLN::ECS::Registry& reg, ZHLN::Entity e) -> std::string {
+    if (const auto meta = reg.Get<ZHLN::Interaction::BSPEntityMetadataComponent>(e)) {
+        if (!meta->className.empty()) {
+            return std::string(meta->className.c_str()) +
+                   (meta->targetName.empty() ? std::string {} : (" '" + std::string(meta->targetName.c_str()) + "'"));
+        }
+    }
+    if (const auto name = reg.Get<ZHLN::Components::NameComponent>(e); name && !name->name.empty()) {
+        return std::string(name->name.c_str());
+    }
+    return "entity#" + std::to_string(e.index);
+}
+
+// One mesh ray from the eye along the view axis. This is the same static mesh
+// collider the player capsule walks on, so what the crosshair reports is
+// literally what you would bump into. PhysicsContext::Raycast returns an empty
+// result while the world is stepping, which is why this runs after Tick rather
+// than from inside a frame step.
+void UpdateCrosshairPick(ZHLN::Engine& engine) {
+    g_pick = CrosshairPick {};
+
+    auto&              reg    = engine.GetRegistry();
+    const ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>();
+    if (camEnt == ZHLN::Entity::Null()) {
+        return;
+    }
+    // Registry::Get returns ZHLN::Optional<T&>, not a raw pointer, so it cannot
+    // share a ?: with nullptr.
+    const auto cc = reg.Get<ZHLN::Components::CameraComponent>(camEnt);
+    if (!cc) {
+        return;
+    }
+
+    const JPH::Vec3 dir = CameraForward(cc->camera);
+    if (dir.LengthSq() < 1e-6f) {
+        return;
+    }
+
+    // The player capsule is a CharacterVirtual, not a Jolt body, so it is not
+    // in the broadphase and cannot be hit -- no ignore handle is needed.
+    const ZHLN::Physics::RaycastResult hit = engine.GetPhysicsContext().Raycast(
+        JPH::RVec3(cc->camera.position), dir, kPickDistance
+    );
+    if (!hit.hasHit) {
+        return;
+    }
+
+    g_pick.hasHit    = true;
+    // RaycastResult::position is RVec3 (double) and this struct is Vec3 (float):
+    // DVec3's Vec3 conversion operator is explicit, so it has to be spelled out.
+    g_pick.position  = static_cast<JPH::Vec3>(hit.position);
+    g_pick.normal    = hit.normal;
+    g_pick.distance  = hit.fraction * kPickDistance;
+    g_pick.bodyIndex = hit.handle.index;
+
+    // Body -> entity. Physics slots are a separate generational pool from ECS
+    // entities, and PhysicsContext::Raycast hands back a validated BodyHandle
+    // (it unpacks Jolt's user data and checks the generation), so the mapping
+    // is a direct handle comparison. GetEntitiesWith returns a span, not a
+    // vector, so this walk allocates nothing.
+    for (const ZHLN::Entity e : reg.GetEntitiesWith<ZHLN::Components::PhysicsComponent>()) {
+        const auto phys = reg.Get<ZHLN::Components::PhysicsComponent>(e);
+        if (!phys || phys->physicsHandle == ZHLN::Physics::BodyHandle::Null()) {
+            continue;
+        }
+        if (phys->physicsHandle == hit.handle) {
+            g_pick.label = PickLabel(reg, e);
+            return;
+        }
+    }
+}
+
+// The crosshair and its readout. Registered as the sample's UI callback, which
+// the engine's HostUICallback step invokes in FramePhase::UI every frame.
+//
+// SetPendingUIData is not optional: RenderSystem draws whatever
+// Engine::GetPendingUIData() returns and nothing else fills it in, so a callback
+// that builds a Context and forgets this call renders nothing at all.
+void DrawCrosshairHUD(ZHLN::Engine& engine) {
+    ZHLN::GUI::Context ui(engine);
+    ui.BeginFrame(g_frameDt);
+
+    const ZHLN::Extent2D viewport = engine.GetPlatformHost().GetSize();
+    const float          cx       = static_cast<float>(viewport.width) * 0.5f;
+    const float          cy       = static_cast<float>(viewport.height) * 0.5f;
+    const float          half     = kCrosshairThickness * 0.5f;
+
+    // Pale arms, hot dot: the dot is the one pixel that matters, and it is the
+    // pixel the ray comes from.
+    const JPH::Vec4 armInk {0.82f, 0.92f, 1.00f, 0.85f};
+    const JPH::Vec4 dotInk {1.00f, 0.78f, 0.28f, 1.00f};
+
+    // A Box with no children still renders -- Clay draws the element's
+    // background colour, and BeginBox/EndBox is the whole contract.
+    auto quad = [&ui](std::string_view id, float x, float y, float w, float h, const JPH::Vec4& color) -> void {
+        ui.BeginBox(
+            id,
+            ZHLN::GUI::BoxConfig {
+                .width  = {.fixed = w},
+                .height = {.fixed = h},
+                .color  = color,
+                // Floating + non-zero offset is what takes a box out of the
+                // layout flow and pins it to the screen's top-left corner,
+                // which is the only anchor Clay offers. Everything below is
+                // pre-subtracted from the screen centre for that reason.
+                .offsetX = x,
+                .offsetY = y,
+            }
+        );
+        ui.EndBox();
+    };
+
+    quad("xhair-left", cx - kCrosshairGap - kCrosshairArm, cy - half, kCrosshairArm, kCrosshairThickness, armInk);
+    quad("xhair-right", cx + kCrosshairGap, cy - half, kCrosshairArm, kCrosshairThickness, armInk);
+    quad("xhair-top", cx - half, cy - kCrosshairGap - kCrosshairArm, kCrosshairThickness, kCrosshairArm, armInk);
+    quad("xhair-bottom", cx - half, cy + kCrosshairGap, kCrosshairThickness, kCrosshairArm, armInk);
+    quad(
+        "xhair-dot",
+        cx - kCrosshairDot * 0.5f,
+        cy - kCrosshairDot * 0.5f,
+        kCrosshairDot,
+        kCrosshairDot,
+        dotInk
+    );
+
+    engine.SetPendingUIData(ui.EndFrame());
+}
+
 // --- First-person rig -----------------------------------------------------------
 
 // Source-style player proportions in metres: the 32x32x72 inch hull becomes a
@@ -201,8 +395,10 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     const JPH::Vec3 eyePos = trans->position + JPH::Vec3(0.0f, kEyeAboveCenter, 0.0f);
 
     reg.Patch<ZHLN::Components::CameraComponent>(camEnt, [&](auto& cc) -> auto {
+        // Captured mouse: look every frame, no button. Uncaptured: keep the
+        // RMB drag so a host that never captures still works exactly as before.
         if (const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-            input && input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) {
+            input && (g_mouseCaptured || input->IsMouseButtonDown(static_cast<uint8_t>(ZHLN::KeyCode::RButton)))) {
             cc.camera.yaw   += input->GetMouseDeltaX() * kLookSensitivity;
             cc.camera.pitch  = std::clamp(cc.camera.pitch - (input->GetMouseDeltaY() * kLookSensitivity), -89.0f, 89.0f);
         }
@@ -229,12 +425,14 @@ void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("Map: {}", mapPath);
     ZHLN::Log("Controls:");
     ZHLN::Log("  WASD          - Move");
-    ZHLN::Log("  Hold RMB      - Look around (mouse)");
+    ZHLN::Log("  Mouse         - Look around (captured; no button to hold)");
     ZHLN::Log("  Space         - Jump");
     ZHLN::Log("  Left Shift    - Sprint");
     ZHLN::Log("  E             - Interact with doors, buttons, and triggers");
     ZHLN::Log("  V             - Toggle free camera (WASD fly, Space/E up, Q down, Left Shift fast)");
     ZHLN::Log("                  The capsule waits where you left it; V puts the view back on it.");
+    ZHLN::Log("  F             - Log what the crosshair is over");
+    ZHLN::Log("  M             - Toggle mouse capture (release the cursor to use the window)");
     ZHLN::Log("  Escape        - Quit sample");
     ZHLN::Log("==================================================================");
 }
@@ -491,6 +689,14 @@ auto main(int argc, char* argv[]) -> int {
     // unless that camera carries the opt-out marker, so Detach once the main
     // camera exists and the sample boots on the capsule instead of in the air.
     ZHLN::FreeCam::Detach(*engine);
+
+    // Captured mouse and the crosshair HUD. Both are no-ops under --headless,
+    // where there is no window to capture and nothing to draw into.
+    if (!cmdOptions.headless) {
+        SetMouseCaptured(*engine, true);
+        ZHLN::Log("[BSPSample] Mouse captured: move to look, no button held. M releases the cursor.");
+    }
+    engine->SetUICallback([](ZHLN::Engine& eng) -> void { DrawCrosshairHUD(eng); });
 
     // 5. Import BSP into ModelPrefab
     ZHLN::BSP::ImportOptions importOpts {
@@ -762,20 +968,27 @@ auto main(int argc, char* argv[]) -> int {
     // the pose while it is on, FirstPersonCameraStep yields to it, and the
     // controller extension freezes the capsule's intent off the same flag.
     bool freeCamKeyWasDown = false;
+    bool captureKeyWasDown = false;
+    bool pickKeyWasDown    = false;
 
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
         engine->ProcessEvents();
         const float dt = std::min(clock.GetDeltaTime(), 0.05f);
+        g_frameDt      = dt;
+
+        // Hoisted out of the block that used to own it: the free-camera, mouse
+        // capture and crosshair-pick toggles all read the same singleton, and
+        // they are three separate blocks now.
+        auto&      reg   = engine->GetRegistry();
+        const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
+        if (input && input->needsResize) {
+            engine->GetRenderContext().SetResolution(input->newSize);
+            input->needsResize = false;
+            continue;
+        }
 
         {
-            auto&      reg   = engine->GetRegistry();
-            const auto input = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
-            if (input && input->needsResize) {
-                engine->GetRenderContext().SetResolution(input->newSize);
-                input->needsResize = false;
-                continue;
-            }
 
             // Raw, like the other samples' edge detection: no console or text
             // field in this sample captures the keyboard.
@@ -798,11 +1011,51 @@ auto main(int argc, char* argv[]) -> int {
                     // brings its own bindings -- Space/E up, Q down -- and E
                     // still interacts with whatever the capsule, not the camera,
                     // is standing next to.
-                    ZHLN::FreeCam::Attach(*engine, kFlySpeedMeters);
+                    // lookRequiresButton = false: the mouse is captured, so
+                    // there is no cursor to drag and the deltas arrive anyway.
+                    ZHLN::FreeCam::Attach(*engine, kFlySpeedMeters, /*lookRequiresButton=*/false);
                     ZHLN::Log("[BSPSample] Free camera on: WASD fly, Space/E up, Q down, Left Shift fast. The capsule waits where you left it.");
                 }
             }
             freeCamKeyWasDown = freeCamKeyDown;
+        }
+
+        // Capture toggle. Raw edge, like the free-camera toggle above: no
+        // console or text field in this sample captures the keyboard, and M is
+        // bound to nothing else (WASD, Q, E, Space, Shift, V, Escape and F are
+        // taken).
+        {
+            const bool captureKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::M));
+            if (captureKeyDown && !captureKeyWasDown) {
+                SetMouseCaptured(*engine, !g_mouseCaptured);
+                ZHLN::Log(
+                    "[BSPSample] Mouse {}: {}.",
+                    g_mouseCaptured ? "captured" : "released",
+                    g_mouseCaptured ? "move to look, no button held" : "the cursor is back; M re-captures"
+                );
+            }
+            captureKeyWasDown = captureKeyDown;
+        }
+
+        // F dumps what the crosshair is over. This is the diagnostic the sample
+        // exists to give: entity name, distance, hit position and surface
+        // normal, which is enough to tell a brush face from a prop hull from a
+        // displacement without attaching a debugger.
+        {
+            const bool pickKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F));
+            if (pickKeyDown && !pickKeyWasDown) {
+                if (g_pick.hasHit) {
+                    ZHLN::Log(
+                        "[BSPSample] CROSSHAIR hit '{}' at {:.2f} m -- pos ({:.2f}, {:.2f}, {:.2f})  normal "
+                        "({:.2f}, {:.2f}, {:.2f})  body {}",
+                        g_pick.label, g_pick.distance, g_pick.position.GetX(), g_pick.position.GetY(), g_pick.position.GetZ(),
+                        g_pick.normal.GetX(), g_pick.normal.GetY(), g_pick.normal.GetZ(), g_pick.bodyIndex
+                    );
+                } else {
+                    ZHLN::Log("[BSPSample] CROSSHAIR no hit within {:.1f} m.", kPickDistance);
+                }
+            }
+            pickKeyWasDown = pickKeyDown;
         }
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
@@ -810,6 +1063,12 @@ auto main(int argc, char* argv[]) -> int {
             engine->GetPlatformHost().Close();
             break;
         }
+
+        // Crosshair pick. After Tick, so the camera pose the ray uses is the
+        // one this frame just rendered with -- a frame step in Phase::UI would
+        // read the previous frame's pose, and the point of the ray is to agree
+        // with what is on screen.
+        UpdateCrosshairPick(*engine);
 
         // Void-fall diagnostic drain: at most one line per prop per run, so a
         // prop grinding on the catcher can never flood stdout.

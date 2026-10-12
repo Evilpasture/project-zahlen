@@ -24,12 +24,19 @@ struct FreeCamComponent {
     float lookSensitivity  = 0.12f;
     float sprintMultiplier = 3.0f;
     bool  enabled          = true;
+    // When true (the default) look motion is read only while RMB is held, which
+    // is what a desktop host with a visible cursor wants. A host that captures
+    // the mouse -- Window::CaptureMouse(true), GLFW_CURSOR_DISABLED -- has no
+    // cursor to drag with, and the deltas arrive whether or not a button is
+    // down, so it sets this false and looks freely.
+    bool  lookRequiresButton = true;
 };
 
 void Install(Engine& engine);
 
-// FreeCamTag + FreeCamComponent on the main camera. Idempotent.
-void Attach(Engine& engine, float speed = 12.0f);
+// FreeCamTag + FreeCamComponent on the main camera. Idempotent. Pass
+// lookRequiresButton = false for a captured-mouse host (see the component).
+void Attach(Engine& engine, float speed = 12.0f, bool lookRequiresButton = true);
 
 // Strip the tag and knobs from the main camera so a follow-cam / orbit
 // host can own pose. Safe if nothing was attached.

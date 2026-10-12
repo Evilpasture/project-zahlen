@@ -27,7 +27,8 @@ void Drive(Components::CameraComponent& cc, const Components::InputStateComponen
     }
     Camera&     cam  = cc.camera;
     const float look = knobs.lookSensitivity;
-    if (input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
+    const bool  lookButton = knobs.lookRequiresButton ? input.IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton)) : true;
+    if (lookButton) {
         cam.yaw += input.GetMouseDeltaX() * look;
         cam.pitch = std::clamp(cam.pitch - (input.GetMouseDeltaY() * look), -89.0f, 89.0f);
     }
@@ -134,7 +135,7 @@ void Install(Engine& engine) {
     engine.AddFrameSchedulerExtension(&AddFrameStep);
 }
 
-void Attach(Engine& engine, float speed) {
+void Attach(Engine& engine, float speed, bool lookRequiresButton) {
     auto&        reg    = engine.GetRegistry();
     const Entity camera = MainCamera(reg);
     if (camera == Entity::Null()) {
@@ -144,8 +145,11 @@ void Attach(Engine& engine, float speed) {
     if (!reg.Get<FreeCamTagComponent>(camera)) {
         reg.Add(camera, FreeCamTagComponent {});
     }
-    if (!reg.Patch<FreeCamComponent>(camera, [speed](auto& fc) -> auto { fc.speed = speed; })) {
-        reg.Add(camera, FreeCamComponent {.speed = speed});
+    if (!reg.Patch<FreeCamComponent>(camera, [speed, lookRequiresButton](auto& fc) -> auto {
+            fc.speed              = speed;
+            fc.lookRequiresButton = lookRequiresButton;
+        })) {
+        reg.Add(camera, FreeCamComponent {.speed = speed, .lookRequiresButton = lookRequiresButton});
     }
 }
 
