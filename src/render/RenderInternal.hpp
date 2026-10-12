@@ -186,6 +186,23 @@ static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
 static constexpr uint32_t kGpuCullingMaxBatches          = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
+// Scene-light budget. The GPU light storage buffer and the submit path share
+// this one constant so the two cannot drift apart again.
+//
+// It used to be 128, in two places that had to be edited together: the buffer
+// allocation in RenderInitScenePipelines.cpp and the head-of-list truncation in
+// RenderContext::SetFrameData. A compiled Source map blows straight past it --
+// gm_murder_drones offers 1227 entity lights and the emissive heuristic adds
+// 151 area-light proxies -- so 1250 lights were silently discarded before the
+// shader ever saw them, and which 128 survived was entity-lump order, i.e.
+// unrelated to where the camera was. That is what reads in-game as lights
+// popping in and out as the player moves.
+//
+// The cost of a bigger pool is culling time, not shading time: the clustered
+// culling pass still bounds every pixel at Cluster.MaxLights (64), and it walks
+// the whole list once per cluster on the GPU.
+static constexpr uint32_t kMaxSceneLights = 4096;
+
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, Vk::kFramesInFlight> pools;
     std::array<ZHLN::Atomic<uint32_t>, Vk::kFramesInFlight>                   cmdCount {};

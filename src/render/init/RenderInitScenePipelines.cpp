@@ -178,7 +178,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreatePerFrame(allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
+            return CreatePerFrame(allocator, sizeof(Light) * kMaxSceneLights, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 

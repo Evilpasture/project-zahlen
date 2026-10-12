@@ -11,9 +11,20 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
+#include <limits>
 #include <span>
 
 namespace ZHLN {
+
+namespace {
+// A light already holding one of the very few punctual shadow slots
+// (TargetManager::kPunctualLights) keeps this much of a score bonus. Without it
+// a light sitting on the cutoff hands its shadow back and forth with its
+// neighbour every frame, which is the other half of "lights pop in and out as I
+// move". 1.25 means a light has to fall 25% below the cutoff to lose its slot,
+// and a challenger has to beat it by 25% to take it.
+constexpr float kShadowSlotHysteresis = 1.25f;
+} // namespace
 
 auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     SunLight sun {
@@ -75,19 +86,66 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
     // the main camera entity's pose, the same state the renderer projects.
     const auto cameraComp = cameraQuery.GetSingleton<Components::CameraComponent>();
 
-    struct LightImportance {
-        Entity entity;
-        float  score;
+    // One ranked entry per light. The renderer admits a bounded number of scene
+    // lights and truncates the head of the list it is handed, so the order this
+    // system publishes *is* the order that decides which lights exist on the
+    // GPU. It used to publish entity-lump order, which made the surviving set
+    // arbitrary with respect to the camera -- walking up to a fixture that was
+    // never in the first 128 did nothing, while one across the map lit a wall
+    // beside you. Ranking here fixes that: pinned (geometry-derived) lights
+    // first, then nearest-and-brightest.
+    struct RankedLight {
+        LightDesc desc;
+        Entity    entity   = Entity::Null();
+        float     score    = 0.0f;
+        bool      pinned   = false;
+        bool      punctual = false;
     };
-    ZHLN::Array<LightImportance> lightPriorities;
+
+    ZHLN::Array<RankedLight> ranked;
 
     const JPH::Vec3 viewPos = cameraComp ? cameraComp->camera.position : JPH::Vec3::sZero();
 
+    // Read the punctual shadow budget before the light pass: the hysteresis
+    // bonus below needs it, and the shadow slots are assigned from the same
+    // ranking so the lights that survive the budget are the ones that cast.
+    uint32_t shadowSlots = 0;
+    {
+        const auto shadowEntities = query.GetEntitiesWith<Components::ShadowSettingsComponent>();
+        if (!shadowEntities.empty()) {
+            query.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
+                shadowSlots = static_cast<uint32_t>(std::max(0, shadowSettings.maxPunctualShadows));
+            });
+        }
+    }
+
     for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
         query.Patch<Components::LightComponent>(e, [&](auto& light) {
-            light.shadowLayer = -1;
+            // The previous frame's slot has to be read before it is cleared:
+            // that is the only thing the hysteresis bonus is measured against.
+            const int32_t previousLayer = light.shadowLayer;
+            light.shadowLayer           = -1;
+
+            LightDesc desc {};
+            desc.type             = light.type;
+            desc.intensity        = light.intensity;
+            desc.radius           = light.radius;
+            desc.twoSided         = light.twoSided;
+            desc.range            = (light.range > 0.0f) ? light.range : 1000.0f;
+            desc.shadowLayer      = light.shadowLayer;
+            desc.direction        = light.direction;
+            desc.color            = light.color;
+            desc.innerConeRadians = light.innerConeRadians;
+            desc.outerConeRadians = light.outerConeRadians;
+
+            RankedLight entry {};
+            entry.desc   = desc;
+            entry.entity = e;
+            entry.pinned = light.pinned;
 
             if (light.type == LightType::Point || light.type == LightType::Spot) {
+                entry.punctual = true;
+
                 JPH::Vec3 lightPos    = JPH::Vec3::sZero();
                 bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
                     lightPos = worldTrans.world.GetTranslation();
@@ -98,76 +156,44 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
                 }
 
                 if (hasLightPos) {
-                    float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
-                    lightPriorities.push_back({.entity = e, .score = light.intensity / distSq});
+                    const float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
+                    entry.score        = light.intensity / distSq;
+                    if (previousLayer >= 0 && static_cast<uint32_t>(previousLayer) < shadowSlots) {
+                        entry.score *= kShadowSlotHysteresis;
+                    }
                 }
+            } else {
+                // Sun / directional / area terms are single-term and cost one
+                // draw. They are never worth culling, so they outrank every
+                // punctual light regardless of how far away they are.
+                entry.score = std::numeric_limits<float>::max();
             }
+
+            ranked.push_back(std::move(entry));
         });
     }
 
-    std::ranges::sort(lightPriorities, [](const LightImportance& a, const LightImportance& b) { return a.score > b.score; });
+    // Stable, so equal-ranked lights keep their relative order: the scene
+    // description publishes geometry-derived lights first, and a stable sort is
+    // what lets that ordering survive to the renderer.
+    std::ranges::stable_sort(ranked, [](const RankedLight& a, const RankedLight& b) {
+        if (a.pinned != b.pinned) {
+            return a.pinned;
+        }
+        return a.score > b.score;
+    });
 
-    auto shadowEntities = query.GetEntitiesWith<Components::ShadowSettingsComponent>();
-    if (!shadowEntities.empty()) {
-        query.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
-            uint32_t shadowCasters = std::min(static_cast<uint32_t>(shadowSettings.maxPunctualShadows), static_cast<uint32_t>(lightPriorities.size()));
-            for (uint32_t i = 0; i < shadowCasters; ++i) {
-                query.Patch<Components::LightComponent>(lightPriorities[i].entity, [&](auto& light) {
-                    light.shadowLayer = static_cast<int32_t>(i);
-                });
-            }
-        });
+    uint32_t assigned = 0;
+    for (RankedLight& entry: ranked) {
+        if (entry.punctual && assigned < shadowSlots) {
+            entry.desc.shadowLayer = static_cast<int32_t>(assigned++);
+        }
     }
 
     ZHLN::Array<LightDesc> sceneLights;
-    auto                   lightEntities = query.GetEntitiesWith<Components::LightComponent>();
-    sceneLights.reserve(lightEntities.size());
-
-    for (Entity e: lightEntities) {
-        query.Patch<Components::LightComponent>(e, [&](const auto& light) {
-            // The scene's own terms, world space: position comes from the entity's
-            // transform, and the view-space copy the shader reads is the renderer's
-            // business (it has the view matrix; this system does not need one).
-            LightDesc desc {};
-            desc.type        = light.type;
-            desc.intensity   = light.intensity;
-            desc.radius      = light.radius;
-            desc.twoSided    = light.twoSided;
-            desc.range       = (light.range > 0.0f) ? light.range : 1000.0f;
-            desc.shadowLayer = light.shadowLayer;
-            desc.direction   = light.direction;
-            desc.color       = light.color;
-            desc.innerConeRadians = light.innerConeRadians;
-            desc.outerConeRadians = light.outerConeRadians;
-
-            JPH::Vec3  pos          = JPH::Vec3::sZero();
-            JPH::Mat44 worldMat     = JPH::Mat44::sIdentity();
-            bool       hasTransform = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                pos      = worldTrans.world.GetTranslation();
-                worldMat = worldTrans.world;
-            });
-
-            if (!hasTransform) {
-                hasTransform = query.Patch<Components::TransformComponent>(e, [&](const auto& trans) {
-                    pos      = trans.position;
-                    worldMat = trans.GetLocalMatrix();
-                });
-            }
-
-            if (hasTransform) {
-                desc.position = pos;
-
-                if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
-                    desc.direction = (light.direction.LengthSq() > 1e-4f) ? light.direction.Normalized() : -worldMat.GetColumn3(2).Normalized();
-                }
-            }
-
-            if (desc.type == LightType::Area) {
-                desc.points = light.points;
-            }
-
-            sceneLights.push_back(desc);
-        });
+    sceneLights.reserve(ranked.size());
+    for (RankedLight& entry: ranked) {
+        sceneLights.push_back(std::move(entry.desc));
     }
 
     sceneData.lights = std::move(sceneLights);

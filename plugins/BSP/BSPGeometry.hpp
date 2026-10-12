@@ -270,6 +270,25 @@ struct InteractiveSubmodel {
 
 [[nodiscard]] auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel>;
 
+// The emissive half of the lighting heuristics as a standalone entry point.
+//
+// ImportMapGeometry collects the same per-face records inline while it walks the
+// faces for the render stream. The scene description has no render stream to
+// walk, so it calls this instead -- and it has to, because the importer
+// deliberately sets gatherLights = false so the prefab does not spawn the
+// entity lights a second time, and that same flag used to gate the emissive
+// emission. The result was that every lamp panel, screen and sign in a Source
+// map reached neither the scene nor the prefab: the emissive half of the
+// heuristic was dead code in the running game.
+//
+// `entityLights` is what fixture damping is measured against (a panel within
+// kEmissiveFixtureRadiusInches of an entity light is that light's housing), so
+// pass the entity lights the scene already gathered. Name-gate strengths only:
+// this layer has no VFS, so there is no .vmt / .vtf refinement here.
+[[nodiscard]] auto GatherEmissiveAreaLights(
+    const BSPMap& map, const ImportOptions& options, const std::vector<BspPointLight>& entityLights
+) -> std::vector<BspPointLight>;
+
 // Faces + displacements -> per-material native streams; entities -> lights.
 // Faces whose texinfo is missing or node-only are skipped (they are tree
 // partitions, not surfaces). Degenerate polygons (fewer than 3 unique corners)

@@ -494,6 +494,51 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         scene.entities.push_back(std::move(propEntity));
     }
 
+    // Emissive-surface proxies: the lamp panels, screens and signs. This is the
+    // only place they can be emitted from. The importer sets gatherLights =
+    // false so the prefab does not spawn the entity lights a second time, and
+    // that flag also gated the emissive emission -- so without this block every
+    // self-illuminated surface in the map reached neither the scene nor the
+    // prefab, and the emissive half of the lighting heuristic was dead code in
+    // the running game.
+    if (options.gatherEmissiveSurfaces) {
+        // Fixture damping is measured against the entity lights, which live
+        // here as SceneLights. FinalizeEmissiveSurfaces only reads type and
+        // position off them, so this is a straight copy.
+        std::vector<BspPointLight> entityLights;
+        entityLights.reserve(scene.lights.size());
+        for (const Scene::SceneLight& light: scene.lights) {
+            if (light.type == "Sun" || light.type == "Directional") {
+                continue;
+            }
+            BspPointLight proxy;
+            proxy.name     = light.name;
+            proxy.type     = LightType::Point;
+            proxy.position = JPH::Vec3(light.position.x, light.position.y, light.position.z);
+            entityLights.push_back(std::move(proxy));
+        }
+
+        for (const BspPointLight& proxy: GatherEmissiveAreaLights(map, options, entityLights)) {
+            Scene::SceneLight light;
+            light.name             = proxy.name;
+            // EmissiveLightFor always builds a Point proxy; say so directly
+            // rather than pulling the reflection header in for one enum name.
+            light.type             = "Point";
+            light.position         = JPH::Float3(proxy.position.GetX(), proxy.position.GetY(), proxy.position.GetZ());
+            light.direction        = JPH::Float3(proxy.direction.GetX(), proxy.direction.GetY(), proxy.direction.GetZ());
+            light.color            = JPH::Float3(proxy.color.GetX(), proxy.color.GetY(), proxy.color.GetZ());
+            light.intensity        = proxy.intensity;
+            light.radius           = proxy.radius;
+            light.range            = proxy.range;
+            light.innerConeRadians = proxy.innerConeRadians;
+            light.outerConeRadians = proxy.outerConeRadians;
+            // Pinned, so LightingSystem ranks these ahead of every entity light
+            // and the renderer's scene-light budget cannot discard them.
+            light.pinned           = true;
+            scene.lights.push_back(std::move(light));
+        }
+    }
+
     // Lighting accounting, same contract as the importer's: the number of
     // lights that did not make it into the scene, and why, is the difference
     // between "the map has no lights" and "the map's lights were suppressed

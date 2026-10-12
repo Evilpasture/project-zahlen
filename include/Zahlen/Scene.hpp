@@ -80,6 +80,12 @@ struct SceneLight {
     // Spot cone angles in radians from the axis (0 = none authored).
     float innerConeRadians = 0.0f;
     float outerConeRadians = 0.0f;
+    // True for a light derived from geometry rather than read from an entity
+    // (a BSP emissive-surface proxy). LightingSystem ranks these ahead of every
+    // entity light, so they cannot be truncated away by the renderer's
+    // scene-light budget -- which is what used to happen to every lamp panel,
+    // screen and sign in a Source map.
+    bool  pinned           = false;
 };
 
 struct SceneCamera {

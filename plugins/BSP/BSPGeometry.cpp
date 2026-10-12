@@ -557,6 +557,94 @@ auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options
     return result;
 }
 
+// The face walk ImportMapGeometry does inline, reduced to just the emissive
+// records: winding, area, centroid, normal, material name, texdata
+// reflectivity and the SURF_NOLIGHT flag. Kept in step with the inline version
+// in ImportMapGeometry -- if one changes, the other must.
+auto GatherEmissiveAreaLights(
+    const BSPMap& map, const ImportOptions& options, const std::vector<BspPointLight>& entityLights
+) -> std::vector<BspPointLight> {
+    std::vector<BspPointLight> out;
+    if (!options.gatherEmissiveSurfaces) {
+        return out;
+    }
+
+    std::vector<EmissiveSurface> faces;
+
+    for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
+        if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
+            continue;
+        }
+        if (std::find(options.skipModels.begin(), options.skipModels.end(), static_cast<int32_t>(modelIdx)) != options.skipModels.end()) {
+            continue;
+        }
+        const DModel& model = map.models[modelIdx];
+        if (model.firstface < 0 || model.numfaces < 0) {
+            continue;
+        }
+        const size_t faceEnd = std::min(static_cast<size_t>(model.firstface) + static_cast<size_t>(model.numfaces), map.faces.size());
+
+        for (size_t faceIndex = static_cast<size_t>(model.firstface); faceIndex < faceEnd; ++faceIndex) {
+            const DFace& face = map.faces[faceIndex];
+
+            auto winding = FaceWinding(map, face);
+            if (!winding) {
+                continue;
+            }
+            DropDuplicateCorners(*winding);
+            if (winding->size() < 3) {
+                continue;
+            }
+
+            // Tool textures and compile helpers are not surfaces; only the
+            // render stream can self-illuminate.
+            if (DispositionFor(map, face) != FaceDisposition::Render) {
+                continue;
+            }
+
+            const std::string_view materialName = MaterialNameFor(map, face);
+            if (!IsEmissiveMaterialName(materialName)) {
+                continue;
+            }
+
+            const double areaInches = WindingArea(*winding);
+            if (areaInches <= 0.0) {
+                continue;
+            }
+
+            EmissiveSurface surface;
+            surface.materialName     = std::string(materialName);
+            surface.position         = ConvertPosition(options, WindingCentroid(*winding));
+            // The face's plane normal, +N out of the solid (see the winding
+            // orientation note in ImportMapGeometry).
+            JPH::Vec3 faceNormal = JPH::Vec3::sAxisZ();
+            if (static_cast<size_t>(face.planenum) < map.planes.size()) {
+                const DPlane& plane = map.planes[static_cast<size_t>(face.planenum)];
+                faceNormal          = JPH::Vec3(plane.normal[0], plane.normal[1], plane.normal[2]);
+            }
+            surface.normal           = ConvertDirection(options, faceNormal);
+            surface.areaSquareInches = static_cast<float>(areaInches);
+            surface.areaSquareMetres = static_cast<float>(areaInches) * options.unitScale * options.unitScale;
+            surface.faceCount        = 1;
+            surface.reflectivityLuma = TexDataReflectivityLuma(map, face);
+            surface.noLightFlag      = HasSurfNoLight(map, face);
+            faces.push_back(std::move(surface));
+        }
+    }
+
+    const std::vector<EmissiveSurface> proxies =
+        FinalizeEmissiveSurfaces(std::move(faces), entityLights, options.unitScale, options.maxEmissiveLights);
+
+    out.reserve(proxies.size());
+    for (const EmissiveSurface& surface: proxies) {
+        if (surface.strength <= 0.0f) {
+            continue;
+        }
+        out.push_back(EmissiveLightFor(surface, options));
+    }
+    return out;
+}
+
 auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> ImportedMapData {
     ImportedMapData result;
     bool            globalBoundsFirst = true;

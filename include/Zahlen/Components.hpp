@@ -5,23 +5,23 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Profiler.hpp>
-#include <Zahlen/physics/PhysicsHandles.hpp>
-#include <Zahlen/Input.hpp>
-#include <Zahlen/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
-#include <Zahlen/Scene.hpp>
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Input.hpp>
+#include <Zahlen/ParticleEmitterDesc.hpp> // the emitter parameters, not the shader's struct
+#include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Scene.hpp>
+#include <Zahlen/physics/PhysicsHandles.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>
@@ -35,7 +35,6 @@ struct Skeleton;
 enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic };
 
 struct Components {
-
     // Engine scene destruction is two-phase: mark now, release external handles
     // while the other components are still accessible, then reclaim the entity.
     struct PendingDestroy {};
@@ -120,7 +119,7 @@ struct Components {
 
     struct PhysicsComponent {
         Physics::BodyHandle physicsHandle = Physics::BodyHandle::Null();
-        bool   isStatic = true;
+        bool                isStatic      = true;
     };
 
     struct RayTracingSettingsComponent {
@@ -179,10 +178,10 @@ struct Components {
     };
 
     struct SceneSourceComponent {
-        Scene::ShapeKind shape       = Scene::ShapeKind::Box;
+        Scene::ShapeKind shape = Scene::ShapeKind::Box;
         ZHLN::String256  source;
-        JPH::Float3      halfExtents = {0.5f, 0.5f, 0.5f};
-        float            extent = 10.0f;
+        JPH::Float3      halfExtents           = {0.5f, 0.5f, 0.5f};
+        float            extent                = 10.0f;
         bool             emissiveVirtualLights = false;
     };
 
@@ -216,31 +215,31 @@ struct Components {
         CullingStats stats;
     };
     struct PostProcessSettingsComponent {
-        int       giMode            = 0;
-        float     aoRadius          = 0.5f;
-        float     aoBias            = 0.05f;
-        float     aoPower           = 1.8f;
-        float     giIntensity       = 1.0f;
-        int       giSamples         = 8;
-        int       useLocalProbe     = 0;
-        float     vignetteIntensity = 0.0f;
-        float     vignettePower     = 1.50f;
-        float     glowIntensity     = 0.0f;
-        int       enableSSR         = 0;
-        int       enableRTR         = 0;
-        int       fullBright        = 0;
+        int   giMode            = 0;
+        float aoRadius          = 0.5f;
+        float aoBias            = 0.05f;
+        float aoPower           = 1.8f;
+        float giIntensity       = 1.0f;
+        int   giSamples         = 8;
+        int   useLocalProbe     = 0;
+        float vignetteIntensity = 0.0f;
+        float vignettePower     = 1.50f;
+        float glowIntensity     = 0.0f;
+        int   enableSSR         = 0;
+        int   enableRTR         = 0;
+        int   fullBright        = 0;
 
-        float     exposure          = 1.0f;
-        float     bloomStrength     = 0.0f;
-        float     contrast          = 1.0f;
-        float     saturation        = 1.0f;
-        int       tonemapper        = 3;
-        JPH::Vec3 colorFilter       = JPH::Vec3::sReplicate(1.0f);
+        float     exposure      = 1.0f;
+        float     bloomStrength = 0.0f;
+        float     contrast      = 1.0f;
+        float     saturation    = 1.0f;
+        int       tonemapper    = 3;
+        JPH::Vec3 colorFilter   = JPH::Vec3::sReplicate(1.0f);
 
-        float     ambientExposure   = 1.0f;
-        JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
-        JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
-        JPH::Vec3 probePos          = JPH::Vec3(0.0f, 4.0f, 0.0f);
+        float     ambientExposure = 1.0f;
+        JPH::Vec3 probeMin        = JPH::Vec3(-22.0f, 0.0f, -22.0f);
+        JPH::Vec3 probeMax        = JPH::Vec3(22.0f, 12.0f, 22.0f);
+        JPH::Vec3 probePos        = JPH::Vec3(0.0f, 4.0f, 0.0f);
 
         JPH::Vec4 skyZenith  = JPH::Vec4(0.003f, 0.008f, 0.020f, 1.0f);
         JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
@@ -358,7 +357,7 @@ struct Components {
             uint32_t value  = 0;
             bool     isChar = false;
         };
-        static constexpr size_t kMaxQueuedInput = 64;
+        static constexpr size_t                  kMaxQueuedInput = 64;
         std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
         uint8_t                                  queuedInputCount = 0;
 
@@ -433,11 +432,15 @@ struct Components {
         float      range       = 0.0f;
         JPH::Mat44 points      = JPH::Mat44::sIdentity();
         uint32_t   twoSided    = 0;
-        int32_t   shadowLayer = -1;
+        int32_t    shadowLayer = -1;
         // Spot cone angles in radians from the axis (0 = no authored cone:
         // the packer emits the -1/-1 "full sphere" sentinel instead).
         float innerConeRadians = 0.0f;
         float outerConeRadians = 0.0f;
+        // Geometry-derived light (a BSP emissive-surface proxy). See
+        // SceneLight::pinned: LightingSystem publishes these first so the
+        // renderer's scene-light budget cannot discard them.
+        bool pinned = false;
     };
 
     // Particle components are authoring/runtime data only. Persistent simulation
@@ -450,15 +453,15 @@ struct Components {
         bool                attachToCamera = false;
         // Additive blending is presentation, not physics: it rides the submit call
         // rather than the emitter's parameters, the way DrawBillboards takes it.
-        bool                  additive       = false;
+        bool additive = false;
     };
 
     struct MeshParticleEmitterComponent {
-        AssetID                   meshAsset     = InvalidAssetID;
-        MaterialID                materialAsset = InvalidMaterialID;
-        uint32_t                  maxParticles  = 128;
-        bool                      active        = true;
-        MeshParticleEmitterDesc   params;
+        AssetID                 meshAsset     = InvalidAssetID;
+        MaterialID              materialAsset = InvalidMaterialID;
+        uint32_t                maxParticles  = 128;
+        bool                    active        = true;
+        MeshParticleEmitterDesc params;
     };
 
     struct DecalComponent {
@@ -475,7 +478,6 @@ struct Components {
         };
         ZHLN::Array<Element> modifiers;
     };
-
 
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };
 
@@ -504,4 +506,4 @@ struct Components {
     };
 };
 
-}
+} // namespace ZHLN

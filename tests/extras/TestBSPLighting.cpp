@@ -740,6 +740,164 @@ struct BSPLightingTestSuite {
         }
         return {};
     }
+
+    // Regression: the emissive proxies used to be gated behind `gatherLights`
+    // in ImportMapGeometry, and BSPImporter deliberately sets gatherLights =
+    // false so the prefab does not spawn the entity lights a second time. The
+    // scene description has no render stream to walk and is the only light
+    // source the engine instantiates for a BSP map, so the result was that
+    // every lamp panel, screen and sign reached neither the scene nor the
+    // prefab -- the emissive half of the heuristic was dead code in the running
+    // game. GatherEmissiveAreaLights is the standalone entry point that fixes
+    // it; this walks a real (synthetic) face-bearing map through it.
+    [[nodiscard]] auto gather_emissive_area_lights_from_faces() const -> std::expected<void, ZHLN::ErrorCode> {
+        // Two quads on the same emissive material, far enough apart to land in
+        // different cluster cells (the cell is 192in = 4.88m at the default
+        // unit scale), so both survive as separate proxies.
+        //
+        //   big   -- 304in x 304in  (~59.7 m2): saturates the intensity cap
+        //   small --  20in x  20in  (~0.258 m2): exercises the uncapped path
+        struct Quad {
+            JPH::Vec3 centre;
+            float     half;
+        };
+        const Quad quads[2] = {{JPH::Vec3(0.0f, 0.0f, 0.0f), 152.0f}, {JPH::Vec3(400.0f, 0.0f, 0.0f), 10.0f}};
+
+        BSPMap map;
+        map.version = 20;
+
+        for (const Quad& q: quads) {
+            const uint16_t base = static_cast<uint16_t>(map.vertices.size());
+            const JPH::Vec3 corners[4] = {
+                JPH::Vec3(q.centre.GetX() - q.half, q.centre.GetY() - q.half, q.centre.GetZ()),
+                JPH::Vec3(q.centre.GetX() + q.half, q.centre.GetY() - q.half, q.centre.GetZ()),
+                JPH::Vec3(q.centre.GetX() + q.half, q.centre.GetY() + q.half, q.centre.GetZ()),
+                JPH::Vec3(q.centre.GetX() - q.half, q.centre.GetY() + q.half, q.centre.GetZ())
+            };
+            for (const JPH::Vec3& c: corners) {
+                ZHLN::BSP::DVertex v;
+                v.point[0] = c.GetX();
+                v.point[1] = c.GetY();
+                v.point[2] = c.GetZ();
+                map.vertices.push_back(v);
+            }
+            for (int i = 0; i < 4; ++i) {
+                ZHLN::BSP::DEdge e;
+                e.v[0] = static_cast<uint16_t>(base + i);
+                e.v[1] = static_cast<uint16_t>(base + ((i + 1) % 4));
+                map.edges.push_back(e);
+                map.surfEdges.push_back(static_cast<int32_t>(map.edges.size()) - 1);
+            }
+
+            ZHLN::BSP::DFace face;
+            face.planenum  = 0;
+            face.side      = 0;
+            face.firstedge = static_cast<int32_t>(map.surfEdges.size()) - 4;
+            face.numedges  = 4;
+            face.texinfo   = 0;
+            map.faces.push_back(face);
+        }
+
+        ZHLN::BSP::DPlane plane;
+        plane.normal[0] = 0.0f;
+        plane.normal[1] = 0.0f;
+        plane.normal[2] = 1.0f;
+        plane.dist      = 0.0f;
+        map.planes.push_back(plane);
+
+        // `white007` is the literal material name this heuristic ships: a
+        // material that reflects nothing cannot be lit at all, so whatever
+        // brightness it shows is its own emission and the reflectivity damping
+        // must not fire.
+        ZHLN::BSP::DTexData texData;
+        texData.reflectivity[0]   = 0.0f;
+        texData.reflectivity[1]   = 0.0f;
+        texData.reflectivity[2]   = 0.0f;
+        texData.nameStringTableID = 0;
+        map.texDatas.push_back(texData);
+        map.texNames.push_back("white007");
+
+        // SURF_NOLIGHT: vbsp saying "do not bake light onto this surface" --
+        // the strongest per-surface self-illumination evidence in the .bsp.
+        ZHLN::BSP::DTexInfo texInfo;
+        texInfo.flags   = ZHLN::BSP::kSurfNolight;
+        texInfo.texdata = 0;
+        map.texInfos.push_back(texInfo);
+
+        ZHLN::BSP::DModel model;
+        model.firstface = 0;
+        model.numfaces  = static_cast<int32_t>(map.faces.size());
+        map.models.push_back(model);
+
+        const ImportOptions                          options;
+        const std::vector<ZHLN::BSP::BspPointLight> proxies = ZHLN::BSP::GatherEmissiveAreaLights(map, options, {});
+        if (!ZHLN::Test::ExpectEq(proxies.size(), 2u)) {
+            return Fail();
+        }
+
+        // Ranked by flux, so the big panel is first.
+        const ZHLN::BSP::BspPointLight& big   = proxies[0];
+        const ZHLN::BSP::BspPointLight& small = proxies[1];
+
+        if (!ZHLN::Test::ExpectTrue(big.name.rfind("Glow_", 0) == 0) || !ZHLN::Test::ExpectEq(big.type, ZHLN::LightType::Point)) {
+            return Fail();
+        }
+        if (!ZHLN::Test::ExpectTrue(big.fromEmissive)) {
+            return Fail();
+        }
+
+        // The big panel saturates the cap; the small one must not, and must be
+        // dimmer than it. That is the flux model and the cap in one assertion
+        // pair.
+        if (!ZHLN::Test::ExpectEq(big.intensity, ZHLN::BSP::kEmissiveMaxLightIntensity)) {
+            return Fail();
+        }
+        if (!ZHLN::Test::ExpectTrue(small.intensity < ZHLN::BSP::kEmissiveMaxLightIntensity)) {
+            return Fail();
+        }
+
+        // The uncapped path is the equivalent-Source-brightness model exactly:
+        // white panel, no fixture damping, area in square metres.
+        const float smallArea = 400.0f * options.unitScale * options.unitScale; // 20in x 20in
+        const float expected  = 1.0f * smallArea * ZHLN::BSP::kEmissiveSourceBrightnessPerSquareMetre * 1.0f * 1.0f *
+                               ZHLN::BSP::kSourceBrightnessToEngine;
+        if (!ZHLN::Test::ExpectInRange(small.intensity, expected * 0.98f, expected * 1.02f)) {
+            return Fail();
+        }
+
+        // Range comes from the footprint, not the intensity: the big panel
+        // out-reaches the small one even though both are point lights.
+        if (!ZHLN::Test::ExpectTrue(big.range > small.range)) {
+            return Fail();
+        }
+        if (!ZHLN::Test::ExpectTrue(small.range >= ZHLN::BSP::kMinRangeMetres)) {
+            return Fail();
+        }
+
+        // Off the surface along its normal, not buried inside the wall it
+        // lights (a light exactly on a surface self-shadows and reads as a dark
+        // blob under RTGI). The default options convert Source Z-up to engine
+        // Y-up, so the source +Z normal lands on engine +Y.
+        if (!ZHLN::Test::ExpectTrue(big.position.GetY() > 0.05f) || !ZHLN::Test::ExpectTrue(small.position.GetY() > 0.05f)) {
+            return Fail();
+        }
+
+        // A map with no faces at all must not invent light.
+        const BSPMap                            empty;
+        const std::vector<ZHLN::BSP::BspPointLight> none = ZHLN::BSP::GatherEmissiveAreaLights(empty, options, {});
+        if (!ZHLN::Test::ExpectEq(none.size(), 0u)) {
+            return Fail();
+        }
+
+        // And with the gather switched off it must stay silent even when the
+        // map is full of emissive faces -- the option is the caller's veto.
+        ImportOptions off                = options;
+        off.gatherEmissiveSurfaces       = false;
+        if (!ZHLN::Test::ExpectEq(ZHLN::BSP::GatherEmissiveAreaLights(map, off, {}).size(), 0u)) {
+            return Fail();
+        }
+        return {};
+    }
 };
 
 } // namespace
@@ -780,6 +938,7 @@ auto main() -> int {
     runTest("enforce_lighting_floor_never_returns_black", [&] { return suite.enforce_lighting_floor_never_returns_black(); });
     runTest("audit_lighting_counters_are_exhaustive", [&] { return suite.audit_lighting_counters_are_exhaustive(); });
     runTest("options_gate_each_stage", [&] { return suite.options_gate_each_stage(); });
+    runTest("gather_emissive_area_lights_from_faces", [&] { return suite.gather_emissive_area_lights_from_faces(); });
 
     ZHLN::Println("--------------------------------------------------");
     ZHLN::Println("Summary for BSPLightingTestSuite: {} Passed, {} Failed", passed, failed);

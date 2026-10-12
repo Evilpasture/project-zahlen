@@ -27,7 +27,12 @@ void RenderContext::SetFrameData(
     _impl->unjittered_view_proj = frame.unjitteredViewProj;
     _impl->currentUniforms      = GpuPack::PackFrameData(frame);
     _impl->currentDt            = std::clamp(dt, 0.0001f, 0.1f);
-    _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {128})).end());
+    // kMaxSceneLights, not 128: see RenderInternal.hpp. The truncation stays --
+    // it is what keeps the memcpy below inside the buffer -- but LightingSystem
+    // now publishes the list in ranked order, so if a map ever does exceed the
+    // budget the lights that survive are the nearest and brightest rather than
+    // the first ones the entity lump happened to list.
+    _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {kMaxSceneLights})).end());
     _impl->UploadSubmittedLights();
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
