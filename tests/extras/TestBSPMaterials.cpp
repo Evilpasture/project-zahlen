@@ -26,7 +26,7 @@ std::string GetPoorMansStacktrace() {
 
 namespace {
 
-auto BuildSyntheticLightmapMap() -> ZHLN::BSP::BSPMap {
+auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
     ZHLN::BSP::BSPMap map;
     map.version = 20;
 
@@ -70,32 +70,21 @@ auto BuildSyntheticLightmapMap() -> ZHLN::BSP::BSPMap {
     map.texDatas.push_back(texData);
     map.texNames.push_back("concrete/floor01");
 
-    // Texture info with lightmap vectors (1 luxel per 16 units)
     ZHLN::BSP::DTexInfo texInfo {};
     texInfo.textureVecs[0][0] = 1.0f;
     texInfo.textureVecs[0][3] = 0.0f;
     texInfo.textureVecs[1][1] = 1.0f;
     texInfo.textureVecs[1][3] = 0.0f;
 
-    // Lightmap vectors: 1/16 scale
-    texInfo.lightmapVecs[0][0] = 1.0f / 16.0f;
-    texInfo.lightmapVecs[0][3] = 0.0f;
-    texInfo.lightmapVecs[1][1] = 1.0f / 16.0f;
-    texInfo.lightmapVecs[1][3] = 0.0f;
     texInfo.texdata            = 0;
     map.texInfos.push_back(texInfo);
 
-    // Face: 256x256 units = 16x16 luxels (mins: 0, 0, size: 16, 16)
+    // Face: 256x256 units on the world plane.
     ZHLN::BSP::DFace face {};
     face.planenum                      = 0;
     face.firstedge                     = 0;
     face.numedges                      = 4;
     face.texinfo                       = 0;
-    face.lightmapTextureMinsInLuxels[0] = 0;
-    face.lightmapTextureMinsInLuxels[1] = 0;
-    face.lightmapTextureSizeInLuxels[0] = 16;
-    face.lightmapTextureSizeInLuxels[1] = 16;
-    face.lightofs                      = 0;
     map.faces.push_back(face);
 
     // Entity 0: worldspawn
@@ -115,7 +104,6 @@ struct BSPMaterialsTestSuite {
             std::filesystem::remove_all(tempRoot, ec);
             std::filesystem::create_directories(tempRoot / "materials" / "brick", ec);
             std::filesystem::create_directories(tempRoot / "materials" / "concrete", ec);
-            std::filesystem::create_directories(tempRoot / "lightmaps", ec);
 
             // Create files
             {
@@ -130,11 +118,6 @@ struct BSPMaterialsTestSuite {
                 std::ofstream f(tempRoot / "materials" / "concrete" / "wall.png");
                 f << "PNG_DUMMY_DATA";
             }
-            {
-                std::ofstream f(tempRoot / "lightmaps" / "gm_test_map_lightmap0.png");
-                f << "LIGHTMAP_PNG_DATA";
-            }
-
             ZHLN::BSP::SourceVFS vfs;
             vfs.AddSearchPath(tempRoot.string());
 
@@ -162,14 +145,7 @@ struct BSPMaterialsTestSuite {
                 ZHLN::Test::ExpectTrue(pngRes->ends_with("wall.png"));
             }
 
-            // 5. Resolve lightmap
-            const auto lmRes = vfs.ResolveLightmap("maps/gm_test_map.bsp");
-            ZHLN::Test::ExpectTrue(lmRes.has_value());
-            if (lmRes) {
-                ZHLN::Test::ExpectTrue(lmRes->ends_with("gm_test_map_lightmap0.png"));
-            }
-
-            // 6. Read file contents
+            // 5. Read file contents
             const auto fileBytes = vfs.ReadFile("materials/brick/brickwall003d.vtf");
             ZHLN::Test::ExpectTrue(fileBytes.has_value());
             if (fileBytes) {
@@ -401,8 +377,8 @@ struct BSPMaterialsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::ErrorCode> lightmap_texcoord_1_calculation() {
-            const auto map      = BuildSyntheticLightmapMap();
+        std::expected<void, ZHLN::ErrorCode> bsp_geometry_leaves_secondary_uv_zero() {
+            const auto map      = BuildSyntheticMap();
             const auto imported = ZHLN::BSP::ImportMapGeometry(map);
 
             ZHLN::Test::ExpectFalse(imported.parts.empty());
@@ -438,14 +414,13 @@ struct BSPMaterialsTestSuite {
                 return result;
             };
 
-            // Inspect TEXCOORD_1 (uv1) in VertexSurface
+            // VertexSurface retains TEXCOORD_1 for glTF; BSP surfaces now
+            // leave the secondary UV set unused.
             for (const auto& surf: part.surfaces) {
                 const float u1 = HalfToFloat(surf.uv1.data & 0xFFFF);
                 const float v1 = HalfToFloat((surf.uv1.data >> 16) & 0xFFFF);
-                ZHLN::Test::ExpectGe(u1, 0.0f);
-                ZHLN::Test::ExpectLe(u1, 1.0f);
-                ZHLN::Test::ExpectGe(v1, 0.0f);
-                ZHLN::Test::ExpectLe(v1, 1.0f);
+                ZHLN::Test::ExpectEq(u1, 0.0f);
+                ZHLN::Test::ExpectEq(v1, 0.0f);
             }
 
             return {};
@@ -550,7 +525,7 @@ int main() {
     runTest("vtf_decoder_dxt1_bc1", [&] { return suite.vtf_decoder_dxt1_bc1(); });
     runTest("vtf_decoder_dxt5_bc3", [&] { return suite.vtf_decoder_dxt5_bc3(); });
     runTest("vtf_decoder_bgra8888_and_rgb888", [&] { return suite.vtf_decoder_bgra8888_and_rgb888(); });
-    runTest("lightmap_texcoord_1_calculation", [&] { return suite.lightmap_texcoord_1_calculation(); });
+    runTest("bsp_geometry_leaves_secondary_uv_zero", [&] { return suite.bsp_geometry_leaves_secondary_uv_zero(); });
     runTest("end_to_end_material_and_texture_resolution", [&] { return suite.end_to_end_material_and_texture_resolution(); });
 
     ZHLN::Println("--------------------------------------------------");

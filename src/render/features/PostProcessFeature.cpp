@@ -51,6 +51,31 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
         )
         .and_then(
             [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
+                return BuildCompute(impl, _rtgiHalfCS, _rtgiHalfCSLayout, _rtgiHalfHeapBindings, Shaders::Modules::RtgiHalfCS::Bytes());
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
+                if (!impl.ctx.RayTracingSupported()) {
+                    return {};
+                }
+                return BuildCompute(
+                    impl, _rtgiDenoiseCS, _rtgiDenoiseCSLayout, _rtgiDenoiseHeapBindings, Shaders::Modules::RtgiDenoiseCS::Bytes()
+                );
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
+                return BuildCompute(
+                    impl, _rtgiCompositeCS, _rtgiCompositeCSLayout, _rtgiCompositeHeapBindings, Shaders::Modules::RtgiCompositeCS::Bytes()
+                );
+            }
+        )
+        .and_then(
+            [&]() -> std::expected<void, ErrorCode> {
                 return BuildCompute(impl, _gtaoCS, _gtaoCSLayout, _gtaoHeapBindings, Shaders::Modules::GtaoCS::Bytes());
             }
         );
@@ -105,6 +130,9 @@ void PostProcessFeature::InitSamplers(RenderContext::Impl& impl) noexcept {
     Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
         impl.heapManager, _rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
+    Vk::InitHeapPassSamplers<Shaders::RtgiHalf>(
+        impl.heapManager, _rtgiHalfHeapBindings, Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+    );
 }
 
 auto PostProcessFeature::BloomThreshold() noexcept -> Vk::DynamicComputePass& {
@@ -131,6 +159,18 @@ auto PostProcessFeature::RtrHalf() noexcept -> Vk::DynamicComputePass& {
     return _rtrHalfCS;
 }
 
+auto PostProcessFeature::RtgiHalf() noexcept -> Vk::DynamicComputePass& {
+    return _rtgiHalfCS;
+}
+
+auto PostProcessFeature::RtgiDenoise() noexcept -> Vk::DynamicComputePass& {
+    return _rtgiDenoiseCS;
+}
+
+auto PostProcessFeature::RtgiComposite() noexcept -> Vk::DynamicComputePass& {
+    return _rtgiCompositeCS;
+}
+
 auto PostProcessFeature::BloomThresholdHeapBindings() noexcept -> Vk::HeapPassBindings& {
     return _bloomThresholdHeapBindings;
 }
@@ -153,6 +193,18 @@ auto PostProcessFeature::GtaoHeapBindings() noexcept -> Vk::HeapPassBindings& {
 
 auto PostProcessFeature::RtrHalfHeapBindings() noexcept -> Vk::HeapPassBindings& {
     return _rtrHalfHeapBindings;
+}
+
+auto PostProcessFeature::RtgiHalfHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _rtgiHalfHeapBindings;
+}
+
+auto PostProcessFeature::RtgiDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _rtgiDenoiseHeapBindings;
+}
+
+auto PostProcessFeature::RtgiCompositeHeapBindings() noexcept -> Vk::HeapPassBindings& {
+    return _rtgiCompositeHeapBindings;
 }
 
 auto PostProcessFeature::SmaaAreaTexture() const noexcept -> uint32_t {

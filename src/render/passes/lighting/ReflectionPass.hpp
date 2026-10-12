@@ -17,7 +17,7 @@ struct ReflectionPass: Vk::RenderPass<
                           Vk::ShaderRead<typename SurfaceTag::Sheen>,
                           Vk::ShaderRead<typename SurfaceTag::Anisotropy>,
                           Vk::ShaderRead<typename SurfaceTag::Depth>,
-                          Vk::ShaderRead<Res_Lighting>,
+                          Vk::ShaderRead<Res_LightingGI>,
                           Vk::ShaderRead<Res_ShadowMap>,
                           Vk::ShaderRead<Res_ShadowAtlas>,
                           Vk::ShaderReadGeneral<Res_VoxelResolved>,

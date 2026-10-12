@@ -10,7 +10,6 @@
 
 #include "BSPGeometry.hpp"
 
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -26,21 +25,6 @@ namespace ZHLN::BSP {
 namespace {
 
 constexpr float kEpsilon = 1e-6f;
-
-// Width/height of the engine-side lightmap atlas texture (the
-// *_lightmap0.png). The atlas is NOT the raw luxel page from the BSP: its
-// layout is produced by repacking every face's (size+1 x size+1) sample rect
-// with a deterministic shelf packer, so the importer reproduces the exact
-// same packing analytically and emits UVs that land on the atlas the renderer
-// actually samples. Scheme (must match the offline atlas generator exactly):
-//   * one rect per face with lightofs >= 0 and sizeU,sizeV > 0, dims size+1
-//   * stable sort by height descending; ties keep ascending face index
-//   * next-fit shelves left to right over the atlas width, rects packed tight
-constexpr int32_t kLightmapAtlasWidth  = 4096;
-// Rows 0..kPropAmbientRows (declared in BSPGeometry.hpp) stay free of face
-// tiles: they hold the prop-ambient cell sampled by studio props.
-constexpr int32_t kLightmapAtlasHeight = 4096;
-// kLightmapGutter lives in BSPGeometry.hpp (shared with the importer's gutter fill).
 
 // texinfo flags, Source bspflags.h. Only the routing-relevant bits are
 // listed; the rest (SURF_WARP for water, SURF_TRANS...) do not change which
@@ -150,18 +134,7 @@ struct FaceProjection {
     float     width   = 512.0f;
     float     height  = 512.0f;
 
-    // Lightmap luxel projection (Source conventions)
-    JPH::Vec3 lightmapSDir {0.0f, 0.0f, 0.0f};
-    float     lightmapSOffset = 0.0f;
-    JPH::Vec3 lightmapTDir {0.0f, 0.0f, 0.0f};
-    float     lightmapTOffset = 0.0f;
-    int32_t   lightmapMins[2] {0, 0};
-    int32_t   lightmapSize[2] {0, 0};
-    bool      hasLightmap = false;
-    // Repacked shelf-atlas origin for this face's sample rect in the
-    // engine-side 4096x4096 lightmap atlas (see ComputeLightmapAtlas); -1/-1
-    // when the face has no atlas placement.
-    int32_t atlasOrigin[2] {-1, -1};
+
 };
 
 [[nodiscard]] auto ProjectionFor(const BSPMap& map, const DFace& face) -> std::optional<FaceProjection> {
@@ -181,15 +154,6 @@ struct FaceProjection {
     out.width   = (texData.width > 0) ? static_cast<float>(texData.width) : 512.0f;
     out.height  = (texData.height > 0) ? static_cast<float>(texData.height) : 512.0f;
 
-    out.lightmapSDir    = JPH::Vec3(texInfo.lightmapVecs[0][0], texInfo.lightmapVecs[0][1], texInfo.lightmapVecs[0][2]);
-    out.lightmapSOffset = texInfo.lightmapVecs[0][3];
-    out.lightmapTDir    = JPH::Vec3(texInfo.lightmapVecs[1][0], texInfo.lightmapVecs[1][1], texInfo.lightmapVecs[1][2]);
-    out.lightmapTOffset = texInfo.lightmapVecs[1][3];
-    out.lightmapMins[0] = face.lightmapTextureMinsInLuxels[0];
-    out.lightmapMins[1] = face.lightmapTextureMinsInLuxels[1];
-    out.lightmapSize[0] = face.lightmapTextureSizeInLuxels[0];
-    out.lightmapSize[1] = face.lightmapTextureSizeInLuxels[1];
-    out.hasLightmap     = (face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0);
     return out;
 }
 
@@ -464,32 +428,6 @@ void EmitVertex(
     const float u = (sourcePos.Dot(projection.sDir) + projection.sOffset) / projection.width;
     const float v = (sourcePos.Dot(projection.tDir) + projection.tOffset) / projection.height;
 
-    float lmU = 0.0f;
-    float lmV = 0.0f;
-    if (projection.hasLightmap) {
-        // dot(p, lightmapS/TDir) + offset IS the absolute luxel coordinate in
-        // the shared lightmap page (a point on the face's mins corner maps to
-        // exactly lightmapTextureMins), so dividing by the page extent gives
-        // atlas UVs in the same packing the baked *_lightmapN.png images and
-        // every third-party lightmap dumper use. Normalizing per-face (the
-        // old code, mins/size) instead stretches the whole atlas across each
-        // quad -- faces then sample random atlas texels and wrong surfaces
-        // render pitch black or glowing, looking "missing".
-        const float sLuxel = sourcePos.Dot(projection.lightmapSDir) + projection.lightmapSOffset;
-        const float tLuxel = sourcePos.Dot(projection.lightmapTDir) + projection.lightmapTOffset;
-        if (projection.atlasOrigin[0] >= 0) {
-            // dot(p, lightmapS/TDir) + offset is the absolute luxel coordinate
-            // in the raw page; subtracting the face's mins corner gives the
-            // in-rect luxel, and the repacked atlas origin places it on the
-            // 4096x4096 engine atlas alongside the baked image.
-            lmU = std::clamp((projection.atlasOrigin[0] + (sLuxel - projection.lightmapMins[0]) + 0.5f) / kLightmapAtlasWidth, 0.0f, 1.0f);
-            lmV = std::clamp((projection.atlasOrigin[1] + (tLuxel - projection.lightmapMins[1]) + 0.5f) / kLightmapAtlasHeight, 0.0f, 1.0f);
-        } else {
-            lmU = (result.lightmapPageWidth > 0.0f) ? std::clamp((sLuxel + 0.5f) / result.lightmapPageWidth, 0.0f, 1.0f) : 0.0f;
-            lmV = (result.lightmapPageHeight > 0.0f) ? std::clamp((tLuxel + 0.5f) / result.lightmapPageHeight, 0.0f, 1.0f) : 0.0f;
-        }
-    }
-
     const JPH::Vec3 tangent = (projection.sDir.LengthSq() > kEpsilon * kEpsilon) ? projection.sDir.Normalized() : JPH::Vec3::sAxisX();
     const JPH::Vec3 normal  = (sourceNormal.LengthSq() > kEpsilon * kEpsilon) ? sourceNormal.Normalized() : JPH::Vec3::sAxisZ();
 
@@ -509,7 +447,7 @@ void EmitVertex(
             Math::PackNormal(engineTangent.GetX(), engineTangent.GetY(), engineTangent.GetZ(), handedness),
         }
     );
-    part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(lmU, lmV)});
+    part.surfaces.push_back(VertexSurface {Math::PackUV(u, v), Math::PackColor(1.0f, 1.0f, 1.0f, 1.0f), Math::PackUV(0.0f, 0.0f)});
 
     UpdateBounds(part.boundsMin, part.boundsMax, partBoundsFirst, enginePos);
     UpdateBounds(result.boundsMin, result.boundsMax, mapBoundsFirst, enginePos);
@@ -525,7 +463,7 @@ void EmitVertex(
         } else if (className == "light_spot") {
             type = LightType::Spot;
         } else if (className == "light_environment") {
-            type = LightType::Directional;
+            type = LightType::Sun;
         } else {
             continue;
         }
@@ -587,65 +525,6 @@ auto ConvertDirection(const ImportOptions& options, JPH::Vec3 in) noexcept -> JP
     return JPH::Vec3(in.GetX(), in.GetZ(), -in.GetY());
 }
 
-struct LightmapAtlasEntry {
-    int32_t x = -1;
-    int32_t y = -1;
-};
-
-[[nodiscard]] auto ComputeLightmapAtlas(const BSPMap& map) -> std::vector<LightmapAtlasEntry> {
-    struct Rect {
-        int32_t w, h, faceIndex;
-    };
-    std::vector<Rect> rects;
-    rects.reserve(map.faces.size());
-    for (size_t i = 0; i < map.faces.size(); ++i) {
-        const DFace& face = map.faces[i];
-        if (face.lightofs < 0 || face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0) {
-            continue;
-        }
-        // Reserve one luxel of gutter on every side (hence +2 per axis, on top
-        // of the +1 the (W+1)x(H+1) sample grid already needs). Without it the
-        // bilinear lightmap sample at a face edge reaches into whichever face
-        // the shelf packer happened to put next door, and bright outdoor
-        // luxels bleed onto dark interior walls as glowing outlines. The
-        // gutter itself is filled by the importer with the duplicated edge
-        // luxel, so it is the face's own border colour, not a neighbour's.
-        // (W+1)x(H+1) sample grid plus kLightmapGutter luxels of own-edge
-        // colour on every side; see kLightmapGutter for why three.
-        rects.push_back({face.lightmapTextureSizeInLuxels[0] + 1 + 2 * kLightmapGutter,
-                         face.lightmapTextureSizeInLuxels[1] + 1 + 2 * kLightmapGutter, static_cast<int32_t>(i)});
-    }
-    std::stable_sort(rects.begin(), rects.end(), [](const Rect& a, const Rect& b) { return a.h > b.h; });
-
-    std::vector<LightmapAtlasEntry> placements(map.faces.size());
-    int32_t                         x = 0, y = kPropAmbientRows, shelfH = 0;
-    int32_t                         overflowed = 0;
-    for (const Rect& r: rects) {
-        if (x + r.w > kLightmapAtlasWidth) {
-            x = 0;
-            y += shelfH;
-            shelfH = 0;
-        }
-        if (y + r.h > kLightmapAtlasHeight) {
-            // Out of atlas space: the face keeps its -1 placement and samples
-            // the page-space fallback instead of clamped garbage rows.
-            ++overflowed;
-            continue;
-        }
-        // Store the cell's top-left content texel, inset past the gutter.
-        // Vertex UVs derive from this, so the inset needs no compensation
-        // anywhere else.
-        placements[static_cast<size_t>(r.faceIndex)] = {x + kLightmapGutter, y + kLightmapGutter};
-        x += r.w;
-        shelfH = std::max(shelfH, r.h);
-    }
-    if (overflowed > 0) {
-        LogWarning("BSP: {} lightmapped faces do not fit the {}x{} lightmap atlas and fall back to page-space UVs; raise kLightmapAtlasWidth/Height for this map",
-                   overflowed, kLightmapAtlasWidth, kLightmapAtlasHeight);
-    }
-    return placements;
-}
-
 auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options) -> std::vector<InteractiveSubmodel> {
     std::vector<InteractiveSubmodel> result;
 
@@ -698,28 +577,6 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
     // Post-pass input for the single-sheet wall audit (one record per
     // undisplaced render face; see ApplyTwinAudit).
     std::vector<TwinRecord> twinRecords;
-
-    // Lightmap atlas: reproduced analytically from the same shelf packer the
-    // offline atlas generator used to lay out the *_lightmap0.png (see
-    // ComputeLightmapAtlas). Every vertex's lightmap UV is then expressed in
-    // that atlas' coordinate space. The raw-BSP mins/page size is NOT the
-    // atlas layout: raw-page UVs (the old code) scatter each face's samples
-    // over unrelated rectangles -- surfaces read black or glow at random.
-    const std::vector<LightmapAtlasEntry> lightmapAtlas = ComputeLightmapAtlas(map);
-
-    // Mirror the shelf pack back out for the importer: it decodes VRAD luxels
-    // into an atlas texture whose texels must land on exactly these cells.
-    result.lightmapOrigins.reserve(lightmapAtlas.size());
-    for (const LightmapAtlasEntry& entry: lightmapAtlas) {
-        result.lightmapOrigins.push_back({entry.x, entry.y});
-    }
-    for (const DFace& face: map.faces) {
-        if (face.lightofs >= 0 && face.lightmapTextureSizeInLuxels[0] > 0 && face.lightmapTextureSizeInLuxels[1] > 0) {
-            result.lightmapPageWidth  = kLightmapAtlasWidth;
-            result.lightmapPageHeight = kLightmapAtlasHeight;
-            break;
-        }
-    }
 
     for (size_t modelIdx = 0; modelIdx < map.models.size(); ++modelIdx) {
         if (options.onlyModel >= 0 && static_cast<int32_t>(modelIdx) != options.onlyModel) {
@@ -807,10 +664,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 ++result.stats.droppedNoProjection;
                 continue;
             }
-            if (projection->hasLightmap && faceIndex < lightmapAtlas.size() && lightmapAtlas[faceIndex].x >= 0) {
-                projection->atlasOrigin[0] = lightmapAtlas[faceIndex].x;
-                projection->atlasOrigin[1] = lightmapAtlas[faceIndex].y;
-            }
+
 
             const std::string_view materialName = MaterialNameFor(map, face);
             MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));

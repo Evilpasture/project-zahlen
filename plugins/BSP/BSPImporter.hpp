@@ -23,7 +23,6 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <cstddef>
-#include <vector>
 #include <span>
 #include <string_view>
 
@@ -48,12 +47,6 @@ namespace ZHLN::BSP {
     std::string_view           virtualPath,
     const ImportOptions&       options = {}
 ) -> ZHLN::Optional<ModelPrefab&>;
-
-// Rasterizes the VRAD radiosity lump into the shelf-packed atlas pixel
-// buffer (RGBA8, sRGB-encoded, scaled by kLightmapEncodeScale). Returns the
-// number of decoded faces; 0 means no lightmap data. Exposed so the decode
-// path can be validated without a RenderContext.
-[[nodiscard]] auto BuildLightmapAtlasPixels(const BSPMap& map, const ImportedMapData& imported, std::vector<uint8_t>& pixels) -> size_t;
 
 // Preloads all StudioModel static props referenced by the map into AssetManager.
 // Returns the count of successfully resolved and cached prefabs.

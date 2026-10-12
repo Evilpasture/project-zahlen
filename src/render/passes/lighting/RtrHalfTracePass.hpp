@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // it and the A-Trous ladder denoises what survives, which is far cheaper than
 // tracing at full rate.
 struct RtrHalfTracePass: Vk::RenderPass<
-                             "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Anisotropy>, Vk::ShaderRead<Res_Lighting>,
+                             "RtrHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>, Vk::ComputeRead<Res_Lighting>,
                              Vk::ComputeWrite<Res_RtrHalf>> {
     RenderContext::Impl& impl;
 

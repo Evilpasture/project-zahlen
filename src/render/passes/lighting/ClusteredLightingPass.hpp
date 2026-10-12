@@ -14,8 +14,8 @@ namespace ZHLN::Passes {
 // the pass that turns the graph's hazard analysis into real work: nine image
 // reads, each with its own barrier, before a single draw.
 struct ClusteredLightingPass: Vk::RenderPass<
-                                  "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>,
-                                  Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Sheen>, Vk::ShaderRead<Res_Anisotropy>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
+                                  "Lighting", Vk::FragmentAndComputeRead<Res_SceneColor>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>,
+                                  Vk::FragmentAndComputeRead<Res_Clearcoat>, Vk::FragmentAndComputeRead<Res_Sheen>, Vk::FragmentAndComputeRead<Res_Anisotropy>, Vk::FragmentAndComputeRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
                                   Vk::ShaderRead<Res_Ao>, Vk::ColorWrite<Res_Lighting>> {
     RenderContext::Impl&                 impl;
     GeneratedGpu::ScenePassPushConstants pc {};

@@ -36,6 +36,10 @@ using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+using Res_RtgiHalf       = Vk::GraphImage<"RtgiHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+using Res_RtgiDenoiseA   = Vk::GraphImage<"RtgiDenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+using Res_RtgiDenoiseB   = Vk::GraphImage<"RtgiDenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+using Res_LightingGI     = Vk::GraphImage<"LightingGI", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
@@ -92,6 +96,10 @@ class TargetManager {
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiHalf;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiDenoiseA;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtgiDenoiseB;
+        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingGI;
         Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
@@ -131,6 +139,10 @@ class TargetManager {
             Res_DenoiseA      denoiseA;
             Res_DenoiseB      denoiseB;
             Res_RtrHalf       rtrHalf;
+            Res_RtgiHalf      rtgiHalf;
+            Res_RtgiDenoiseA  rtgiDenoiseA;
+            Res_RtgiDenoiseB  rtgiDenoiseB;
+            Res_LightingGI    lightingGI;
             Res_Ao            ao;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;

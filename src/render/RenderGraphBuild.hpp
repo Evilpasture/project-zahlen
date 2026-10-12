@@ -26,6 +26,9 @@
 #include "passes/lighting/GtaoPass.hpp"
 #include "passes/lighting/ReflectionPass.hpp"
 #include "passes/lighting/RtrHalfTracePass.hpp"
+#include "passes/lighting/RtgiHalfTracePass.hpp"
+#include "passes/lighting/RtgiDenoisePass.hpp"
+#include "passes/lighting/RtgiCompositePass.hpp"
 #include "passes/lighting/ShadowPass.hpp"
 #include "passes/postprocess/BloomPass.hpp"
 #include "passes/postprocess/HdrDenoisePass.hpp"
@@ -79,7 +82,9 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::ShadowPass {.impl = self}, Passes::GBufferBasePass {.impl = self}, Passes::HiZGeneratePass {.impl = self},
         Passes::GBufferResolvePass {.impl = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc}, Passes::ClusteredLightingPass {.impl = self, .pc = pc},
-        Passes::RtrHalfTracePass {.impl = self}, OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
+        Passes::RtrHalfTracePass {.impl = self}, Passes::RtgiHalfTracePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self},
+        Passes::RtgiCompositePass {.impl = self},
+        OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.impl = self}, Passes::HdrDenoisePass {.impl = self}, Passes::BloomPass {.impl = self}
     );
 

@@ -14,8 +14,8 @@
 
 namespace ZHLN::BSP {
 
-// Virtual File System for resolving Source engine assets (materials, textures,
-// models, lightmaps) across disk search paths and embedded BSP pakfiles.
+// Virtual File System for resolving Source engine materials, textures, and
+// models across disk search paths and embedded BSP pakfiles.
 // Handles case-insensitive lookups on POSIX filesystems.
 class SourceVFS {
   public:
@@ -44,9 +44,6 @@ class SourceVFS {
     // Resolves a model name (e.g. "props_c17/furniturechair001a.mdl" or "models/props_c17/furniturechair001a.mdl")
     // to an actual disk path.
     [[nodiscard]] auto ResolveModel(std::string_view modelName) const -> std::optional<std::string>;
-
-    // Resolves a lightmap atlas path for a map (e.g. "lightmaps/gm_murder_drones_lightmap0.png").
-    [[nodiscard]] auto ResolveLightmap(std::string_view mapName) const -> std::optional<std::string>;
 
     // Checks whether an asset exists in any search path or pakfile.
     [[nodiscard]] auto Exists(std::string_view virtualPath) const -> bool;

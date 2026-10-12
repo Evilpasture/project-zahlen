@@ -359,33 +359,4 @@ auto SourceVFS::ResolveModel(std::string_view modelName) const -> std::optional<
     return std::nullopt;
 }
 
-auto SourceVFS::ResolveLightmap(std::string_view mapName) const -> std::optional<std::string> {
-    if (mapName.empty()) {
-        return std::nullopt;
-    }
-
-    std::filesystem::path p(mapName);
-    std::string baseName = p.stem().string();
-
-    // Check lightmaps/<mapname>_lightmap0.png
-    std::string cand1 = "lightmaps/" + baseName + "_lightmap0.png";
-    if (Exists(cand1)) {
-        return cand1;
-    }
-
-    // Check lightmaps/<mapname>_lightmap.png
-    std::string cand2 = "lightmaps/" + baseName + "_lightmap.png";
-    if (Exists(cand2)) {
-        return cand2;
-    }
-
-    // Check materials/maps/<mapname>/lightmap0.png
-    std::string cand3 = "materials/maps/" + baseName + "/lightmap0.png";
-    if (Exists(cand3)) {
-        return cand3;
-    }
-
-    return std::nullopt;
-}
-
 } // namespace ZHLN::BSP

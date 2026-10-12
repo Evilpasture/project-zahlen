@@ -53,11 +53,6 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
 
 auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string_view materialName, const ImportOptions& options) -> MaterialDesc {
     MaterialDesc desc = MaterialDesc::Basic({1.0f, 1.0f, 1.0f, 1.0f}, 0.8f, 0.0f, false);
-    // Route the map's baked atlas into the material so the studio mesh's
-    // (0,0) lightmap UVs resolve to the prop-ambient cell (atlas rows 0..3).
-    // Invalid keeps props unlit by the bake, as before.
-    desc.lightmapMap = options.lightmapTexture;
-
     const auto vmtPath = vfs.ResolveMaterial(materialName);
     if (!vmtPath.has_value()) {
         return desc;

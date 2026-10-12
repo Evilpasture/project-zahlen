@@ -5,7 +5,7 @@
 //
 // Standalone sample demonstrating Source Engine world ingestion in Zahlen:
 // loads import/engine_assets/maps/gm_murder_drones.bsp, resolves VMT/VTF materials,
-// external lightmap atlas, static prop StudioModels (.mdl/.vvd/.vtx/.phy),
+// runtime BSP lights, static prop StudioModels (.mdl/.vvd/.vtx/.phy),
 // interactive entities (doors, buttons, triggers), and spawns the player at
 // info_player_start as an invisible first-person capsule character controller.
 // V swaps that eye for the extensions/FreeCam fly camera while the capsule
@@ -87,7 +87,6 @@ namespace {
 
 inline constexpr std::string_view kDefaultMapPath       = "import/engine_assets/maps/gm_murder_drones.bsp";
 inline constexpr std::string_view kDefaultAssetRoot     = "import/engine_assets";
-inline constexpr std::string_view kDefaultLightmapAtlas = "import/engine_assets/lightmaps/gm_murder_drones_lightmap0.png";
 
 [[nodiscard]] auto ReadFileBytes(const std::filesystem::path& path) -> std::optional<std::vector<std::byte>> {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -418,25 +417,8 @@ auto main(int argc, char* argv[]) -> int {
         assetRoot = std::filesystem::path("..") / assetRoot;
     }
 
-    // Infer lightmap atlas path
-    std::filesystem::path lightmapPath = kDefaultLightmapAtlas;
-    const std::string     mapStem      = mapPath.stem().string();
-    const std::filesystem::path candidateLightmap = assetRoot / "lightmaps" / (mapStem + "_lightmap0.png");
-    if (std::filesystem::exists(candidateLightmap)) {
-        lightmapPath = candidateLightmap;
-    } else if (!std::filesystem::exists(lightmapPath) && std::filesystem::exists(std::filesystem::path("..") / lightmapPath)) {
-        lightmapPath = std::filesystem::path("..") / lightmapPath;
-    }
-
     ZHLN::Log("[BSPSample] Target map: {}", mapPath.string());
     ZHLN::Log("[BSPSample] Asset root: {}", assetRoot.string());
-    if (std::filesystem::exists(lightmapPath)) {
-        ZHLN::Log("[BSPSample] Lightmap atlas: {}", lightmapPath.string());
-    } else {
-        ZHLN::Log("[BSPSample] Lightmap atlas not found on disk, fallback unlit/baked lighting will be used.");
-        lightmapPath.clear();
-    }
-
     // 2. Read BSP file bytes
     auto bspBytesOpt = ReadFileBytes(mapPath);
     if (!bspBytesOpt) {
@@ -516,12 +498,8 @@ auto main(int argc, char* argv[]) -> int {
         .unitScale            = 0.0254f, // Convert inches to meters
         .includeDisplacements = true,
         .gatherLights         = true,
-        // The baked lightmap already carries every static light; only spawn
-        // the dynamic ones (named/styled) in real time.
-        .onlyInteractiveLights = true,
         .buildColliders       = true,
         .assetRoot            = assetRoot.string(),
-        .lightmapAtlasPath    = lightmapPath.string(),
     };
 
     const std::string virtualPath = mapPath.string();
@@ -564,26 +542,6 @@ auto main(int argc, char* argv[]) -> int {
     const auto& instance = *instanceExp;
     ZHLN::Log("[BSPSample] Instantiated {} scene entities and {} lights",
         instance.entities.size(), instance.lights.size());
-
-    // The G-buffer now adds the baked VRAD radiosity (sun included) back as
-    // outgoing radiance. LightingSystem::GetSun otherwise falls back to a
-    // synthetic intensity-180 sun when no sun entity exists -- light_environment
-    // arrives as Directional, which the punctual loop ignores -- so on a baked
-    // map that default would double-light every exterior surface. Register an
-    // explicit zero-intensity sun so the bake is the only sun; maps without a
-    // lighting lump keep the synthetic default.
-    if (!bspMap.lighting.empty()) {
-        engine->GetRegistry().Create(
-            ZHLN::Components::SunTagComponent {},
-            ZHLN::Components::LightComponent {
-                .type      = ZHLN::LightType::Sun,
-                .color     = JPH::Vec3::sZero(),
-                .intensity = 0.0f,
-                .direction = JPH::Vec3(0.0f, 1.0f, 0.0f),
-            }
-        );
-        ZHLN::Log("[BSPSample] Baked lighting present: registered zero-intensity sun (sun is in the bake)");
-    }
 
     // 7. Initialize Interactive Entities (doors, buttons, triggers)
     ZHLN::Interaction::InitializeBSPEntities(engine->GetRegistry(), bspMap, instance, importOpts);
@@ -717,6 +675,19 @@ auto main(int argc, char* argv[]) -> int {
                 p.tonemapper      = 1;
                 p.ambientExposure = 1.2f;
             });
+            const ZHLN::Entity camera = reg.SingletonEntity<ZHLN::Components::AASettingsComponent>();
+            reg.Patch<ZHLN::Components::AASettingsComponent>(camera, [](auto& aa) { aa.state.mode = ZHLN::AAMode::TAA; });
+
+            // Enable the independent one-bounce RTGI path alongside runtime
+            // BSP lights. TAA above reuses motion vectors to stabilize the
+            // blue-noise sequence, and the shared A-Trous pass handles
+            // remaining spatial noise.
+            const ZHLN::Entity rtSettings = reg.SingletonEntity<ZHLN::Components::RayTracingSettingsComponent>();
+            if (rtSettings == ZHLN::Entity::Null()) {
+                reg.Create(ZHLN::Components::RayTracingSettingsComponent {.config = {.enableDiffuseGI = true}});
+            } else {
+                reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(rtSettings, [](auto& rt) { rt.config.enableDiffuseGI = true; });
+            }
             reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
                 s.shadowWidth      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
                 s.shadowResolution = 2048;
@@ -742,10 +713,9 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::Components::LightComponent {
                     .type      = ZHLN::LightType::Sun,
                     .color     = JPH::Vec3(0.95f, 0.96f, 1.00f),
-                    // Indoor map: the baked lightmap carries the look. This
-                    // fallback is only a dim fill so the level stays navigable
-                    // without a compiled light_environment -- at 8.0 it washed
-                    // every shadow-leaking interior out to white.
+                    // A dim fill keeps the level navigable when it has no
+                    // authored light_environment; the runtime BSP lights and
+                    // RTGI provide the remaining illumination.
                     .intensity = 3.0f,
                     .direction = JPH::Vec3(-0.4f, 0.85f, -0.35f).Normalized(),
                 }

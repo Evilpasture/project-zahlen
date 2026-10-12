@@ -13,21 +13,22 @@ struct HdrAtrousPushConstants {
     uint32_t stepSize;
     float    phiDepth;
     float    phiNormal;
-    uint32_t _pad;
+    float    phiAlbedo;
 };
 static_assert(GpuAbi::ScenePassPayload<HdrAtrousPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 namespace {
 
 [[nodiscard]] auto Atrous(uint32_t stepSize) noexcept -> HdrAtrousPushConstants {
-    return HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, ._pad = 0u};
+    return HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .phiAlbedo = 0.12f};
 }
 
 } // namespace
 
 void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
-    const bool     active = impl.ctx.RayTracingSupported() && passes > 0 && (impl.settings.rayTracing.enableShadows || impl.settings.rayTracing.enableReflections);
+    const bool     active = impl.ctx.RayTracingSupported() && passes > 0 &&
+                            (impl.settings.rayTracing.enableShadows || impl.settings.rayTracing.enableReflections);
     if (!active) {
         return;
     }
@@ -38,6 +39,7 @@ void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.hdrSceneColor);
     const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.denoiseA);
     const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.denoiseB);
+    const auto albedo   = Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor);
     const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(impl.presenter.depthTarget);
     const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer);
 
@@ -47,6 +49,7 @@ void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
         atrousChain.Step<Shaders::HdrDenoise>(
             impl.postProcess.HdrDenoise(), impl.postProcess.HdrDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize),
             Vk::Slot<"inColor">(src),
+            Vk::Slot<"texAlbedo">(albedo),
             Vk::Slot<"texDepth">(depth),
             Vk::Slot<"texNormalRoughness">(norm),
             Vk::Slot<"outColor">(dst),

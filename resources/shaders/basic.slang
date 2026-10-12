@@ -105,10 +105,9 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         float3 emissive = SampleMaterialEmissive<ClearCoatMaterial>(material);
         SurfaceInteraction surface = EvaluateMaterial<ClearCoatMaterial>(material, albedo, emissive);
         output.color           = float4(surface.albedo, surface.alpha);
-        // Baked VRAD radiosity is irradiance: its outgoing radiance
-        // (albedo * bake) joins the emissive slot so baked rooms read lit
-        // even where no real-time light reaches.
-        output.emissive        = float4(surface.emissive + BakedOutgoingRadiance(material, surface.albedo), 1.0f);
+        // Preserve the material's emissive term separately; direct, diffuse
+        // and RTGI illumination are composed in the lighting passes.
+        output.emissive        = float4(surface.emissive, 1.0f);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
         output.clearcoat       = surface.clearcoat;

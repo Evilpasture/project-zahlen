@@ -76,7 +76,7 @@ enum class Lump : uint32_t {
     LeafMinDistToWater          = 46,
     FaceMacroTextureInfo        = 47,
     DispTris                    = 48,
-    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR, VRAD radiosity (ColorRGBExp32)
+    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR (ignored by the runtime importer)
     FacesHDR                    = 58, // v20+: LUMP_FACES_HDR, face list whose lightofs address LightingHDR
     Count                       = 64
 };
@@ -123,7 +123,7 @@ struct DModel {
     int32_t numfaces;
 };
 
-// LUMP_TEXINFO: [s/t][xyz offset], projections in texels / luxels.
+// LUMP_TEXINFO: [s/t][xyz offset], projections in texture texels and legacy luxels.
 struct DTexInfo {
     float   textureVecs[2][4];
     float   lightmapVecs[2][4];
@@ -141,9 +141,10 @@ struct DTexData {
     int32_t viewHeight;
 };
 
-// LUMP_FACES: the mainline (version 19-21) face. On-disk order after origFace
-// is firstPrimID, numPrims -- the classic header spells the pair the other way
-// round, so keep this order when porting from memory.
+// LUMP_FACES: the mainline (version 19-21) face. Lightmap offsets and extents
+// remain in the packed record for format compatibility; runtime import ignores them.
+// On-disk order after origFace is firstPrimID, numPrims -- the classic header
+// spells the pair the other way round, so keep this order when porting from memory.
 struct DFace {
     uint16_t planenum;
     int8_t   side;
@@ -277,25 +278,5 @@ static_assert(sizeof(DBrushSide) == 8);
 static_assert(sizeof(DOverlay) == 352);
 static_assert(sizeof(DGameLump) == 16);
 
-// Source's ColorRGBExp32, the on-disk unit of LUMP_LIGHTING_HDR and
-// LUMP_LIGHTING: linear value = byte * 2^E with E the exponent byte read as
-// SIGNED (Source SDK's ColorRGBExp32ToVector does ldexp(byte, exponent) with
-// the signed char directly -- no 128 bias, no /255). Measured on
-// gm_murder_drones: mantissas 16-21 with exponents 245-252 (int8 -11..-4),
-// i.e. dim luxels around 0.1; a bias-128 read of the same bytes inflates them
-// by 2^121 (saturating the whole atlas white), while byte/255 shrinks them by
-// 255x (the original near-black interiors).
-struct ColorRGBExp32 {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-    int8_t  exponent;
-};
-static_assert(sizeof(ColorRGBExp32) == 4);
-
-// Decode one RGBE texel to linear RGB (VRAD radiosity, Source units).
-[[nodiscard]] inline auto DecodeRGBE(const ColorRGBExp32& s) -> std::array<float, 3> {
-    return {std::ldexp(static_cast<float>(s.r), s.exponent), std::ldexp(static_cast<float>(s.g), s.exponent), std::ldexp(static_cast<float>(s.b), s.exponent)};
-}
 
 } // namespace ZHLN::BSP

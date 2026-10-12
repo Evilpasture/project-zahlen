@@ -9,13 +9,14 @@ struct HdrAtrousPushConstants {
     uint  stepSize;
     float phiDepth;
     float phiNormal;
-    uint  _pad;
+    float phiAlbedo;
 };
 
 [vk::push_constant]
 HdrAtrousPushConstants pc;
 
 Texture2D<float4> inColor;
+Texture2D<float4> texAlbedo;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 RWTexture2D<float4> outColor;
@@ -23,7 +24,10 @@ ConstantBuffer<FrameUniforms> frame;
 
 static const float WaveletKernel[5] = { 0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f };
 
-void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol, float3 centerNormal, inout float4 sum, inout float totalWeight) {
+void AccumulateTap(
+    int2 coord, float kernelW, float centerDepth, float depthTol, float3 centerNormal, float3 centerAlbedo, float albedoTol, inout float4 sum,
+    inout float totalWeight
+) {
     coord = clamp(coord, int2(0, 0), int2(frame.screenResolution) - int2(1, 1));
 
     float sampleDepthRaw = texDepth.Load(int3(coord, 0)).r;
@@ -33,10 +37,12 @@ void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol,
 
     float4 sampleValue  = inColor.Load(int3(coord, 0));
     float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
+    float3 sampleAlbedo = texAlbedo.Load(int3(coord, 0)).rgb;
 
     float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw, frame.invProj)) / depthTol);
     float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
-    float weight  = kernelW * wDepth * wNormal;
+    float wAlbedo = exp(-length(centerAlbedo - sampleAlbedo) / albedoTol);
+    float weight  = kernelW * wDepth * wNormal * wAlbedo;
 
     sum         += sampleValue * weight;
     totalWeight += weight;
@@ -57,6 +63,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float4 centerValue  = inColor.Load(int3(tid.xy, 0));
     float  centerDepth  = LinearizeDepth(depth, frame.invProj);
     float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
+    float3 centerAlbedo = texAlbedo.Load(int3(tid.xy, 0)).rgb;
+    float albedoTol = max(pc.phiAlbedo * max(length(centerAlbedo), 0.25f), 0.02f);
 
     int step = int(max(pc.stepSize, 1u));
     float depthTol = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
@@ -72,13 +80,17 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         };
         for (int i = 0; i < 9; ++i) {
             int2 off = CrossOffsets[i];
-            AccumulateTap(int2(tid.xy) + off * step, WaveletKernel[off.x + 2] * WaveletKernel[off.y + 2], centerDepth, depthTol, centerNormal, sum, totalWeight);
+            AccumulateTap(
+                int2(tid.xy) + off * step, WaveletKernel[off.x + 2] * WaveletKernel[off.y + 2], centerDepth, depthTol, centerNormal, centerAlbedo,
+                albedoTol, sum, totalWeight
+            );
         }
     } else {
         for (int y = -2; y <= 2; ++y) {
             for (int x = -2; x <= 2; ++x) {
                 AccumulateTap(
-                    int2(tid.xy) + int2(x, y) * step, WaveletKernel[x + 2] * WaveletKernel[y + 2], centerDepth, depthTol, centerNormal, sum, totalWeight
+                    int2(tid.xy) + int2(x, y) * step, WaveletKernel[x + 2] * WaveletKernel[y + 2], centerDepth, depthTol, centerNormal, centerAlbedo,
+                    albedoTol, sum, totalWeight
                 );
             }
         }

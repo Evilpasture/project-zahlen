@@ -33,13 +33,14 @@ struct TierBudget {
 
 // The resources a preset scales, read out of one settings value as plain
 // numbers: flags become 0/1 so the same "may not shrink" rule covers them.
-[[nodiscard]] auto Budgets(const GraphicsSettings& settings) -> std::array<TierBudget, 9> {
+[[nodiscard]] auto Budgets(const GraphicsSettings& settings) -> std::array<TierBudget, 10> {
     return {{
         {"shadow map resolution", settings.shadows.resolution},
         {"gi samples", static_cast<uint64_t>(settings.post.giSamples)},
         {"screen-space reflections", static_cast<uint64_t>(settings.post.enableSSR)},
         {"ray-traced reflections", static_cast<uint64_t>(settings.post.enableRTR)},
         {"ray-traced shadows", static_cast<uint64_t>(settings.rayTracing.enableShadows)},
+        {"ray-traced diffuse GI", static_cast<uint64_t>(settings.rayTracing.enableDiffuseGI)},
         {"rt shadow samples", settings.rayTracing.shadowSamples},
         {"rt reflection samples", settings.rayTracing.reflectionSamples},
         {"rt denoiser passes", settings.rayTracing.denoiserPasses},

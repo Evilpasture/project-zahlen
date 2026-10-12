@@ -900,7 +900,7 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
-# --- BSP Materials, VFS, & Lightmaps Suite ---
+# --- BSP Materials and VFS Suite ---
 set(TARGET_NAME TestBSPMaterials)
 add_executable(${TARGET_NAME} TestBSPMaterials.cpp)
 

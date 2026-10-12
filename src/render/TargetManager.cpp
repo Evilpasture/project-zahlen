@@ -67,6 +67,9 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = Vk::ImageUsage::TransferSrc;
             }
+            if constexpr (std::is_same_v<Tag, Res_LightingGI>) {
+                extra |= Vk::ImageUsage::Storage;
+            }
             if constexpr (Tag::scale_divisor > 1) {
                 extra |= Vk::ImageUsage::Storage;
             }
@@ -265,7 +268,9 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    const std::array denoiseTargets = {_graph.denoiseA.image.Handle(), _graph.denoiseB.image.Handle()};
+    const std::array denoiseTargets = {
+        _graph.denoiseA.image.Handle(), _graph.denoiseB.image.Handle(), _graph.rtgiDenoiseA.image.Handle(), _graph.rtgiDenoiseB.image.Handle()
+    };
     for (auto* const img: denoiseTargets) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
     }

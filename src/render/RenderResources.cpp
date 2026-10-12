@@ -581,7 +581,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
         .sheenRoughnessMap        = desc.sheenRoughnessMap,
         .occlusionMap             = desc.occlusionMap,
         .occlusionStrength        = desc.occlusionStrength,
-        .lightmapMap              = desc.lightmapMap,
         .textureSamplers          = desc.textureSamplers,
         .textureTransforms        = desc.textureTransforms,
     };

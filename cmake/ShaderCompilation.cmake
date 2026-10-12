@@ -30,6 +30,7 @@ file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 set(ZHLN_SHADER_COMMON_SOURCES
     "${SHADER_SRC_DIR}/uniforms.slang"
     "${SHADER_SRC_DIR}/pbr_helpers.slang"
+    "${SHADER_SRC_DIR}/blue_noise.slang"
     "${SHADER_SRC_DIR}/hash.slang"
     "${SHADER_SRC_DIR}/common.slang"
     "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
@@ -612,8 +613,8 @@ add_shader_target(shadow_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/shadow_denoise_atrous.slang|CSMain|cs_6_0|SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
 )
 
-# Color A-Trous wavelet over the composited HDR scene color, run between the
-# reflection/forward passes and bloom to integrate the 1 SPP RT grain.
+# Color A-Trous wavelet over the composited HDR scene color for ray-traced
+# shadows/reflections. RTGI is denoised separately before albedo modulation.
 add_shader_target(hdr_denoise_atrous_shader
     STAGES "${SHADER_SRC_DIR}/hdr_denoise_atrous.slang|CSMain|cs_6_0|SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
 )
@@ -622,6 +623,23 @@ add_shader_target(hdr_denoise_atrous_shader
 # reflection pass upsamples the composed result.
 add_shader_target(rtr_half_shader
     STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
+)
+
+# Half-resolution RTGI trace, pre-albedo denoise and bilateral composite.
+# Trace/denoise need ray tracing; composite is always available and passes
+# through direct lighting when the independent diffuse-GI toggle is off.
+add_shader_target(rtgi_half_shader
+    STAGES "${SHADER_SRC_DIR}/rtgi_half.slang|CSMain|cs_6_0|SHADER_RTGI_HALF_SLANG_CS_PATH"
+)
+
+# A-Trous filtering of the half-resolution incoming-radiance signal before
+# RtgiComposite applies surface albedo, avoiding texture-detail blur.
+add_shader_target(rtgi_denoise_atrous_shader
+    STAGES "${SHADER_SRC_DIR}/rtgi_denoise_atrous.slang|CSMain|cs_6_0|SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
+)
+
+add_shader_target(rtgi_composite_shader
+    STAGES "${SHADER_SRC_DIR}/rtgi_composite.slang|CSMain|cs_6_0|SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
 )
 
 # Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
@@ -870,6 +888,9 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
     "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
     "RtrHalfCS=SHADER_RTR_HALF_SLANG_CS_PATH"
+    "RtgiHalfCS=SHADER_RTGI_HALF_SLANG_CS_PATH"
+    "RtgiDenoiseCS=SHADER_RTGI_DENOISE_ATROUS_SLANG_CS_PATH"
+    "RtgiCompositeCS=SHADER_RTGI_COMPOSITE_SLANG_CS_PATH"
     "GtaoCS=SHADER_AO_GTAO_SLANG_CS_PATH"
     "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
     "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
@@ -942,6 +963,9 @@ set(ZHLN_SHADER_CATALOG_SETS
     "BloomUp=BloomUpCS"
     "HdrDenoise=HdrDenoiseAtrousCS"
     "RtrHalf=RtrHalfCS"
+    "RtgiHalf=RtgiHalfCS"
+    "RtgiDenoise=RtgiDenoiseCS"
+    "RtgiComposite=RtgiCompositeCS"
     "Gtao=GtaoCS"
     "Taa=TaaPS"
     "Fxaa=FxaaPS"

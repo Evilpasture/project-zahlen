@@ -22,9 +22,9 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     };
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(
         impl.ctx, impl.heapManager,
-        Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(impl.presenter.depthTarget)),
-        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
+        Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
+        Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
+        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"lights">(impl.frames.lightStorageBuffers[fIdx]),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(impl.graphResources.shadowMap)),
@@ -37,9 +37,9 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx)),
         Vk::Slot<"texEmissive">(Vk::Assume<Vk::ShaderRead<Res_Emissive>>(impl.graphResources.emissiveBuffer)),
         Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(impl.graphResources.ao)),
-        Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
-        Vk::Slot<"texSheen">(Vk::Assume<Vk::ShaderRead<Res_Sheen>>(impl.graphResources.sheenBuffer)),
-        Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ShaderRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
+        Vk::Slot<"texClearcoat">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
+        Vk::Slot<"texSheen">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Sheen>>(impl.graphResources.sheenBuffer)),
+        Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
         Vk::Slot<"tlas">(tlas)
     );
     impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(impl.ctx, ctx.Cmd(), lightVariant, pc, block);

@@ -59,6 +59,9 @@ set(RAW_RENDER_SOURCES
     passes/lighting/ClusteredLightingPass.cpp
     passes/lighting/GtaoPass.cpp
     passes/lighting/RtrHalfTracePass.cpp
+    passes/lighting/RtgiHalfTracePass.cpp
+    passes/lighting/RtgiDenoisePass.cpp
+    passes/lighting/RtgiCompositePass.cpp
     passes/lighting/ShadowPass.cpp
     passes/lighting/ReflectionInputs.cpp
     passes/postprocess/BloomPass.cpp

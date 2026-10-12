@@ -15,7 +15,6 @@
 #include "StudioModelImporter.hpp"
 #include "VMTParser.hpp"
 #include "VTFDecoder.hpp"
-#include <array>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
@@ -82,179 +81,7 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
     return TextureHandle::Invalid;
 }
 
-// One VRAD luxel: RGB mantissas sharing a signed power-of-two exponent.
-[[nodiscard]] inline auto LinearToSRGB8(float linear) -> uint8_t {
-    const float c = std::max(linear, 0.0f);
-    const float s = (c <= 0.0031308f) ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-    return static_cast<uint8_t>(std::clamp(s, 0.0f, 1.0f) * 255.0f + 0.5f);
-}
-
-// Engine texture ingestion is 8-bit only: RenderContext::CreateTexture always
-// uploads RGBA8 and TextureUploader hardcodes four bytes per texel, so a float
-// atlas is not reachable without RHI work. That forces a choice, because VRAD
-// radiance above 1.0 (sunlit patches, lamp pools) clips to one flat white in
-// an 8-bit target while an sRGB-encoded ramp below 1.0 is already well
-// resolved. This scale is where that trade is set, and SampleBakedRadiosity
-// divides it back out.
-//
-// Measured over a linear ramp, distinct stored codes / worst absolute error:
-//
-//   range          scale 1.0      scale 0.5      scale 0.25
-//   0.01-0.08      56 / 0.0010    41 / 0.0014    32 / 0.0018
-//   0.0-0.3       150 / 0.0022   109 / 0.0029    78 / 0.0039
-//   1.0-4.0         1 / 3.0000    68 / 2.0000   119 / 0.0176
-//
-// So 1.0 destroys everything above 1.0 outright, while 0.25 costs the shadows
-// 56 -> 32 codes -- a worst-case error of 0.0018 against values around 0.05,
-// which stays invisible under an albedo multiply. 0.25 is the better trade
-// for a baked-lighting map whose brights carry the readable information.
-inline constexpr float kLightmapEncodeScale = 0.25f;
-
-// Decode VRAD radiosity from BSPMap::lighting (LUMP_LIGHTING_HDR, falling back
-// to LDR LUMP_LIGHTING) into the same shelf-packed atlas BSPGeometry's
-// TEXCOORD_1 UVs reference -- no external *_lightmap0.png required. Each face
-// owns a (W+1)x(H+1) block of ColorRGBExp32 samples at face.lightofs;
-// bump-lit faces store 4 samples per luxel (flat + three directional) and the
-// flat one is taken. Linear radiance is scaled down and encoded to sRGB8; the
-// sampler's sRGB->linear decode round-trips the encode.
-} // namespace (BuildLightmapAtlasPixels is public: declared in BSPImporter.hpp)
-
-// Rasterizes the VRAD radiosity into the atlas pixel buffer that
-// BSPGeometry's TEXCOORD_1 UVs reference. Split out of the texture-creation
-// wrapper so the decode can be exercised without a RenderContext.
-[[nodiscard]] auto BuildLightmapAtlasPixels(const BSPMap& map, const ImportedMapData& imported, std::vector<uint8_t>& pixels) -> size_t {
-    if (map.lighting.empty() || imported.lightmapOrigins.size() != map.faces.size()) {
-        return 0;
-    }
-    const auto atlasW = static_cast<int32_t>(imported.lightmapPageWidth);
-    const auto atlasH = static_cast<int32_t>(imported.lightmapPageHeight);
-    if (atlasW <= 0 || atlasH <= 0) {
-        return 0;
-    }
-
-    pixels.assign(static_cast<size_t>(atlasW) * static_cast<size_t>(atlasH) * 4, 0);
-    const auto           putPixel = [&](int32_t x, int32_t y, float r, float g, float b) {
-        if (x < 0 || y < 0 || x >= atlasW || y >= atlasH) {
-            return;
-        }
-        uint8_t* px = &pixels[(static_cast<size_t>(y) * static_cast<size_t>(atlasW) + static_cast<size_t>(x)) * 4];
-        px[0]       = LinearToSRGB8(r * kLightmapEncodeScale);
-        px[1]       = LinearToSRGB8(g * kLightmapEncodeScale);
-        px[2]       = LinearToSRGB8(b * kLightmapEncodeScale);
-        px[3]       = 255;
-    };
-
-    double radiositySum            = 0.0;
-    double radiosityChannelCount   = 0.0;
-
-    size_t facesUnpacked = 0;
-    for (size_t faceIndex = 0; faceIndex < map.faces.size(); ++faceIndex) {
-        const DFace& face   = map.faces[faceIndex];
-        const auto   origin = imported.lightmapOrigins[faceIndex];
-        if (face.lightofs < 0 || face.lightmapTextureSizeInLuxels[0] <= 0 || face.lightmapTextureSizeInLuxels[1] <= 0 || origin[0] < 0) {
-            continue;
-        }
-        const int32_t w = face.lightmapTextureSizeInLuxels[0] + 1;
-        const int32_t h = face.lightmapTextureSizeInLuxels[1] + 1;
-        const bool    bumpLit = face.texinfo >= 0 && static_cast<size_t>(face.texinfo) < map.texInfos.size() &&
-                             (map.texInfos[static_cast<size_t>(face.texinfo)].flags & kSurfBumpLight) != 0;
-        const size_t  sampleStride = bumpLit ? 4 : 1;
-        const size_t  byteCount =
-            static_cast<size_t>(w) * static_cast<size_t>(h) * sampleStride * sizeof(ColorRGBExp32);
-        if (static_cast<size_t>(face.lightofs) + byteCount > map.lighting.size()) {
-            continue; // truncated or corrupt lump: skip this face, not the map
-        }
-        const auto* luxels = reinterpret_cast<const ColorRGBExp32*>(map.lighting.data() + static_cast<size_t>(face.lightofs));
-        // Decode into a scratch tile first: the gutter ring has to copy the
-        // edge luxels, which are only all known once the interior is decoded.
-        std::vector<std::array<float, 3>> tile(static_cast<size_t>(w) * static_cast<size_t>(h));
-        for (int32_t y = 0; y < h; ++y) {
-            for (int32_t x = 0; x < w; ++x) {
-                // Bump-lit faces store 4 ColorRGBExp32 per luxel: three
-                // tangent-space directional slices followed by the flat
-                // isotropic one. The flat slice is what a non-bumpmapped
-                // diffuse pass wants; slice 0 is lit along bump vector 0 and
-                // alternates bright/dark across brushes whose tangent axes
-                // differ -- the blocky banding visible on brush-aligned
-                // floors and walls.
-                const ColorRGBExp32& s =
-                    luxels[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * sampleStride + (bumpLit ? 3 : 0)];
-                tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = DecodeRGBE(s);
-            }
-        }
-        for (int32_t y = 0; y < h; ++y) {
-            for (int32_t x = 0; x < w; ++x) {
-                const auto c = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)];
-                radiositySum += static_cast<double>(c[0]) + static_cast<double>(c[1]) + static_cast<double>(c[2]);
-                radiosityChannelCount += 3.0;
-                putPixel(origin[0] + x, origin[1] + y, c[0], c[1], c[2]);
-            }
-        }
-        // Duplicate the border luxels into the reserved gutter rings so any
-        // tap landing outside the cell (bilinear, half-float UV error) reads
-        // this face's own edge colour, never a neighbour's light.
-        for (int32_t d = 1; d <= kLightmapGutter; ++d) {
-            for (int32_t x = 0; x < w; ++x) {
-                const auto top = tile[static_cast<size_t>(x)];
-                const auto bot = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(x)];
-                putPixel(origin[0] + x, origin[1] - d, top[0], top[1], top[2]);
-                putPixel(origin[0] + x, origin[1] + h - 1 + d, bot[0], bot[1], bot[2]);
-            }
-            for (int32_t y = 0; y < h; ++y) {
-                const auto lft = tile[static_cast<size_t>(y) * static_cast<size_t>(w)];
-                const auto rgt = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
-                putPixel(origin[0] - d, origin[1] + y, lft[0], lft[1], lft[2]);
-                putPixel(origin[0] + w - 1 + d, origin[1] + y, rgt[0], rgt[1], rgt[2]);
-            }
-            const auto cornerTL = tile[0];
-            const auto cornerTR = tile[static_cast<size_t>(w - 1)];
-            const auto cornerBL = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w)];
-            const auto cornerBR = tile[static_cast<size_t>(h - 1) * static_cast<size_t>(w) + static_cast<size_t>(w - 1)];
-            putPixel(origin[0] - d, origin[1] - d, cornerTL[0], cornerTL[1], cornerTL[2]);
-            putPixel(origin[0] + w - 1 + d, origin[1] - d, cornerTR[0], cornerTR[1], cornerTR[2]);
-            putPixel(origin[0] - d, origin[1] + h - 1 + d, cornerBL[0], cornerBL[1], cornerBL[2]);
-            putPixel(origin[0] + w - 1 + d, origin[1] + h - 1 + d, cornerBR[0], cornerBR[1], cornerBR[2]);
-        }
-        ++facesUnpacked;
-    }
-    if (facesUnpacked == 0) {
-        return 0;
-    }
-
-    // Prop-ambient cell: the map's mean baked radiosity, written into the
-    // rows the shelf packer reserves at the top of the atlas. Studio props
-    // carry lightmap UV (0,0) on every vertex, so their BakedOutgoingRadiance
-    // resolves here: albedo x map-average ambient instead of pitch black.
-    if (radiosityChannelCount > 0.0) {
-        const auto mean = static_cast<float>(radiositySum / radiosityChannelCount);
-        for (int32_t y = 0; y < kPropAmbientRows; ++y) {
-            for (int32_t x = 0; x < kPropAmbientRows; ++x) {
-                putPixel(x, y, mean, mean, mean);
-            }
-        }
-    }
-    return facesUnpacked;
-}
-
-namespace {
-
-[[nodiscard]] auto BuildLightmapAtlasTexture(RenderContext& ctx, const BSPMap& map, const ImportedMapData& imported) -> TextureHandle {
-    std::vector<uint8_t> pixels;
-    const auto          facesUnpacked = BuildLightmapAtlasPixels(map, imported, pixels);
-    if (facesUnpacked == 0) {
-        return TextureHandle::Invalid;
-    }
-    const auto atlasW = static_cast<int32_t>(imported.lightmapPageWidth);
-    const auto atlasH = static_cast<int32_t>(imported.lightmapPageHeight);
-
-    Log("BSP Importer: decoded {} lightmapped faces from {} lighting into a {}x{} atlas", facesUnpacked, map.lightingHDR ? "HDR" : "LDR",
-        atlasW, atlasH);
-    return ctx.CreateTexture("bsp_lightmap", std::span {pixels}, Extent2D {static_cast<uint32_t>(atlasW), static_cast<uint32_t>(atlasH)}, true)
-        .value_or(TextureHandle::Invalid);
-}
-
-auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, TextureHandle lightmapTexture)
-    -> MaterialDesc {
+auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part) -> MaterialDesc {
     if (IsToolTexture(part.materialName)) {
         return MaterialDesc::Unlit({0.4f, 0.4f, 0.4f, 1.0f});
     }
@@ -263,18 +90,6 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
     // found or parsed, and a pure-white fallback turns every missing material
     // into a blinding surface under direct light.
     MaterialDesc desc = MaterialDesc::Basic({0.5f, 0.5f, 0.5f, 1.0f}, 0.8f, 0.0f, false);
-    if (lightmapTexture != TextureHandle::Invalid) {
-        // A VRAD lightmap is incoming irradiance, so it modulates the surface
-        // colour rather than being added to it. Routing it through
-        // MaterialDesc::emissiveMap would add it after lighting (see
-        // lighting.slang: `... + directSun + directPunctual + emissive`), which
-        // washes every material towards the same grey no matter how dark or
-        // saturated its albedo is. The dedicated lightmap slot is sampled in
-        // material_model.slang and multiplied into the albedo instead.
-        // The UV selector is not needed: SampleBakedRadiosity reads uv1
-        // directly, which is where EmitVertex puts the atlas coordinates.
-        desc.lightmapMap = lightmapTexture;
-    }
 
     const auto vmtPath = vfs.ResolveMaterial(part.materialName);
     if (!vmtPath.has_value()) {
@@ -375,7 +190,6 @@ void AssemblePrefabParts(
     const ImportedMapData& data,
     std::string_view       prefabPath,
     const ImportOptions&   options,
-    TextureHandle          lightmapTex,
     ModelPrefab&           prefab
 ) {
     for (const MaterialStreams& part: data.parts) {
@@ -424,7 +238,7 @@ void AssemblePrefabParts(
             }
         }
 
-        const Material subMaterial = ctx.CreateMaterial(ResolveMaterialDesc(ctx, vfs, part, lightmapTex)).value_or(Material {});
+        const Material subMaterial = ctx.CreateMaterial(ResolveMaterialDesc(ctx, vfs, part)).value_or(Material {});
 
         ModelPart modelPart;
         modelPart.name            = String64(part.materialName.c_str());
@@ -561,17 +375,17 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // line proves whether it was dropped here (and by which stage) or is
     // present and the problem is downstream of this import.
     Log(
-        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided; lightmap page {}x{} luxels",
+        "BSP Importer: {} -> {} total faces -> {} render faces in {} parts ({} triangles); dropped: {} no-winding, {} degenerate, {} no-texinfo, {} tool-helper; {} collision-only; {} disp fallbacks; {} single-sheet walls forced double-sided",
         virtualPath, imported.faceCount + imported.stats.helperFacesDropped + imported.stats.collisionOnlyFaces + imported.stats.droppedNoWinding +
                          imported.stats.droppedDegenerate + imported.stats.droppedNoProjection,
         imported.faceCount, imported.parts.size(), imported.triangleCount, imported.stats.droppedNoWinding, imported.stats.droppedDegenerate,
         imported.stats.droppedNoProjection, imported.stats.helperFacesDropped, imported.stats.collisionOnlyFaces, imported.stats.displacementFallbacks,
-        imported.stats.singleSidedSheets, static_cast<int>(imported.lightmapPageWidth), static_cast<int>(imported.lightmapPageHeight)
+        imported.stats.singleSidedSheets
     );
 
     auto prefab                 = std::make_unique<ModelPrefab>();
     prefab->virtualPath         = String256(virtualPath);
-    prefab->emissiveFactorScale = 1.0f; // Source emission is baked lighting, not glTF factors.
+    prefab->emissiveFactorScale = 1.0f; // Keep Source emission at its authored linear scale.
 
     SourceVFS vfs;
     if (!options.assetRoot.empty()) {
@@ -585,33 +399,12 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         }
     }
 
-    // VRAD radiosity decoded from the BSP's own lighting lumps wins: same
-    // shelf-packed layout the vertex UVs were emitted against, with no
-    // external *_lightmap0.png dependency. The on-disk atlas PNG remains as a
-    // fallback for maps with a stripped/absent lighting lump.
-    TextureHandle lightmapTex = BuildLightmapAtlasTexture(ctx, map, imported);
-    if (lightmapTex == TextureHandle::Invalid) {
-        std::string lmPath = options.lightmapAtlasPath;
-        if (lmPath.empty()) {
-            const auto resolvedLm = vfs.ResolveLightmap(virtualPath);
-            if (resolvedLm.has_value()) {
-                lmPath = *resolvedLm;
-            }
-        }
-        if (!lmPath.empty()) {
-            const auto lmBytes = vfs.ReadFile(lmPath);
-            if (lmBytes.has_value()) {
-                lightmapTex = LoadTextureFromBytes(ctx, "bsp_lightmap", *lmBytes, false);
-            }
-        }
-    }
-
     // One identity root; parts hang off it directly (part.localTransform does
     // the placement), lights get their own translated nodes because ModelLight
     // resolves position through its node chain.
     prefab->nodes.push_back(ModelNode {.name = String64("bsp_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false});
 
-    AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, lightmapTex, *prefab);
+    AssemblePrefabParts(ctx, vfs, imported, virtualPath, options, *prefab);
 
     for (const BspPointLight& light: imported.lights) {
         ModelNode node;
@@ -660,7 +453,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         subPrefab->nodes.push_back(
             ModelNode {.name = String64("bsp_submodel_root"), .parentIndex = -1, .localTransform = JPH::Mat44::sIdentity(), .hasMesh = false}
         );
-        AssemblePrefabParts(ctx, vfs, subImported, subPath, options, lightmapTex, *subPrefab);
+        AssemblePrefabParts(ctx, vfs, subImported, subPath, options, *subPrefab);
         assetMgr.CachePrefab(HashAssetPath(subPath), std::move(subPrefab));
         Log("BSP Importer: {} -> interactive submodel prefab ({}, {} parts)", subPath, sub.rotating ? "rotating" : "sliding", subImported.parts.size());
     }
@@ -717,20 +510,10 @@ auto PreloadStaticProps(
         vfs.AddSearchPath(options.assetRoot);
     }
 
-    // Studio materials need the baked atlas for their prop-ambient cell.
-    // Build (or reuse, when the caller already carries a handle) the atlas
-    // here; BuildModelPrefab's later upload dedupes on texture identity, so
-    // this costs one atlas build per map, not two.
-    ImportOptions opts = options;
-    if (opts.lightmapTexture == TextureHandle::Invalid && !map.lighting.empty()) {
-        const ImportedMapData geom = ImportMapGeometry(map, opts);
-        opts.lightmapTexture       = BuildLightmapAtlasTexture(ctx, map, geom);
-    }
-
     size_t loaded = 0;
     for (const auto& sp: map.staticProps) {
         if (!sp.modelName.empty()) {
-            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, opts); model.has_value()) {
+            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options); model.has_value()) {
                 ++loaded;
             }
         }
@@ -739,7 +522,7 @@ auto PreloadStaticProps(
     for (const auto& ent: map.entities) {
         const std::string_view model = ent.Find("model");
         if (model.ends_with(".mdl")) {
-            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, opts); m.has_value()) {
+            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, options); m.has_value()) {
                 ++loaded;
             }
         }

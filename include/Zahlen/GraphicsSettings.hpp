@@ -65,6 +65,7 @@ struct ShadowSettings {
 struct RayTracingConfig {
     bool     enableReflections = false;
     bool     enableShadows     = false;
+    bool     enableDiffuseGI   = false;
     uint32_t reflectionSamples = 1;
     uint32_t shadowSamples     = 1;
     uint32_t denoiserPasses    = 2;
@@ -106,6 +107,7 @@ struct GraphicsSettings {
         uint32_t giSamples           = 8;
         int      enableSSR           = 0;
         int      enableRTR           = 0;
+        bool     rtDiffuseGI         = false;
         uint32_t rtShadowSamples     = 1;
         uint32_t rtReflectionSamples = 1;
         uint32_t rtDenoiserPasses    = 2;
@@ -122,6 +124,7 @@ struct GraphicsSettings {
             .giSamples           = static_cast<uint32_t>(post.giSamples),
             .enableSSR           = post.enableSSR,
             .enableRTR           = post.enableRTR,
+            .rtDiffuseGI         = rayTracing.enableDiffuseGI,
             .rtShadowSamples     = rayTracing.shadowSamples,
             .rtReflectionSamples = rayTracing.reflectionSamples,
             .rtDenoiserPasses    = rayTracing.denoiserPasses,
@@ -142,6 +145,7 @@ struct GraphicsSettings {
                 rayTracing.denoiserPasses    = 0;
                 rayTracing.maxBounces        = 1;
                 rayTracing.enableShadows     = false;
+                rayTracing.enableDiffuseGI   = false;
                 break;
             case QualityLevel::Medium:
                 antiAliasing.mode            = AAMode::TAA;
@@ -155,6 +159,7 @@ struct GraphicsSettings {
                 rayTracing.denoiserPasses    = 1;
                 rayTracing.maxBounces        = 1;
                 rayTracing.enableShadows     = true;
+                rayTracing.enableDiffuseGI   = false;
                 break;
             case QualityLevel::High:
                 antiAliasing.mode            = AAMode::TAA;
@@ -168,6 +173,7 @@ struct GraphicsSettings {
                 rayTracing.denoiserPasses    = 2;
                 rayTracing.maxBounces        = 1;
                 rayTracing.enableShadows     = true;
+                rayTracing.enableDiffuseGI   = true;
                 break;
             case QualityLevel::Ultra:
                 antiAliasing.mode            = AAMode::TAA;
@@ -181,6 +187,7 @@ struct GraphicsSettings {
                 rayTracing.denoiserPasses    = 3;
                 rayTracing.maxBounces        = 2;
                 rayTracing.enableShadows     = true;
+                rayTracing.enableDiffuseGI   = true;
                 rayTracing.alphaTestingInBVH = true;
                 break;
             case QualityLevel::Custom:
@@ -219,14 +226,14 @@ static_assert([] -> bool {
            && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
            && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
            && settings.post.tonemapper == 3 && settings.shadows.maxPunctualShadows == 0
-           && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections
+           && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections && !settings.rayTracing.enableDiffuseGI
            && settings.rayTracing.denoiserPasses == 2 && settings.environment.ambientExposure == 1.0f;
 }());
 static_assert([] -> bool {
     GraphicsSettings s {};
     s.ApplyPreset(QualityLevel::Ultra);
     return s.shadows.resolution == 4096 && s.post.enableRTR == 1 && s.post.giSamples == 16 && s.rayTracing.denoiserPasses == 3 &&
-           s.rayTracing.shadowSamples == 2 && s.DetectPreset() == QualityLevel::Ultra;
+           s.rayTracing.shadowSamples == 2 && s.rayTracing.enableDiffuseGI && s.DetectPreset() == QualityLevel::Ultra;
 }());
 static_assert([] -> bool {
     GraphicsSettings s {};

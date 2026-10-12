@@ -17,16 +17,19 @@ using BloomUpCSLayout        = Vk::ReflectedLayout;
 using HdrDenoiseCSLayout     = Vk::ReflectedLayout;
 using GtaoCSLayout           = Vk::ReflectedLayout;
 using RtrHalfCSLayout        = Vk::ReflectedLayout;
+using RtgiHalfCSLayout       = Vk::ReflectedLayout;
+using RtgiDenoiseCSLayout    = Vk::ReflectedLayout;
+using RtgiCompositeCSLayout  = Vk::ReflectedLayout;
 
 // The image-space effects that are not a lighting model.
 //
-// Bloom, the A-Trous denoiser, GTAO and the half-resolution reflection trace
-// are all full-screen compute chains driven by `GraphicsSettings::post`, and
-// the SMAA lookup tables are baked once and then only read. They share a build
-// path -- reflect a compute layout, allocate frame-lifetime heap bindings,
-// build a pipeline -- and nothing outside their own passes touches them, so
-// they are collected here rather than left as loose pipeline handles on
-// `RenderContext::Impl`.
+// Bloom, the HDR and pre-albedo RTGI A-Trous denoisers, GTAO, the half-resolution
+// reflection and RTGI traces, and the diffuse-GI composite are full-screen
+// compute passes. The SMAA lookup tables are baked once and then only read.
+// These passes share a build path -- reflect a compute layout, allocate
+// frame-lifetime heap bindings, build a pipeline -- and nothing outside their
+// own passes touches them, so they are collected here rather than left as
+// loose pipeline handles on `RenderContext::Impl`.
 class PostProcessFeature {
   public:
     PostProcessFeature()                                             = default;
@@ -39,8 +42,8 @@ class PostProcessFeature {
     // --- setup --------------------------------------------------------------
 
     // Builds every compute pipeline below that this device can run: the
-    // half-resolution ray-traced reflection trace needs ray tracing, and
-    // failing that one is not a failure of the others.
+    // half-resolution reflection and RTGI traces need ray tracing; their
+    // absence on other devices does not prevent the remaining pipelines.
     [[nodiscard]] auto Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
 
     // Bakes the SMAA area and search lookup tables on the GPU.
@@ -57,6 +60,9 @@ class PostProcessFeature {
     [[nodiscard]] auto HdrDenoise() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto Gtao() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto RtrHalf() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto RtgiHalf() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto RtgiDenoise() noexcept -> Vk::DynamicComputePass&;
+    [[nodiscard]] auto RtgiComposite() noexcept -> Vk::DynamicComputePass&;
 
     [[nodiscard]] auto BloomThresholdHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto BloomDownHeapBindings() noexcept -> Vk::HeapPassBindings&;
@@ -64,6 +70,9 @@ class PostProcessFeature {
     [[nodiscard]] auto HdrDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto GtaoHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto RtrHalfHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto RtgiHalfHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto RtgiDenoiseHeapBindings() noexcept -> Vk::HeapPassBindings&;
+    [[nodiscard]] auto RtgiCompositeHeapBindings() noexcept -> Vk::HeapPassBindings&;
 
     // Bindless slots of the baked SMAA lookup tables; `SmaaWeightPass` reads
     // both while computing blending weights.
@@ -81,6 +90,9 @@ class PostProcessFeature {
     Vk::DynamicComputePass _hdrDenoiseCS;
     Vk::DynamicComputePass _gtaoCS;
     Vk::DynamicComputePass _rtrHalfCS;
+    Vk::DynamicComputePass _rtgiHalfCS;
+    Vk::DynamicComputePass _rtgiDenoiseCS;
+    Vk::DynamicComputePass _rtgiCompositeCS;
 
     Vk::HeapPassBindings _bloomThresholdHeapBindings;
     Vk::HeapPassBindings _bloomDownHeapBindings;
@@ -88,6 +100,9 @@ class PostProcessFeature {
     Vk::HeapPassBindings _hdrDenoiseHeapBindings;
     Vk::HeapPassBindings _gtaoHeapBindings;
     Vk::HeapPassBindings _rtrHalfHeapBindings;
+    Vk::HeapPassBindings _rtgiHalfHeapBindings;
+    Vk::HeapPassBindings _rtgiDenoiseHeapBindings;
+    Vk::HeapPassBindings _rtgiCompositeHeapBindings;
 
     Vk::ReflectedLayout _bloomThresholdCSLayout;
     Vk::ReflectedLayout _bloomDownCSLayout;
@@ -95,6 +110,9 @@ class PostProcessFeature {
     Vk::ReflectedLayout _hdrDenoiseCSLayout;
     Vk::ReflectedLayout _gtaoCSLayout;
     Vk::ReflectedLayout _rtrHalfCSLayout;
+    Vk::ReflectedLayout _rtgiHalfCSLayout;
+    Vk::ReflectedLayout _rtgiDenoiseCSLayout;
+    Vk::ReflectedLayout _rtgiCompositeCSLayout;
 
     uint32_t _smaaAreaTexIdx   = 0;
     uint32_t _smaaSearchTexIdx = 0;

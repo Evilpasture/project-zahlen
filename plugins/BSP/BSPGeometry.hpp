@@ -20,20 +20,19 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <array>
-#include <Zahlen/Render/Handles.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace ZHLN::BSP {
 
-// Source `_light` brightness (the 4th component, typically 150-300) is a
-// VRAD radiosity unit, not a renderer intensity. Passed through raw, every
+// Source `_light` brightness (the 4th component, typically 150-300) is in
+// Source lighting units, not renderer intensity. Passed through raw, every
 // point/spot light lands ~30x too hot (intensity 200 against an engine
 // convention of single digits for punctual lights and 3-28 for suns) and
 // blows the scene out to white. Dividing by ~30 calibrates a stock
 // brightness-200 room light to engine intensity ~6.7, matching the physical
-// inches->metres rescale (unitScale^2) plus VRAD's luxel gain.
+// inches->metres rescale (unitScale^2) and Source's authored brightness scale.
 inline constexpr float kSourceBrightnessToEngine = 1.0f / 30.0f;
 
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
@@ -44,15 +43,8 @@ struct ImportOptions {
     float       unitScale            = 0.0254f; // Inches to meters
     bool        includeDisplacements = true;
     bool        gatherLights         = true;
-    // When true, DescribeScene skips light entities that are VRAD baking
-    // markers: unnamed and style 0. Those lights are already in the baked
-    // lightmap; respawning them in real time double-lights the map and
-    // floods the shading clusters. Named/styled lights stay: they are
-    // switchable or animated at runtime.
-    bool        onlyInteractiveLights = false;
     bool        buildColliders       = true;
     std::string assetRoot;
-    std::string lightmapAtlasPath;
 
     // Restrict the import to one submodel (index into BSPMap::models); -1
     // imports every model not listed in skipModels. Interactive brush
@@ -65,26 +57,7 @@ struct ImportOptions {
     // its collider -- a door baked into the world keeps blocking after it
     // opens).
     std::vector<int32_t> skipModels;
-
-    // Baked-lightmap atlas handle to route into studio-model materials so
-    // static props sample the prop-ambient cell (rows 0..3 of the atlas) via
-    // their (0,0) lightmap UVs. Invalid keeps props unlit by the bake.
-    TextureHandle lightmapTexture = TextureHandle::Invalid;
 };
-
-// Rows 0..3 of the lightmap atlas are reserved for the prop-ambient cell:
-// the map's mean baked radiosity, which studio props sample through their
-// (0,0) lightmap UVs (see BuildLightmapAtlasTexture / ResolveStudioMaterial).
-inline constexpr int32_t kPropAmbientRows = 4;
-
-// Padding reserved on each side of every packed lightmap face cell. One
-// luxel would suffice for the bilinear sample at a face border, but uv1 is a
-// PackedHalf2: near u = 1 the half float quantises to ~1/2048 of UV space,
-// i.e. up to one atlas texel at 4096, so an edge tap can land ~1.5 texels
-// outside the cell once bilinear centre offset is added. Two luxels of
-// own-edge colour absorb that error instead of letting it read a neighbour's
-// light (and three luxels per side no longer fits this map's 38k faces).
-inline constexpr int32_t kLightmapGutter = 2;
 
 // One material group: the concatenated, de-indexed-then-reindexed streams of
 // every face that uses one texdata name.
@@ -141,11 +114,6 @@ struct ImportStats {
     uint32_t singleSidedSheets = 0;       // faces with no opposite-facing twin; forced double-sided + backside collision
 };
 
-// texinfo flag: face compiled with bumpmapping, so VRAD stored 4 ColorRGBExp32
-// luxels per lightmap sample instead of 1. The importer needs it to stride
-// through LUMP_LIGHTING correctly.
-inline constexpr int32_t kSurfBumpLight = 0x800;
-
 struct ImportedMapData {
     std::vector<MaterialStreams> parts;
     std::vector<BspPointLight>   lights;
@@ -165,20 +133,6 @@ struct ImportedMapData {
     uint32_t    displacementCount = 0;
     uint32_t    triangleCount     = 0;
     ImportStats stats;
-
-    // Lightmap atlas page extent, in luxels: max(mins + size) over all faces.
-    // Source lightmaps live in one huge page-local coordinate space, and the
-    // baked atlas images community tools dump next to the map use that same
-    // origin -- the absorption in EmitVertex maps global luxel UVs straight
-    // into atlas space. Zero when no face carries a lightmap.
-    float lightmapPageWidth  = 0.0f;
-    float lightmapPageHeight = 0.0f;
-
-    // Per-face atlas cell origin in luxels, indexed by face index, from the
-    // same shelf pack that produced the TEXCOORD_1 UVs above. {-1, -1} marks
-    // a face with no lightmap. The importer walks this alongside
-    // BSPMap::lighting to unpack VRAD radiosity into an atlas texture.
-    std::vector<std::array<int32_t, 2>> lightmapOrigins;
 };
 
 // Position transform for the options in force (Source Z-up inches -> engine

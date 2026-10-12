@@ -159,7 +159,6 @@ struct InstanceDataDesc {
     uint32_t sheenRoughnessTex = kNoFilmTexture;
     uint32_t occlusionTex = kNoFilmTexture;
     float occlusionStrength = 1.0f;
-    uint32_t lightmapTex = kNoFilmTexture;
     MaterialSamplerAddresses textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 };
@@ -251,7 +250,6 @@ struct InstanceDataDesc {
         .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
         .occlusionTexIndex      = desc.occlusionTex,
         .occlusionStrength      = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
-        .lightmapTexIndex       = desc.lightmapTex,
         .transmissionValue       = desc.transmissionFactor,
         .transmissionIor         = desc.ior,
         .transmissionThicknessM  = desc.volumeThicknessM,
@@ -488,7 +486,6 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
                  .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
                  .occlusionStrength        = material.occlusionStrength,
-                 .lightmapTex              = OptionalTextureIndex(_impl.get(), material.lightmapMap),
                  .textureSamplers          = material.textureSamplers,
                  .textureTransforms        = material.textureTransforms,
              }

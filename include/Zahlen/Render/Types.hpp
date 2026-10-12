@@ -147,7 +147,6 @@ struct Material {
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
     TextureHandle             occlusionMap         = TextureHandle::Invalid;
     float                     occlusionStrength    = 1.0f;
-    TextureHandle             lightmapMap          = TextureHandle::Invalid;
     MaterialSamplerAddresses  textureSamplers {}; // Repeat/Repeat for non-glTF materials.
     MaterialTextureTransforms textureTransforms {};
 };
@@ -223,9 +222,6 @@ struct MaterialDesc {
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
     TextureHandle             occlusionMap         = TextureHandle::Invalid;
     float                     occlusionStrength    = 1.0f;
-    // Baked radiosity (VRAD lightmap), sampled from TEXCOORD_1 and multiplied
-    // into the diffuse albedo rather than added as emission.
-    TextureHandle             lightmapMap          = TextureHandle::Invalid;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 

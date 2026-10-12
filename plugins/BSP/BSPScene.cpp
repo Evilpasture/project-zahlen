@@ -142,19 +142,6 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         if (className == "light" || className == "light_spot" || className == "light_environment") {
             const auto lightName = entity.Find("targetname");
 
-            // VRAD leaves every baked light in the entity lump. Unnamed,
-            // style-0 lights are offline markers whose contribution is
-            // already in the lightmap; spawning them in real time
-            // double-lights the map and floods the punctual clusters.
-            // Named or styled lights are dynamic (switchable, flickering).
-            // light_environment is the sun and always stays.
-            if (options.onlyInteractiveLights && className != "light_environment") {
-                const int32_t style = entity.FindInt("style").value_or(0);
-                if (lightName.empty() && style == 0) {
-                    continue;
-                }
-            }
-
             Scene::SceneLight light;
             light.name = lightName.empty() ? std::string(className) : std::string(lightName);
 
@@ -163,8 +150,8 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 lightType  = LightType::Spot;
                 light.type = "Spot";
             } else if (className == "light_environment") {
-                lightType  = LightType::Directional;
-                light.type = "Directional";
+                lightType  = LightType::Sun;
+                light.type = "Sun";
             } else {
                 light.type = "Point";
             }
