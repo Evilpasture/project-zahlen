@@ -139,6 +139,9 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
         px[3]       = 255;
     };
 
+    double radiositySum            = 0.0;
+    double radiosityChannelCount   = 0.0;
+
     size_t facesUnpacked = 0;
     for (size_t faceIndex = 0; faceIndex < map.faces.size(); ++faceIndex) {
         const DFace& face   = map.faces[faceIndex];
@@ -169,6 +172,8 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
                 const auto c = tile[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+                radiositySum += static_cast<double>(c[0]) + static_cast<double>(c[1]) + static_cast<double>(c[2]);
+                radiosityChannelCount += 3.0;
                 putPixel(origin[0] + x, origin[1] + y, c[0], c[1], c[2]);
             }
         }
@@ -200,6 +205,19 @@ inline constexpr float kLightmapEncodeScale = 0.25f;
     }
     if (facesUnpacked == 0) {
         return TextureHandle::Invalid;
+    }
+
+    // Prop-ambient cell: the map's mean baked radiosity, written into the
+    // rows the shelf packer reserves at the top of the atlas. Studio props
+    // carry lightmap UV (0,0) on every vertex, so their BakedOutgoingRadiance
+    // resolves here: albedo x map-average ambient instead of pitch black.
+    if (radiosityChannelCount > 0.0) {
+        const auto mean = static_cast<float>(radiositySum / radiosityChannelCount);
+        for (int32_t y = 0; y < kPropAmbientRows; ++y) {
+            for (int32_t x = 0; x < kPropAmbientRows; ++x) {
+                putPixel(x, y, mean, mean, mean);
+            }
+        }
     }
 
     Log("BSP Importer: decoded {} lightmapped faces from {} lighting into a {}x{} atlas", facesUnpacked, map.lightingHDR ? "HDR" : "LDR",
@@ -672,10 +690,20 @@ auto PreloadStaticProps(
         vfs.AddSearchPath(options.assetRoot);
     }
 
+    // Studio materials need the baked atlas for their prop-ambient cell.
+    // Build (or reuse, when the caller already carries a handle) the atlas
+    // here; BuildModelPrefab's later upload dedupes on texture identity, so
+    // this costs one atlas build per map, not two.
+    ImportOptions opts = options;
+    if (opts.lightmapTexture == TextureHandle::Invalid && !map.lighting.empty()) {
+        const ImportedMapData geom = ImportMapGeometry(map, opts);
+        opts.lightmapTexture       = BuildLightmapAtlasTexture(ctx, map, geom);
+    }
+
     size_t loaded = 0;
     for (const auto& sp: map.staticProps) {
         if (!sp.modelName.empty()) {
-            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, options); model.has_value()) {
+            if (const auto model = LoadStudioModelPrefab(ctx, assetMgr, vfs, sp.modelName, opts); model.has_value()) {
                 ++loaded;
             }
         }
@@ -684,7 +712,7 @@ auto PreloadStaticProps(
     for (const auto& ent: map.entities) {
         const std::string_view model = ent.Find("model");
         if (model.ends_with(".mdl")) {
-            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, options); m.has_value()) {
+            if (const auto m = LoadStudioModelPrefab(ctx, assetMgr, vfs, model, opts); m.has_value()) {
                 ++loaded;
             }
         }

@@ -35,6 +35,8 @@ constexpr float kEpsilon = 1e-6f;
 //   * stable sort by height descending; ties keep ascending face index
 //   * next-fit shelves left to right over the atlas width, rects packed tight
 constexpr int32_t kLightmapAtlasWidth  = 2048;
+// Rows 0..kPropAmbientRows (declared in BSPGeometry.hpp) stay free of face
+// tiles: they hold the prop-ambient cell sampled by studio props.
 constexpr int32_t kLightmapAtlasHeight = 2048;
 // One luxel of padding reserved on each side of every packed face cell, so a
 // bilinear lightmap sample at a face border cannot reach a neighbouring face.
@@ -613,7 +615,7 @@ struct LightmapAtlasEntry {
     std::stable_sort(rects.begin(), rects.end(), [](const Rect& a, const Rect& b) { return a.h > b.h; });
 
     std::vector<LightmapAtlasEntry> placements(map.faces.size());
-    int32_t                         x = 0, y = 0, shelfH = 0;
+    int32_t                         x = 0, y = kPropAmbientRows, shelfH = 0;
     for (const Rect& r: rects) {
         if (x + r.w > kLightmapAtlasWidth) {
             x = 0;

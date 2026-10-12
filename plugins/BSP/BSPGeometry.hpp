@@ -20,6 +20,7 @@
 #include <Zahlen/Render/GpuEnums.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <array>
+#include <Zahlen/Render/Handles.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -64,7 +65,17 @@ struct ImportOptions {
     // its collider -- a door baked into the world keeps blocking after it
     // opens).
     std::vector<int32_t> skipModels;
+
+    // Baked-lightmap atlas handle to route into studio-model materials so
+    // static props sample the prop-ambient cell (rows 0..3 of the atlas) via
+    // their (0,0) lightmap UVs. Invalid keeps props unlit by the bake.
+    TextureHandle lightmapTexture = TextureHandle::Invalid;
 };
+
+// Rows 0..3 of the lightmap atlas are reserved for the prop-ambient cell:
+// the map's mean baked radiosity, which studio props sample through their
+// (0,0) lightmap UVs (see BuildLightmapAtlasTexture / ResolveStudioMaterial).
+inline constexpr int32_t kPropAmbientRows = 4;
 
 // One material group: the concatenated, de-indexed-then-reindexed streams of
 // every face that uses one texdata name.
