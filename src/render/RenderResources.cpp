@@ -333,10 +333,6 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
     }
 }
 
-auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uint32_t {
-    return _impl->textureManager.GetBindlessIndex(handle);
-}
-
 void RenderContext::ClearGPUCaches() noexcept {
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());

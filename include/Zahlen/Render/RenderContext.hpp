@@ -161,9 +161,9 @@ class ZHLN_API RenderContext {
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
 
-    // Only draw submission needs the GPU descriptor index; resource creation
-    // and lifetime use TextureHandle throughout.
-    [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
+    // TextureHandles are the only texture identity outside the renderer.
+    // The descriptor index a handle maps to is draw-submission business and
+    // stays inside; nothing out here can ask for it.
 
     // Unnamed uploads each get a fresh handle; release it with UnloadTexture.
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;

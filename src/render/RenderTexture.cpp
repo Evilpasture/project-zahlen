@@ -9,10 +9,11 @@ namespace ZHLN {
 
 // A render texture is an ordinary bindless texture whose image also has
 // attachment usage, so it gets the same TextureHandle as any other texture:
-// materials and sampling passes read it through scene.globalTextures via
-// GetBindlessIndex, exactly like an uploaded texture. The only extra state
-// is the attachment side (slice + view + layout), kept in the registry
-// below and looked up by that handle when a FrameTarget resolves.
+// materials and sampling passes read it through scene.globalTextures,
+// resolved from the handle inside the renderer, exactly like an uploaded
+// texture. The only extra state is the attachment side (slice + view +
+// layout), kept in the registry below and looked up by that handle when a
+// FrameTarget resolves.
 auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode> {
     if (width == 0 || height == 0 || ctx.Device() == VK_NULL_HANDLE) {
         return std::unexpected(Vk::DescriptorHeapError::AllocationFailed);

@@ -60,6 +60,9 @@ class TextureManager {
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
         -> std::expected<TextureHandle, ErrorCode>;
+    // Renderer-internal: draw submission translating handles into descriptor
+    // indices at pack time. Not reachable from the public API -- outside code
+    // holds TextureHandles, period.
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
     void Clear();
