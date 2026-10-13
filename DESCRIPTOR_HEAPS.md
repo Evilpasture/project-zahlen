@@ -160,10 +160,11 @@ the old bindless set array.
 * Scene registry pipelines: materials, shadow (cascade + light atlas), lines,
   CSG stencil passes, particle render, mesh-particle render + shadow, UI
   batches, decals (set 0 + scene set 1 merged into one mapping chain).
-* Compute: particle update, mesh-particle update, HiZ generation (one block per
-  mip, written while the mip is recorded), occlusion culling (one block per
-  pass), cluster bounds/culling, all five volumetric passes, procedural bake
-  (immediate partition).
+* Compute: particle update, mesh-particle update, standalone BDA-based
+  skinning (heap-mode push data with no descriptor mapping), HiZ generation
+  (one block per mip, written while the mip is recorded), occlusion culling
+  (one block per pass), cluster bounds/culling, all five volumetric passes,
+  procedural bake (immediate partition).
 * Post-processing: ambient, lighting, reflection (their RT/NoRT pipeline
   variants share one block per frame), translucent reflection, bloom (one block
   per chain step), TAA/FXAA/MLAA/SMAA, blit.
@@ -205,8 +206,9 @@ the old bindless set array.
 
 ## 5. Still Legacy
 
-* Skinning only: a BDA + push-constant compute pass recorded before the
-  frame's heap segments (it binds no descriptor sets).
+* `HangGpuCS` only: the device-lost diagnostic remains a traditional compute
+  pipeline with an empty real layout; it uses neither descriptor sets nor push
+  constants.
 * Everything descriptor-set related was deleted from the render layer after
   the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
   the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,

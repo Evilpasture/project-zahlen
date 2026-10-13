@@ -82,7 +82,6 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
-    skinningPass.Bind(cmd);
 
     for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
@@ -121,8 +120,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
                 .morphWeights     = drawCmd.morphWeights
             };
 
-            skinningPass.PushConstants<Shaders::Modules::SkinningCS>(cmd, pcs);
-            skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
+            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(ctx, cmd, posMesh->vertexCount, 1, 1, pcs);
         }
     }
 

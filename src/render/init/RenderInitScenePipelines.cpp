@@ -78,17 +78,16 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
 }
 
 auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCode> {
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddPushConstant(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(SkinningConstants))
-        .Build()
-        .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
-            skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader<Shaders::Modules::SkinningCS, SkinningConstants>(
-                       Vk::MakeStageSource<Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
-            )
-                .transform([&](auto&& pipeline) -> auto { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
+    const auto source = Vk::MakeStageSource<Shaders::Modules::SkinningCS>();
+    const auto loaded = LoadShaderData(source);
+    const auto bytes  = loaded.Code();
+    if (bytes.empty()) {
+        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
+    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, pipelineCache.Get());
 }
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(

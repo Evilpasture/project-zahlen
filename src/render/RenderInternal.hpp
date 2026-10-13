@@ -399,7 +399,6 @@ struct RenderContext::Impl {
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
-    Vk::PipelineLayout     skinningPipelineLayout;
 
     bool enableMeshShading = true;
 
