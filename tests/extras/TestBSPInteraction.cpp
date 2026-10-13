@@ -324,6 +324,151 @@ struct BSPInteractionTestSuite {
             return {};
         }
 
+        // Regression: a sliding func_door / func_button used to be emitted with
+        // the SceneEntity default transform -- the map origin -- because
+        // DescribeScene only stamped transform.position for rotating
+        // submodels. Three things then read that origin as the door's real
+        // position: BSPInteraction's closedPosition (and therefore the
+        // movement system's interpolation), the 2.5 m use radius, and
+        // Scene::Instantiate's kinematic root collider. The door rendered in
+        // place, collided at the origin, and could never be used.
+        std::expected<void, ZHLN::ErrorCode> sliding_door_transform_is_not_the_map_origin() {
+            ZHLN::BSP::BSPMap map;
+            map.version = 20;
+
+            // Model 0 is the worldspawn brush.
+            ZHLN::BSP::DModel world {};
+            world.mins[0] = -200.0f;
+            world.mins[1] = -200.0f;
+            world.mins[2] = 0.0f;
+            world.maxs[0] = 200.0f;
+            world.maxs[1] = 200.0f;
+            world.maxs[2] = 200.0f;
+            map.models.push_back(world);
+
+            // Model 1 is the gate door: a sliding func_door. Note the absence
+            // of any On* output and of `target` -- a map's main gate is exactly
+            // the entity an author wires nothing to.
+            ZHLN::BSP::DModel doorModel {};
+            doorModel.mins[0] = -50.0f;
+            doorModel.mins[1] = -5.0f;
+            doorModel.mins[2] = 0.0f;
+            doorModel.maxs[0] = 50.0f;
+            doorModel.maxs[1] = 5.0f;
+            doorModel.maxs[2] = 80.0f;
+            map.models.push_back(doorModel);
+
+            {
+                ZHLN::BSP::BSPEntity ent;
+                ent.keys.push_back({"classname", "worldspawn"});
+                map.entities.push_back(ent);
+            }
+            {
+                ZHLN::BSP::BSPEntity ent;
+                ent.keys.push_back({"classname", "func_door"});
+                ent.keys.push_back({"targetname", "gate"});
+                ent.keys.push_back({"model", "*1"});
+                ent.keys.push_back({"speed", "100"});
+                ent.keys.push_back({"wait", "4"});
+                ent.keys.push_back({"movedir", "0 90 0"}); // +Y in source
+                ent.keys.push_back({"spawnflags", "256"}); // Use opens
+                // Authored off the map origin, so "transform == origin" is a
+                // visible failure rather than a silent zero. Both scene
+                // description paths (the submodel prefab path and the
+                // placeholder-box fallback) resolve the position from this
+                // keyvalue, so the test does not depend on which one runs.
+                ent.keys.push_back({"origin", "100 200 40"});
+                map.entities.push_back(ent);
+            }
+
+            const auto scene = ZHLN::BSP::DescribeScene(map, "maps/gate.bsp");
+            ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2});
+
+            const auto& gateDesc   = scene.entities[1];
+            const JPH::Vec3 pivot {gateDesc.transform.position.x, gateDesc.transform.position.y, gateDesc.transform.position.z};
+            // The gate sits well off the origin in this synthetic map.
+            ZHLN::Test::ExpectGt((pivot - JPH::Vec3::sZero()).Length(), 1e-3f);
+
+            ZHLN::ECS::Registry reg;
+            reg.RegisterComponent<ZHLN::Components::NameComponent>();
+            reg.RegisterComponent<ZHLN::Components::TransformComponent>();
+            reg.RegisterComponent<ZHLN::Components::SceneSourceComponent>();
+            reg.RegisterComponent<ZHLN::Components::PhysicsComponent>();
+            reg.RegisterComponent<ZHLN::Interaction::DoorComponent>();
+            reg.RegisterComponent<ZHLN::Interaction::ButtonComponent>();
+            reg.RegisterComponent<ZHLN::Interaction::TriggerComponent>();
+            reg.RegisterComponent<ZHLN::Interaction::EntityConnectionComponent>();
+            reg.RegisterComponent<ZHLN::Interaction::BSPEntityMetadataComponent>();
+
+            ZHLN::Scene::Instance inst;
+            for (const auto& sceneEnt : scene.entities) {
+                const auto e = reg.Create();
+                reg.Add(e, ZHLN::Components::NameComponent {.name = ZHLN::String64(sceneEnt.name)});
+                reg.Add<ZHLN::Components::TransformComponent>(
+                    e,
+                    ZHLN::Components::TransformComponent {
+                        .position = JPH::Vec3(sceneEnt.transform.position),
+                        .rotation = JPH::Quat::sIdentity(),
+                        .scale    = JPH::Vec3::sReplicate(1.0f),
+                    }
+                );
+                reg.Add<ZHLN::Components::SceneSourceComponent>(
+                    e,
+                    ZHLN::Components::SceneSourceComponent {
+                        .shape       = sceneEnt.shape,
+                        .source      = ZHLN::String256(sceneEnt.source),
+                        .halfExtents = sceneEnt.halfExtents,
+                    }
+                );
+                // Scene::Instantiate hangs the kinematic root collider on the
+                // root entity; both movement systems want a PhysicsComponent.
+                reg.Add<ZHLN::Components::PhysicsComponent>(
+                    e,
+                    ZHLN::Components::PhysicsComponent {
+                        .physicsHandle = ZHLN::Physics::BodyHandle {.index = 1, .generation = 1},
+                        .isStatic      = false,
+                    }
+                );
+                inst.entities.push_back(e);
+            }
+
+            ZHLN::Interaction::InitializeBSPEntities(reg, map, inst);
+
+            const auto gate    = inst.entities[1];
+            const auto doorEnt = reg.Get<ZHLN::Interaction::DoorComponent>(gate);
+            if (!ZHLN::Test::ExpectTrue(doorEnt.has_value())) {
+                return {};
+            }
+            const auto& door = *doorEnt;
+
+            // The closed position must be the door's authored world position,
+            // not the map origin. This is the value the interaction system
+            // measures the 2.5 m use radius from, and the value the movement
+            // system interpolates from -- a zero here is the regression.
+            ZHLN::Test::ExpectLt((door.closedPosition - pivot).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((door.closedPosition - JPH::Vec3::sZero()).Length(), 1e-3f);
+            ZHLN::Test::ExpectGt((door.openPosition - door.closedPosition).Length(), 0.0f);
+
+            // The door actually slides: opening moves it, in place, along movedir.
+            ZHLN::ECS::Query<
+                ZHLN::Interaction::DoorComponent&, ZHLN::Components::TransformComponent&, const ZHLN::Interaction::EntityConnectionComponent,
+                const ZHLN::Components::PhysicsComponent>
+                query(reg);
+            ZHLN::Interaction::FireEntityInput(reg, "gate", "Open");
+            ZHLN::Interaction::DoorMovementSystem::Update(query, reg, ZHLN::FrameDt {0.5f}, std::nullopt, std::nullopt);
+
+            const auto moved = reg.Get<ZHLN::Components::TransformComponent>(gate);
+            if (!ZHLN::Test::ExpectTrue(moved.has_value())) {
+                return {};
+            }
+            // Half a speed-step of travel away from the gate, still nowhere near
+            // the origin.
+            ZHLN::Test::ExpectGt((moved->position - pivot).Length(), 0.0f);
+            ZHLN::Test::ExpectGt((moved->position - JPH::Vec3::sZero()).Length(), 0.0f);
+
+            return {};
+        }
+
         std::expected<void, ZHLN::ErrorCode> door_movement_system_state_machine() {
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ZHLN::Components::NameComponent>();
@@ -661,6 +806,7 @@ int main() {
 
     runTest("describe_scene_converts_interactive_entities", [&] { return suite.describe_scene_converts_interactive_entities(); });
     runTest("initialize_bsp_entities_attaches_components", [&] { return suite.initialize_bsp_entities_attaches_components(); });
+    runTest("sliding_door_transform_is_not_the_map_origin", [&] { return suite.sliding_door_transform_is_not_the_map_origin(); });
     runTest("door_movement_system_state_machine", [&] { return suite.door_movement_system_state_machine(); });
     runTest("rotating_door_slerp_movement", [&] { return suite.rotating_door_slerp_movement(); });
     runTest("source_entity_io_wiring", [&] { return suite.source_entity_io_wiring(); });

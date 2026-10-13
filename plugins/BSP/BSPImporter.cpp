@@ -732,8 +732,24 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
 
     // One prefab per interactive submodel, cached under "<map>#model_<N>" --
     // the source BSPScene stamps on the door/button entity description.
-    // Sliding doors keep their world-space vertices (the entity transform is
-    // just the movement delta); rotating doors are re-based on their hinge.
+    // Re-base every interactive submodel on its pivot, rotating or not.
+    //
+    // The rotating path has always done this; the sliding path did not, on the
+    // theory that "the entity transform is just the movement delta". That left
+    // a sliding door's transform at the identity SceneEntity default -- the map
+    // origin -- and three things read that transform as the door's real
+    // position:
+    //
+    //   * BSPInteraction reads trans->position as the door's closedPosition, so
+    //     the movement system interpolated origin -> origin + movedir*travel
+    //     instead of in place, and the E-to-use proximity check (2.5 m from
+    //     trans->position) never fired anywhere near the actual door.
+    //   * Scene::Instantiate creates the kinematic root collider at
+    //     params.position, so the door's collider sat at the map origin and the
+    //     player walked straight through the door where it really was.
+    //
+    // Re-basing costs nothing visually: the rendered vertex is
+    // pivot + (worldVertex - pivot) == worldVertex, exactly as before.
     for (const InteractiveSubmodel& sub: interactiveSubmodels) {
         ImportOptions subOptions = options;
         subOptions.onlyModel     = sub.modelIndex;
@@ -743,9 +759,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         if (subImported.parts.empty()) {
             continue; // Pure tool faces (clip/hint brushes): nothing to draw.
         }
-        if (sub.rotating) {
-            ShiftImportedGeometry(subImported, -sub.pivot);
-        }
+        ShiftImportedGeometry(subImported, -sub.pivot);
 
         const std::string subPath      = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
         auto              subPrefab    = std::make_unique<ModelPrefab>();
