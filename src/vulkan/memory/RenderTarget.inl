@@ -8,14 +8,14 @@ namespace ZHLN::Vk {
 
 template <VkFormat F>
 inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
-    image(std::move(other.image)), view(std::move(other.view)), extent(other.extent) {
+    image(std::move(other.image)), attachmentView(std::move(other.attachmentView)), extent(other.extent) {
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::operator=(RenderTarget&& other) noexcept -> RenderTarget& {
     if (this != &other) {
-        view   = std::move(other.view);
-        image  = std::move(other.image);
+        attachmentView = std::move(other.attachmentView);
+        image          = std::move(other.image);
         extent = other.extent;
     }
     return *this;
@@ -43,20 +43,17 @@ inline auto
     rt.image = std::move(img_res.value());
     ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    const ImageViewConfig viewConfig {
-        .kind = desc.arrayLayers > 1 ? ImageViewKind::Texture2DArray : ImageViewKind::Texture2D,
-    };
-    auto view_res = rt.image.CreateView(device, viewConfig);
+    auto view_res = rt.image.CreateAttachmentView(device);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
-    rt.view = std::move(*view_res);
+    rt.attachmentView = std::move(*view_res);
     return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 
 template <VkFormat F>
 inline auto RenderTarget<F>::Valid() const noexcept -> bool {
-    return image.Valid() && view.Valid();
+    return image.Valid() && attachmentView.Valid();
 }
 
 template <VkFormat F>
@@ -77,11 +74,11 @@ inline auto
     rt.image = std::move(img_res.value());
     ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    auto view_res = rt.image.CreateView(device, {.kind = ImageViewKind::Texture3D});
+    auto view_res = rt.image.CreateAttachmentView(device);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
-    rt.view = std::move(*view_res);
+    rt.attachmentView = std::move(*view_res);
     return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
 }
 

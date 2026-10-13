@@ -24,7 +24,7 @@ void DestroySemaphore::operator()(const VkDevice device, const VkSemaphore handl
     }
 }
 
-void DestroyImageView::operator()(const VkDevice device, const VkImageView handle) const noexcept {
+void DestroyAttachmentView::operator()(const VkDevice device, const VkImageView handle) const noexcept {
     if (vkDestroyImageView != nullptr) {
         vkDestroyImageView(device, handle, nullptr);
     }

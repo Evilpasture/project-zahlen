@@ -40,7 +40,7 @@ struct ResourceResolver<Res_TransLighting> {
         const auto& target = impl.graphResources.transLightingTarget;
         // The graph uses mip 0 as a color attachment; the scene descriptor
         // separately samples the full mip chain (WriteTransLightingToHeap).
-        return ImageSlice {target.image.Handle(), target.mipViews[0], target.extent, Res_TransLighting::format};
+        return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, Res_TransLighting::format};
     }
 };
 

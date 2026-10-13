@@ -10,23 +10,25 @@
 
 namespace ZHLN::Vk {
 
+// An uploaded sampled texture: the image plus the plain view description
+// every heap write of it is built from. No VkImageView handle exists for it.
 struct TextureResource {
-    Image      image;
-    ImageView  view;
-    VkExtent3D extent {};
+    Image                 image;
+    VkImageViewCreateInfo viewInfo {};
+    VkExtent3D            extent {};
 
     void Destroy(Allocator& allocator) noexcept {
-        view = {};
+        viewInfo = {};
         allocator.DestroyImage(image);
         extent = {};
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {image.Handle(), view, extent, view.Format()};
+        return ImageSlice {viewInfo, extent};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return image.Valid() && view.Valid();
+        return image.Valid() && viewInfo.image != VK_NULL_HANDLE;
     }
     explicit operator bool() const noexcept {
         return Valid();

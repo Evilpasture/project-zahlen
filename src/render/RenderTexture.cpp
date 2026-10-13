@@ -23,22 +23,24 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     auto image = std::move(*imageRes);
     defer _([&] { allocator.DestroyImage(image); });
 
-    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
+    // One real handle for the attachment role, held by the RenderTexture
+    // itself; the bindless descriptor side only gets a create-info.
+    auto viewRes = image.CreateAttachmentView(ctx.Device());
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
-    auto view = std::move(*viewRes);
+    auto attachmentView = std::move(*viewRes);
 
-    auto bindless = textureManager.Adopt(std::move(image), std::move(view));
+    const VkImageViewCreateInfo descriptorInfo = image.ViewInfo();
+    auto bindless = textureManager.Adopt(std::move(image), descriptorInfo);
     if (!bindless) {
         return std::unexpected(bindless.error());
     }
 
     const auto handle = static_cast<RenderTextureHandle>(nextRenderTextureId.fetch_add(1, std::memory_order::relaxed));
-    renderTextures.emplace(handle, RenderTexture {
-        .image = textureManager.Slice(*bindless, {width, height}),
-        .bindlessIndex = *bindless,
-    });
+    auto& entry = renderTextures.emplace(handle, RenderTexture {.bindlessIndex = *bindless}).first->second;
+    entry.attachmentView = std::move(attachmentView);
+    entry.image = Vk::ImageSlice {textureManager.Image(*bindless).Handle(), entry.attachmentView, VkExtent2D {width, height}, format};
     return handle;
 }
 
@@ -48,6 +50,9 @@ void RenderContext::Impl::DestroyRenderTexture(RenderTextureHandle handle) noexc
         return;
     }
     const uint32_t bindlessIndex = it->second.bindlessIndex;
+    // The attachment view may still be referenced by in-flight rendering;
+    // retire it with the frame fence like the bindless slot's image.
+    deletionQueue.EnqueueAttachmentView(ctx.Device(), std::move(it->second.attachmentView));
     renderTextures.erase(it);
     if (bindlessIndex > kFallbackNormalTextureIndex) {
         textureManager.ReleaseSlot(bindlessIndex);

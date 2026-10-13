@@ -351,8 +351,9 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->pipelines.RetireAll();
     _impl->geometry.ClearMaterials();
 
-    for (const auto& entry: _impl->renderTextures) {
+    for (auto& entry: _impl->renderTextures) {
         _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
+        _impl->deletionQueue.EnqueueAttachmentView(_impl->ctx.Device(), std::move(entry.second.attachmentView));
     }
     _impl->renderTextures.clear();
     _impl->textureManager.Clear();
@@ -687,18 +688,14 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
-    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
-    if (!viewRes) {
-        return std::unexpected(viewRes.error());
-    }
-    Vk::ImageView view = std::move(*viewRes);
+    const VkImageViewCreateInfo viewInfo = image.ViewInfo();
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
     // Retained only as a config: InitPassSamplerDescriptors writes it into
     // the sampler heap (e.g. Reflection's "blueNoiseSampler" slot).
     blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), std::move(view));
+    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), viewInfo);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }

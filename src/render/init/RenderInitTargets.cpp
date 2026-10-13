@@ -66,7 +66,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         Vk::ClearColorAndTransition(cmd, Color4 {}, accumulationHistory.Current(), accumulationHistory.Previous());
 
         if (decalDepthSlot.Valid()) {
-            heapManager.WriteImage(decalDepthSlot, presenter.depthTarget, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            heapManager.WriteImage(decalDepthSlot, presenter.depthTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(

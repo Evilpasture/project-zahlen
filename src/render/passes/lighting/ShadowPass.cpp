@@ -192,7 +192,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     if (ctx.shadows.AtlasPipeline() != VK_NULL_HANDLE && !placements.empty()) {
         const auto atlasImage = Vk::ImageSlice {
             ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.AtlasView(),
-            VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT
+            VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT
         }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
         const auto tiles = ctx.shadowAtlas.Tiles();

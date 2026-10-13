@@ -41,14 +41,14 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(
         impl, ctx.Cmd(), impl.smaaWeightPass, [&]() {
-            const auto& areaView   = impl.textureManager.View(impl.postProcess.SmaaAreaTexture());
-            const auto& searchView = impl.textureManager.View(impl.postProcess.SmaaSearchTexture());
+            const auto& areaInfo   = impl.textureManager.ViewInfo(impl.postProcess.SmaaAreaTexture());
+            const auto& searchInfo = impl.textureManager.ViewInfo(impl.postProcess.SmaaSearchTexture());
 
             return MakeFullscreenPassArgs(
                 MetricsOf(impl.graphResources.smaaWeightTarget.extent),
                 Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(impl.graphResources.smaaEdgeTarget)),
-                Vk::Slot<"areaTex">(areaView),
-                Vk::Slot<"searchTex">(searchView)
+                Vk::Slot<"areaTex">(areaInfo),
+                Vk::Slot<"searchTex">(searchInfo)
             );
         }
     );

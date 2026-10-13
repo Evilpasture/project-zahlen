@@ -65,13 +65,13 @@ auto VolumetricFogSystem::InitializeNoise(RenderContext::Impl& impl) -> std::exp
         )
         .transform([this, &impl](Vk::TextureResource tex) -> void {
             DestroyNoise(impl.allocator);
-            _noiseView  = std::move(tex.view);
+            _noiseInfo = tex.viewInfo;
             _noiseImage = std::move(tex.image);
         });
 }
 
 void VolumetricFogSystem::DestroyNoise(Vk::Allocator& allocator) noexcept {
-    _noiseView = {};
+    _noiseInfo = {};
     allocator.DestroyImage(_noiseImage);
 }
 
@@ -112,7 +112,7 @@ auto VolumetricFogSystem::Temporal() noexcept -> Vk::FixedDoubleBufferedComputeP
 }
 
 auto VolumetricFogSystem::NoiseWrite() const noexcept -> Vk::ImageWrite {
-    return Vk::ImageWrite {_noiseView};
+    return Vk::ImageWrite {_noiseInfo};
 }
 
 auto VolumetricFogSystem::VoxelDispatchExtent() const noexcept -> VkExtent3D {

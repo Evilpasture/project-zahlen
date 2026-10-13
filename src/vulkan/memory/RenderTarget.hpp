@@ -13,9 +13,12 @@ namespace ZHLN::Vk {
 
 template <VkFormat F>
 struct RenderTarget {
-    Image      image;
-    ImageView  view;
-    VkExtent2D extent {};
+    Image          image;
+    // The render target's one VkImageView handle, existing solely so the
+    // image can be bound as a dynamic-rendering attachment. Sampling it
+    // goes through image.ViewInfo() / AsSlice().ViewInfo(), never this.
+    AttachmentView attachmentView;
+    VkExtent2D     extent {};
 
     RenderTarget() = default;
 
@@ -40,13 +43,13 @@ struct RenderTarget {
         Create(Allocator& allocator, VkDevice device, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
     void Destroy(Allocator& allocator) noexcept {
-        view = {};
+        attachmentView = {};
         allocator.DestroyImage(image);
         extent = {};
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {image.Handle(), view, extent, F};
+        return ImageSlice {image.Handle(), attachmentView, extent, F};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool;
@@ -55,9 +58,9 @@ struct RenderTarget {
 
 template <VkFormat F>
 struct RenderTarget3D {
-    Image      image;
-    ImageView  view;
-    VkExtent3D extent {};
+    Image          image;
+    AttachmentView attachmentView;
+    VkExtent3D     extent {};
 
     RenderTarget3D()  = default;
     ~RenderTarget3D() = default;
@@ -67,25 +70,25 @@ struct RenderTarget3D {
     RenderTarget3D(RenderTarget3D&&) noexcept        = default;
     auto operator=(RenderTarget3D&& other) noexcept -> RenderTarget3D& {
         if (this != &other) {
-            view   = std::move(other.view);
-            image  = std::move(other.image);
-            extent = other.extent;
+            attachmentView = std::move(other.attachmentView);
+            image          = std::move(other.image);
+            extent         = other.extent;
         }
         return *this;
     }
 
     void Destroy(Allocator& allocator) noexcept {
-        view = {};
+        attachmentView = {};
         allocator.DestroyImage(image);
         extent = {};
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {image.Handle(), view, extent, F};
+        return ImageSlice {image.Handle(), attachmentView, extent, F};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return image.Valid() && view.Valid();
+        return image.Valid() && attachmentView.Valid();
     }
     explicit operator bool() const noexcept {
         return Valid();
@@ -96,11 +99,14 @@ struct RenderTarget3D {
 
 template <VkFormat F>
 struct MipmappedRenderTarget {
-    Image                  image;
-    ImageView              fullView;
-    std::vector<ImageView> mipViews;
-    VkExtent2D             extent {};
-    uint32_t               mipLevels = 1;
+    Image                       image;
+    // Attachment views only (full chain and one per mip, for targets that
+    // are rendered into at a single mip). Per-mip descriptor views are not
+    // stored: image.ViewInfo(aspect, mip, 1) describes them on demand.
+    AttachmentView              attachmentView;
+    std::vector<AttachmentView> mipAttachmentViews;
+    VkExtent2D                  extent {};
+    uint32_t                    mipLevels = 1;
 
     MipmappedRenderTarget() = default;
 
@@ -110,11 +116,11 @@ struct MipmappedRenderTarget {
     MipmappedRenderTarget(MipmappedRenderTarget&& other) noexcept = default;
     auto operator=(MipmappedRenderTarget&& other) noexcept -> MipmappedRenderTarget& {
         if (this != &other) {
-            mipViews  = std::move(other.mipViews);
-            fullView  = std::move(other.fullView);
-            image     = std::move(other.image);
-            extent    = other.extent;
-            mipLevels = other.mipLevels;
+            mipAttachmentViews = std::move(other.mipAttachmentViews);
+            attachmentView     = std::move(other.attachmentView);
+            image              = std::move(other.image);
+            extent             = other.extent;
+            mipLevels          = other.mipLevels;
         }
         return *this;
     }
@@ -135,36 +141,36 @@ struct MipmappedRenderTarget {
         target.image = std::move(img_res.value());
         ZHLN::defer _([&] { target.Destroy(allocator); });
 
-        auto view_res = target.image.CreateView(device);
+        auto view_res = target.image.CreateAttachmentView(device);
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
-        target.fullView = std::move(*view_res);
-        target.mipViews.reserve(target.mipLevels);
+        target.attachmentView = std::move(*view_res);
+        target.mipAttachmentViews.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            auto mip_res = target.image.CreateView(device, {.baseMip = m, .mipCount = 1});
+            auto mip_res = target.image.CreateAttachmentView(device, VK_IMAGE_ASPECT_NONE, m, 1);
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }
-            target.mipViews.push_back(std::move(*mip_res));
+            target.mipAttachmentViews.push_back(std::move(*mip_res));
         }
         return std::move(target); // Move before the failure guard runs.
     }
 
     void Destroy(Allocator& allocator) noexcept {
-        mipViews.clear();
-        fullView = {};
+        mipAttachmentViews.clear();
+        attachmentView = {};
         allocator.DestroyImage(image);
         extent = {};
         mipLevels = 1;
     }
 
     [[nodiscard]] auto AsSlice() const noexcept -> ImageSlice {
-        return ImageSlice {image.Handle(), fullView, extent, F};
+        return ImageSlice {image.Handle(), attachmentView, extent, F};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
-        return image.Valid() && fullView.Valid();
+        return image.Valid() && attachmentView.Valid();
     }
     explicit operator bool() const noexcept {
         return Valid();

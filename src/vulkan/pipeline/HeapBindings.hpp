@@ -264,9 +264,6 @@ struct AsAddressWrite {
 
 namespace TemplatedDetail {
 
-// Return a value, never forward a borrowed pointer into a heap write.
-// A raw slice without view metadata cannot describe its shape: guessing a 2D
-// single-mip view here would be invalid for cube, array and 3D images.
 template <typename T>
 [[nodiscard]] constexpr auto BorrowedSliceOf(const T& img) noexcept -> const ImageSlice& {
     if constexpr (IsTypedImage<T>::value) {
@@ -276,20 +273,25 @@ template <typename T>
     }
 }
 
+// Descriptor writes consume exactly one thing: a VkImageViewCreateInfo, by
+// value. Every image-like source knows how to produce one -- an Image or
+// ImageSlice via ViewInfo(), an ImageWrite carries one, and a raw
+// VkImageViewCreateInfo is already one. VkImageView handles play no part.
 template <typename T>
-[[nodiscard]] auto ViewResourceOf(const T& image) noexcept -> const ImageView* {
+[[nodiscard]] auto ViewInfoOf(const T& resource) noexcept -> VkImageViewCreateInfo {
     if constexpr (std::is_same_v<T, ImageWrite>) {
-        return image.viewResource;
-    } else if constexpr (std::is_same_v<T, ImageView>) {
-        return &image;
-    } else if constexpr (std::is_same_v<T, ImageSlice>) {
-        return image.viewResource;
+        return resource.viewInfo;
     } else if constexpr (IsTypedImage<T>::value) {
-        return image.Raw().viewResource;
-    } else if constexpr (requires(const T& resource) { resource.view.Valid(); }) {
-        return &image.view;
+        return resource.Raw().ViewInfo();
+    } else if constexpr (requires { resource.ViewInfo(); }) {
+        return resource.ViewInfo();
+    } else if constexpr (requires { resource.image.ViewInfo(); }) {
+        return resource.image.ViewInfo();
+    } else if constexpr (std::is_same_v<T, VkImageViewCreateInfo>) {
+        return resource;
+    } else {
+        return VkImageViewCreateInfo {};
     }
-    return nullptr;
 }
 
 enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
@@ -297,8 +299,8 @@ enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
     if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice> || std::is_same_v<T, ImageWrite> ||
-                  std::is_same_v<T, ImageView> ||
-                  requires(const T& image) { image.view.Valid(); }) {
+                  std::is_same_v<T, VkImageViewCreateInfo> || requires { std::declval<const T&>().ViewInfo(); } ||
+                  requires { std::declval<const T&>().image.ViewInfo(); }) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -352,37 +354,18 @@ template <typename Arg>
         if constexpr (source != WriteSource::Image) {
             return false;
         } else {
-            if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
-                const ImageSlice& slice = BorrowedSliceOf(arg);
-                if (slice.viewResource == nullptr) {
-                    return slice.image == VK_NULL_HANDLE;
-                }
-                if (slice.viewResource->Get() != slice.view || slice.viewResource->Format() != slice.format) {
-                    return false;
-                }
-            } else if constexpr (std::is_same_v<T, ImageWrite>) {
-                if (arg.viewResource == nullptr) {
-                    if (arg.slice.image != VK_NULL_HANDLE || arg.slice.view != VK_NULL_HANDLE) {
-                        return false;
-                    }
-                } else if (arg.slice.image != VK_NULL_HANDLE || arg.slice.view != VK_NULL_HANDLE) {
-                    if (!arg.slice.Valid() || arg.slice.viewResource != arg.viewResource || arg.slice.view != arg.viewResource->Get() ||
-                        arg.slice.format != arg.viewResource->Format()) {
-                        return false;
-                    }
-                }
-            }
-            const ImageView* view = ViewResourceOf(arg);
-            if (view == nullptr || !view->Valid()) {
+            const VkImageViewCreateInfo viewInfo = ViewInfoOf(arg);
+            if (viewInfo.image == VK_NULL_HANDLE) {
+                // An empty write is only meaningful as "no image": a typed
+                // or sliced source must actually be empty, and an ImageWrite
+                // with no image is the explicit empty descriptor.
                 if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
                     return BorrowedSliceOf(arg).image == VK_NULL_HANDLE;
-                } else if constexpr (std::is_same_v<T, ImageWrite>) {
-                    return arg.slice.image == VK_NULL_HANDLE && arg.slice.view == VK_NULL_HANDLE;
                 }
-                return false;
+                return true;
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, *view, VK_IMAGE_LAYOUT_GENERAL);
+                heap.WriteStorageImage(StorageImageHandle {slot}, viewInfo, VK_IMAGE_LAYOUT_GENERAL);
             } else {
                 VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 if constexpr (IsTypedImage<T>::value) {
@@ -392,7 +375,7 @@ template <typename Arg>
                 } else if constexpr (std::is_same_v<T, ImageWrite>) {
                     layout = arg.layout;
                 }
-                heap.WriteImage(TextureHandle {slot}, *view, layout);
+                heap.WriteImage(TextureHandle {slot}, viewInfo, layout);
             }
             return true;
         }

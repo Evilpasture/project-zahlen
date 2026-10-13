@@ -19,35 +19,7 @@ class ResourceWriteBatch;
 class HeapManager;
 struct ImageSlice;
 
-enum class ImageViewKind : uint8_t {
-    Inferred,
-    Texture2D,
-    Texture2DArray,
-    Texture3D,
-    Cube,
-    CubeArray,
-};
-
-enum class ImageAspect : uint8_t {
-    Inferred,
-    Color,
-    Depth,
-    Stencil,
-    DepthStencil,
-};
-
-// Describes the visible subresources of an image. A zero count selects the
-// remaining mips or layers; it does not describe the image's current layout.
-struct ImageViewConfig {
-    ImageViewKind kind = ImageViewKind::Inferred;
-    ImageAspect   aspect = ImageAspect::Inferred;
-    uint32_t      baseMip = 0;
-    uint32_t      mipCount = 0;
-    uint32_t      baseLayer = 0;
-    uint32_t      layerCount = 0;
-};
-
-enum class ImageViewCreationError : uint8_t {
+enum class AttachmentViewCreationError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory">{}) = 1,
     OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of device memory">{}),
     CreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Image view creation failed">{}),
@@ -56,25 +28,35 @@ enum class ImageViewCreationError : uint8_t {
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 
-class ImageView {
+// The only owning VkImageView wrapper in the engine, and it exists for
+// exactly one purpose: dynamic-rendering attachments
+// (VkRenderingAttachmentInfo::imageView). Descriptor-heap writes never take
+// one of these -- they take the plain VkImageViewCreateInfo produced by
+// Image::ViewInfo() / ImageSlice::ViewInfo() instead. If a view is only ever
+// sampled or written from a shader, do not create an AttachmentView for it.
+class AttachmentView {
   public:
-    ImageView() noexcept = default;
+    AttachmentView() noexcept = default;
 
-    ImageView(const ImageView&)                    = delete;
-    auto operator=(const ImageView&) -> ImageView& = delete;
+    AttachmentView(const AttachmentView&)                    = delete;
+    auto operator=(const AttachmentView&) -> AttachmentView& = delete;
 
-    ImageView(ImageView&& other) noexcept:
+    AttachmentView(AttachmentView&& other) noexcept:
         _handle(std::move(other._handle)), _info(std::exchange(other._info, VkImageViewCreateInfo {})) {
     }
-    auto operator=(ImageView&& other) noexcept -> ImageView& {
+    auto operator=(AttachmentView&& other) noexcept -> AttachmentView& {
         if (this != &other) {
             _handle = std::move(other._handle);
-            _info = std::exchange(other._info, VkImageViewCreateInfo {});
+            _info   = std::exchange(other._info, VkImageViewCreateInfo {});
         }
         return *this;
     }
 
     [[nodiscard]] auto Get() const noexcept -> VkImageView { return _handle.Get(); }
+    // The create-info this handle was built from; used to describe the same
+    // subresources when building an ImageSlice. Never a descriptor input by
+    // itself -- slice/descriptor code goes through VkImageViewCreateInfo.
+    [[nodiscard]] constexpr auto CreateInfo() const noexcept -> const VkImageViewCreateInfo& { return _info; }
     [[nodiscard]] constexpr auto Format() const noexcept -> VkFormat { return _info.format; }
     [[nodiscard]] constexpr auto AspectFlags() const noexcept -> VkImageAspectFlags { return _info.subresourceRange.aspectMask; }
     [[nodiscard]] auto Valid() const noexcept -> bool { return _handle.Valid(); }
@@ -86,18 +68,14 @@ class ImageView {
 
   private:
     friend class Image;
-    friend class ResourceWriteBatch;
-    friend class HeapManager;
-    friend struct ImageSlice;
 
-    [[nodiscard]] auto CreateInfo() const noexcept -> const VkImageViewCreateInfo& { return _info; }
-    [[nodiscard]] static auto Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode>;
+    [[nodiscard]] static auto Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<AttachmentView, ErrorCode>;
 
-    ImageView(VkDevice device, VkImageView view, const VkImageViewCreateInfo& info) noexcept:
+    AttachmentView(VkDevice device, VkImageView view, const VkImageViewCreateInfo& info) noexcept:
         _handle(device, view), _info(info) {
     }
 
-    ImageViewHandle       _handle;
+    AttachmentViewHandle  _handle;
     VkImageViewCreateInfo _info {};
 };
 

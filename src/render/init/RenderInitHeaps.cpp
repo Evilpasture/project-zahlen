@@ -196,11 +196,11 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
-    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
-        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredInfo.image != VK_NULL_HANDLE) {
+        heapManager.WriteImage(iblPrefilteredSlot, iblPayload.prefilteredInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
-    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Valid()) {
-        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutInfo.image != VK_NULL_HANDLE) {
+        heapManager.WriteImage(iblBrdfLutSlot, iblPayload.brdfLutInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 
@@ -212,7 +212,9 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.fullView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // Sampled with the complete mip chain; the attachment view is only
+    // the graph's mip-0 color attachment.
+    heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
@@ -360,19 +362,13 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     submittedStaging = std::make_unique<Vk::SubmittedStagingWork>(std::move(*work));
     submitted        = true;
 
-    auto matView = matImg->CreateView(ctx.Device());
-    if (!matView) {
-        return std::unexpected(matView.error());
-    }
-    auto ampView = ampImg->CreateView(ctx.Device());
-    if (!ampView) {
-        return std::unexpected(ampView.error());
-    }
+    const VkImageViewCreateInfo matInfo = matImg->ViewInfo();
+    const VkImageViewCreateInfo ampInfo = ampImg->ViewInfo();
 
     ltcMatImage = std::move(*matImg);
     ltcAmpImage = std::move(*ampImg);
-    ltcMatView  = std::move(*matView);
-    ltcAmpView  = std::move(*ampView);
+    ltcMatInfo  = matInfo;
+    ltcAmpInfo  = ampInfo;
     ApplyImageDebugNames(*this);
     return {};
 }
@@ -428,7 +424,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         hash = desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc);
         mode = !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3);
     }
-    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyView.Valid())) {
+    if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyInfo.image != VK_NULL_HANDLE)) {
         // Mode-only changes do not need a new IBL bake, EXCEPT when enabling
         // the original sky for a cooked map whose hidden mode never uploaded it.
         impl->iblPayload.environmentMode = mode;

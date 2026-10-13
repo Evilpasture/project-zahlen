@@ -231,17 +231,19 @@ class TargetManager {
     [[nodiscard]] auto ShadowMapPrev() noexcept -> Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
     [[nodiscard]] auto ShadowMapPrev() const noexcept -> const Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
 
-    [[nodiscard]] auto CascadeViews() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViews; }
-    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViewsPrev; }
+    [[nodiscard]] auto CascadeViews() const noexcept -> std::span<const Vk::AttachmentView> { return _shadowCascadeViews; }
+    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::AttachmentView> { return _shadowCascadeViewsPrev; }
     void               SwapCascadeViews() noexcept { std::swap(_shadowCascadeViews, _shadowCascadeViewsPrev); }
 
     // The one view of the whole atlas: every tile is a viewport into it, so
     // there is nothing per-light to hand out any more.
-    [[nodiscard]] auto AtlasView() noexcept -> Vk::ImageView& { return _shadowAtlasView; }
-    [[nodiscard]] auto AtlasView() const noexcept -> const Vk::ImageView& { return _shadowAtlasView; }
+        // Attachment role only; sampling the atlas goes through the image's
+    // ViewInfo() at the call site.
+    [[nodiscard]] auto AtlasView() noexcept -> Vk::AttachmentView& { return _shadowAtlasView; }
+    [[nodiscard]] auto AtlasView() const noexcept -> const Vk::AttachmentView& { return _shadowAtlasView; }
 
   private:
-    [[nodiscard]] auto CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode>;
+    [[nodiscard]] auto CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::AttachmentView>, ErrorCode>;
 
     Vk::Context&                             _ctx;
     Vk::Allocator&                           _allocator;
@@ -250,9 +252,9 @@ class TargetManager {
     GraphResources _graph;
 
     Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> _shadowMapPrev;
-    ZHLN::Array<Vk::ImageView>             _shadowCascadeViews;
-    ZHLN::Array<Vk::ImageView>             _shadowCascadeViewsPrev;
-    Vk::ImageView                          _shadowAtlasView;
+    ZHLN::Array<Vk::AttachmentView>        _shadowCascadeViews;
+    ZHLN::Array<Vk::AttachmentView>        _shadowCascadeViewsPrev;
+    Vk::AttachmentView                     _shadowAtlasView;
 };
 
 }

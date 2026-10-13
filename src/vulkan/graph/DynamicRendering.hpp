@@ -41,8 +41,10 @@ struct TypedImage {
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return slice.image;
     }
-    [[nodiscard]] constexpr auto View() const noexcept -> VkImageView {
-        return slice.view;
+    // Only meaningful when the slice carries an attachment view; descriptor
+    // writes use Raw().ViewInfo() and never look at this.
+    [[nodiscard]] constexpr auto AttachmentView() const noexcept -> VkImageView {
+        return slice.attachmentView;
     }
     [[nodiscard]] constexpr auto Extent() const noexcept -> VkExtent3D {
         return slice.extent;
@@ -55,9 +57,6 @@ struct TypedImage {
     }
     [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
         return slice.aspect;
-    }
-    [[nodiscard]] constexpr auto ViewResource() const noexcept -> const ImageView* {
-        return slice.viewResource;
     }
     [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
         return slice;
@@ -94,8 +93,10 @@ struct TypedImage<Layout, Format> {
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return slice.image;
     }
-    [[nodiscard]] constexpr auto View() const noexcept -> VkImageView {
-        return slice.view;
+    // Only meaningful when the slice carries an attachment view; descriptor
+    // writes use Raw().ViewInfo() and never look at this.
+    [[nodiscard]] constexpr auto AttachmentView() const noexcept -> VkImageView {
+        return slice.attachmentView;
     }
     [[nodiscard]] constexpr auto Extent() const noexcept -> VkExtent3D {
         return slice.extent;
@@ -108,9 +109,6 @@ struct TypedImage<Layout, Format> {
     }
     [[nodiscard]] constexpr auto Aspect() const noexcept -> VkImageAspectFlags {
         return slice.aspect;
-    }
-    [[nodiscard]] constexpr auto ViewResource() const noexcept -> const ImageView* {
-        return slice.viewResource;
     }
     [[nodiscard]] constexpr auto Raw() const noexcept -> const ImageSlice& {
         return slice;
@@ -141,7 +139,7 @@ constexpr auto ImageSlice::Assume() const noexcept -> TypedImage<Layout, VK_FORM
 template <VkFormat Format, VkImageLayout Layout>
 constexpr auto ImageSlice::MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>> {
     static_assert(Format != VK_FORMAT_UNDEFINED, "MatchFormat requires a concrete VkFormat.");
-    if (!Valid() || format != Format || (viewResource != nullptr && viewResource->Format() != Format)) {
+    if (!Valid() || format != Format) {
         return std::nullopt;
     }
     ImageSlice result = *this;

@@ -11,19 +11,21 @@
 
 namespace ZHLN::Vk {
 
-// Carries a borrowed owned view to the synchronous heap write. The descriptor
-// batch copies the view's implementation metadata before flushing.
+// A descriptor-heap image write: the plain VkImageViewCreateInfo is the
+// whole payload (it becomes VkImageDescriptorInfoEXT::pView), plus the
+// layout to write it with. There is deliberately no way to construct one
+// from an AttachmentView -- descriptor writes never consume VkImageView
+// handles, so sources provide ViewInfo() (Image / ImageSlice) instead.
 struct ImageWrite {
-    const ImageView* viewResource = nullptr;
-    ImageSlice       slice {};
-    VkImageLayout    layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkImageViewCreateInfo viewInfo {};
+    VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     ImageWrite() = default;
-    explicit ImageWrite(const ImageView& view, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        viewResource(&view), layout(imageLayout) {
+    explicit ImageWrite(const VkImageViewCreateInfo& info, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
+        viewInfo(info), layout(imageLayout) {
     }
     explicit ImageWrite(const ImageSlice& source, VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) noexcept:
-        viewResource(source.viewResource), slice(source), layout(imageLayout) {
+        viewInfo(source.ViewInfo()), layout(imageLayout) {
     }
 };
 
@@ -52,14 +54,18 @@ namespace TemplatedDetail {
 template <ZHLN::StringLiteral Name, bool IsUnread, typename T>
 [[nodiscard]] constexpr auto MakeNamedSlot(T&& value) noexcept {
     using U = std::remove_cvref_t<T>;
-    if constexpr (std::is_same_v<U, ImageView>) {
+    if constexpr (std::is_same_v<U, VkImageViewCreateInfo>) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
     } else if constexpr (std::is_same_v<U, ImageSlice>) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value}};
     } else if constexpr (IsTypedImage<U>::value) {
         return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.Raw()}};
-    } else if constexpr (requires(const U& resource) { resource.view.Valid(); }) {
-        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.view}};
+    } else if constexpr (requires(const U& resource) { resource.AsSlice(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.AsSlice()}};
+    } else if constexpr (requires(const U& resource) { resource.ViewInfo(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.ViewInfo()}};
+    } else if constexpr (requires(const U& resource) { resource.image.ViewInfo(); }) {
+        return NamedSlot<Name, ImageWrite, IsUnread> {.value = ImageWrite {value.image.ViewInfo()}};
     } else if constexpr (requires(const U& buffer) {
                              buffer.Handle();
                              buffer.Size();

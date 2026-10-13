@@ -25,7 +25,7 @@ struct DestroySemaphore {
     void operator()(VkDevice device, VkSemaphore handle) const noexcept;
 };
 
-struct DestroyImageView {
+struct DestroyAttachmentView {
     void operator()(VkDevice device, VkImageView handle) const noexcept;
 };
 
@@ -90,7 +90,7 @@ class DeviceHandle {
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
 using PipelineCache         = DeviceHandle<VkPipelineCache, DestroyPipelineCache>;
 using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
-using ImageViewHandle       = DeviceHandle<VkImageView, DestroyImageView>;
+using AttachmentViewHandle  = DeviceHandle<VkImageView, DestroyAttachmentView>;
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, DestroyAccelerationStructure>;
 
 } // namespace ZHLN::Vk

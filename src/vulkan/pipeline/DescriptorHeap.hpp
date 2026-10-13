@@ -169,8 +169,11 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    void AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    void AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
+    // Descriptor-heap writes take only the view description: it becomes
+    // VkImageDescriptorInfoEXT::pView verbatim. Whether a VkImageView handle
+    // exists for the image is the attachment system's business, not this one's.
+    void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
@@ -289,19 +292,8 @@ class HeapManager {
         FreeStaticSamplerSlot(handle.index);
     }
 
-    void WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    template <typename Resource>
-        requires requires(const Resource& resource) { resource.view.Valid(); }
-    void WriteImage(TextureHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
-        WriteImage(handle, resource.view, layout);
-    }
-
-    void WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept;
-    template <typename Resource>
-        requires requires(const Resource& resource) { resource.view.Valid(); }
-    void WriteStorageImage(StorageImageHandle handle, const Resource& resource, VkImageLayout layout) noexcept {
-        WriteStorageImage(handle, resource.view, layout);
-    }
+    void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
+    void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void WriteBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
     void WriteBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept;
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;

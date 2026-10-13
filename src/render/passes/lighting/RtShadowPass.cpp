@@ -33,7 +33,7 @@ void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"outShadow">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtShadowMask)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"tlas">(tlas),
-        Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx))
+        Vk::Slot<"blueNoiseTex">(impl.textureManager.ViewInfo(impl.blueNoiseTexIdx))
     );
 
     const RTShadowPushConstants push {

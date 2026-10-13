@@ -245,35 +245,25 @@ class IBLProcessor {
 
         impl.heapManager.BeginImmediate();
 
-        auto brdfWriteView = state.payload.brdfLutImage.CreateView(impl.ctx.Device());
-        if (!brdfWriteView) {
-            return std::unexpected(brdfWriteView.error());
-        }
-        const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(*brdfWriteView));
+        const VkImageViewCreateInfo brdfWriteInfo = state.payload.brdfLutImage.ViewInfo();
+        const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(brdfWriteInfo));
 
-        auto radianceWriteView = radianceImage->CreateView(impl.ctx.Device(), {.mipCount = sourceMipLevels});
-        if (!radianceWriteView) {
-            return std::unexpected(radianceWriteView.error());
-        }
+        const VkImageViewCreateInfo radianceWriteInfo = radianceImage->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceMipLevels);
 
-        std::array<ImageView, kMipLevels>     specMipViews {};
-        std::array<HeapBlockBase, kMipLevels> specMipBlocks {};
+        // Per-mip cube-face writes go through 2D-array storage views; that is
+        // a descriptor reinterpretation, so it stays an explicit view type.
+        std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
+        std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            auto mipView = state.payload.prefilteredImage.CreateView(
-                impl.ctx.Device(), {.kind = ImageViewKind::Texture2DArray, .baseMip = mip, .mipCount = 1, .layerCount = 6}
-            );
-            if (!mipView) {
-                return std::unexpected(mipView.error());
-            }
-            specMipViews[mip]  = std::move(*mipView);
+            specMipInfos[mip]  = state.payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
             specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipViews[mip]), Vk::Slot<"radianceMap">(*radianceWriteView)
+                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipInfos[mip]), Vk::Slot<"radianceMap">(radianceWriteInfo)
             );
         }
         HeapBlockBase shBlock {};
         if (!hasPreparedSH) {
             shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipViews[0]), Vk::Slot<"radianceMap">(*radianceWriteView)
+                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipInfos[0]), Vk::Slot<"radianceMap">(radianceWriteInfo)
             );
         }
 
@@ -403,22 +393,10 @@ class IBLProcessor {
             }
         }
 
-        auto lutView = state.payload.brdfLutImage.CreateView(impl.ctx.Device());
-        if (!lutView) {
-            return std::unexpected(lutView.error());
-        }
-        state.payload.brdfLutView = std::move(*lutView);
-        auto cubeView             = state.payload.prefilteredImage.CreateView(impl.ctx.Device(), {.kind = ImageViewKind::Cube, .mipCount = kMipLevels});
-        if (!cubeView) {
-            return std::unexpected(cubeView.error());
-        }
-        state.payload.prefilteredView = std::move(*cubeView);
+        state.payload.brdfLutInfo     = state.payload.brdfLutImage.ViewInfo();
+        state.payload.prefilteredInfo = state.payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
         if (useVisualSky) {
-            auto skyView = state.payload.visualSkyImage.CreateView(impl.ctx.Device());
-            if (!skyView) {
-                return std::unexpected(skyView.error());
-            }
-            state.payload.visualSkyView = std::move(*skyView);
+            state.payload.visualSkyInfo = state.payload.visualSkyImage.ViewInfo();
         }
         return std::move(state.payload);
     }

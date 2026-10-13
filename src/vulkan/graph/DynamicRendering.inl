@@ -259,7 +259,7 @@ auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags as
     } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
         src_image = TypedImage<src_layout> {resource};
     } else {
-        src_image = TypedImage<src_layout> {ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Format()}};
+        src_image = TypedImage<src_layout> {resource.AsSlice()};
     }
 
     return std::make_pair(transitioned_image, ScopedBarrierGuard<SrcState, DstState>(cmd, src_image, aspectOverride));
@@ -277,8 +277,6 @@ inline auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFl
         slice = resource.AsSlice();
     } else if constexpr (std::is_same_v<std::remove_cvref_t<T>, ImageSlice>) {
         slice = resource;
-    } else if constexpr (requires { resource.image.Handle(); resource.view.Format(); }) {
-        slice = ImageSlice {resource.image.Handle(), resource.view, resource.extent, resource.view.Format()};
     } else {
         static_assert(sizeof(T) == 0, "IssueBarrier requires an image slice or an owning image resource");
     }
@@ -318,7 +316,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColor(
     _colors[ColorCount] = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .pNext              = nullptr,
-        .imageView          = img.View(),
+        .imageView          = img.AttachmentView(),
         .imageLayout        = Layout,
         .resolveMode        = VK_RESOLVE_MODE_NONE,
         .resolveImageView   = VK_NULL_HANDLE,
@@ -353,7 +351,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddColorGroup(
                 _colors[index] = {
                     .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                     .pNext              = nullptr,
-                    .imageView          = image.View(),
+                    .imageView          = image.AttachmentView(),
                     .imageLayout        = std::remove_cvref_t<decltype(image)>::layout,
                     .resolveMode        = VK_RESOLVE_MODE_NONE,
                     .resolveImageView   = VK_NULL_HANDLE,
@@ -392,7 +390,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
     _depth = {
         .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .pNext              = nullptr,
-        .imageView          = img.View(),
+        .imageView          = img.AttachmentView(),
         .imageLayout        = Layout,
         .resolveMode        = VK_RESOLVE_MODE_NONE,
         .resolveImageView   = VK_NULL_HANDLE,

@@ -9,12 +9,11 @@
 
 namespace ZHLN {
 
-auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode> {
-    ZHLN::Array<Vk::ImageView> out;
+auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::AttachmentView>, ErrorCode> {
+    ZHLN::Array<Vk::AttachmentView> out;
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res =
-            image.CreateView(device, {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i, .layerCount = 1});
+        auto view_res = image.CreateAttachmentView(device, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -49,7 +48,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             );
         } else if constexpr (requires {
                                  rt.mipLevels;
-                                 rt.mipViews;
+                                 rt.mipAttachmentViews;
                              }) {
             // HiZ is compute-writable; transmission is a color attachment at
             // mip 0, with the complete chain sampled by the forward shader.
@@ -139,7 +138,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     }
     for (uint32_t i = 0; i < kCascades; ++i) {
         if (!_shadowCascadeViews[i].Valid() || !_shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
-            return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
+            return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
         }
     }
 
@@ -156,16 +155,14 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas = std::move(*sa_res);
 
-    auto atlas_res = _graph.shadowAtlas.image.CreateView(
-        _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D, .aspect = Vk::ImageAspect::Depth}
-    );
+    auto atlas_res = _graph.shadowAtlas.image.CreateAttachmentView(_ctx.Device(), VK_IMAGE_ASPECT_DEPTH_BIT);
     if (!atlas_res) {
         return std::unexpected(atlas_res.error());
     }
     _shadowAtlasView = std::move(*atlas_res);
 
     if (!_shadowAtlasView.Valid()) [[unlikely]] {
-        return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
+        return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
     }
 
     Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {

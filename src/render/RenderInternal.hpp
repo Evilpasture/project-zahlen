@@ -76,23 +76,25 @@ struct TaskSystemScheduler {
 namespace ZHLN::Vk {
 
 struct IBLPayload {
-    Image     brdfLutImage;
-    ImageView brdfLutView;
-    Image     prefilteredImage;
-    ImageView prefilteredView;
+    // Baked textures keep no VkImageView handles at all: only the plain view
+    // descriptions their heap writes are built from.
+    Image                 brdfLutImage;
+    VkImageViewCreateInfo brdfLutInfo {};
+    Image                 prefilteredImage;
+    VkImageViewCreateInfo prefilteredInfo {};
     // Original RGBA32F sky, only retained when the lighting cube was cooked
     // from a different (sunless) panorama and the skybox is visible.
     Image                    visualSkyImage;
-    ImageView                visualSkyView;
+    VkImageViewCreateInfo    visualSkyInfo {};
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
     int                      environmentMode   = 0;
 
     void Destroy(Allocator& allocator) noexcept {
-        brdfLutView     = {};
-        prefilteredView = {};
-        visualSkyView   = {};
+        brdfLutInfo     = {};
+        prefilteredInfo = {};
+        visualSkyInfo   = {};
         allocator.DestroyImage(brdfLutImage);
         allocator.DestroyImage(prefilteredImage);
         allocator.DestroyImage(visualSkyImage);
@@ -462,9 +464,9 @@ struct RenderContext::Impl {
     Vk::ReflectedLayout iblBakeDescLayout;
 
     Vk::Image     ltcMatImage;
-    Vk::ImageView ltcMatView;
+    VkImageViewCreateInfo ltcMatInfo {};
     Vk::Image     ltcAmpImage;
-    Vk::ImageView ltcAmpView;
+    VkImageViewCreateInfo ltcAmpInfo {};
 
     Vk::IBLPayload iblPayload;
 
@@ -519,6 +521,9 @@ struct RenderContext::Impl {
 
     struct RenderTexture {
         Vk::ImageSlice       image {};
+        // Owns the attachment handle `image` borrows; the descriptor side of
+        // this texture needs no handle (TextureManager stores a create-info).
+        Vk::AttachmentView   attachmentView;
         uint32_t             bindlessIndex = 0;
         Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
         bool                 drawn         = false;
@@ -699,8 +704,8 @@ struct RenderContext::Impl {
         fog.DestroyNoise(allocator);
         textureManager.Reset();
         iblPayload.Destroy(allocator);
-        ltcMatView = {};
-        ltcAmpView = {};
+        ltcMatInfo = {};
+        ltcAmpInfo = {};
         allocator.DestroyImage(ltcMatImage);
         allocator.DestroyImage(ltcAmpImage);
         targets.Clear();
@@ -928,13 +933,9 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
     return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
         defer _([&] { allocator.DestroyImage(image); });
-        auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
-        if (!viewRes) {
-            return std::unexpected(viewRes.error());
-        }
-        Vk::ImageView view = std::move(*viewRes);
+        const VkImageViewCreateInfo viewInfo = image.ViewInfo();
         heapManager.BeginImmediate();
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(view));
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(viewInfo));
 
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
             heapManager.BindHeaps(cmd);
@@ -942,7 +943,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
         });
-        return textureManager.Adopt(std::move(image), std::move(view));
+        return textureManager.Adopt(std::move(image), viewInfo);
     });
 }
 

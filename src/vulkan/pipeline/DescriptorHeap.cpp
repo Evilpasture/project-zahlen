@@ -275,18 +275,12 @@ struct ResourceWriteBatch::Impl {
     std::vector<Write>                  writes;
 
     void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
-        VkImageViewCreateInfo descriptorViewInfo = viewInfo;
-        constexpr VkImageAspectFlags depthStencilAspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-        // Descriptor-heap image views must select exactly one depth/stencil
-        // aspect. Attachment views may contain both; use depth for sampling by
-        // default, while an explicitly stencil-only view remains unchanged.
-        if (GetFormatAspect(descriptorViewInfo.format) == depthStencilAspects &&
-            (descriptorViewInfo.subresourceRange.aspectMask & depthStencilAspects) == depthStencilAspects) {
-            descriptorViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        }
-
+        // The create-info is used verbatim as the descriptor's pView. Its
+        // aspect is already descriptor-legal by construction: Image::ViewInfo
+        // and ImageSlice::ViewInfo normalize a combined depth-stencil aspect
+        // to depth only, since that selection is legal solely for attachments.
         std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
-        auto*                                         image = alloc.new_object<ImagePayload>(descriptorViewInfo, layout);
+        auto*                                         image = alloc.new_object<ImagePayload>(viewInfo, layout);
 
         VkResourceDescriptorInfoEXT descriptor {.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT, .pNext = nullptr, .type = type, .data = {}};
         descriptor.data.pImage = &image->descriptor;
@@ -331,15 +325,15 @@ auto ResourceWriteBatch::SlotBounds() const noexcept -> std::pair<uint32_t, uint
     return {minSlot, maxSlot};
 }
 
-void ResourceWriteBatch::AddImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-    if (handle.Valid() && view.Valid()) {
-        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, view.CreateInfo(), layout);
+void ResourceWriteBatch::AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (handle.Valid() && viewInfo.image != VK_NULL_HANDLE) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, viewInfo, layout);
     }
 }
 
-void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-    if (handle.Valid() && view.Valid()) {
-        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, view.CreateInfo(), layout);
+void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (handle.Valid() && viewInfo.image != VK_NULL_HANDLE) {
+        _impl->AddImage(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, viewInfo, layout);
     }
 }
 
@@ -562,21 +556,21 @@ auto HeapManager::ReserveOffsetAddressedSamplerRegion(uint32_t count) noexcept -
     return base;
 }
 
-void HeapManager::WriteImage(TextureHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-    if (!handle.Valid() || !view.Valid()) {
+void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || viewInfo.image == VK_NULL_HANDLE) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddImage(handle, view, layout);
+    batch.AddImage(handle, viewInfo, layout);
     FlushResourceBatch(batch);
 }
 
-void HeapManager::WriteStorageImage(StorageImageHandle handle, const ImageView& view, VkImageLayout layout) noexcept {
-    if (!handle.Valid() || !view.Valid()) {
+void HeapManager::WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
+    if (!handle.Valid() || viewInfo.image == VK_NULL_HANDLE) {
         return;
     }
     ResourceWriteBatch batch;
-    batch.AddStorageImage(handle, view, layout);
+    batch.AddStorageImage(handle, viewInfo, layout);
     FlushResourceBatch(batch);
 }
 
