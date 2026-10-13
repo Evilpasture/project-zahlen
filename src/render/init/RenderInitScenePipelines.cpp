@@ -496,6 +496,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                         if (!frames.tlas[i].Valid()) {
                             return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
                         }
+                        frames.tlasAddresses[i] = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), frames.tlas[i].Get())};
                     }
                     return {};
                 });

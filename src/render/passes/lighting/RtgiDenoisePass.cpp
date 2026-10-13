@@ -37,7 +37,7 @@ void RtgiDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx   = impl.presenter.frameIndex;
     const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
     if (!impl.ctx.RayTracingSupported() || !impl.settings.rayTracing.enableDiffuseGI || passes == 0 || impl.settings.environment.fullBright != 0 ||
-        !impl.frames.tlas[fIdx]) {
+        impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 

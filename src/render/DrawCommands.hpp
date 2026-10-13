@@ -9,6 +9,7 @@
 #include <Zahlen/Core/AssetID.hpp>
 #include "GpuLayout.hpp"
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -71,10 +72,20 @@ struct DrawCommand {
     InstanceData         instanceData;
     NativeMaterial*      material;
     NativeMaterial*      prePassMaterial;
-    NativeMesh*          posMesh;
-    NativeMesh*          frameMesh;
-    NativeMesh*          skinMesh;
-    BufferHandle         skinnedVertexBuffer;
+    // Everything the frame passes need from the source meshes, copied in as
+    // addresses at draw time. Pass recording never dereferences stream
+    // records -- and never sees a VkAccelerationStructureKHR handle: the
+    // BLAS object stays with NativeMesh, which owns build and retirement,
+    // while its address is all a TLAS instance or a skinning dispatch names.
+    // (The skinned scratch buffer is the one exception: its BLAS is rebuilt
+    // after the skinning dispatch each frame, so BuildTLAS still resolves
+    // that handle through the geometry manager at frame time.)
+    Vk::DeviceAddress<>                    blasAddress;
+    Vk::DeviceAddress<VertexPosition>      skinPosAddress;
+    Vk::DeviceAddress<VertexTangentFrame>  skinFrameAddress;
+    // The skinning shader reads the skin stream as raw uint words.
+    Vk::DeviceAddress<uint32_t>            skinDataAddress;
+    BufferHandle                           skinnedVertexBuffer;
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;

@@ -103,7 +103,7 @@ void RenderContext::SetFrameData(
     const JPH::Vec3 gridOrigin    = gridCenter - halfSpan;
     const uint32_t  fIdx          = _impl->presenter.frameIndex;
     const bool      ddgiEnabled   = _impl->ctx.RayTracingSupported() && _impl->settings.environment.fullBright == 0 &&
-                                    static_cast<bool>(_impl->frames.tlas[fIdx]) &&
+                                    _impl->frames.tlasAddresses[fIdx] != nullptr &&
                                     (_impl->settings.rayTracing.enableDiffuseGI || _impl->settings.rayTracing.enableReflections ||
                                      _impl->settings.rayTracing.enableShadows);
     const float ddgiHysteresis    = _impl->rtHistoryValid ? 0.96f : 0.0f;

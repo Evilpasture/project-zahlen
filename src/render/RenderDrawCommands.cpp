@@ -347,6 +347,27 @@ uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses,
     return EncodeMaterialSamplerWord(addresses, first);
 }
 
+struct DrawAddressPack {
+    Vk::DeviceAddress<>                    blasAddress;
+    Vk::DeviceAddress<VertexPosition>      skinPosAddress;
+    Vk::DeviceAddress<VertexTangentFrame>  skinFrameAddress;
+    Vk::DeviceAddress<uint32_t>            skinDataAddress;
+};
+
+// Everything a DrawCommand keeps from the resolved source meshes: the BLAS
+// address for the TLAS, and the three skinning input streams (from the
+// source meshes, not the animated scratch the outputs land in).
+[[nodiscard]] DrawAddressPack AddressesOf(const ResolvedMeshMaterial& res) noexcept {
+    return {
+        .blasAddress      = res.posMesh->blasAddress,
+        .skinPosAddress   = Vk::DeviceAddress<VertexPosition>::Cast(res.posMesh->vboAddress),
+        .skinFrameAddress = res.frameMesh != nullptr ? Vk::DeviceAddress<VertexTangentFrame>::Cast(res.frameMesh->vboAddress) :
+                                                       Vk::DeviceAddress<VertexTangentFrame> {nullptr},
+        .skinDataAddress  = res.skinMesh != nullptr ? Vk::DeviceAddress<uint32_t>::Cast(res.skinMesh->vboAddress) :
+                                                      Vk::DeviceAddress<uint32_t> {nullptr},
+    };
+}
+
 void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     activeLineVertexCount = 0;
 
@@ -440,6 +461,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
+    const auto addr = AddressesOf(*resolved);
     _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
@@ -500,9 +522,10 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
          ),
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
-         .posMesh             = resolved->posMesh,
-         .frameMesh           = resolved->frameMesh,
-         .skinMesh            = resolved->skinMesh,
+         .blasAddress         = addr.blasAddress,
+         .skinPosAddress      = addr.skinPosAddress,
+         .skinFrameAddress    = addr.skinFrameAddress,
+         .skinDataAddress     = addr.skinDataAddress,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,
          .jointOffset         = params.jointOffset,
          .morphOffset         = params.morphOffset,
@@ -524,6 +547,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
+        const auto addr = AddressesOf(*resolved);
         return DrawCommand {
             .instanceData = BuildGPUInstanceData(
                 InstanceDataDesc {
@@ -573,9 +597,10 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
             ),
             .material            = resolved->material,
             .prePassMaterial     = resolved->prePassMaterial,
-            .posMesh             = resolved->posMesh,
-            .frameMesh           = resolved->frameMesh,
-            .skinMesh            = resolved->skinMesh,
+            .blasAddress         = addr.blasAddress,
+            .skinPosAddress      = addr.skinPosAddress,
+            .skinFrameAddress    = addr.skinFrameAddress,
+            .skinDataAddress     = addr.skinDataAddress,
             .skinnedVertexBuffer = skinnedVertexBuffer,
             .jointOffset         = jointOffset,
             .morphOffset         = 0,

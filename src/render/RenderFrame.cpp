@@ -85,12 +85,11 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 
     for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            auto* posMesh     = drawCmd.posMesh;
-            auto* frameMesh   = drawCmd.frameMesh;
-            auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
-            if (AnyNull(posMesh, frameMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
+            const uint32_t vertexCount = drawCmd.instanceData.vertexCount;
+            if (drawCmd.skinPosAddress == nullptr || drawCmd.skinFrameAddress == nullptr || scratchMesh == nullptr ||
+                vertexCount > scratchMesh->vertexCount) {
                 continue;
             }
 
@@ -106,22 +105,21 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
             }
 
             SkinningConstants pcs {
-                .inPosAddr        = Vk::DeviceAddress<VertexPosition>::Cast(posMesh->vboAddress),
-                .inFrameAddr      = Vk::DeviceAddress<VertexTangentFrame>::Cast(frameMesh->vboAddress),
-                .inSkinAddr       = (skinMesh != nullptr) ? Vk::DeviceAddress<uint32_t>::Cast(skinMesh->vboAddress) :
-                                                            Vk::DeviceAddress<uint32_t> {nullptr},
+                .inPosAddr        = drawCmd.skinPosAddress,
+                .inFrameAddr      = drawCmd.skinFrameAddress,
+                .inSkinAddr       = drawCmd.skinDataAddress,
                 .outPosAddr       = Vk::DeviceAddress<VertexPosition>::Cast(positions.Address()),
                 .outFrameAddr     = Vk::DeviceAddress<VertexTangentFrame>::Cast(framesOut.Address()),
                 .jointsAddr       = Vk::DeviceAddress<JPH::Mat44> {ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle())},
                 .morphDeltasAddr  = Vk::DeviceAddress<JPH::Float4> {ctx.BufferAddress(morphDeltasBuffer.Handle())},
-                .vertexCount      = posMesh->vertexCount,
+                .vertexCount      = vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
                 .activeMorphCount = drawCmd.activeMorphCount,
                 .morphWeights     = drawCmd.morphWeights
             };
 
-            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, posMesh->vertexCount, 1, 1, pcs);
+            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, vertexCount, 1, 1, pcs);
         }
     }
 
@@ -161,13 +159,16 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     for (uint32_t i = 0; i < queues.Draws().size(); ++i) {
         const auto& drawCmd = queues.Draws()[i];
-        auto*       mesh    = drawCmd.posMesh;
 
+        Vk::DeviceAddress<> blasAddress = drawCmd.blasAddress;
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
+            // The scratch BLAS was rebuilt after this frame's skinning
+            // dispatch, so its address is read from the record, not the draw.
+            const auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
+            blasAddress             = scratchMesh != nullptr ? scratchMesh->blasAddress : nullptr;
         }
 
-        if (mesh == nullptr || mesh->blasAddress == nullptr || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
+        if (blasAddress == nullptr || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
             continue;
         }
 
@@ -187,7 +188,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference         = mesh->blasAddress.Get()
+            .accelerationStructureReference         = blasAddress.Get()
         };
 
         tlasInstancesScratch.push_back(inst);

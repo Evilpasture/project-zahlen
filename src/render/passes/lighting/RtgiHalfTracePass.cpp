@@ -18,13 +18,13 @@ void RtgiHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 
     const uint32_t fIdx = impl.presenter.frameIndex;
-    if (!impl.frames.tlas[fIdx]) {
+    if (impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::AsAddressWrite tlas {
-        .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
+        .address = impl.frames.tlasAddresses[fIdx].Get()
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtgiHalf>(
         impl.postProcess.RtgiHalfHeapBindings(),

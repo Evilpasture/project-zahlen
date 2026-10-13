@@ -14,8 +14,8 @@ auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInp
         .blueNoise   = Vk::ImageWrite {impl.textureManager.ViewInfo(impl.blueNoiseTexIdx)},
         .tlas =
             Vk::AsAddressWrite {
-                .address = (impl.ctx.RayTracingSupported() && impl.frames.tlas[impl.presenter.frameIndex]) ?
-                               Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[impl.presenter.frameIndex].Get()) :
+                .address = (impl.ctx.RayTracingSupported() && impl.frames.tlasAddresses[impl.presenter.frameIndex] != nullptr) ?
+                               impl.frames.tlasAddresses[impl.presenter.frameIndex].Get() :
                                0
             }
     };

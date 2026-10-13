@@ -19,7 +19,7 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
     const bool     wantRT = impl.settings.rayTracing.enableDiffuseGI ||
                             (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) ||
                             impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 

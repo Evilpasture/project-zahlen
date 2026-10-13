@@ -17,7 +17,11 @@ void DrawQueueManager::Sort() {
     _sorted.resize(drawCount);
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        _sortItems[i] = {.key = SortKey::Pack(_queues.drawQueue[i].material, _queues.drawQueue[i].posMesh), .payload = i};
+        _sortItems[i] = {
+            .key = SortKey::Pack(
+                _queues.drawQueue[i].material, reinterpret_cast<const void*>(static_cast<uintptr_t>(_queues.drawQueue[i].instanceData.posAddress))
+            ),
+            .payload = i};
     }
 
     RadixSort64(_sortItems.data(), _sortTemp.data(), drawCount);

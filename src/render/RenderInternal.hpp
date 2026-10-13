@@ -330,6 +330,11 @@ struct RenderContext::Impl {
         // Its physical lifetime follows the N-slot frame ring, not PingPong.
         PerFrame<Vk::Buffer>                jointBuffers;
         PerFrame<Vk::AccelerationStructure> tlas;
+        // The address is the TLAS's only identity outside the build: passes,
+        // descriptors and instances consume it, never the object handle.
+        // Cached at creation (BuildTLAS builds into the same objects, so
+        // these stay valid for the objects' whole lifetime).
+        PerFrame<Vk::DeviceAddress<>>       tlasAddresses;
         PerFrame<Vk::Buffer>                tlasBuffer;
         PerFrame<Vk::Buffer>                tlasScratchBuffer;
         PerFrame<Vk::Buffer>                tlasInstanceBuffers;
@@ -696,6 +701,9 @@ struct RenderContext::Impl {
         // Acceleration structures must go before their backing VMA buffers.
         for (auto& tlas: frames.tlas) {
             tlas = Vk::AccelerationStructure {};
+        }
+        for (auto& tlasAddress: frames.tlasAddresses) {
+            tlasAddress = nullptr;
         }
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);

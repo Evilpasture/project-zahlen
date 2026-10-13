@@ -704,7 +704,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 }
 
 void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) {
-    if (!ctx.RayTracingSupported() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
+    if (!ctx.RayTracingSupported() || scratchMesh == nullptr || drawCmd.skinPosAddress == nullptr) {
         return;
     }
 

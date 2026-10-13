@@ -19,14 +19,14 @@ void DdgiRayTracePass::operator()(VkCommandBuffer cmd) const noexcept {
     const bool     wantRT = impl.settings.rayTracing.enableDiffuseGI ||
                             (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) ||
                             impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::AsAddressWrite tlas {
-        .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
+        .address = impl.frames.tlasAddresses[fIdx].Get()
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::DdgiTrace>(
         impl.postProcess.DdgiTraceHeapBindings(),

@@ -17,7 +17,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
     const uint32_t fIdx = impl.presenter.frameIndex;
-    const bool rtgiActive = impl.ctx.RayTracingSupported() && impl.settings.rayTracing.enableDiffuseGI && static_cast<bool>(impl.frames.tlas[fIdx]);
+    const bool rtgiActive = impl.ctx.RayTracingSupported() && impl.settings.rayTracing.enableDiffuseGI && impl.frames.tlasAddresses[fIdx] != nullptr;
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtgiComposite>(
         impl.postProcess.RtgiCompositeHeapBindings(),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(impl.graphResources.lightingTarget)),

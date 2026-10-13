@@ -125,13 +125,13 @@ class DeviceAddress {
     }
 
   private:
-    VkDeviceAddress _address = 0;
+    VkDeviceAddress _address;
 };
 
 static_assert(sizeof(DeviceAddress<>) == sizeof(VkDeviceAddress));
 static_assert(alignof(DeviceAddress<>) == alignof(VkDeviceAddress));
 static_assert(std::is_standard_layout_v<DeviceAddress<>>);
-static_assert(std::is_trivially_copyable_v<DeviceAddress<>>);
+static_assert(std::is_trivially_copyable_v<DeviceAddress<>> && std::is_trivially_constructible_v<DeviceAddress<>>);
 static_assert(DeviceAddress<uint32_t>(0x100) + 4 == DeviceAddress<uint32_t>(0x110));
 static_assert(DeviceAddress<uint32_t>(0x110) - DeviceAddress<uint32_t>(0x100) == 4);
 static_assert(DeviceAddress<void>(DeviceAddress<uint32_t>(0x100)).Get() == 0x100);

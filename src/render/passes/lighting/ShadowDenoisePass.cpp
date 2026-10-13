@@ -26,7 +26,7 @@ void ShadowDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx   = impl.presenter.frameIndex;
     const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
     const bool     wantRT = (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) || impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || passes == 0 || impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+    if (!impl.ctx.RayTracingSupported() || !wantRT || passes == 0 || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
