@@ -56,7 +56,10 @@ same module into the generated host structs (`GeneratedGpuTypes.hpp`, re-exporte
 by `src/render/GpuLayout.hpp`, which is renderer-internal -- nothing under
 `include/` reaches it). Every struct is emitted, including the five the engine and
 the shaders share (`Particle`, `ParticleEmitterParams`, `MeshParticleEmitterParams`,
-`Light`, `FrameUniforms`): one definition per concept, and it is this one. The
+`Light`, `FrameUniforms`): one definition per concept, and it is this one.
+`ShadowTile` (`uniforms.slang`) generates with them: the shadow atlas hands
+the lighting pass the per-tile light-space matrix and its atlas rectangle, so
+the sampler and the rasterizer read one definition of a tile. The
 engine hands the renderer its own terms (`Zahlen/ParticleEmitterDesc.hpp`,
 `Zahlen/Render/FrameData.hpp`) and `src/render/GpuPack.cpp` writes these structs
 field by field. A field added, removed, reordered

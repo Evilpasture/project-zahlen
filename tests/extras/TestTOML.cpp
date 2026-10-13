@@ -479,7 +479,7 @@ intensity = 250.0
             // LightingSystem packs a Sun's direction from the world matrix.
             ZHLN::Test::ExpectEq(scene.lights[0].type, std::string {"Sun"});
             ZHLN::Test::ExpectEq(scene.lights[0].rotation.x, 50.0f);
-            // ... and it is not a ranged light, which the punctual defaults
+            // ... and it is not a ranged light, which the point/spot defaults
             // would otherwise make it.
             ZHLN::Test::ExpectEq(scene.lights[0].range, 0.0f);
 
@@ -646,7 +646,7 @@ onClickAction = "editor.save_scene"
                     .radius      = 0.0f,
                     .direction   = JPH::Vec3(0.4f, 1.0f, 0.3f),
                     .range       = 0.0f,
-                    .shadowLayer = 3
+                    .castsShadow = true
                 },
                 ZHLN::Components::SceneLightTagComponent {}
             );
@@ -725,7 +725,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(sun.name, std::string {"SavedSun"});
             ZHLN::Test::ExpectEq(sun.type, std::string {"Sun"});
             ZHLN::Test::ExpectEq(sun.intensity, 180.0f);
-            ZHLN::Test::ExpectEq(sun.shadowLayer, 3);
+            ZHLN::Test::ExpectTrue(sun.castsShadow);
             ZHLN::Test::ExpectEq(sun.color.y, 0.5f);
             ZHLN::Test::ExpectEq(sun.direction.z, 0.3f);
             ZHLN::Test::ExpectEq(sun.position.z, 6.0f);

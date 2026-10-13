@@ -182,7 +182,16 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        .transform([&](auto&& lsb) -> void { frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb); });
+        .and_then([&](auto&& lsb) -> auto {
+            frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
+            return CreatePerFrame(
+                allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::CPUToGPU
+            )
+                .transform_error([](auto err) -> ErrorCode { return err; });
+        })
+
+        .transform([&](auto&& stb) -> void { frames.shadowTileBuffers = std::forward<decltype(stb)>(stb); });
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {

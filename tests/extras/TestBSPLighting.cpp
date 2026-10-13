@@ -198,7 +198,7 @@ struct BSPLightingTestSuite {
     // The map's 743 `point_spotlight` entities all carry "No Dynamic Light":
     // they are beam sprites that sit behind a co-located `light_spot`, and
     // VRAD's own worldlights lump contains none of them. Harvesting them as
-    // punctual lights would double the map's illumination.
+    // point/spot lights would double the map's illumination.
     [[nodiscard]] auto gather_entity_lights_skips_disabled_beam_cones() const -> std::expected<void, ZHLN::ErrorCode> {
         BSPMap map;
         map.version = 20;

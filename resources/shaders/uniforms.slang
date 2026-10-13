@@ -74,6 +74,20 @@ public struct AAState {
     public uint mlaaMaxSearchSteps;
 };
 
+// One rectangular tile of the shadow atlas: the light-space transform the tile
+// was rasterized with, plus where it landed. A spot light owns one tile, a
+// point light six (its cube faces, in Vulkan layer order).
+//
+// The projection is baked into `viewProj` rather than reconstructed here, so
+// the lighting pass and the rasterizer cannot disagree about the depth range:
+// both read the matrix the atlas allocator wrote this frame.
+public struct ShadowTile {
+    public float4x4 viewProj;
+    public float2 uvOrigin; // tile origin in atlas UV
+    public float uvScale;   // tile edge in atlas UV
+    public float _pad;
+};
+
 public struct Light {
     public float3 position;
     [CxxEnum("::ZHLN::LightType")]
@@ -87,6 +101,9 @@ public struct Light {
     public float innerConeCos;
     public float outerConeCos;
     public uint twoSided;
-    public int shadowLayer;
+    // Index of this light's first ShadowTile, or -1 when it casts no shadow.
+    // The renderer owns it: the atlas allocator assigns it each frame from the
+    // lights that asked to cast and the tiles that still fit.
+    public int shadowTileBase;
     public float4 positionView;
 };

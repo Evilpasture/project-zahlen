@@ -33,7 +33,7 @@ void RenderContext::SetFrameData(
     // budget the lights that survive are the nearest and brightest rather than
     // the first ones the entity lump happened to list.
     _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {kMaxSceneLights})).end());
-    _impl->UploadSubmittedLights();
+    _impl->UploadSubmittedLights(cam);
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
@@ -131,18 +131,64 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
+// Hands out this frame's shadow tiles.
+//
+// The lights arrive already ranked -- pinned first, then nearest-and-brightest
+// (LightingSystem) -- so the atlas fills in that order and the lights that lose
+// are the ones furthest away and least worth the texels. What a loser loses is
+// tile *size*, not shadows: `TileForDistance` steps a light down as it recedes
+// long before the atlas is full enough to refuse it.
+void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept {
+    shadowAtlas.BeginFrame();
+
+    std::array<JPH::Mat44, ShadowAtlas::kPointFaces> faces {};
+    for (size_t index = 0; index < submittedLights.size(); ++index) {
+        const LightDesc& desc = submittedLights[index];
+        const bool isPoint    = desc.type == LightType::Point;
+        const bool isSpot     = desc.type == LightType::Spot;
+        if (!desc.castsShadow || (!isPoint && !isSpot)) {
+            lightTileBases.push_back(-1);
+            continue;
+        }
+
+        const uint32_t faceCount = ShadowAtlas::MakeFaceMatrices(
+            desc.position, desc.direction, desc.range, isPoint, desc.outerConeRadians, faces.data()
+        );
+        ShadowAtlas::Request req {};
+        req.key        = ShadowAtlas::MakeLightKey(desc.type, desc.position, desc.intensity, desc.range);
+        req.lightIndex = static_cast<int32_t>(index);
+        req.faceCount  = faceCount;
+        req.tile       = ShadowAtlas::TileForDistance((desc.position - viewPos).Length());
+        for (uint32_t face = 0; face < faceCount; ++face) {
+            req.faces[face] = faces[face];
+        }
+        lightTileBases.push_back(shadowAtlas.Acquire(req).tileBase);
+    }
+
+    // Drops the lights that stopped asking, so the cache cannot grow with a
+    // scene's history.
+    shadowAtlas.EndFrame();
+}
+
 // Packed from SetFrameData once the view matrix and light list exist.
-void RenderContext::Impl::UploadSubmittedLights() noexcept {
+void RenderContext::Impl::UploadSubmittedLights(const Camera& cam) noexcept {
     if (submittedLights.empty()) {
         mappedLights.clear();
+        lightTileBases.clear();
+        shadowAtlas.BeginFrame();
+        shadowAtlas.EndFrame();
         packedLightCount = 0;
         return;
     }
 
+    lightTileBases.clear();
+    AllocateShadowTiles(cam.position);
+
     gpuLights.clear();
     gpuLights.reserve(submittedLights.size());
-    for (const LightDesc& desc: submittedLights) {
-        gpuLights.push_back(GpuPack::PackLight(desc, view_matrix));
+    for (size_t index = 0; index < submittedLights.size(); ++index) {
+        const int32_t tileBase = (index < lightTileBases.size()) ? lightTileBases[index] : -1;
+        gpuLights.push_back(GpuPack::PackLight(submittedLights[index], view_matrix, tileBase));
     }
 
     auto mapped = frames.lightStorageBuffers[presenter.frameIndex].Map(allocator);
@@ -154,6 +200,13 @@ void RenderContext::Impl::UploadSubmittedLights() noexcept {
     std::memcpy(mapped->Data(), gpuLights.data(), gpuLights.size() * sizeof(Light));
     mappedLights.assign(gpuLights.begin(), gpuLights.end());
     packedLightCount = static_cast<uint32_t>(gpuLights.size());
+
+    // The tiles go up with the lights: the lighting pass reconstructs a
+    // shadow-atlas tile from the same matrices the shadow pass is about to
+    // rasterize with, so the two are written in the same place in the frame.
+    if (const auto tiles = frames.shadowTileBuffers[presenter.frameIndex].Map(allocator); tiles && shadowAtlas.TileCount() > 0) {
+        std::memcpy(tiles->Data(), shadowAtlas.Tiles().data(), shadowAtlas.TileCount() * sizeof(ShadowTile));
+    }
 }
 
 }

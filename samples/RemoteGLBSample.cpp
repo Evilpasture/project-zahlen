@@ -201,7 +201,7 @@ inline constexpr float kSunIntensity = 60.0f;
 inline const JPH::Vec3 kSunColor {1.00f, 0.97f, 0.92f};
 inline const JPH::Vec3 kSunDirection {0.45f, 1.00f, 0.30f};
 
-// Two punctual fills, quoted per square metre of subject: a point light falls off
+// Two point/spot fills, quoted per square metre of subject: a point light falls off
 // as 1/(d^2 + 1) and the rig sits at a distance proportional to the subject's
 // radius, so intensity scales with radius^2 to look the same on a helmet and on a
 // car. At the helmet's ~0.5 m that is 25 and 40 — was 70/110 which blew the floor.
@@ -657,8 +657,8 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
                            kSunIntensity, 0.0f, 0.0f, kSunDirection.Normalized());
 
     // Cool fill from the front-left, warm rim from behind-right: the two specular
-    // highlights that separate a metal surface from a silhouette. Neither casts --
-    // ShadowSettings::maxPunctualShadows is 0, so no cube map is rendered for them.
+    // highlights that separate a metal surface from a silhouette. Neither asks to
+    // cast, so the shadow atlas hands them no tile.
     studio.fill = MakeLight(engine, "StudioFill", ZHLN::LightType::Point, center + JPH::Vec3(-radius * 2.2f, radius * 1.6f, radius * 2.4f), kFillColor,
                             kFillIntensityPerM2 * radius * radius, radius * 0.15f, radius * 6.0f, JPH::Vec3::sZero());
     studio.rim  = MakeLight(engine, "StudioRim", ZHLN::LightType::Point, center + JPH::Vec3(radius * 2.6f, radius * 1.1f, -radius * 2.2f), kRimColor,
@@ -792,10 +792,9 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // bias and penumbra filter are all expressed in units of the nominal
     // resolution, so they would run at half the width of the real 2048 texels
     // and the floor shimmers around the subject's shadow.
-    gfx.shadows.resolution         = 2048;
-    gfx.shadows.sunSize            = 0.035f;
-    gfx.shadows.maxPunctualShadows = 0;
-    gfx.shadows.width              = std::clamp(subjectRadius * 16.0f, 4.0f, 64.0f);
+    gfx.shadows.resolution = 2048;
+    gfx.shadows.sunSize    = 0.035f;
+    gfx.shadows.width      = std::clamp(subjectRadius * 16.0f, 4.0f, 64.0f);
 
     return gfx;
 }
@@ -857,10 +856,9 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
     reg.Add(
         settings,
         ZHLN::Components::ShadowSettingsComponent {
-            .shadowWidth        = gfx.shadows.width,
-            .shadowResolution   = static_cast<int>(gfx.shadows.resolution),
-            .maxPunctualShadows = static_cast<int>(gfx.shadows.maxPunctualShadows),
-            .sunSize            = gfx.shadows.sunSize,
+            .shadowWidth      = gfx.shadows.width,
+            .shadowResolution = static_cast<int>(gfx.shadows.resolution),
+            .sunSize          = gfx.shadows.sunSize,
         }
     );
     reg.Add(settings, ZHLN::Components::RayTracingSettingsComponent {.config = gfx.rayTracing});

@@ -99,14 +99,12 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
     if (!result) {
         return result;
     }
-
-    RecreatePunctualShadowViews();
     return {};
 }
 
 auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     const VkExtent2D cascadeExt = {.width = kShadowResolution, .height = kShadowResolution};
-    const VkExtent2D atlasExt   = {.width = kAtlasSize, .height = kAtlasSize};
+    const VkExtent2D atlasExt   = {.width = kShadowAtlasSize, .height = kShadowAtlasSize};
 
     auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
         _allocator, _ctx, cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
@@ -145,36 +143,28 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         }
     }
 
+    // A plain 2D depth image: no layers, no cube compatibility. Every
+    // shadow tile -- a spot's single tile or a point's six faces -- is a
+    // viewport into this one attachment.
     auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, atlasExt,
-        {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kAtlasLayers, .cubeCompatible = true}
+        _allocator, _ctx, atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
     }
-    _punctualShadowViews.clear();
-    _shadowAtlasCubeView = {};
-    _shadowAtlas2DView   = {};
+    _shadowAtlasView = {};
     _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas = std::move(*sa_res);
 
-    auto cube_res = _graph.shadowAtlas.image.CreateView(
-        _ctx.Device(), {.kind = Vk::ImageViewKind::CubeArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
+    auto atlas_res = _graph.shadowAtlas.image.CreateView(
+        _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D, .aspect = Vk::ImageAspect::Depth}
     );
-    if (!cube_res) {
-        return std::unexpected(cube_res.error());
+    if (!atlas_res) {
+        return std::unexpected(atlas_res.error());
     }
-    _shadowAtlasCubeView = std::move(*cube_res);
+    _shadowAtlasView = std::move(*atlas_res);
 
-    auto array_res = _graph.shadowAtlas.image.CreateView(
-        _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
-    );
-    if (!array_res) {
-        return std::unexpected(array_res.error());
-    }
-    _shadowAtlas2DView = std::move(*array_res);
-
-    if (!_shadowAtlasCubeView.Valid() || !_shadowAtlas2DView.Valid()) [[unlikely]] {
+    if (!_shadowAtlasView.Valid()) [[unlikely]] {
         return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
     }
 
@@ -186,7 +176,6 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         }
     });
 
-    RecreatePunctualShadowViews();
     return {};
 }
 
@@ -242,19 +231,6 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         return {};
     });
-}
-
-void TargetManager::RecreatePunctualShadowViews() noexcept {
-    _punctualShadowViews.clear();
-    _punctualShadowViews.resize(kPunctualLights);
-    for (uint32_t i = 0; i < kPunctualLights; ++i) {
-        auto view_res = _graph.shadowAtlas.image.CreateView(
-            _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i * 6, .layerCount = 6}
-        );
-        if (view_res.has_value()) {
-            _punctualShadowViews[i] = std::move(*view_res);
-        }
-    }
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
@@ -324,9 +300,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
 void TargetManager::Clear() noexcept {
     _shadowCascadeViews.clear();
     _shadowCascadeViewsPrev.clear();
-    _punctualShadowViews.clear();
-    _shadowAtlasCubeView = {};
-    _shadowAtlas2DView   = {};
+    _shadowAtlasView = {};
     Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) { target.Destroy(_allocator); });
     // These targets are not part of the render graph's reflected resources.
     _graph.shadowMap.Destroy(_allocator);

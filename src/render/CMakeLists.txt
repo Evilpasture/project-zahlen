@@ -42,6 +42,7 @@ set(RAW_RENDER_SOURCES
     features/PostProcessFeature.cpp
     features/ShadowRenderer.cpp
     features/VolumetricFogSystem.cpp
+    features/ShadowAtlas.cpp
     passes/SceneDraw.cpp
     passes/aa/FXAAPass.cpp
     passes/aa/MLAAPass.cpp

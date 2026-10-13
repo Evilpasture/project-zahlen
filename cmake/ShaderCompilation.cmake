@@ -570,7 +570,6 @@ compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/ui.slang"
     "${SHADER_SRC_DIR}/fxaa.slang"
     "${SHADER_SRC_DIR}/mlaa.slang"
-    "${SHADER_SRC_DIR}/punctual_shadows.slang"
 )
 
 # --- Scene shaders (basic.slang hosts the GlobalSceneRegistry ParameterBlock).
@@ -667,6 +666,10 @@ add_shader_target(shadow_shader
         "${SHADER_SRC_DIR}/basic.slang|VSMainShadow|vs_6_5|SHADER_BASIC_SLANG_VS_SHADOW_PATH"
         "${SHADER_SRC_DIR}/basic.slang|PSShadow|ps_6_0|SHADER_SHADOW_SLANG_PS_PATH"
         "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMainShadow|ms_6_5|SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
+        # One atlas tile per draw, so this stage is not multiview: the tile's
+        # matrix arrives in a push constant and its place in the atlas in the
+        # viewport. Pairs with basic.slang's PSShadow above.
+        "${SHADER_SRC_DIR}/shadow_atlas.slang|VSMain|vs_6_5|SHADER_SHADOW_ATLAS_SLANG_VS_PATH"
 )
 
 add_shader_target(cluster_bounds
@@ -891,8 +894,7 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "BloomThresholdCS=SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH"
     "BloomDownCS=SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH"
     "BloomUpCS=SHADER_BLOOM_UP_CS_SLANG_CS_PATH"
-    "PunctualShadowsVS=SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH"
-    "PunctualShadowsPS=SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH"
+    "ShadowAtlasVS=SHADER_SHADOW_ATLAS_SLANG_VS_PATH"
     "LightingNortVS=SHADER_LIGHTING_NORT_SLANG_VS_PATH"
     "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
     "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"

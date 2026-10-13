@@ -82,15 +82,15 @@ auto PackMeshParticleEmitter(const MeshParticleEmitterDesc& desc) noexcept -> Me
     return packed;
 }
 
-auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView) noexcept -> Light {
+auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t shadowTileBase) noexcept -> Light {
     Light packed {};
 
-    packed.type        = desc.type;
-    packed.intensity   = desc.intensity;
-    packed.radius      = desc.radius;
-    packed.twoSided    = desc.twoSided;
-    packed.range       = (desc.range > 0.0f) ? desc.range : 1000.0f;
-    packed.shadowLayer = desc.shadowLayer;
+    packed.type           = desc.type;
+    packed.intensity      = desc.intensity;
+    packed.radius         = desc.radius;
+    packed.twoSided       = desc.twoSided;
+    packed.range          = (desc.range > 0.0f) ? desc.range : 1000.0f;
+    packed.shadowTileBase = shadowTileBase;
 
     desc.position.StoreFloat3(&packed.position);
     desc.direction.StoreFloat3(&packed.direction);

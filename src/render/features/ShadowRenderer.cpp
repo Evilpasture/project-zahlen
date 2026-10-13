@@ -13,10 +13,12 @@
 namespace ZHLN {
 
 auto ShadowRenderer::InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    return CreatePerFrame(
-               impl.allocator, sizeof(VkDrawIndirectCommand) * RenderContext::Impl::kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect,
-               Vk::MemoryUsage::CPUToGPU
-    )
+    // Slot 0 for the cascades, one slot per shadow-casting light after it. See
+    // kAtlasInstancesPerLight for why the slots are per light rather than per
+    // tile.
+    constexpr VkDeviceSize kCommands =
+        sizeof(VkDrawIndirectCommand) * (RenderContext::Impl::kGpuCullingMaxInstances + ShadowAtlas::kMaxLights * kAtlasInstancesPerLight);
+    return CreatePerFrame(impl.allocator, kCommands, Vk::BufferUsage::Indirect, Vk::MemoryUsage::CPUToGPU)
         .transform([this, &impl](auto&& buffers) -> void {
             DestroyResources(impl.allocator);
             _indirectCommands = std::forward<decltype(buffers)>(buffers);
@@ -41,12 +43,12 @@ auto ShadowRenderer::CascadeMeshPipeline() const noexcept -> VkPipeline {
     return _cascadeMeshPipeline.Get();
 }
 
-auto ShadowRenderer::PunctualPipeline() const noexcept -> VkPipeline {
-    return _punctualPipeline.Get();
+auto ShadowRenderer::AtlasPipeline() const noexcept -> VkPipeline {
+    return _atlasPipeline.Get();
 }
 
-auto ShadowRenderer::PunctualLayout() const noexcept -> VkPipelineLayout {
-    return _punctualLayout;
+auto ShadowRenderer::AtlasLayout() const noexcept -> VkPipelineLayout {
+    return _atlasLayout;
 }
 
 auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer& {
@@ -112,9 +114,9 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
         });
 }
 
-auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
+auto ShadowRenderer::CompileAtlasPipeline(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
-    _punctualLayout = impl.emptyPipelineLayout;
+    _atlasLayout = impl.emptyPipelineLayout;
     return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
@@ -124,12 +126,11 @@ auto ShadowRenderer::CompilePunctualPipeline(RenderContext::Impl& impl, VkDevice
                 .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
-                .ViewMask(kCubemapFaceMask)
                 .CullNone()
                 .Cache(impl.pipelineCache.Get())
                 .Build(device)
                 .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
-                .transform([this](auto&& pipeline) -> auto { _punctualPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([this](auto&& pipeline) -> auto { _atlasPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 

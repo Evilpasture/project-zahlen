@@ -433,8 +433,7 @@ auto TrySpawnEmissiveVPL(ECS::Registry& reg, const ModelPart& part, Entity paren
                      .direction   = JPH::Vec3(0, -1, 0),
                      .range       = std::max(partExtent * scaleMult * 2.5f, 3.0f),
                      .points      = {},
-                     .twoSided    = 0,
-                     .shadowLayer = -1
+                     .twoSided    = 0
                  }
     );
     return glowEnt;
@@ -801,7 +800,6 @@ auto InstantiatePrefab(
                               .radius      = (light.type == LightType::Spot) ? light.outerConeAngle : 0.0f,
                               .direction   = worldDir,
                               .range       = (light.range > 0.0f) ? light.range * scaleMult : 1000.0f,
-                              .shadowLayer = -1,
                               .innerConeRadians = light.innerConeAngle,
                               .outerConeRadians = light.outerConeAngle
                           }

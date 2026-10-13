@@ -302,7 +302,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 .radius      = light.radius,
                 .direction   = direction,
                 .range       = light.range,
-                .shadowLayer = light.shadowLayer,
+                .castsShadow = light.castsShadow,
                 .innerConeRadians = light.innerConeRadians,
                 .outerConeRadians = light.outerConeRadians,
                 .pinned = light.pinned
@@ -444,7 +444,7 @@ namespace {
                 .intensity   = light.intensity,
                 .radius      = light.radius,
                 .range       = light.range,
-                .shadowLayer = light.shadowLayer,
+                .castsShadow = light.castsShadow,
                 .pinned      = light.pinned,
             }
         );

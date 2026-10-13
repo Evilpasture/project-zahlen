@@ -559,7 +559,7 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
         std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)
     );
 
-    // Brightness: the punctual constant for point/spot, the sun constant for the
+    // Brightness: the point/spot constant, the sun constant for the
     // directional term. A light with no brightness lane at all (legacy
     // 3-component `_light`) keeps Source's own default of 200 rather than
     // becoming invisible.
@@ -826,7 +826,7 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 
     // The equivalent-Source-brightness model: a white panel of area A reads as
     // a `light` of brightness (A * kEmissiveSourceBrightnessPerSquareMetre),
-    // then goes through the same punctual calibration the entity lights use.
+    // then goes through the same point/spot calibration the entity lights use.
     const float equivalentBrightness = Rec709Luma(surface.color) * surface.areaSquareMetres * kEmissiveSourceBrightnessPerSquareMetre * surface.strength *
                                        surface.fixtureDamping;
     light.intensity                  = std::max(equivalentBrightness * kSourceBrightnessToEngine, 0.0f);
@@ -907,7 +907,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     // 1. Ambient floor. The engine's ambient term is
     //    EvaluateSH(N, frame.sh) * ambientExposure, and frame.sh integrates the
     //    sky gradient -- so a black sky is a black scene no matter how many
-    //    punctual lights it carries. Lift a black or near-black ambient to a
+    //    point/spot lights it carries. Lift a black or near-black ambient to a
     //    visible floor while keeping whatever hue the mapper did author, so a
     //    night map stays a night map and does not become a grey room.
     const float ambientIrradiance = Rec709Luma(data.ambient.color) * data.ambient.intensity / kAmbientBrightnessLadder;

@@ -1782,8 +1782,7 @@ void ClientSession::SpawnOrUpdateLightEntity(Engine& engine, ReplicatedObject& o
                 .intensity = rendererIntensity,
                 .radius = object.sourceRadius,
                 .direction = resolved.direction,
-                .range = object.range,
-                .shadowLayer = -1
+                .range = object.range
             },
             Components::SceneLightTagComponent {}
         );

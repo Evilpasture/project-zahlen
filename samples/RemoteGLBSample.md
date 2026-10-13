@@ -201,7 +201,7 @@ Key plus two fills plus a floor, laid out around the subject's bounds:
   tiny; 3.5*r tightened it; 5.0*r widened it again to catch reflections at
   oblique angles.
 
-`maxPunctualShadows = 0` — neither fill casts, no cube map rendered.
+Neither fill asks to cast (`LightComponent::castsShadow` is false), so the shadow atlas hands them no tile.
 
 ## Render settings
 

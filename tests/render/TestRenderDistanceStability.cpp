@@ -723,7 +723,7 @@ struct DistanceStabilitySuite {
                 );
             }
 
-            // Sun (cascade shadows) + two punctuals anchored at mid/far depth
+            // Sun (cascade shadows) + two point lights anchored at mid/far depth
             // so the cluster z-slices at depth carry light.
             // The sun must sit BEHIND the camera (toward -Z): the camera
             // looks along +Z, so the +Z faces of the rings are the visible

@@ -41,7 +41,9 @@ namespace ZHLN::GpuPack {
 
 // @p worldToView is the frame's view matrix: a light's view-space position is not
 // scene data, so the renderer derives it here rather than asking the engine for it.
-[[nodiscard]] auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView) noexcept -> Light;
+// @p shadowTileBase is the shadow atlas's answer to the light's `castsShadow`: the
+// index of its first tile, or -1 when the atlas has none to give it.
+[[nodiscard]] auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t shadowTileBase) noexcept -> Light;
 
 // The packed frame carries only what the engine authored; the renderer fills the
 // lanes only it knows (screen resolution, light count, cascade splits, the SH

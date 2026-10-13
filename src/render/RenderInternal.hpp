@@ -19,6 +19,7 @@
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "features/PostProcessFeature.hpp"
+#include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
 #include "graph/RenderGraph.hpp"
@@ -234,9 +235,8 @@ struct RenderContext::Impl {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
     };
 
-    static constexpr uint32_t SHADOW_RES          = TargetManager::kShadowResolution;
-    static constexpr uint32_t NUM_CASCADES        = TargetManager::kCascades;
-    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = TargetManager::kPunctualLights;
+    static constexpr uint32_t SHADOW_RES   = TargetManager::kShadowResolution;
+    static constexpr uint32_t NUM_CASCADES = TargetManager::kCascades;
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
@@ -264,6 +264,7 @@ struct RenderContext::Impl {
     // passes need, so a pass is a description of recording work rather than a
     // holder of GPU state.
     ShadowRenderer      shadows;
+    ShadowAtlas         shadowAtlas;
     VolumetricFogSystem fog;
     PostProcessFeature  postProcess;
 
@@ -317,6 +318,7 @@ struct RenderContext::Impl {
         PerFrame<Vk::Buffer>      globalCounterBuffers;
         PerFrame<Vk::Buffer>      frameUniformBuffers;
         PerFrame<Vk::Buffer>      lightStorageBuffers;
+        PerFrame<Vk::Buffer>      shadowTileBuffers;
         PerFrame<Vk::Buffer>      instanceDataBuffers;
         PerFrame<Vk::Buffer>      indirectCommandsBuffers;
         PerFrame<Vk::Buffer>      indirectCommandsBuffersPass2;
@@ -505,6 +507,12 @@ struct RenderContext::Impl {
     uint32_t                   billboardSerial = 0;
 
     ZHLN::Array<Light> mappedLights;
+
+    // The shadow atlas's answer to this frame's lights: one tile base per
+    // submitted light, in submitted order, -1 for the lights that asked and did
+    // not fit (and the ones that never asked). `UploadSubmittedLights` fills it
+    // before it packs, so the packed lights carry the atlas's decision.
+    ZHLN::Array<int32_t> lightTileBases;
 
     // SetLights takes descriptions; this holds the packed structs for the frame
     // a pass is about to upload, so the conversion happens once per frame
@@ -729,6 +737,7 @@ struct RenderContext::Impl {
         destroyFrames(frames.globalCounterBuffers);
         destroyFrames(frames.frameUniformBuffers);
         destroyFrames(frames.lightStorageBuffers);
+        destroyFrames(frames.shadowTileBuffers);
         destroyFrames(frames.instanceDataBuffers);
         destroyFrames(frames.indirectCommandsBuffers);
         destroyFrames(frames.indirectCommandsBuffersPass2);
@@ -868,7 +877,11 @@ struct RenderContext::Impl {
         "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
-    void UploadSubmittedLights() noexcept;
+    // Packs the submitted lights, and answers their shadow asks first: the
+    // atlas allocation has to exist before the pack, because a light's tile
+    // base is one of the fields the shader reads.
+    void UploadSubmittedLights(const Camera& cam) noexcept;
+    void AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept;
 
     void ProvokeDeviceLostInternal() const;
 

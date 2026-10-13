@@ -48,7 +48,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             const auto reflectInputs = std::to_array<Vk::ReflectedStageInput>({
                 {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = basicView.Fragment(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
-                {.shader = Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
                 {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},

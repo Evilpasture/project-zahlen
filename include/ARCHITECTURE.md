@@ -431,10 +431,10 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
                                               [ BlitPass & ImGui / UI ] ──> [ Swapchain ]
 ```
 
-* **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) and punctual light shadow atlases.
+* **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) in one multiview pass, then every shadow-casting point/spot light into tiles of a single 2D depth atlas (`features/ShadowAtlas.hpp`): one tile for a spot, six for a point's cube faces. Tile size falls off with distance and tiles whose light and casters did not move are reused, so a light that loses the ranking contest loses resolution rather than its shadows.
 * **MainPass**: Writes primary G-Buffer channels (`SceneColor`, `Velocity`, `NormalRoughness`, `Depth`).
 * **DecalPass**: Projects screen-space decals directly onto the G-Buffer before lighting.
-* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled). The occlusion factor modulates only indirect light: the lighting pass applies it to the SH/gather ambient term and passes it in the lighting target's alpha, where the reflection pass applies it to specular IBL; direct sun/punctual terms carry their own shadow visibility instead.
+* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled). The occlusion factor modulates only indirect light: the lighting pass applies it to the SH/gather ambient term and passes it in the lighting target's alpha, where the reflection pass applies it to specular IBL; direct sun and point/spot terms carry their own shadow visibility instead.
 * **LightingPass**: Computes direct sun lighting, clustered point/spot/area (LTC) lights, and ray-traced shadows.
 * **ReflectionPass**: Evaluates Screen-Space Reflections (SSR) or Hardware Ray-Traced Reflections (RTR).
 * **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.

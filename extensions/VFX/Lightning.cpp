@@ -314,8 +314,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
             .intensity   = 0.0f,
             .radius      = 12.0f,
             .direction   = JPH::Vec3(0.0f, -1.0f, 0.0f),
-            .range       = 2000.0f,
-            .shadowLayer = -1
+            .range       = 2000.0f
         }
     );
 
@@ -327,8 +326,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
             .intensity   = 0.0f,
             .radius      = 8.0f,
             .direction   = JPH::Vec3(0.0f, 1.0f, 0.0f),
-            .range       = 500.0f,
-            .shadowLayer = -1
+            .range       = 500.0f
         }
     );
 

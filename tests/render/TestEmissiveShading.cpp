@@ -13,7 +13,7 @@
 // Emission now owns G-Buffer attachment 3 and lighting.slang adds it to the
 // composed result unconditionally.
 //
-// The scene here is the one that used to fail: no sun, no punctual lights, and
+// The scene here is the one that used to fail: no sun, no point/spot lights, and
 // ambient turned all the way down. Whatever the emissive box shows in that
 // frame can only have come from the emissive term.
 

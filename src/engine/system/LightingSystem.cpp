@@ -16,16 +16,6 @@
 
 namespace ZHLN {
 
-namespace {
-// A light already holding one of the very few punctual shadow slots
-// (TargetManager::kPunctualLights) keeps this much of a score bonus. Without it
-// a light sitting on the cutoff hands its shadow back and forth with its
-// neighbour every frame, which is the other half of "lights pop in and out as I
-// move". 1.25 means a light has to fall 25% below the cutoff to lose its slot,
-// and a challenger has to beat it by 25% to take it.
-constexpr float kShadowSlotHysteresis = 1.25f;
-} // namespace
-
 auto LightingSystem::GetSun(SunQuery reg) noexcept -> SunLight {
     SunLight sun {
         .direction = JPH::Vec3(0.5f, 1.0f, 0.2f),
@@ -77,8 +67,8 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(SunQuery
     return {sun.direction, sun.intensity};
 }
 
-void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
-                                       const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
+void LightingSystem::Update(ECS::Query<const Components::LightComponent, const Components::WorldTransformComponent,
+                                       const Components::TransformComponent> query,
                             ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<SceneData> scene) {
     auto& sceneData = *scene;
 
@@ -99,40 +89,22 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         Entity    entity   = Entity::Null();
         float     score    = 0.0f;
         bool      pinned   = false;
-        bool      punctual = false;
+        bool      isRanged = false;
     };
 
     ZHLN::Array<RankedLight> ranked;
 
     const JPH::Vec3 viewPos = cameraComp ? cameraComp->camera.position : JPH::Vec3::sZero();
 
-    // Read the punctual shadow budget before the light pass: the hysteresis
-    // bonus below needs it, and the shadow slots are assigned from the same
-    // ranking so the lights that survive the budget are the ones that cast.
-    uint32_t shadowSlots = 0;
-    {
-        const auto shadowEntities = query.GetEntitiesWith<Components::ShadowSettingsComponent>();
-        if (!shadowEntities.empty()) {
-            query.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
-                shadowSlots = static_cast<uint32_t>(std::max(0, shadowSettings.maxPunctualShadows));
-            });
-        }
-    }
-
     for (Entity e: query.GetEntitiesWith<Components::LightComponent>()) {
-        query.Patch<Components::LightComponent>(e, [&](auto& light) {
-            // The previous frame's slot has to be read before it is cleared:
-            // that is the only thing the hysteresis bonus is measured against.
-            const int32_t previousLayer = light.shadowLayer;
-            light.shadowLayer           = -1;
-
+        query.Patch<Components::LightComponent>(e, [&](const auto& light) {
             LightDesc desc {};
             desc.type             = light.type;
             desc.intensity        = light.intensity;
             desc.radius           = light.radius;
             desc.twoSided         = light.twoSided;
             desc.range            = (light.range > 0.0f) ? light.range : 1000.0f;
-            desc.shadowLayer      = light.shadowLayer;
+            desc.castsShadow      = light.castsShadow;
             desc.direction        = light.direction;
             desc.color            = light.color;
             desc.innerConeRadians = light.innerConeRadians;
@@ -144,7 +116,7 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
             entry.pinned = light.pinned;
 
             if (light.type == LightType::Point || light.type == LightType::Spot) {
-                entry.punctual = true;
+                entry.isRanged = true;
 
                 JPH::Vec3 lightPos    = JPH::Vec3::sZero();
                 bool      hasLightPos = query.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
@@ -158,14 +130,11 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
                 if (hasLightPos) {
                     const float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
                     entry.score        = light.intensity / distSq;
-                    if (previousLayer >= 0 && static_cast<uint32_t>(previousLayer) < shadowSlots) {
-                        entry.score *= kShadowSlotHysteresis;
-                    }
                 }
             } else {
                 // Sun / directional / area terms are single-term and cost one
                 // draw. They are never worth culling, so they outrank every
-                // punctual light regardless of how far away they are.
+                // point/spot light regardless of how far away they are.
                 entry.score = std::numeric_limits<float>::max();
             }
 
@@ -183,12 +152,11 @@ void LightingSystem::Update(ECS::Query<Components::LightComponent&, const Compon
         return a.score > b.score;
     });
 
-    uint32_t assigned = 0;
-    for (RankedLight& entry: ranked) {
-        if (entry.punctual && assigned < shadowSlots) {
-            entry.desc.shadowLayer = static_cast<int32_t>(assigned++);
-        }
-    }
+    // No shadow slots are handed out here any more. A light's `castsShadow`
+    // reaches the renderer untouched and the shadow atlas answers it per
+    // frame, so a light that loses the ranking contest loses tile *resolution*
+    // rather than its shadows -- which is what the slot assignment and its
+    // hysteresis patch were both working around.
 
     ZHLN::Array<LightDesc> sceneLights;
     sceneLights.reserve(ranked.size());

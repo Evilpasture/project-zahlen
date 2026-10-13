@@ -85,7 +85,7 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     // never express Source pitch: a rotation about +X does not tilt the +X
     // forward at all, so a fixture pitched straight down -- the common case
     // for ceiling lights -- rendered rolled onto its side, perpendicular to
-    // the floor, with its housing redirecting/occluding the punctual light
+    // the floor, with its housing redirecting/occluding the point/spot light
     // placed at the same origin (dark interiors, light pools only on walls).
     //
     // The exact transform is the conjugate of the Source rotation by the

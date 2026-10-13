@@ -480,8 +480,7 @@ export class ExplosionSystem {
                 .color       = JPH::Vec3(1.0f, 0.48f, 0.09f),
                 .intensity   = 2800.0f * scale * scale,
                 .radius      = 1.5f,
-                .range       = 60.0f * scale,
-                .shadowLayer = -1
+                .range       = 60.0f * scale
             },
             std::move(initialExp)
         );

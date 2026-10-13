@@ -899,7 +899,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
 }
 
-// A mesh node that also carries a punctual light, alongside the emissive
+// A mesh node that also carries a KHR_lights_punctual light, alongside the emissive
 // extension: two extensions on one document, one of them unread.
 [[nodiscard]] auto MakeLitMeshFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfMeshNodeWithLight, GltfEmissiveStrengthMaterial> document {
@@ -920,7 +920,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
-// Geometry-free document carrying only a punctual light -- the shape zcook
+// Geometry-free document carrying only a KHR_lights_punctual light -- the shape zcook
 // emits for a cooked scene light (tools/zcook/GLB.cpp).
 [[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
@@ -1314,7 +1314,7 @@ struct GLTFImportTestSuite {
             if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
-            // Check that the punctual light was imported:
+            // Check that the KHR_lights_punctual light was imported:
             if (litMesh->lights.size() != 1 || std::string_view(litMesh->lights[0].name) != "TestPoint" || litMesh->lights[0].intensity != 42.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }

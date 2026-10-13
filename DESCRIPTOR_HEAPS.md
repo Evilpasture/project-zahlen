@@ -123,6 +123,8 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 | 9       | clampSampler    | `HEAP_WITH_CONSTANT_OFFSET` → static sampler slot |
 | 10      | texTransLighting| `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 | 11      | globalTextures[]| `HEAP_WITH_CONSTANT_OFFSET`, `heapArrayStride = resource stride` |
+| 12      | texDdgiIrradiance | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
+| 13      | texDdgiDistance   | `HEAP_WITH_CONSTANT_OFFSET` → static image slot |
 
 ### Push-data layout
 
@@ -155,7 +157,7 @@ the old bindless set array.
 
 ## 4. Ported (heap + push data) — the entire frame
 
-* Scene registry pipelines: materials, shadow (cascade + punctual), lines,
+* Scene registry pipelines: materials, shadow (cascade + light atlas), lines,
   CSG stencil passes, particle render, mesh-particle render + shadow, UI
   batches, decals (set 0 + scene set 1 merged into one mapping chain).
 * Compute: particle update, mesh-particle update, HiZ generation (one block per

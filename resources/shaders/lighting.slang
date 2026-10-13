@@ -24,8 +24,12 @@ StructuredBuffer<ClusterVolume> clusterGrid;
 StructuredBuffer<uint> clusterIndexList;
 SamplerState pointSampler;
 
-TextureCubeArray<float> punctualShadowCube;
-Texture2DArray<float> punctualShadow2D;
+// Punctual shadows live in one 2D depth atlas that every shadow-casting spot
+// and point light sub-allocates square tiles out of -- one tile for a spot, six
+// for a point's cube faces. `ShadowAtlas` on the CPU owns the packing; this is
+// the sampled half of it.
+Texture2D<float> shadowAtlas;
+StructuredBuffer<ShadowTile> shadowTiles;
 
 Texture2D<float4> texEmissive;
 
@@ -344,24 +348,34 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 float3 kD_p   = (1.0f - F_p) * (1.0f - metallic);
 
                 float shadowVisibility = 1.0f;
-                if (light.shadowLayer >= 0) {
+                if (light.shadowTileBase >= 0) {
+                    // A point light is six atlas tiles, one per cube face in
+                    // Vulkan layer order (+X,-X,+Y,-Y,+Z,-Z), so the face this
+                    // direction lands on picks the tile. A spot light is a
+                    // single tile and always takes face 0. The face order here
+                    // is the order `ShadowAtlas` writes the matrices in.
+                    uint face = 0u;
                     if (light.type == 1) {
-                        float3 r = -L_unnorm;
+                        float3 r  = worldPos - light.position;
+                        float3 ar = abs(r);
+                        if (ar.x >= ar.y && ar.x >= ar.z) {
+                            face = (r.x > 0.0f) ? 0u : 1u;
+                        } else if (ar.y >= ar.z) {
+                            face = (r.y > 0.0f) ? 2u : 3u;
+                        } else {
+                            face = (r.z > 0.0f) ? 4u : 5u;
+                        }
+                    }
 
-                        float currentDepth = (distToCenter / max(light.range, 0.001f)) - 0.005f;
-
-                        shadowVisibility = punctualShadowCube.SampleCmpLevelZero(shadowSampler, float4(r, light.shadowLayer), currentDepth);
-                    } else if (light.type == 2) {
-                        float4x4 lightViewProj;
-                        lightViewProj[0] = light.points[0];
-                        lightViewProj[1] = light.points[1];
-                        lightViewProj[2] = light.points[2];
-                        lightViewProj[3] = light.points[3];
-                        float4 sPos      = mul(lightViewProj, float4(worldPos + N * 0.05f, 1.0f));
-                        sPos.xy          = sPos.xy * 0.5f + 0.5f * sPos.w;
-
-                        float depthRef   = (sPos.z / sPos.w) - 0.005f;
-                        shadowVisibility = punctualShadow2D.SampleCmpLevelZero(shadowSampler, float3(sPos.xy / sPos.w, (float) light.shadowLayer), depthRef);
+                    // Both light kinds then take the same path: the tile's own
+                    // matrix is the one the rasterizer drew with, so the depth
+                    // written and the depth compared are the same quantity.
+                    ShadowTile tile = shadowTiles[light.shadowTileBase + face];
+                    float4 sPos     = mul(tile.viewProj, float4(worldPos + N * 0.05f, 1.0f));
+                    if (sPos.w > 0.0f) {
+                        float2 tileUv  = sPos.xy / sPos.w * 0.5f + 0.5f;
+                        float2 atlasUv = tile.uvOrigin + tileUv * tile.uvScale;
+                        shadowVisibility = shadowAtlas.SampleCmpLevelZero(shadowSampler, atlasUv, sPos.z / sPos.w - 0.0025f);
                     }
                 }
 
