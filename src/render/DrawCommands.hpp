@@ -8,6 +8,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include "GpuLayout.hpp"
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <array>
@@ -78,8 +79,8 @@ struct DrawCommand {
     // BLAS object stays with NativeMesh, which owns build and retirement,
     // while its address is all a TLAS instance or a skinning dispatch names.
     // (The skinned scratch buffer is the one exception: its BLAS is rebuilt
-    // after the skinning dispatch each frame, so BuildTLAS still resolves
-    // that handle through the geometry manager at frame time.)
+    // after the skinning dispatch each frame, so its address reaches
+    // BuildTLAS through the per-frame SkinnedBlasEntry list instead.)
     Vk::DeviceAddress<>                    blasAddress;
     Vk::DeviceAddress<VertexPosition>      skinPosAddress;
     Vk::DeviceAddress<VertexTangentFrame>  skinFrameAddress;
@@ -97,6 +98,32 @@ struct DrawCommand {
 };
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
+
+// One rebuilt skinned-scratch BLAS: which scratch buffer, and the address
+// its TLAS instance must name this frame. Produced by the skinning stage,
+// consumed by BuildTLAS -- the ordering between them is carried by this
+// data, not by a convention about which Impl method runs first.
+struct SkinnedBlasEntry {
+    BufferHandle        scratch;
+    Vk::DeviceAddress<> address;
+};
+
+// (Re)builds the BLAS of one skinned scratch buffer from the vertex stream
+// the skinning dispatch just wrote. Creates the backing buffer and the
+// acceleration structure on first use and keeps them on the scratch mesh;
+// later frames rebuild in place. Returns the BLAS address for the caller's
+// SkinnedBlasEntry.
+//
+// A free function, deliberately: everything it touches arrives as a
+// parameter, and every failure -- unsupported ray tracing, allocation
+// failure, a failed create -- comes back as an error instead of being
+// swallowed. On failure during first creation the half-created state is
+// rolled back; on failure of a later rebuild the previous BLAS (and the
+// address the caller already has) remains intact.
+[[nodiscard]] auto RebuildSkinnedBLAS(
+    VkCommandBuffer cmd, Vk::Context& ctx, Vk::Allocator& allocator, Vk::DeletionQueue& deletionQueue, const DrawCommand& drawCmd,
+    NativeMesh& scratchMesh
+) -> std::expected<Vk::DeviceAddress<>, ErrorCode>;
 
 struct CSGDrawCommand {
     DrawCommand eyeDraw;

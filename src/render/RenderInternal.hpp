@@ -880,13 +880,21 @@ struct RenderContext::Impl {
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                         DispatchSkinningPasses(VkCommandBuffer cmd);
+    // Skins every queued skinned draw, then rebuilds each scratch buffer's
+    // BLAS. The returned entries are the only channel from the rebuild to
+    // BuildTLAS: a scratch buffer whose rebuild failed is simply absent
+    // (and the failure is handed back alongside, never swallowed).
+    struct SkinnedBlasOutcome {
+        ZHLN::Array<SkinnedBlasEntry> addresses;
+        std::optional<ErrorCode>      failure;
+    };
+    [[nodiscard]] auto DispatchSkinningPasses(VkCommandBuffer cmd) -> SkinnedBlasOutcome;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
         -> std::expected<TextureHandle, ErrorCode>;
 
-    void BuildTLAS(VkCommandBuffer cmd) noexcept;
+    void BuildTLAS(VkCommandBuffer cmd, std::span<const SkinnedBlasEntry> skinnedBlas) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
@@ -907,7 +915,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh);
 
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
