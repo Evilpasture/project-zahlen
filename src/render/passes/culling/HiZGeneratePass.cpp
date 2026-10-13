@@ -40,10 +40,10 @@ void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
         const Vk::ImageWrite inDepth = mip == 0 ? Vk::ImageWrite {impl.presenter.depthTarget.view} :
                                                   Vk::ImageWrite {impl.graphResources.hizMap.mipViews[mip - 1], VK_IMAGE_LAYOUT_GENERAL};
         const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            impl.ctx, impl.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
+            impl.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
             Vk::Slot<"outDepth">(impl.graphResources.hizMap.mipViews[mip])
         );
-        impl.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(impl.ctx, cmd, block, dstW, dstH, 1, hizPC);
+        impl.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
     }
 }
 

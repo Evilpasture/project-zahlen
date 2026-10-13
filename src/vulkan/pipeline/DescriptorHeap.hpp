@@ -307,8 +307,16 @@ class HeapManager {
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const SamplerConfig& config) noexcept;
 
+    [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
+        const VkBufferDeviceAddressInfo info {
+            .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = buffer,
+        };
+        return vkGetBufferDeviceAddress(_resourceHeap.GetDevice(), &info);
+    }
+
     template <typename Declared, typename... Slots>
-    [[nodiscard]] auto WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
+    [[nodiscard]] auto WriteHeapParameters(const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;

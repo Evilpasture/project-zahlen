@@ -120,7 +120,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
                 .morphWeights     = drawCmd.morphWeights
             };
 
-            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(ctx, cmd, posMesh->vertexCount, 1, 1, pcs);
+            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, posMesh->vertexCount, 1, 1, pcs);
         }
     }
 

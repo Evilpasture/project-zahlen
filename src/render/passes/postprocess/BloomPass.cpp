@@ -43,9 +43,9 @@ void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.bloomUp1);
     const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.bloomFinalTarget);
 
-    Vk::ComputeChain thresholdChain(impl.ctx, impl.heapManager, cmd);
-    Vk::ComputeChain downChain(impl.ctx, impl.heapManager, cmd);
-    Vk::ComputeChain upChain(impl.ctx, impl.heapManager, cmd);
+    Vk::ComputeChain thresholdChain(impl.heapManager, cmd);
+    Vk::ComputeChain downChain(impl.heapManager, cmd);
+    Vk::ComputeChain upChain(impl.heapManager, cmd);
 
     const auto Kawase = [](int mode, const auto& src) noexcept {
         return KawasePushConstants {

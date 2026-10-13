@@ -209,7 +209,6 @@ struct ComputePass {
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapThreads(
-        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         uint32_t        threadCountX,
         uint32_t        threadCountY,
@@ -230,7 +229,7 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapThreads([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
+    void DispatchHeapThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
         ZHLN::Assert(Valid());
@@ -242,7 +241,6 @@ struct ComputePass {
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapIndexedThreads(
-        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         HeapBlockBase   blockBase,
         uint32_t        threadCountX,
@@ -267,7 +265,7 @@ struct ComputePass {
     }
 
     void DispatchHeapIndexedThreads(
-        [[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
@@ -286,7 +284,7 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(MakeFixedDispatchDesc(cmd));
     }
 
-    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd) const noexcept
+    void DispatchHeap(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(Valid());
@@ -297,7 +295,7 @@ struct ComputePass {
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, const T& pushData) const noexcept
+    void DispatchHeap(VkCommandBuffer cmd, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: DispatchHeap*<Shaders::Modules::X>(...)");
@@ -312,7 +310,7 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapIndexed([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
+    void DispatchHeapIndexed(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(Valid());
@@ -325,7 +323,7 @@ struct ComputePass {
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeapIndexed([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
+    void DispatchHeapIndexed(VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: DispatchHeap*<Shaders::Modules::X>(...)");
@@ -405,8 +403,8 @@ struct DoubleBufferedComputePass {
     }
 
     template <typename Declared, typename... Slots>
-    [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
-        return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
+    [[nodiscard]] auto WriteHeapParameters(HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
+        return heap.template WriteHeapParameters<Declared>(heapBindings, slots...);
     }
 
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, HeapBlockBase blockBase)
@@ -427,7 +425,7 @@ struct DoubleBufferedComputePass {
     }
 
     void DispatchHeapThreads(
-        [[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
@@ -436,7 +434,6 @@ struct DoubleBufferedComputePass {
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapThreads(
-        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         HeapBlockBase   blockBase,
         uint32_t        threadCountX,
@@ -453,7 +450,7 @@ struct DoubleBufferedComputePass {
         TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, blockBase), &pushData);
     }
 
-    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
+    void DispatchHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
@@ -463,7 +460,7 @@ struct DoubleBufferedComputePass {
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
+    void DispatchHeap(VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(
@@ -522,7 +519,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
 
 class ComputeChain {
   public:
-    constexpr ComputeChain(const Context& ctx, HeapManager& heap, VkCommandBuffer cmd) noexcept: _ctx(ctx), _heap(heap), _cmd(cmd) {
+    constexpr ComputeChain(HeapManager& heap, VkCommandBuffer cmd) noexcept: _heap(heap), _cmd(cmd) {
     }
 
     template <typename Declared, typename PushT, typename... Slots>
@@ -531,8 +528,8 @@ class ComputeChain {
         if (_step++ > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }
-        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(_ctx, bindings, slots...);
-        Declared::DispatchHeapIndexed(pass, _ctx, _cmd, blockBase, extent.width, extent.height, 1, push);
+        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(bindings, slots...);
+        Declared::DispatchHeapIndexed(pass, _cmd, blockBase, extent.width, extent.height, 1, push);
     }
 
     [[nodiscard]] constexpr auto StepCount() const noexcept -> uint32_t {
@@ -540,7 +537,6 @@ class ComputeChain {
     }
 
   private:
-    const Context&  _ctx;
     HeapManager&    _heap;
     VkCommandBuffer _cmd;
     uint32_t        _step = 0;

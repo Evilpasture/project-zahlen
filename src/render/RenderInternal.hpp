@@ -943,12 +943,12 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         }
         Vk::ImageView view = std::move(*viewRes);
         heapManager.BeginImmediate();
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view));
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(view));
 
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
             heapManager.BindHeaps(cmd);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-            pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
+            pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
         });
         return textureManager.Adopt(std::move(image), std::move(view));

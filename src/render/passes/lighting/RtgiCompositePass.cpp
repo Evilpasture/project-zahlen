@@ -19,7 +19,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
     const bool rtgiActive = impl.ctx.RayTracingSupported() && impl.settings.rayTracing.enableDiffuseGI && static_cast<bool>(impl.frames.tlas[fIdx]);
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtgiComposite>(
-        impl.ctx, impl.postProcess.RtgiCompositeHeapBindings(),
+        impl.postProcess.RtgiCompositeHeapBindings(),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
         Vk::Slot<"texAlbedo">(Vk::Assume<Vk::ComputeRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
@@ -38,7 +38,7 @@ void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
         .giIntensity = impl.settings.post.giIntensity,
     };
     impl.postProcess.RtgiComposite().DispatchHeapIndexedThreads<Shaders::Modules::RtgiCompositeCS>(
-        impl.ctx, cmd, block, impl.graphResources.lightingGI.extent.width, impl.graphResources.lightingGI.extent.height, 1, push
+        cmd, block, impl.graphResources.lightingGI.extent.width, impl.graphResources.lightingGI.extent.height, 1, push
     );
 }
 

@@ -22,7 +22,7 @@ void VolumetricLightInjectPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
     const Vk::HeapBlockBase block = impl.fog.LightInject().WriteHeapParameters<Shaders::VolumetricLightInject>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"inVoxelMedia">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(impl.graphResources.voxelMedia)),
         Vk::Slot<"outVoxelLight">(Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(impl.graphResources.voxelLight)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
@@ -32,7 +32,7 @@ void VolumetricLightInjectPass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"shadowMap">(Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(impl.graphResources.shadowMap))
     );
     const VolumetricLightInjectPushConstants lightInjectPC = {};
-    impl.fog.LightInject().DispatchHeap<Shaders::Modules::VolumetricLightInjectCS>(impl.ctx, cmd, block, lightInjectPC);
+    impl.fog.LightInject().DispatchHeap<Shaders::Modules::VolumetricLightInjectCS>(cmd, block, lightInjectPC);
 }
 
 }

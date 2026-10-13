@@ -26,7 +26,7 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::DdgiUpdateIrradiance>(
-        impl.ctx, impl.postProcess.DdgiUpdateHeapBindings(),
+        impl.postProcess.DdgiUpdateHeapBindings(),
         Vk::Slot<"inRays">(Vk::Assume<Vk::ComputeRead<Res_DdgiRays>>(impl.graphResources.ddgiRays)),
         Vk::Slot<"outIrradiance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"outDistance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ddgiDistance)),
@@ -43,7 +43,7 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
         .depthSharpness = 16.0f,
     };
     impl.postProcess.DdgiUpdate().DispatchHeapIndexedThreads<Shaders::Modules::DdgiUpdateIrradianceCS>(
-        impl.ctx, cmd, block, totalProbes * 16u, 16u, 1u, push
+        cmd, block, totalProbes * 16u, 16u, 1u, push
     );
 }
 

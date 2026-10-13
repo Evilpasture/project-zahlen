@@ -32,7 +32,7 @@ void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::Gtao>(
-        impl.ctx, impl.postProcess.GtaoHeapBindings(),
+        impl.postProcess.GtaoHeapBindings(),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
@@ -52,7 +52,7 @@ void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
         .viewProj    = pc.viewProj,
     };
     impl.postProcess.Gtao().DispatchHeapIndexedThreads<Shaders::Modules::GtaoCS>(
-        impl.ctx, cmd, block, impl.graphResources.ao.extent.width, impl.graphResources.ao.extent.height, 1, push
+        cmd, block, impl.graphResources.ao.extent.width, impl.graphResources.ao.extent.height, 1, push
     );
 }
 

@@ -36,14 +36,14 @@ void VolumetricFogInjectPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
     const Vk::HeapBlockBase block = impl.fog.FogInject().WriteHeapParameters<Shaders::VolumetricFogInject>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(impl.graphResources.voxelMedia)),
         Vk::Slot<"noiseTexture">(impl.fog.NoiseWrite()),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
     );
 
     const VolumetricFogPushConstants fogPC = {};
-    impl.fog.FogInject().DispatchHeap<Shaders::Modules::VolumetricFogInjectCS>(impl.ctx, cmd, block, fogPC);
+    impl.fog.FogInject().DispatchHeap<Shaders::Modules::VolumetricFogInjectCS>(cmd, block, fogPC);
 }
 
 }

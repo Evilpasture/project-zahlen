@@ -28,7 +28,7 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
 
 template <VkFormat F>
 inline auto
-    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode> {
+    RenderTarget<F>::Create(Allocator& allocator, VkDevice device, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode> {
     RenderTarget rt;
     rt.extent = extent;
 
@@ -46,7 +46,7 @@ inline auto
     const ImageViewConfig viewConfig {
         .kind = desc.arrayLayers > 1 ? ImageViewKind::Texture2DArray : ImageViewKind::Texture2D,
     };
-    auto view_res = rt.image.CreateView(ctx.Device(), viewConfig);
+    auto view_res = rt.image.CreateView(device, viewConfig);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
@@ -66,7 +66,7 @@ inline RenderTarget<F>::operator bool() const noexcept {
 
 template <VkFormat F>
 inline auto
-    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
+    RenderTarget3D<F>::Create(Allocator& allocator, VkDevice device, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
     RenderTarget3D rt;
     rt.extent                    = extent;
     const ImageConfig imageConfig = ImageConfig::Texture3D(extent, F, usage);
@@ -77,7 +77,7 @@ inline auto
     rt.image = std::move(img_res.value());
     ZHLN::defer _([&] { rt.Destroy(allocator); });
 
-    auto view_res = rt.image.CreateView(ctx.Device(), {.kind = ImageViewKind::Texture3D});
+    auto view_res = rt.image.CreateView(device, {.kind = ImageViewKind::Texture3D});
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }

@@ -69,7 +69,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
-                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(writeView)
+                bakeHeapBindings, Vk::Slot<"outTexture">(writeView)
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {

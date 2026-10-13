@@ -342,7 +342,7 @@ struct WriteShapeMatchesDeclaration {
 };
 
 template <typename Arg>
-[[nodiscard]] auto WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
+[[nodiscard]] auto WriteHeapBinding(HeapManager& heap, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
 
     constexpr WriteSource source = WriteSourceOf<T>();
@@ -419,7 +419,7 @@ template <typename Arg>
             // Resolve a base address only when the slice did not carry one;
             // Address() adds its relative offset exactly once.
             if (slice.address == 0) {
-                slice.address = ctx.BufferAddress(slice.buffer);
+                slice.address = heap.BufferAddress(slice.buffer);
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 heap.WriteBuffer(UniformBufferHandle {slot}, slice);
@@ -446,7 +446,7 @@ template <typename Arg>
 
 template <typename Declared, typename... Slots>
 [[nodiscard]] auto
-    HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
+    HeapManager::WriteHeapParameters(const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
     static_assert(
         NamesCoverDeclarations<Declared, ResourceBindings, Slots...>(),
         "a descriptor-heap write does not name every resource binding its block declares (<ShaderBindings.hpp>)"
@@ -489,7 +489,7 @@ template <typename Declared, typename... Slots>
         named[*ordinal] = true;
 
         const auto& binding = b.resources[*ordinal];
-        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, blockBase + *ordinal, binding.descriptorType, slot.value)) {
+        if (!TemplatedDetail::WriteHeapBinding(*this, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
                 false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); wrong kind or missing/mismatched image view metadata", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)

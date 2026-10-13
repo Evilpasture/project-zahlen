@@ -39,7 +39,7 @@ void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
             .p                  = emitter.params
         };
 
-        impl.particleUpdatePass.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(impl.ctx, cmd, emitter.maxParticles, 1, 1, particlePC);
+        impl.particleUpdatePass.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, particlePC);
     }
 }
 

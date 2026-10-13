@@ -51,17 +51,17 @@ struct FullscreenPass {
     }
 
     template <typename Declared, typename... Slots>
-    [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
+    [[nodiscard]] auto WriteHeapParameters(HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
     template <ShaderProgram... Modules, FullscreenPushPayload T>
-    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
+    void ExecuteHeap(VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
 
     template <ShaderProgram... Modules, FullscreenPushPayload T>
     void ExecuteVariantHeap(
-        const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
+        VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
     ) const noexcept;
 
-    void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept;
+    void ExecuteHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept;
 };
 
 }

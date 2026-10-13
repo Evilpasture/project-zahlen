@@ -37,7 +37,7 @@ struct RenderTarget {
     };
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
+        Create(Allocator& allocator, VkDevice device, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
     void Destroy(Allocator& allocator) noexcept {
         view = {};
@@ -91,7 +91,7 @@ struct RenderTarget3D {
         return Valid();
     }
 
-    [[nodiscard]] static auto Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
+    [[nodiscard]] static auto Create(Allocator& allocator, VkDevice device, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
 };
 
 template <VkFormat F>
@@ -122,7 +122,7 @@ struct MipmappedRenderTarget {
     ~MipmappedRenderTarget() = default;
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, ErrorCode> {
+        Create(Allocator& allocator, VkDevice device, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, ErrorCode> {
         MipmappedRenderTarget target;
         target.extent    = extent;
         target.mipLevels = GetMipLevels(extent.width, extent.height);
@@ -135,14 +135,14 @@ struct MipmappedRenderTarget {
         target.image = std::move(img_res.value());
         ZHLN::defer _([&] { target.Destroy(allocator); });
 
-        auto view_res = target.image.CreateView(ctx.Device());
+        auto view_res = target.image.CreateView(device);
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
         target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            auto mip_res = target.image.CreateView(ctx.Device(), {.baseMip = m, .mipCount = 1});
+            auto mip_res = target.image.CreateView(device, {.baseMip = m, .mipCount = 1});
             if (!mip_res.has_value()) {
                 return std::unexpected(mip_res.error());
             }
@@ -249,12 +249,12 @@ struct RenderTargetBundle {
     constexpr explicit RenderTargetBundle(Targets&... t) noexcept: targets(t...) {
     }
 
-    [[nodiscard]] auto Recreate(Allocator& alloc, const Context& ctx, VkExtent2D extent) -> std::expected<void, ErrorCode> {
+    [[nodiscard]] auto Recreate(Allocator& alloc, VkDevice device, VkExtent2D extent) -> std::expected<void, ErrorCode> {
         std::expected<void, ErrorCode> result;
         std::apply([&](auto&... t) {
             ([&] {
                 if (!result) return;
-                auto created = std::remove_cvref_t<decltype(t)>::Create(alloc, ctx, extent, {});
+                auto created = std::remove_cvref_t<decltype(t)>::Create(alloc, device, extent, {});
                 if (!created) {
                     result = std::unexpected(created.error());
                     return;

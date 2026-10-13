@@ -33,9 +33,9 @@ void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32
     }
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
-        impl.ctx, impl.clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(impl.clusterBoundsBuffer), Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+        impl.clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(impl.clusterBoundsBuffer), Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
     );
-    impl.clusterBoundsPass.DispatchHeapIndexed(impl.ctx, cmd, block);
+    impl.clusterBoundsPass.DispatchHeapIndexed(cmd, block);
     Vk::MemoryBarrier(cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead);
     impl.frameState.clusterBoundsDirty = false;
 }

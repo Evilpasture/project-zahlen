@@ -29,7 +29,7 @@ void DdgiRayTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::DdgiTrace>(
-        impl.ctx, impl.postProcess.DdgiTraceHeapBindings(),
+        impl.postProcess.DdgiTraceHeapBindings(),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
@@ -48,7 +48,7 @@ void DdgiRayTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         ._pad           = 0u,
     };
     impl.postProcess.DdgiTrace().DispatchHeapIndexedThreads<Shaders::Modules::DdgiTraceCS>(
-        impl.ctx, cmd, block, totalProbes, raysPerProbe, 1, push
+        cmd, block, totalProbes, raysPerProbe, 1, push
     );
 }
 

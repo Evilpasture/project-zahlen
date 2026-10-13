@@ -49,7 +49,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     };
 
     for (auto& history: accumulationHistory) {
-        auto result = assign(history, CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
+        auto result = assign(history, CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx.Device(), ext, Vk::ImageUsage::TransferDst));
         if (!result) {
             return result;
         }

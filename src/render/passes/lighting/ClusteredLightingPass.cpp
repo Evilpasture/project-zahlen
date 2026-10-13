@@ -18,7 +18,7 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     const uint32_t lightVariant = rtrActive ? 1 : 0;
 
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
@@ -40,7 +40,7 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );
-    impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(impl.ctx, ctx.Cmd(), lightVariant, pc, block);
+    impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(ctx.Cmd(), lightVariant, pc, block);
 }
 
 }

@@ -9,12 +9,12 @@
 
 namespace ZHLN {
 
-auto TargetManager::CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode> {
+auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode> {
     ZHLN::Array<Vk::ImageView> out;
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
         auto view_res =
-            image.CreateView(_ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i, .layerCount = 1});
+            image.CreateView(device, {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i, .layerCount = 1});
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -44,7 +44,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
         } else if constexpr (Tag::is_3d) {
             result = assign(
                 rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        _allocator, _ctx, voxelExtent, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
+                        _allocator, _ctx.Device(), voxelExtent, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr (requires {
@@ -57,19 +57,19 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Tag, Res_HiZ>) {
                 usage |= Vk::ImageUsage::Storage;
             }
-            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx, ext, usage));
+            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, usage));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiIrradiance>) {
             const VkExtent2D ddgiIrrExt = {.width = 640u, .height = 320u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiDistance>) {
             const VkExtent2D ddgiDistExt = {.width = 1024u, .height = 512u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiRays>) {
             const VkExtent2D ddgiRaysExt = {.width = 2048u, .height = 64u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
-                rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
+                rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
             );
         } else {
             Vk::ImageUsage extra = Vk::ImageUsage::None;
@@ -92,7 +92,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                 extra |= Vk::ImageUsage::TransferDst;
             }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
-            result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, scaled, extra));
+            result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), scaled, extra));
         }
     });
 
@@ -107,7 +107,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     const VkExtent2D atlasExt   = {.width = kShadowAtlasSize, .height = kShadowAtlasSize};
 
     auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+        _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!sm_res) {
         return std::unexpected(sm_res.error());
@@ -118,7 +118,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowMap = std::move(*sm_res);
 
     auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+        _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!smp_res) {
         return std::unexpected(smp_res.error());
@@ -127,12 +127,12 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
-    if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+    if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
         return std::unexpected(r.error());
     } else {
         _shadowCascadeViews = std::move(*r);
     }
-    if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+    if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
         return std::unexpected(r.error());
     } else {
         _shadowCascadeViewsPrev = std::move(*r);
@@ -147,7 +147,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     // shadow tile -- a spot's single tile or a point's six faces -- is a
     // viewport into this one attachment.
     auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
+        _allocator, _ctx.Device(), atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
@@ -188,13 +188,13 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         const VkExtent2D ext = {.width = resolution, .height = resolution};
 
         auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!sm_res) {
             return std::unexpected(sm_res.error());
         }
         auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!smp_res) {
             sm_res->Destroy(_allocator);
@@ -209,12 +209,12 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         _graph.shadowMap = std::move(*sm_res);
         _shadowMapPrev   = std::move(*smp_res);
 
-        if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+        if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
             return std::unexpected(r.error());
         } else {
             _shadowCascadeViews = std::move(*r);
         }
-        if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+        if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
             return std::unexpected(r.error());
         } else {
             _shadowCascadeViewsPrev = std::move(*r);

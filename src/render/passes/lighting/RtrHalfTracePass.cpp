@@ -26,7 +26,7 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .address = impl.frames.tlas[fIdx] ? Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get()) : 0
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtrHalf>(
-        impl.ctx, impl.postProcess.RtrHalfHeapBindings(),
+        impl.postProcess.RtrHalfHeapBindings(),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
@@ -46,7 +46,7 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .halfRes = {impl.graphResources.rtrHalf.extent.width, impl.graphResources.rtrHalf.extent.height}, ._pad = {}
     };
     impl.postProcess.RtrHalf().DispatchHeapIndexedThreads<Shaders::Modules::RtrHalfCS>(
-        impl.ctx, cmd, block, impl.graphResources.rtrHalf.extent.width, impl.graphResources.rtrHalf.extent.height, 1, push
+        cmd, block, impl.graphResources.rtrHalf.extent.width, impl.graphResources.rtrHalf.extent.height, 1, push
     );
 }
 

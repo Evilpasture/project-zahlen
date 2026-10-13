@@ -139,7 +139,7 @@ class PipelineRegistry {
             .vertexMapping   = &_heapMappings.info,
             .fragmentMapping = &_heapMappings.info,
         };
-        auto created = Vk::GraphicsPipeline<ShaderModule, PassContract, Flags>::Create(_ctx, bindings, _pipelineCache.Get());
+        auto created = Vk::GraphicsPipeline<ShaderModule, PassContract, Flags>::Create(_ctx.Device(), bindings, _pipelineCache.Get());
         if (!created) {
             return std::unexpected(created.error());
         }

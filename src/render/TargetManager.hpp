@@ -85,9 +85,9 @@ using Res_AccumCurrent = Vk::GraphImage<"AccumCurrent", VK_FORMAT_R16G16B16A16_S
 
 
 template <VkFormat F>
-[[nodiscard]] auto CreateColorTarget(Vk::Allocator& allocator, Vk::Context& ctx, VkExtent2D ext, Vk::ImageUsage extra = Vk::ImageUsage::None)
+[[nodiscard]] auto CreateColorTarget(Vk::Allocator& allocator, VkDevice device, VkExtent2D ext, Vk::ImageUsage extra = Vk::ImageUsage::None)
     -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
-    return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extra});
+    return Vk::RenderTarget<F>::Create(allocator, device, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extra});
 }
 
 class TargetManager {
@@ -241,7 +241,7 @@ class TargetManager {
     [[nodiscard]] auto AtlasView() const noexcept -> const Vk::ImageView& { return _shadowAtlasView; }
 
   private:
-    [[nodiscard]] auto CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode>;
+    [[nodiscard]] auto CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode>;
 
     Vk::Context&                             _ctx;
     Vk::Allocator&                           _allocator;

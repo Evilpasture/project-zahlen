@@ -27,7 +27,7 @@ void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtShadow>(
-        impl.ctx, impl.postProcess.RtShadowHeapBindings(),
+        impl.postProcess.RtShadowHeapBindings(),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"outShadow">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtShadowMask)),
@@ -43,7 +43,7 @@ void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         ._pad        = 0u,
     };
     impl.postProcess.RtShadow().DispatchHeapIndexedThreads<Shaders::Modules::RtShadowCS>(
-        impl.ctx, cmd, block, impl.graphResources.rtShadowMask.extent.width, impl.graphResources.rtShadowMask.extent.height, 1, push
+        cmd, block, impl.graphResources.rtShadowMask.extent.width, impl.graphResources.rtShadowMask.extent.height, 1, push
     );
 }
 
