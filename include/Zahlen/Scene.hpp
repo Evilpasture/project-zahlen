@@ -76,7 +76,7 @@ struct SceneLight {
     float       intensity   = 100.0f;
     float       radius      = 0.5f;
     float       range      = 20.0f;
-    int32_t     shadowLayer = -1;
+    bool        castsShadow = false;
     // Spot cone angles in radians from the axis (0 = none authored).
     float innerConeRadians = 0.0f;
     float outerConeRadians = 0.0f;

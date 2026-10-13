@@ -8,6 +8,8 @@
 
 #include <type_traits>
 
+#include "DeviceAddress.hpp"
+
 namespace ZHLN::Vk {
 
 class Buffer;
@@ -16,10 +18,10 @@ class Buffer;
 // address of `buffer` (or zero when it has not yet been looked up); `offset`
 // is relative to that base. Never add offset to Address() a second time.
 struct BufferSlice {
-    VkBuffer        buffer  = VK_NULL_HANDLE;
-    VkDeviceAddress address = 0;
-    VkDeviceSize    offset  = 0;
-    VkDeviceSize    size    = 0;
+    VkBuffer          buffer  = VK_NULL_HANDLE;
+    DeviceAddress<>   address = nullptr;
+    VkDeviceSize      offset  = 0;
+    VkDeviceSize      size    = 0;
 
     constexpr BufferSlice() noexcept = default;
     constexpr BufferSlice(VkBuffer b, VkDeviceAddress base, VkDeviceSize off, VkDeviceSize bytes) noexcept:
@@ -28,8 +30,8 @@ struct BufferSlice {
     // A base address may be supplied now, or resolved by the descriptor writer.
     BufferSlice(const Buffer& b, VkDeviceAddress base = 0) noexcept;
 
-    [[nodiscard]] constexpr auto Address() const noexcept -> VkDeviceAddress {
-        return address != 0 ? address + offset : 0;
+    [[nodiscard]] constexpr auto Address() const noexcept -> DeviceAddress<> {
+        return address ? address.ByteOffset(offset) : DeviceAddress<> {nullptr};
     }
     [[nodiscard]] constexpr auto Size() const noexcept -> VkDeviceSize {
         return size;
@@ -45,12 +47,12 @@ struct BufferSlice {
             return {};
         }
         const VkDeviceSize remaining = size - relativeOffset;
-        return {buffer, address, offset + relativeOffset, bytes == VK_WHOLE_SIZE || bytes > remaining ? remaining : bytes};
+        return {buffer, address.Get(), offset + relativeOffset, bytes == VK_WHOLE_SIZE || bytes > remaining ? remaining : bytes};
     }
 };
 
 static_assert(std::is_trivially_copyable_v<BufferSlice>);
-static_assert(BufferSlice {VK_NULL_HANDLE, 0x100, 8, 32}.Subspan(10, 5).Address() == 0x112);
+static_assert(BufferSlice {VK_NULL_HANDLE, 0x100, 8, 32}.Subspan(10, 5).Address().Get() == 0x112);
 static_assert(BufferSlice {VK_NULL_HANDLE, 0x100, 8, 32}.Subspan(10, 5).Size() == 5);
 static_assert(BufferSlice {VK_NULL_HANDLE, 0x100, 8, 32}.Subspan(40).Size() == 0);
 

@@ -3,6 +3,7 @@
 
 #pragma once
 #include "Rendering.hpp"
+#include "features/ShadowAtlas.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -14,22 +15,30 @@ namespace ZHLN {
 
 // The shadow subsystem, collected in one place.
 //
-// Cascaded and punctual shadows are a multi-pass arrangement with state that is
+// Cascaded and atlas shadows are a multi-pass arrangement with state that is
 // not one frame's business: a depth-only pipeline set that has to agree with the
 // render targets' view masks, an indirect-command buffer the CPU fills and the
 // GPU consumes, and the cascade fit that turns a camera frustum slice into a
 // stable light-space matrix. None of that is a render pass -- it is what the
 // passes are built out of -- so it lives here instead of being spread across
 // `RenderContext::Impl`.
+//
+// The atlas pipeline is deliberately not multiview, unlike the cascades': a
+// atlas tile is one draw with its own matrix in a push constant and its own
+// viewport into a 2D depth image.
 class ShadowRenderer {
   public:
-    // View masks that tie the pipelines to the shadow targets' layer counts:
-    // four cascades rendered in one multiview pass, and six cubemap faces for a
-    // punctual light. `Passes::ShadowPass` and the pipeline builder both read
-    // them, so the two cannot drift apart.
-    static constexpr uint32_t kCubemapFaceMask  = 0x3F;
+    // The view mask that ties the cascade pipelines to the shadow map's layer
+    // count: four cascades rendered in one multiview pass. `Passes::ShadowPass`
+    // and the pipeline builder both read it, so the two cannot drift apart.
     static constexpr uint32_t kCascadeViewMask  = 0x0F;
     static constexpr float    kShadowClearDepth = 1.0f;
+
+    // The indirect command buffer's shape: slot 0 is the cascades' draw list at
+    // the scene-wide instance budget, then one slot per shadow-casting light. A
+    // light's cube faces share its slot -- they see the same instances -- so
+    // this is per light, not per tile.
+    static constexpr uint32_t kAtlasInstancesPerLight = 512;
 
     ShadowRenderer()                                     = default;
     ~ShadowRenderer()                                    = default;
@@ -51,17 +60,15 @@ class ShadowRenderer {
         RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag
     ) -> std::expected<void, ErrorCode>;
 
-    [[nodiscard]] auto CompilePunctualPipeline(
+    [[nodiscard]] auto CompileAtlasPipeline(
         RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag
     ) -> std::expected<void, ErrorCode>;
 
     // --- what the shadow pass needs -----------------------------------------
 
     [[nodiscard]] auto CascadePipeline() const noexcept -> VkPipeline;
-    [[nodiscard]] auto CascadeLayout() const noexcept -> VkPipelineLayout;
     [[nodiscard]] auto CascadeMeshPipeline() const noexcept -> VkPipeline;
-    [[nodiscard]] auto PunctualPipeline() const noexcept -> VkPipeline;
-    [[nodiscard]] auto PunctualLayout() const noexcept -> VkPipelineLayout;
+    [[nodiscard]] auto AtlasPipeline() const noexcept -> VkPipeline;
 
     [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer&;
     [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) const noexcept -> const Vk::Buffer&;
@@ -84,11 +91,8 @@ class ShadowRenderer {
     ) noexcept -> JPH::Mat44;
 
   private:
-    VkPipelineLayout _cascadeLayout  = VK_NULL_HANDLE;
-    VkPipelineLayout _punctualLayout = VK_NULL_HANDLE;
-
     Vk::TypedPipeline<0, true> _cascadePipeline;
-    Vk::TypedPipeline<0, true> _punctualPipeline;
+    Vk::TypedPipeline<0, true> _atlasPipeline;
     Vk::TypedPipeline<0, true> _cascadeMeshPipeline;
 
     // `PerFrame` lives in `ZHLN`, next to `RenderContext::Impl` and the other

@@ -15,12 +15,6 @@ template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
 
 template <GpuTriviallyCopyable T>
-inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages, const T& value) noexcept {
-    static_assert(sizeof(T) <= UINT32_MAX);
-    vkCmdPushConstants(cmd, layout, stages, 0, static_cast<uint32_t>(sizeof(T)), &value);
-}
-
-template <GpuTriviallyCopyable T>
 inline void PushData(const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {
     if (vkCmdPushDataEXT == nullptr) {
         return;

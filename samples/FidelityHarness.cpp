@@ -13,7 +13,7 @@
 //
 // This is deliberately NOT RemoteGLBSample: that sample's "looked good" came
 // from a hand-tuned studio profile -- 0.08 exposure, 4x SH fill, an extra sun
-// with two punctual fills, and a 0.03-roughness mirror floor. This harness
+// with two point/spot fills, and a 0.03-roughness mirror floor. This harness
 // builds no studio; it uses the generator-selected display transform and
 // authors the camera directly from the scenario's spherical orbit.
 //
@@ -365,9 +365,6 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
     gfx.rayTracing.enableReflections = false;
     gfx.rayTracing.enableShadows     = false;
 
-    // Punctual shadows off (there are no lights anyway).
-    gfx.shadows.maxPunctualShadows = 0;
-
     // Environment: the baked SH + prefiltered probe are scaled by
     // ambientExposure in the shading; conformance wants 1:1.
     gfx.environment.ambientExposure = ambientScale;
@@ -430,10 +427,9 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
     }
 
     const ZHLN::Components::ShadowSettingsComponent shadows {
-        .shadowWidth        = gfx.shadows.width,
-        .shadowResolution   = static_cast<int>(gfx.shadows.resolution),
-        .maxPunctualShadows = static_cast<int>(gfx.shadows.maxPunctualShadows),
-        .sunSize            = gfx.shadows.sunSize,
+        .shadowWidth      = gfx.shadows.width,
+        .shadowResolution = static_cast<int>(gfx.shadows.resolution),
+        .sunSize          = gfx.shadows.sunSize,
     };
     if (!registry.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [&](auto& shadow) { shadow = shadows; })) {
         registry.Add(settings, shadows);

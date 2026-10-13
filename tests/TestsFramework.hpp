@@ -17,6 +17,7 @@
 #include <format>
 #include <fstream>
 #include <source_location>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -503,9 +504,25 @@ struct FailedTestSummary {
     std::string detail; // "LightingRTTestError::EngineInitFailed", "3 recorded failures", ...
 };
 
-inline std::vector<FailedTestSummary>& GetFailedTestSummaries() noexcept {
-    static std::vector<FailedTestSummary> summaries;
-    return summaries;
+struct FailedTestSummaryStorage {
+    std::vector<FailedTestSummary> values;
+};
+
+inline auto FailedTestSummariesStorage() noexcept -> FailedTestSummaryStorage& {
+    static FailedTestSummaryStorage storage;
+    return storage;
+}
+
+[[nodiscard]] inline auto GetFailedTestSummaries() noexcept -> std::span<const FailedTestSummary> {
+    return FailedTestSummariesStorage().values;
+}
+
+inline void RecordFailedTestSummary(FailedTestSummary summary) {
+    FailedTestSummariesStorage().values.push_back(std::move(summary));
+}
+
+inline void ClearFailedTestSummaries() noexcept {
+    FailedTestSummariesStorage().values.clear();
 }
 
 template <typename T>
@@ -716,7 +733,7 @@ TestStats RunSuite() {
                     if (detail.empty()) {
                         detail = "failed without recorded details";
                     }
-                    GetFailedTestSummaries().push_back(FailedTestSummary {std::string {suiteName}, std::string {name}, std::move(detail)});
+                    RecordFailedTestSummary(FailedTestSummary {std::string {suiteName}, std::string {name}, std::move(detail)});
                 }
             }
         }
@@ -818,7 +835,7 @@ class Runner {
             ZHLN::Println("No test matched ZHLN_TEST_FILTER='{}'.", selected);
         }
 
-        auto& summaries = GetFailedTestSummaries();
+        const auto summaries = GetFailedTestSummaries();
         if (!summaries.empty()) {
             ZHLN::Println("Failed tests:");
             for (const auto& f: summaries) {
@@ -829,7 +846,7 @@ class Runner {
 
         // One summary per Runner invocation: if a process ever runs a second
         // Runner, its results section must not re-list the first run's failures.
-        summaries.clear();
+        ClearFailedTestSummaries();
 
         // Quarantined tests intentionally do not affect the exit code: the bug
         // is known and tracked in QuarantineList, so the suite must not go red

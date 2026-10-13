@@ -65,13 +65,11 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                     passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
-                         .layout        = ctx.particleRenderLayout,
-                         .heap          = true,
                          .vertexCount   = 6,
                          .instanceCount = emitter.maxParticles,
                          .firstVertex   = 0,
                          .firstInstance = 0},
-                        pc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                        pc
                     );
                 }
             }
@@ -81,13 +79,11 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),
-                     .layout        = ctx.linePipelineLayout,
-                     .heap          = true,
                      .vertexCount   = ctx.activeLineVertexCount,
                      .instanceCount = 1,
                      .firstVertex   = 0,
                      .firstInstance = ctx.lineInstanceId},
-                    pc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                    pc
                 );
             }
         });

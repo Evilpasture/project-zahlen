@@ -269,7 +269,6 @@
       typedef struct ShadowSettingsComponent {
           float shadowWidth;
           int shadowResolution;
-          int maxPunctualShadows;
           float sunSize;
       } ShadowSettingsComponent;
 
@@ -311,7 +310,7 @@
           float    range;
           float    points[16];
           uint32_t twoSided;
-          int32_t  shadowLayer;
+          bool     castsShadow;
       } LightComponent;
 
       typedef struct TerrainComponent {

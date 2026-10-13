@@ -9,17 +9,13 @@ namespace ZHLN {
 
 // NOLINTBEGIN(performance-enum-size)
 enum class TextureHandle : uint64_t { Invalid = 0 };
-enum class RenderTextureHandle : uint64_t { Invalid = 0 };
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
-enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
 // NOLINTEND(performance-enum-size)
 
 static_assert(sizeof(BufferHandle) == 8);
 static_assert(sizeof(PipelineHandle) == 8);
-static_assert(sizeof(ResourceGroupHandle) == 8);
 static_assert(sizeof(TextureHandle) == 8);
-static_assert(sizeof(RenderTextureHandle) == 8);
 
 namespace SystemTextures {
 inline constexpr TextureHandle Invalid    = TextureHandle(0);
@@ -45,8 +41,11 @@ class FrameTarget {
 
     // An offscreen image still records into this frame's acquired command
     // stream. It cannot be passed as a frame target without that association.
-    [[nodiscard]] constexpr auto ForTexture(RenderTextureHandle texture) const noexcept -> FrameTarget {
-        if (!Valid() || texture == RenderTextureHandle::Invalid) {
+    // The texture must be a render texture (CreateRenderTexture): it is the
+    // same TextureHandle used for bindless sampling, with the attachment
+    // side looked up in the render-texture registry at resolve time.
+    [[nodiscard]] constexpr auto ForTexture(TextureHandle texture) const noexcept -> FrameTarget {
+        if (!Valid() || texture == TextureHandle::Invalid) {
             return {};
         }
         FrameTarget result = *this;
@@ -66,7 +65,7 @@ class FrameTarget {
     uint64_t            _frame       = 0;
     uint64_t            _window      = 0;
     uint64_t            _acquisition = 0;
-    RenderTextureHandle _texture     = RenderTextureHandle::Invalid;
+    TextureHandle       _texture     = TextureHandle::Invalid;
 };
 
 static_assert(std::is_trivially_copyable_v<FrameTarget>);

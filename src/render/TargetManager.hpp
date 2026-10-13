@@ -85,9 +85,9 @@ using Res_AccumCurrent = Vk::GraphImage<"AccumCurrent", VK_FORMAT_R16G16B16A16_S
 
 
 template <VkFormat F>
-[[nodiscard]] auto CreateColorTarget(Vk::Allocator& allocator, Vk::Context& ctx, VkExtent2D ext, Vk::ImageUsage extra = Vk::ImageUsage::None)
+[[nodiscard]] auto CreateColorTarget(Vk::Allocator& allocator, VkDevice device, VkExtent2D ext, Vk::ImageUsage extra = Vk::ImageUsage::None)
     -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
-    return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extra});
+    return Vk::RenderTarget<F>::Create(allocator, device, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extra});
 }
 
 class TargetManager {
@@ -196,9 +196,11 @@ class TargetManager {
     };
     static constexpr uint32_t kShadowResolution = 2048;
     static constexpr uint32_t kCascades         = 4;
-    static constexpr uint32_t kPunctualLights   = 4;
-    static constexpr uint32_t kAtlasLayers      = 24;
-    static constexpr uint32_t kAtlasSize        = 1024;
+    // One 2D depth image every shadow-casting light sub-allocates
+    // square tiles out of; `ShadowAtlas` owns the packing and mirrors this
+    // edge. 64 MB of D32 buys 1024 tiles at 128 or 64 at 512, which is the
+    // budget that replaced four hard-wired cube maps.
+    static constexpr uint32_t kShadowAtlasSize  = 4096;
 
     TargetManager(Vk::Context& ctx, Vk::Allocator& allocator, Vk::CommandRing<Vk::QueueType::Graphics, 8>& ring) noexcept
         : _ctx(ctx), _allocator(allocator), _ring(ring) {}
@@ -216,9 +218,6 @@ class TargetManager {
 
     [[nodiscard]] auto ResizeShadows(uint32_t resolution) noexcept -> std::expected<void, ErrorCode>;
 
-    void RecreatePunctualShadowViews() noexcept;
-
-
     void RecordInitialLayouts(VkCommandBuffer cmd) const noexcept;
 
     void NameGraphTargets() const noexcept;
@@ -232,18 +231,19 @@ class TargetManager {
     [[nodiscard]] auto ShadowMapPrev() noexcept -> Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
     [[nodiscard]] auto ShadowMapPrev() const noexcept -> const Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>& { return _shadowMapPrev; }
 
-    [[nodiscard]] auto CascadeViews() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViews; }
-    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::ImageView> { return _shadowCascadeViewsPrev; }
-    [[nodiscard]] auto PunctualViews() const noexcept -> std::span<const Vk::ImageView> { return _punctualShadowViews; }
+    [[nodiscard]] auto CascadeViews() const noexcept -> std::span<const Vk::AttachmentView> { return _shadowCascadeViews; }
+    [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::AttachmentView> { return _shadowCascadeViewsPrev; }
     void               SwapCascadeViews() noexcept { std::swap(_shadowCascadeViews, _shadowCascadeViewsPrev); }
 
-    [[nodiscard]] auto AtlasCubeView() noexcept -> Vk::ImageView& { return _shadowAtlasCubeView; }
-    [[nodiscard]] auto AtlasCubeView() const noexcept -> const Vk::ImageView& { return _shadowAtlasCubeView; }
-    [[nodiscard]] auto Atlas2DView() noexcept -> Vk::ImageView& { return _shadowAtlas2DView; }
-    [[nodiscard]] auto Atlas2DView() const noexcept -> const Vk::ImageView& { return _shadowAtlas2DView; }
+    // The one view of the whole atlas: every tile is a viewport into it, so
+    // there is nothing per-light to hand out any more.
+        // Attachment role only; sampling the atlas goes through the image's
+    // ViewInfo() at the call site.
+    [[nodiscard]] auto AtlasView() noexcept -> Vk::AttachmentView& { return _shadowAtlasView; }
+    [[nodiscard]] auto AtlasView() const noexcept -> const Vk::AttachmentView& { return _shadowAtlasView; }
 
   private:
-    [[nodiscard]] auto CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode>;
+    [[nodiscard]] auto CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::AttachmentView>, ErrorCode>;
 
     Vk::Context&                             _ctx;
     Vk::Allocator&                           _allocator;
@@ -252,11 +252,9 @@ class TargetManager {
     GraphResources _graph;
 
     Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> _shadowMapPrev;
-    ZHLN::Array<Vk::ImageView>             _shadowCascadeViews;
-    ZHLN::Array<Vk::ImageView>             _shadowCascadeViewsPrev;
-    ZHLN::Array<Vk::ImageView>             _punctualShadowViews;
-    Vk::ImageView                          _shadowAtlasCubeView;
-    Vk::ImageView                          _shadowAtlas2DView;
+    ZHLN::Array<Vk::AttachmentView>        _shadowCascadeViews;
+    ZHLN::Array<Vk::AttachmentView>        _shadowCascadeViewsPrev;
+    Vk::AttachmentView                     _shadowAtlasView;
 };
 
 }

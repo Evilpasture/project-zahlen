@@ -77,11 +77,8 @@ inline constexpr size_t k_material_flag_variant_count = 5;
 }
 
 struct PipelineCreateBindings {
-    // Pipeline layout and descriptor-heap mappings are device/runtime objects,
-    // so they remain explicit creation inputs rather than template parameters.
-    VkPipelineLayout layout         = VK_NULL_HANDLE;
-    bool             descriptorHeap = false;
-
+    // Descriptor-heap mapping tables are device/runtime objects, so they remain
+    // explicit creation inputs rather than template parameters.
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vertexMapping   = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* fragmentMapping = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* computeMapping  = nullptr;
@@ -369,14 +366,14 @@ struct ComputePipeline {
     );
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+    static auto Create(VkDevice device, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
         -> std::expected<Pipeline, ErrorCode> {
-        return Create(context, CreateShaderDesc<ShaderModule>(), bindings, cache);
+        return Create(device, CreateShaderDesc<ShaderModule>(), bindings, binaries);
     }
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, ErrorCode> {
-        return Create(context, PipelineCreateBindings {}, cache);
+    static auto Create(VkDevice device, PipelineBinaryStore* binaries = nullptr) noexcept -> std::expected<Pipeline, ErrorCode> {
+        return Create(device, PipelineCreateBindings {}, binaries);
     }
 
     // Runtime shader bytes remain available for reloadable passes. The type
@@ -384,28 +381,17 @@ struct ComputePipeline {
     // translation unit validates SPIR-V reflection, including heap mappings.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto
-        Create(const Context& context, const ShaderDesc& shader, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+        Create(VkDevice device, const ShaderDesc& shader, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
         -> std::expected<Pipeline, ErrorCode> {
-        if (context.Device() == VK_NULL_HANDLE) {
+        if (device == VK_NULL_HANDLE) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
-        if (bindings.layout == VK_NULL_HANDLE && !bindings.descriptorHeap) {
-            return std::unexpected(PipelineBuilderError::MissingLayout);
-        }
-
-        const ComputePipelineConfig config {
-            .shader         = shader,
-            .layout         = bindings.layout,
-            .cache          = cache,
-            .specialization = bindings.specialization,
-            .descriptorHeap = bindings.descriptorHeap,
-            .mapping        = bindings.computeMapping,
-        };
-        auto pipeline = CreateComputePipeline(context.Device(), config);
-        if (!pipeline) {
-            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
-        }
-        return Pipeline(context.Device(), *pipeline);
+        return ComputePipelineBuilder()
+            .Shader(shader)
+            .Specialization(bindings.specialization)
+            .HeapMappings(bindings.computeMapping)
+            .Binaries(binaries)
+            .Build(device);
     }
 };
 
@@ -425,26 +411,26 @@ struct GraphicsPipeline {
     static_assert(!HasFlag(Flags, MaterialFlags::DepthWrite) || Attachments::has_depth, "DepthWrite requires a pass depth attachment.");
 
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+    static auto Create(VkDevice device, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
         -> std::expected<Pipeline, ErrorCode> {
         auto stages = ShaderModule::CreateStages();
         if (!stages) {
             return std::unexpected(stages.error());
         }
-        return Create(context, *stages, bindings, cache);
+        return Create(device, *stages, bindings, binaries);
     }
 
-    // The short form supports contracts that provide their own runtime binding
-    // context; otherwise callers with device-owned layouts/heaps use the overload
+    // The short form supports contracts that derive their bindings from the device;
+    // otherwise callers with device-owned heap mappings use the overload
     // above.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, ErrorCode> {
+    static auto Create(VkDevice device, PipelineBinaryStore* binaries = nullptr) noexcept -> std::expected<Pipeline, ErrorCode> {
         if constexpr (requires {
-                          { PassContract::PipelineBindings(context) } -> std::same_as<PipelineCreateBindings>;
+                          { PassContract::PipelineBindings(device) } -> std::same_as<PipelineCreateBindings>;
                       }) {
-            return Create(context, PassContract::PipelineBindings(context), cache);
+            return Create(device, PassContract::PipelineBindings(device), binaries);
         } else {
-            return Create(context, PipelineCreateBindings {}, cache);
+            return Create(device, PipelineCreateBindings {}, binaries);
         }
     }
 
@@ -452,23 +438,16 @@ struct GraphicsPipeline {
     // retaining compile-time stage/push checks and zshader's generated
     // translation-unit reflection assertions.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
-    static auto Create(const Context& context, ShaderStagesView stages, const PipelineCreateBindings& bindings, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+    static auto Create(VkDevice device, ShaderStagesView stages, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
         -> std::expected<Pipeline, ErrorCode> {
-        if (context.Device() == VK_NULL_HANDLE) {
+        if (device == VK_NULL_HANDLE) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
         if (!stages.Valid() || stages.IsMeshPipeline() != ShaderModule::is_mesh_pipeline) {
             return std::unexpected(PipelineBuilderError::MissingShaders);
         }
-        if (bindings.layout == VK_NULL_HANDLE && !bindings.descriptorHeap) {
-            return std::unexpected(PipelineBuilderError::MissingLayout);
-        }
-
         const PipelineConfig config {
             .stages          = stages,
-            .layout          = bindings.layout,
-            .pipelineCache   = cache,
-            .descriptorHeap  = bindings.descriptorHeap,
             .vsMapping       = bindings.vertexMapping,
             .psMapping       = bindings.fragmentMapping,
             .colorFormats    = {Attachments::color_formats.begin(), Attachments::color_formats.end()},
@@ -487,11 +466,7 @@ struct GraphicsPipeline {
             .colorWriteEnable   = PipelineDetail::PassColorWriteEnable<PassContract>(),
         };
 
-        auto pipeline = CreateGraphicsPipeline(context.Device(), config);
-        if (!pipeline) {
-            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
-        }
-        return Pipeline(context.Device(), *pipeline);
+        return PipelineBuilder<>::WithConfig(config).Binaries(binaries).Build(device);
     }
 };
 

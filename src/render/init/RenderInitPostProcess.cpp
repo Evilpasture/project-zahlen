@@ -9,6 +9,7 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <span>
 #include <tuple>
 
 namespace ZHLN {
@@ -62,7 +63,7 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
     Reflect::ForEachFieldInfo<SpecData>(spec);
 
     const std::array variants  = {SpecData {.enableRTR = 0}, SpecData {.enableRTR = 1}};
-    const auto       specInfos = spec.Infos(variants);
+    const auto       specInfos = spec.Infos(std::span {variants});
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
@@ -89,7 +90,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
         SpecData {.enableSSR = 0, .enableRTR = 0}, SpecData {.enableSSR = 1, .enableRTR = 0}, SpecData {.enableSSR = 0, .enableRTR = 1},
         SpecData {.enableSSR = 1, .enableRTR = 1}
     };
-    const auto specInfos = spec.Infos(variants);
+    const auto specInfos = spec.Infos(std::span {variants});
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
@@ -121,17 +122,11 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
     defaultSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
+    pointSamplerConfig   = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
+    // The config is the sampler: it is written into the sampler heap at
+    // pointSamplerSlot, no VkSampler object is created.
+    WritePointSamplerToHeap(pointSamplerConfig);
     return std::expected<void, ErrorCode> {}
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            return defaultSamplerConfig.Create(ctx.Device()).and_then([&](auto defaultResult) -> auto {
-                defaultSampler = std::move(defaultResult);
-                pointSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
-                return pointSamplerConfig.Create(ctx.Device()).transform([&](auto pointResult) -> auto {
-                    pointSampler = std::move(pointResult);
-                    WritePointSamplerToHeap(pointSamplerConfig);
-                });
-            });
-        })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(
                 GraphicsPassDesc {

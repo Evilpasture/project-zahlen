@@ -431,10 +431,10 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
                                               [ BlitPass & ImGui / UI ] ──> [ Swapchain ]
 ```
 
-* **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) and punctual light shadow atlases.
+* **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) in one multiview pass, then every shadow-casting point/spot light into tiles of a single 2D depth atlas (`features/ShadowAtlas.hpp`): one tile for a spot, six for a point's cube faces. Tile size falls off with distance and tiles whose light and casters did not move are reused, so a light that loses the ranking contest loses resolution rather than its shadows.
 * **MainPass**: Writes primary G-Buffer channels (`SceneColor`, `Velocity`, `NormalRoughness`, `Depth`).
 * **DecalPass**: Projects screen-space decals directly onto the G-Buffer before lighting.
-* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled). The occlusion factor modulates only indirect light: the lighting pass applies it to the SH/gather ambient term and passes it in the lighting target's alpha, where the reflection pass applies it to specular IBL; direct sun/punctual terms carry their own shadow visibility instead.
+* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled). The occlusion factor modulates only indirect light: the lighting pass applies it to the SH/gather ambient term and passes it in the lighting target's alpha, where the reflection pass applies it to specular IBL; direct sun and point/spot terms carry their own shadow visibility instead.
 * **LightingPass**: Computes direct sun lighting, clustered point/spot/area (LTC) lights, and ray-traced shadows.
 * **ReflectionPass**: Evaluates Screen-Space Reflections (SSR) or Hardware Ray-Traced Reflections (RTR).
 * **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.
@@ -603,16 +603,24 @@ tree resolves exactly what it always did.
 
 This is policy, so it stays private to the layer that owns the process: it has
 no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
-includes it. The renderer and the RHI are *told* where to read and write --
-`RenderConfig::pipelineCachePath` and `RenderConfig::crashDumpPath`, the latter
-forwarded into `Vk::DiagnosticConfig::crashDumpPath` -- so a host can override
-either one, and the decision can change without touching a consumer's API. An
-empty path is what the engine fills in; a path set by the caller is used as
-given.
+includes it. Pipeline binaries cross into the renderer as data, never as a
+path: the kernel reads `pipeline_cache.bin` itself and hands the bytes in via
+`RenderConfig::initialPipelineBinaryData`, then extracts the updated set
+with `RenderContext::GetPipelineBinaryData()` before teardown and writes it
+back, so the RHI works unchanged on hosts with no file system at all. There
+is no `VkPipelineCache` anywhere in the renderer: `VK_KHR_pipeline_binary`
+supplies per-pipeline blobs keyed by the driver's own pipeline keys, held in
+`Vk::PipelineBinaryStore` and replayed or captured inside the pipeline
+builders; hosts without the extension compile from scratch. A caller
+that supplies its own cache bytes keeps persistence for itself; only when it
+supplies none does the kernel fill in the on-disk cache and take on writing it
+back. `RenderConfig::crashDumpPath` is still a path, forwarded into
+`Vk::DiagnosticConfig::crashDumpPath`; an empty path is what the engine fills
+in, and a path set by the caller is used as given.
 
 Caches are regenerable by definition: a missing or foreign cache costs compile
-time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on
-another driver or device (`MatchesDevice` in `PipelineCache.cpp`), and an
+time, never correctness -- `Vk::MatchesDevice` discards a store recorded on
+another driver or device (the global pipeline key check in `PipelineBinaries.cpp`), and an
 unwritable directory costs one log line.
 
 `ZHLN_PROJECT_ROOT` (`Config.hpp`) stays a *compile-time source path*. It is only

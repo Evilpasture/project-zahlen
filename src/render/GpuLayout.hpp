@@ -27,9 +27,10 @@ using GeneratedGpu::InstanceData;
 using GeneratedGpu::Particle3D;
 
 // And the ones both halves of the work have a word for: one particle, an
-// emitter's parameters, a light, a frame.
+// emitter's parameters, a light, a shadow-atlas tile, a frame.
 using GeneratedGpu::FrameUniforms;
 using GeneratedGpu::Light;
+using GeneratedGpu::ShadowTile;
 using GeneratedGpu::MeshParticleEmitterParams;
 using GeneratedGpu::Particle;
 using GeneratedGpu::ParticleEmitterParams;

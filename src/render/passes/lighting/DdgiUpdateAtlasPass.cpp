@@ -19,14 +19,14 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
     const bool     wantRT = impl.settings.rayTracing.enableDiffuseGI ||
                             (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) ||
                             impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::DdgiUpdateIrradiance>(
-        impl.ctx, impl.postProcess.DdgiUpdateHeapBindings(),
+        impl.postProcess.DdgiUpdateHeapBindings(),
         Vk::Slot<"inRays">(Vk::Assume<Vk::ComputeRead<Res_DdgiRays>>(impl.graphResources.ddgiRays)),
         Vk::Slot<"outIrradiance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"outDistance">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ddgiDistance)),
@@ -43,7 +43,7 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
         .depthSharpness = 16.0f,
     };
     impl.postProcess.DdgiUpdate().DispatchHeapIndexedThreads<Shaders::Modules::DdgiUpdateIrradianceCS>(
-        impl.ctx, cmd, block, totalProbes * 16u, 16u, 1u, push
+        cmd, block, totalProbes * 16u, 16u, 1u, push
     );
 }
 

@@ -13,27 +13,19 @@ namespace ZHLN::Vk {
 
 // These stateless deleter declarations are needed by DeviceHandle's template;
 // keep the Vulkan calls themselves out of the header in Handles.cpp.
-struct DestroyPipelineLayout {
-    void operator()(VkDevice device, VkPipelineLayout handle) const noexcept;
-};
-
 struct DestroyPipeline {
     void operator()(VkDevice device, VkPipeline handle) const noexcept;
 };
 
-struct DestroyPipelineCache {
-    void operator()(VkDevice device, VkPipelineCache handle) const noexcept;
+struct DestroyPipelineBinary {
+    void operator()(VkDevice device, VkPipelineBinaryKHR handle) const noexcept;
 };
 
 struct DestroySemaphore {
     void operator()(VkDevice device, VkSemaphore handle) const noexcept;
 };
 
-struct DestroySampler {
-    void operator()(VkDevice device, VkSampler handle) const noexcept;
-};
-
-struct DestroyImageView {
+struct DestroyAttachmentView {
     void operator()(VkDevice device, VkImageView handle) const noexcept;
 };
 
@@ -95,12 +87,10 @@ class DeviceHandle {
     T        _raw    = VK_NULL_HANDLE;
 };
 
-using PipelineLayout        = DeviceHandle<VkPipelineLayout, DestroyPipelineLayout>;
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
-using PipelineCache         = DeviceHandle<VkPipelineCache, DestroyPipelineCache>;
+using PipelineBinary        = DeviceHandle<VkPipelineBinaryKHR, DestroyPipelineBinary>;
 using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
-using Sampler               = DeviceHandle<VkSampler, DestroySampler>;
-using ImageViewHandle       = DeviceHandle<VkImageView, DestroyImageView>;
+using AttachmentViewHandle  = DeviceHandle<VkImageView, DestroyAttachmentView>;
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, DestroyAccelerationStructure>;
 
 } // namespace ZHLN::Vk

@@ -85,7 +85,7 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     // never express Source pitch: a rotation about +X does not tilt the +X
     // forward at all, so a fixture pitched straight down -- the common case
     // for ceiling lights -- rendered rolled onto its side, perpendicular to
-    // the floor, with its housing redirecting/occluding the punctual light
+    // the floor, with its housing redirecting/occluding the point/spot light
     // placed at the same origin (dark interiors, light pools only on walls).
     //
     // The exact transform is the conjugate of the Source rotation by the
@@ -344,15 +344,22 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                     interactive.shape  = Scene::ShapeKind::Prefab;
                     interactive.source = std::string(virtualPath) + "#model_" + std::to_string(modelIndex);
 
-                    if (subRecord->rotating) {
-                        // The importer re-based the geometry on the hinge; put
-                        // the entity transform at the pivot so rotations sweep
-                        // the door around the correct point.
-                        interactive.transform.position = {subRecord->pivot.GetX(), subRecord->pivot.GetY(), subRecord->pivot.GetZ()};
-                    }
-                    // Sliding doors/buttons keep world-space vertices: the
-                    // transform starts at identity and the movement system's
-                    // delta translates the baked geometry.
+                    // The importer re-based the submodel geometry on its
+                    // pivot, so the entity transform is the submodel's authored
+                    // world position for rotating and sliding alike. Rotations
+                    // sweep around the pivot; translations start from it.
+                    //
+                    // This used to be stamped only for rotating submodels, and
+                    // a sliding door/button was left at the SceneEntity default
+                    // -- the map origin. Everything downstream then measured
+                    // the door from the origin instead of from the door: the
+                    // interaction layer's 2.5 m use radius never reached it,
+                    // the movement system slid it origin-relative instead of in
+                    // place, and Scene::Instantiate put the kinematic root
+                    // collider at the origin so it blocked nothing. The
+                    // rendered position is unchanged either way, because the
+                    // prefab vertices are re-based by the same pivot.
+                    interactive.transform.position = {subRecord->pivot.GetX(), subRecord->pivot.GetY(), subRecord->pivot.GetZ()};
 
                     // Submodel bounds still drive the door travel distance
                     // (BSPInteraction) and the instantiator's root collider

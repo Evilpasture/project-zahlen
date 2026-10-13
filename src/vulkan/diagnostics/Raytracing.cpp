@@ -149,7 +149,7 @@ void BuildBLAS(
     const uint32_t primitiveCount
 ) noexcept {
     CmdBuild(
-        cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, MakeBlasGeometry(desc), destination, scratch.Address(), primitiveCount
+        cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, MakeBlasGeometry(desc), destination, scratch.Address().Get(), primitiveCount
     );
 }
 
@@ -160,7 +160,7 @@ void BuildTLAS(
     const BufferSlice scratch,
     const uint32_t instanceCount
 ) noexcept {
-    CmdBuild(cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, MakeTlasGeometry(desc.instance_data), destination, scratch.Address(), instanceCount);
+    CmdBuild(cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, MakeTlasGeometry(desc.instance_data), destination, scratch.Address().Get(), instanceCount);
 }
 
 } // namespace ZHLN::Vk

@@ -134,7 +134,6 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         if (const auto shadow = reg.Get<ShadowSettingsComponent>(shadowEnt)) {
             gfx.shadows.width              = shadow->shadowWidth;
             gfx.shadows.resolution         = static_cast<uint32_t>(shadow->shadowResolution);
-            gfx.shadows.maxPunctualShadows = static_cast<uint32_t>(shadow->maxPunctualShadows);
             gfx.shadows.sunSize            = shadow->sunSize;
         }
     }

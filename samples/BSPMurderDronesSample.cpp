@@ -898,7 +898,7 @@ auto main(int argc, char* argv[]) -> int {
             // enableShadows adds the ray-traced shadow mask: RtShadowPass traces
             // it against the TLAS and lighting.slang uses it within 160 m,
             // blending out to the sun's cascades beyond that. That replaces the
-            // rasterized punctual cubemaps entirely -- four 1024x1024x6 cubemap
+            // rasterized point cubemaps entirely -- four 1024x1024x6 cubemap
             // passes cost more than the rest of the frame on a low-end GPU and
             // are far coarser than a ray query on a map of this magnitude.
             //
@@ -919,12 +919,11 @@ auto main(int argc, char* argv[]) -> int {
                 });
             }
             reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [mapRadius](auto& s) {
-                s.shadowWidth        = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
-                s.shadowResolution   = 2048;
-                // No rasterized punctual shadows: the ray-traced mask above
-                // covers them, and the cubemap atlas is the single most
-                // expensive thing this sample can ask for.
-                s.maxPunctualShadows = 0;
+                s.shadowWidth      = std::clamp(mapRadius * 2.5f, 64.0f, 2048.0f);
+                s.shadowResolution = 2048;
+                // No rasterized point shadows here either: the ray-traced
+                // mask above covers them, and none of this map's lights asks
+                // the atlas for a tile.
             });
         }
 

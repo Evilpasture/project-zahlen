@@ -14,6 +14,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <span>
 #include <unordered_map>
 #include <utility>
 
@@ -87,14 +88,14 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
 }
 
-[[nodiscard]] auto Rec709Luma(const std::array<float, 3>& rgb) noexcept -> float {
+[[nodiscard]] auto Rec709Luma(std::span<const float, 3> rgb) noexcept -> float {
     return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
 }
 
 // Reads up to four whitespace-separated floats out of a keyvalue. Returns how
 // many were read, which is what tells a 3-component legacy `_light`
 // ("119 49 47") from a proper 4-component one.
-[[nodiscard]] auto ParseFloats(std::string_view text, std::array<float, 4>& out) noexcept -> size_t {
+[[nodiscard]] auto ParseFloats(std::string_view text, std::span<float, 4> out) noexcept -> size_t {
     size_t      count = 0;
     const char* cur   = text.data();
     const char* end   = text.data() + text.size();
@@ -559,7 +560,7 @@ auto BuildLight(const BSPEntity& entity, const ImportOptions& options, LightEnti
         std::clamp(value.rgba[0] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[1] / 255.0f, 0.0f, 1.0f), std::clamp(value.rgba[2] / 255.0f, 0.0f, 1.0f)
     );
 
-    // Brightness: the punctual constant for point/spot, the sun constant for the
+    // Brightness: the point/spot constant, the sun constant for the
     // directional term. A light with no brightness lane at all (legacy
     // 3-component `_light`) keeps Source's own default of 200 rather than
     // becoming invisible.
@@ -708,7 +709,7 @@ auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std:
 // Emissive surface assembly
 // ---------------------------------------------------------------------------
 
-auto FinalizeEmissiveSurfaces(std::vector<EmissiveSurface> surfaces, const std::vector<BspPointLight>& entityLights, float unitScale, uint32_t maxLights)
+auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights)
     -> std::vector<EmissiveSurface> {
     const float cellMetres      = std::max(kEmissiveClusterCellInches * unitScale, 0.1f);
     const float fixtureMetres   = std::max(kEmissiveFixtureRadiusInches * unitScale, 0.1f);
@@ -826,7 +827,7 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 
     // The equivalent-Source-brightness model: a white panel of area A reads as
     // a `light` of brightness (A * kEmissiveSourceBrightnessPerSquareMetre),
-    // then goes through the same punctual calibration the entity lights use.
+    // then goes through the same point/spot calibration the entity lights use.
     const float equivalentBrightness = Rec709Luma(surface.color) * surface.areaSquareMetres * kEmissiveSourceBrightnessPerSquareMetre * surface.strength *
                                        surface.fixtureDamping;
     light.intensity                  = std::max(equivalentBrightness * kSourceBrightnessToEngine, 0.0f);
@@ -854,7 +855,7 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 // Diagnostics / guarantee
 // ---------------------------------------------------------------------------
 
-auto AuditLighting(const std::vector<BspPointLight>& entityLights, const std::vector<EmissiveSurface>& emissive, const AmbientTerm& ambient, const BSPMap& map)
+auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const BSPMap& map)
     -> LightingDiagnostics {
     LightingDiagnostics out;
     uint32_t            offered   = 0;
@@ -907,7 +908,7 @@ auto EnforceLightingFloor(ImportedMapData& data, const BSPMap& map, const Import
     // 1. Ambient floor. The engine's ambient term is
     //    EvaluateSH(N, frame.sh) * ambientExposure, and frame.sh integrates the
     //    sky gradient -- so a black sky is a black scene no matter how many
-    //    punctual lights it carries. Lift a black or near-black ambient to a
+    //    point/spot lights it carries. Lift a black or near-black ambient to a
     //    visible floor while keeping whatever hue the mapper did author, so a
     //    night map stays a night map and does not become a grey room.
     const float ambientIrradiance = Rec709Luma(data.ambient.color) * data.ambient.intensity / kAmbientBrightnessLadder;

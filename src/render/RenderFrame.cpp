@@ -2,20 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "Zahlen/Profiler.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "graph/RenderGraph.hpp"
-
-#include <ShaderBindings.hpp>
-
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
-#include "Zahlen/Profiler.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/SceneData.hpp>
-#include <span>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -23,6 +20,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <utility>
 
 namespace ZHLN {
@@ -39,7 +37,7 @@ auto ForkSequentialForced() noexcept -> bool {
     return enabled;
 }
 
-}
+} // namespace Diag
 
 namespace {
 
@@ -48,8 +46,7 @@ template <typename... Ptrs>
     return (... || (ptrs == nullptr));
 }
 
-}
-
+} // namespace
 
 auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     return {
@@ -76,81 +73,92 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     return size;
 }
 
-void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
+auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> SkinnedBlasOutcome {
+    SkinnedBlasOutcome outcome;
     if (!frameState.hasSkinned || cmd == VK_NULL_HANDLE) {
-        return;
+        return outcome;
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
-    skinningPass.Bind(cmd);
 
     for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            auto* posMesh     = drawCmd.posMesh;
-            auto* frameMesh   = drawCmd.frameMesh;
-            auto* skinMesh    = drawCmd.skinMesh;
             auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
-            if (AnyNull(posMesh, frameMesh, scratchMesh) || posMesh->vertexCount > scratchMesh->vertexCount) {
+            const uint32_t vertexCount = drawCmd.instanceData.vertexCount;
+            if (drawCmd.skinPosAddress == nullptr || drawCmd.skinFrameAddress == nullptr || scratchMesh == nullptr || vertexCount > scratchMesh->vertexCount) {
                 continue;
             }
 
             // Only position and tangent-frame streams are animated; the
             // immutable surface stream is read directly by the draw shader.
-            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress};
-            const VkDeviceSize posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
-            const VkDeviceSize frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
-            const auto         positions  = output.Subspan(0, posBytes);
-            const auto         framesOut  = output.Subspan(posBytes, frameBytes);
+            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress.Get()};
+            const VkDeviceSize    posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
+            const VkDeviceSize    frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
+            const auto            positions  = output.Subspan(0, posBytes);
+            const auto            framesOut  = output.Subspan(posBytes, frameBytes);
             if (positions.Size() != posBytes || framesOut.Size() != frameBytes) {
                 continue;
             }
 
             SkinningConstants pcs {
-                .inPosAddr        = posMesh->vboAddress,
-                .inFrameAddr      = frameMesh->vboAddress,
-                .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                .outPosAddr       = positions.Address(),
-                .outFrameAddr     = framesOut.Address(),
-                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
-                .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
-                .vertexCount      = posMesh->vertexCount,
+                .inPosAddr        = drawCmd.skinPosAddress,
+                .inFrameAddr      = drawCmd.skinFrameAddress,
+                .inSkinAddr       = drawCmd.skinDataAddress,
+                .outPosAddr       = Vk::DeviceAddress<VertexPosition>::Cast(positions.Address()),
+                .outFrameAddr     = Vk::DeviceAddress<VertexTangentFrame>::Cast(framesOut.Address()),
+                .jointsAddr       = Vk::DeviceAddress<JPH::Mat44> {ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle())},
+                .morphDeltasAddr  = Vk::DeviceAddress<JPH::Float4> {ctx.BufferAddress(morphDeltasBuffer.Handle())},
+                .vertexCount      = vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
                 .activeMorphCount = drawCmd.activeMorphCount,
                 .morphWeights     = drawCmd.morphWeights
             };
 
-            skinningPass.PushConstants<Shaders::Modules::SkinningCS>(cmd, pcs);
-            skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
+            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, vertexCount, 1, 1, pcs);
         }
     }
 
     Vk::MemoryBarrier(
-        cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite,
-        Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
+        cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::AccelerationStructureBuild | Vk::BarrierStage::Vertex,
         Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead
     );
 
     if (ctx.RayTracingSupported()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.Draws()) {
-            if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-                auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
-                if (scratchMesh != nullptr) {
-                    BuildOrUpdateSkinnedBLAS(cmd, drawCmd, scratchMesh);
-                }
+            if (drawCmd.skinnedVertexBuffer == BufferHandle::Invalid) {
+                continue;
+            }
+            // Several draws can share one scratch buffer; one rebuild
+            // covers them all.
+            const bool alreadyRebuilt =
+                std::ranges::any_of(outcome.addresses, [&](const SkinnedBlasEntry& entry) { return entry.scratch == drawCmd.skinnedVertexBuffer; });
+            if (alreadyRebuilt) {
+                continue;
+            }
+            auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
+            if (scratchMesh == nullptr) {
+                continue;
+            }
+            const auto rebuilt = RebuildSkinnedBLAS(cmd, ctx, allocator, deletionQueue, drawCmd, *scratchMesh);
+            if (rebuilt) {
+                outcome.addresses.push_back({.scratch = drawCmd.skinnedVertexBuffer, .address = *rebuilt});
+            } else if (!outcome.failure.has_value()) {
+                outcome.failure = rebuilt.error();
             }
         }
 
         Vk::MemoryBarrier(
-            cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
-            Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureRead
+            cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite, Vk::BarrierStage::AccelerationStructureBuild,
+            Vk::BarrierAccess::AccelerationStructureRead
         );
     }
+    return outcome;
 }
 
-void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
+void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const SkinnedBlasEntry> skinnedBlas) noexcept {
     if (!ctx.RayTracingSupported() || queues.Draws().empty()) {
         return;
     }
@@ -162,13 +170,23 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     for (uint32_t i = 0; i < queues.Draws().size(); ++i) {
         const auto& drawCmd = queues.Draws()[i];
-        auto*       mesh    = drawCmd.posMesh;
 
+        Vk::DeviceAddress<> blasAddress = drawCmd.blasAddress;
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
+            // The scratch BLAS was rebuilt earlier in this frame prep; its
+            // address arrives through the outcome list, not by re-resolving
+            // the record. A scratch buffer missing from the list failed its
+            // rebuild and contributes no instance.
+            blasAddress = nullptr;
+            for (const auto& entry: skinnedBlas) {
+                if (entry.scratch == drawCmd.skinnedVertexBuffer) {
+                    blasAddress = entry.address;
+                    break;
+                }
+            }
         }
 
-        if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
+        if (blasAddress == nullptr || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
             continue;
         }
 
@@ -188,7 +206,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference         = mesh->blasAddress
+            .accelerationStructureReference         = blasAddress.Get()
         };
 
         tlasInstancesScratch.push_back(inst);
@@ -201,21 +219,22 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
     auto mappedInstances = instanceBuf.Map(allocator);
-    if (!mappedInstances) return;
+    if (!mappedInstances)
+        return;
     std::memcpy(mappedInstances->Data(), tlasInstancesScratch.data(), tlasInstancesScratch.size() * sizeof(VkAccelerationStructureInstanceKHR));
 
     Vk::TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
     auto& scratch = frames.tlasScratchBuffer[presenter.frameIndex];
-    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())},
-                  tlasInstancesScratch.size());
+    Vk::BuildTLAS(
+        cmd, geom, frames.tlas[presenter.frameIndex].Get(), Vk::BufferSlice {scratch, ctx.BufferAddress(scratch.Handle())}, tlasInstancesScratch.size()
+    );
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
         Vk::BarrierStage::Fragment | Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::AccelerationStructureRead
     );
 }
-
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
@@ -226,7 +245,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     currentUniforms.viewProj           = view.viewProjMatrix;
     currentUniforms.unjitteredViewProj = unjittered;
     currentUniforms.invViewProj        = unjittered.Inversed();
-    currentUniforms.camPos = JPH::Float4 {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time};
+    currentUniforms.camPos             = JPH::Float4 {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time};
     if (view.frameIndex != 0) {
         currentUniforms.frameIndex = view.frameIndex;
     }
@@ -244,11 +263,17 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     gpu->frameIndex         = currentUniforms.frameIndex;
 }
 
-
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
     ApplySceneView(view);
 
-    DispatchSkinningPasses(cmd);
+    // The hand-off is data now: BuildTLAS below consumes exactly the BLAS
+    // addresses this stage rebuilt, in this order, because the call takes
+    // them as an argument -- not because two Impl methods happen to be
+    // called in the right sequence.
+    const SkinnedBlasOutcome skinnedBlas = DispatchSkinningPasses(cmd);
+    if (skinnedBlas.failure.has_value() && invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
+        ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", skinnedBlas.failure.value());
+    }
 
     if (queues.Draws().size() > kGpuCullingMaxInstances) {
         queues.Draws().resize(kGpuCullingMaxInstances);
@@ -286,9 +311,8 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
             }
         }
     }
-    BuildTLAS(cmd);
+    BuildTLAS(cmd, skinnedBlas.addresses);
 }
-
 
 namespace {
 
@@ -300,7 +324,7 @@ auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::F
     return rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
-}
+} // namespace
 
 void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkCall> bodies) noexcept {
     auto& self = *impl;
@@ -331,14 +355,13 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
     const auto frameAddrs   = self.FrameHeapAddresses();
     rec.SetHeapState(
-        &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
-        std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
+        &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(), std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
     );
 
     const bool previousInheritance  = self.frameState.inForkSecondary;
     self.frameState.inForkSecondary = true;
 
-    TaskSystemScheduler scheduler;
+    TaskSystemScheduler            scheduler;
     std::expected<void, ErrorCode> recorded;
     if (count == 2) {
         recorded = RecordForkBodies(rec, scheduler, bodies, std::make_index_sequence<2> {});
@@ -358,14 +381,13 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
 
-
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     // The two-state accumulation, shadow-map and voxel histories can be reused
     // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
     // independently indexed, but increasing N alone does not permit additional
     // overlapping GPU frames while these history targets remain shared.
-    auto& primarySync = _impl->presenter.sync;
-    const uint32_t slot = _impl->presenter.frameIndex;
+    auto&          primarySync = _impl->presenter.sync;
+    const uint32_t slot        = _impl->presenter.frameIndex;
     // The previous frame protects shared two-state histories. The current
     // slot's older submission must also finish before its pools are reset, even
     // if the previous frame acquired no image and never submitted graphics.
@@ -424,7 +446,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    (void)_impl->presenter.sync.StepTimeline(frame_index);
+    (void) _impl->presenter.sync.StepTimeline(frame_index);
 
     _impl->gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
@@ -514,7 +536,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     return presented;
 }
 
-
 auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<FrameTarget> {
     return _impl->AcquireTarget(target);
 }
@@ -527,11 +548,11 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<RenderTextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {
     return _impl->CreateRenderTexture(width, height, hdr);
 }
 
-void RenderContext::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 
@@ -543,12 +564,10 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     const VkCommandBuffer cmd = resolved->recorder.Handle();
     _impl->destinations.SetActive(resolved->window.id);
     _impl->sceneTarget = resolved->image;
-    if (_impl->settings.post.enableRTR != settings.post.enableRTR ||
-        _impl->settings.rayTracing.enableReflections != settings.rayTracing.enableReflections ||
+    if (_impl->settings.post.enableRTR != settings.post.enableRTR || _impl->settings.rayTracing.enableReflections != settings.rayTracing.enableReflections ||
         _impl->settings.rayTracing.enableShadows != settings.rayTracing.enableShadows ||
         _impl->settings.rayTracing.enableDiffuseGI != settings.rayTracing.enableDiffuseGI ||
-        _impl->settings.rayTracing.denoiserPasses != settings.rayTracing.denoiserPasses ||
-        settings.rayTracing.denoiserPasses == 0) {
+        _impl->settings.rayTracing.denoiserPasses != settings.rayTracing.denoiserPasses || settings.rayTracing.denoiserPasses == 0) {
         _impl->rtHistoryValid = false;
     }
     _impl->settings = settings;
@@ -556,8 +575,8 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
     _impl->sceneTarget.reset();
-    resolved->layout = Vk::AttachmentLayout::ColorAttachment;
-    resolved->drawn = true;
+    resolved->layout             = Vk::AttachmentLayout::ColorAttachment;
+    resolved->drawn              = true;
     _impl->warnedUnwrittenTarget = false;
     return std::nullopt;
 }
@@ -607,7 +626,7 @@ void RenderContext::AbortFrame() noexcept {
         return;
     }
     _impl->destinations.AbortRecordings();
-    _impl->frameOpen = false;
+    _impl->frameOpen    = false;
     _impl->pendingLines = {};
     _impl->queues.Clear();
     _impl->frameState.Reset();
@@ -660,9 +679,7 @@ auto FrameScope::RenderScene(const SceneRenderPass& pass, const SceneData& scene
     if (_rc == nullptr) {
         return FrameSkipped {};
     }
-    _rc->SetFrameData(
-        pass.camera, pass.frame, pass.shadowProjView, std::span<const LightDesc> {scene.lights.data(), scene.lights.size()}, scene.dt
-    );
+    _rc->SetFrameData(pass.camera, pass.frame, pass.shadowProjView, std::span<const LightDesc> {scene.lights.data(), scene.lights.size()}, scene.dt);
     _rc->ApplyDrawData(scene);
     return _rc->RenderScene(pass.view, pass.settings);
 }
@@ -688,7 +705,9 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     }
 
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
-        ZHLN::Log("[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName);
+        ZHLN::Log(
+            "[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName
+        );
         return;
     }
 
@@ -703,4 +722,4 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     }
 }
 
-}
+} // namespace ZHLN

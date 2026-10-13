@@ -70,13 +70,13 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     if (surface.Get() == VK_NULL_HANDLE) {
         const VkExtent2D render_extent = {.width = width, .height = height};
         auto             dt_res        = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-            *_alloc, *_ctx, render_extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
+            *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
         );
         if (!dt_res) {
             return std::unexpected(dt_res.error());
         }
         auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
-            *_alloc, *_ctx, render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
+            *_alloc, _ctx->Device(), render_extent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
         );
         if (!hct_res) {
             dt_res->Destroy(*_alloc);
@@ -104,7 +104,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
     {
         auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-            *_alloc, *_ctx, swapchain.Get().extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
+            *_alloc, _ctx->Device(), swapchain.Get().extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
         );
         if (!dt_res) {
             return std::unexpected(dt_res.error());

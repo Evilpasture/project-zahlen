@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <expected>
 #include <memory_resource>
+#include <utility>
 
 enum class ALifeTestError : uint8_t {
     GOAPPlanFailed ZHLN_ANNOTATION(ZHLN::Description<"GOAP solver failed to compute valid action sequence.">{}) = 1,
@@ -148,22 +149,19 @@ struct ALifeTestSuite {
             grid.UpdateEntity(reg, e3, JPH::RVec3(-1, -1, -1));
 
             // Query within 20m of (100, 0, 100)
-            std::vector<ZHLN::Entity> results;
-            uint32_t                  count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
+            std::vector<ZHLN::Entity> results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f);
 
             // Should find e1 and e2, but NOT e3
-            ZHLN::Test::ExpectEq(count, 2u);
-            ZHLN::Test::ExpectEq(results.size(), static_cast<size_t>(2));
+            ZHLN::Test::ExpectEq(results.size(), size_t {2});
 
             // Move e2 outside the radius
             JPH::RVec3 oldPos = c2.position;
             c2.position       = JPH::RVec3(300.0, 0.0, 300.0);
             grid.UpdateEntity(reg, e2, oldPos);
 
-            results.clear();
-            count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
-            ZHLN::Test::ExpectEq(count, 1u);
-            if (count == 1) {
+            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
+            ZHLN::Test::ExpectEq(results.size(), size_t {1});
+            if (results.size() == 1) {
                 ZHLN::Test::ExpectEq(results[0], e1);
             }
 
@@ -180,11 +178,10 @@ struct ALifeTestSuite {
             replacementComp.position = JPH::RVec3(105.0, 0.0, 100.0);
             grid.UpdateEntity(reg, replacement, JPH::RVec3(-1, -1, -1));
 
-            results.clear();
-            count = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, results);
+            results = grid.Query(reg, JPH::RVec3(100.0, 0.0, 100.0), 20.0f, std::move(results));
             ZHLN::Test::ExpectEq(replacement.index, e1.index);
             ZHLN::Test::ExpectNe(replacement.generation, e1.generation);
-            ZHLN::Test::ExpectEq(count, 2u);
+            ZHLN::Test::ExpectEq(results.size(), size_t {2});
             ZHLN::Test::ExpectTrue(std::ranges::find(results, e2) != results.end());
             ZHLN::Test::ExpectTrue(std::ranges::find(results, replacement) != results.end());
             ZHLN::Test::ExpectTrue(std::ranges::find(results, e1) == results.end());

@@ -19,8 +19,8 @@ namespace {
 [[nodiscard]] constexpr auto EncodeMaterialSamplerWord(const MaterialSamplerAddresses& addresses, size_t first) noexcept -> uint32_t {
     uint32_t packed = 0;
     for (size_t i = 0; i < 8 && first + i < addresses.size(); ++i) {
-        const auto s = static_cast<uint32_t>(addresses[first + i].s);
-        const auto t = static_cast<uint32_t>(addresses[first + i].t);
+        const auto     s    = static_cast<uint32_t>(addresses[first + i].s);
+        const auto     t    = static_cast<uint32_t>(addresses[first + i].t);
         const uint32_t code = (s < 3 && t < 3) ? s * 3 + t : 0;
         packed |= code << (i * 4);
     }
@@ -54,14 +54,17 @@ struct ResolvedMeshMaterial {
     NativeMesh*     indexMesh       = nullptr;
     NativeMaterial* material        = nullptr;
     NativeMaterial* prePassMaterial = nullptr;
-    VkDeviceAddress posAddr         = 0;
-    VkDeviceAddress frameAddr       = 0;
-    VkDeviceAddress surfaceAddr     = 0;
+    // Addresses gain their element type here, where the stream each one
+    // feeds is known. Offsets below are then checked arithmetic, not bytes
+    // counted by hand against the wrong struct.
+    Vk::DeviceAddress<VertexPosition>     posAddr;
+    Vk::DeviceAddress<VertexTangentFrame> frameAddr;
+    Vk::DeviceAddress<VertexSurface>      surfaceAddr;
 
-    VkDeviceAddress meshletAddr       = 0;
-    VkDeviceAddress meshletVertexAddr = 0;
-    VkDeviceAddress meshletTriAddr    = 0;
-    uint32_t        meshletCount      = 0;
+    Vk::DeviceAddress<GPUMeshlet> meshletAddr;
+    Vk::DeviceAddress<uint32_t>   meshletVertexAddr;
+    Vk::DeviceAddress<uint8_t>    meshletTriAddr;
+    uint32_t                      meshletCount = 0;
 };
 
 [[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
@@ -128,56 +131,56 @@ struct InstanceDataDesc {
     float roughnessFactor = 1.0f;
     float alphaCutoff     = 0.0f;
 
-    JPH::Float3          localCenter {0.0f, 0.0f, 0.0f};
-    JPH::Float4          morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
-    JPH::Float4          baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Float4          emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
+    JPH::Float3 localCenter {0.0f, 0.0f, 0.0f};
+    JPH::Float4 morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
+    JPH::Float4 baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
+    JPH::Float4 emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
 
-    float transmissionFactor = 0.0f;
-    float iridescenceFactor  = 0.0f;
-    float filmThicknessNm    = 0.0f;
-    float filmThicknessMinNm = 0.0f;
-    float volumeThicknessM   = 0.0f;
-    float ior                = 1.5f;
-    float normalScale        = 1.0f;
-    uint32_t transmissionTex  = kNoFilmTexture;
-    uint32_t filmThicknessTex = kNoFilmTexture;
-    uint32_t iridescenceTex   = kNoFilmTexture;
-    uint32_t volumeThicknessTex = kNoFilmTexture;
-    float    clearcoatFactor          = 0.0f;
-    float    clearcoatRoughnessFactor = 0.0f;
-    float    clearcoatNormalScale     = 1.0f;
-    uint32_t clearcoatTex             = kNoFilmTexture;
-    uint32_t clearcoatRoughnessTex    = kNoFilmTexture;
-    uint32_t clearcoatNormalTex       = kNoFilmTexture;
-    float    anisotropyStrength      = 0.0f;
-    float    anisotropyRotation      = 0.0f;
-    uint32_t anisotropyTex           = kNoFilmTexture;
-    JPH::Float3 sheenColorFactor {};
-    float sheenRoughnessFactor = 0.0f;
-    uint32_t sheenColorTex = kNoFilmTexture;
-    uint32_t sheenRoughnessTex = kNoFilmTexture;
-    uint32_t occlusionTex = kNoFilmTexture;
-    float occlusionStrength = 1.0f;
-    MaterialSamplerAddresses textureSamplers {};
+    float                     transmissionFactor       = 0.0f;
+    float                     iridescenceFactor        = 0.0f;
+    float                     filmThicknessNm          = 0.0f;
+    float                     filmThicknessMinNm       = 0.0f;
+    float                     volumeThicknessM         = 0.0f;
+    float                     ior                      = 1.5f;
+    float                     normalScale              = 1.0f;
+    uint32_t                  transmissionTex          = kNoFilmTexture;
+    uint32_t                  filmThicknessTex         = kNoFilmTexture;
+    uint32_t                  iridescenceTex           = kNoFilmTexture;
+    uint32_t                  volumeThicknessTex       = kNoFilmTexture;
+    float                     clearcoatFactor          = 0.0f;
+    float                     clearcoatRoughnessFactor = 0.0f;
+    float                     clearcoatNormalScale     = 1.0f;
+    uint32_t                  clearcoatTex             = kNoFilmTexture;
+    uint32_t                  clearcoatRoughnessTex    = kNoFilmTexture;
+    uint32_t                  clearcoatNormalTex       = kNoFilmTexture;
+    float                     anisotropyStrength       = 0.0f;
+    float                     anisotropyRotation       = 0.0f;
+    uint32_t                  anisotropyTex            = kNoFilmTexture;
+    JPH::Float3               sheenColorFactor {};
+    float                     sheenRoughnessFactor = 0.0f;
+    uint32_t                  sheenColorTex        = kNoFilmTexture;
+    uint32_t                  sheenRoughnessTex    = kNoFilmTexture;
+    uint32_t                  occlusionTex         = kNoFilmTexture;
+    float                     occlusionStrength    = 1.0f;
+    MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 };
 
 [[nodiscard]] inline auto BuildGPUInstanceData(const InstanceDataDesc& desc) noexcept -> InstanceData {
     const ResolvedMeshMaterial* res = desc.resolved;
 
-    const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
-    const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
+    const uint32_t isViewmodel     = desc.isViewmodel ? 1u : 0u;
+    const uint32_t isSkinned       = desc.isSkinned ? 1u : 0u;
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
     const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
     const uint32_t isUnlit         = desc.unlit ? 1u : 0u;
     // Winding is a property of the current draw, not of the cached mesh or
     // material: the same primitive can be instanced under either parity.
-    const uint32_t isMirrored      = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
+    const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
-    JPH::Float4 emissive = desc.emissiveFactor;
-    uint32_t             paddingCenter = 0;
-    uint32_t             paddingMeshlet = 0;
+    JPH::Float4 emissive       = desc.emissiveFactor;
+    uint32_t    paddingCenter  = 0;
+    uint32_t    paddingMeshlet = 0;
     if (hasTransmission != 0) {
         paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
         paddingMeshlet = desc.iridescenceTex & kNoFilmTexture;
@@ -200,10 +203,10 @@ struct InstanceDataDesc {
     std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
         const auto& transform = desc.textureTransforms[slot];
-        const float c = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
-        const float s = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
-        uvRow0[slot] = JPH::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
-        uvRow1[slot] = JPH::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
+        const float c         = transform.rotation == 0.0f ? 1.0f : std::cos(transform.rotation);
+        const float s         = transform.rotation == 0.0f ? 0.0f : std::sin(transform.rotation);
+        uvRow0[slot]          = JPH::Float4 {c * transform.scale.x, s * transform.scale.y, transform.offset.x, 0.0f};
+        uvRow1[slot]          = JPH::Float4 {-s * transform.scale.x, c * transform.scale.y, transform.offset.y, static_cast<float>(transform.texCoord)};
     }
 
     return InstanceData {
@@ -212,8 +215,8 @@ struct InstanceDataDesc {
         .posAddress          = desc.posAddress,
         .tangentFrameAddress = desc.tangentFrameAddress,
         .surfaceAddress      = desc.surfaceAddress,
-        .skinAddress         = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress : 0ull,
-        .iboAddress          = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress : 0ull,
+        .skinAddress         = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress.Get() : 0ull,
+        .iboAddress          = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress.Get() : 0ull,
         .vertexCount         = desc.vertexCount,
         .indexCount          = desc.indexCount,
         .texIndices0         = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
@@ -225,8 +228,8 @@ struct InstanceDataDesc {
         // Bit 9 keeps double-sided meshlets; bit 10 routes transmission forward
         // without changing alphaMode; bit 11 marks unlit surfaces. Bit 12
         // reverses raster triangle winding for a negative world determinant.
-        .flags                = (isViewmodel << 16) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) |
-                                (doubleSided << 9) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .flags                = (isViewmodel << 16) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) |
+                                (desc.alphaMode & 0xFFu),
         .jointOffset          = desc.jointOffset,
         .morphOffset          = desc.morphOffset,
         .activeMorphCount     = desc.activeMorphCount,
@@ -235,9 +238,9 @@ struct InstanceDataDesc {
         .morphWeights         = desc.morphWeights,
         .baseColorFactor      = desc.baseColorFactor,
         .emissiveFactor       = emissive,
-        .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
-        .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
-        .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
+        .meshletAddress       = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
+        .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr.Get() : 0ull,
+        .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr.Get() : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
         ._paddingMeshlet      = paddingMeshlet,
         .anisotropyStrength   = std::clamp(desc.anisotropyStrength, 0.0f, 1.0f),
@@ -245,11 +248,11 @@ struct InstanceDataDesc {
         .anisotropyTexIndex   = desc.anisotropyTex,
         .samplerCodes0        = PackMaterialSamplerAddresses(desc.textureSamplers, 0),
         .samplerCodes1        = PackMaterialSamplerAddresses(desc.textureSamplers, 8),
-        .sheenParams        = {desc.sheenColorFactor.x, desc.sheenColorFactor.y, desc.sheenColorFactor.z, std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
-        .sheenColorTexIndex = desc.sheenColorTex,
-        .sheenRoughnessTexIndex = desc.sheenRoughnessTex,
-        .occlusionTexIndex      = desc.occlusionTex,
-        .occlusionStrength      = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
+        .sheenParams          = {desc.sheenColorFactor.x, desc.sheenColorFactor.y, desc.sheenColorFactor.z, std::clamp(desc.sheenRoughnessFactor, 0.0f, 1.0f)},
+        .sheenColorTexIndex   = desc.sheenColorTex,
+        .sheenRoughnessTexIndex  = desc.sheenRoughnessTex,
+        .occlusionTexIndex       = desc.occlusionTex,
+        .occlusionStrength       = std::clamp(desc.occlusionStrength, 0.0f, 1.0f),
         .transmissionValue       = desc.transmissionFactor,
         .transmissionIor         = desc.ior,
         .transmissionThicknessM  = desc.volumeThicknessM,
@@ -258,8 +261,8 @@ struct InstanceDataDesc {
         .filmThicknessNm         = desc.filmThicknessNm,
         .filmThicknessMinNm      = desc.filmThicknessMinNm,
         .transmissionTexIndex    = desc.transmissionTex,
-        .uvRow0                 = uvRow0,
-        .uvRow1                 = uvRow1,
+        .uvRow0                  = uvRow0,
+        .uvRow1                  = uvRow1,
     };
 }
 
@@ -296,16 +299,16 @@ struct InstanceDataDesc {
     if (res.finalPosMesh == nullptr) [[unlikely]] {
         return std::nullopt;
     }
-    if (skinnedVertexBuffer != Invalid &&
-        (res.finalPosMesh->vertexCount < posMesh->vertexCount ||
-         res.finalPosMesh->buffer.Size() < static_cast<size_t>(res.finalPosMesh->vertexCount) *
-                                               (sizeof(VertexPosition) + sizeof(VertexTangentFrame)))) [[unlikely]] {
+    if (skinnedVertexBuffer != Invalid && (res.finalPosMesh->vertexCount < posMesh->vertexCount ||
+                                           res.finalPosMesh->buffer.Size() < static_cast<size_t>(res.finalPosMesh->vertexCount) *
+                                                                                 (sizeof(VertexPosition) + sizeof(VertexTangentFrame)))) [[unlikely]] {
         return std::nullopt;
     }
 
-    res.posAddr     = res.finalPosMesh->vboAddress;
-    res.frameAddr   = res.frameMesh != nullptr ? res.frameMesh->vboAddress : 0;
-    res.surfaceAddr = res.surfaceMesh->vboAddress;
+    res.posAddr     = Vk::DeviceAddress<VertexPosition>::Cast(res.finalPosMesh->vboAddress);
+    res.frameAddr   = res.frameMesh != nullptr ? Vk::DeviceAddress<VertexTangentFrame>::Cast(res.frameMesh->vboAddress) :
+                                                 Vk::DeviceAddress<VertexTangentFrame> {nullptr};
+    res.surfaceAddr = Vk::DeviceAddress<VertexSurface>::Cast(res.surfaceMesh->vboAddress);
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
         auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
@@ -313,9 +316,9 @@ struct InstanceDataDesc {
         auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
-            res.meshletAddr       = meshletMesh->vboAddress;
-            res.meshletVertexAddr = meshletVtx->vboAddress;
-            res.meshletTriAddr    = meshletTri->vboAddress;
+            res.meshletAddr       = Vk::DeviceAddress<GPUMeshlet>::Cast(meshletMesh->vboAddress);
+            res.meshletVertexAddr = Vk::DeviceAddress<uint32_t>::Cast(meshletVtx->vboAddress);
+            res.meshletTriAddr    = Vk::DeviceAddress<uint8_t>::Cast(meshletTri->vboAddress);
             res.meshletCount      = mesh.meshletCount;
         }
     }
@@ -324,19 +327,43 @@ struct InstanceDataDesc {
     // one buffer. Skinned geometry stores positions then animated frames in
     // scratch; its UVs/color continue to use the original surface buffer.
     if (res.posMesh == res.surfaceMesh) {
-        res.surfaceAddr += RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
+        // Debug triangles pack positions, then surfaces, in one buffer:
+        // walk kMaxDebugVertices positions forward from the position stream.
+        res.surfaceAddr = Vk::DeviceAddress<VertexSurface>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(RenderContext::Impl::kMaxDebugVertices));
     }
     if (skinnedVertexBuffer != Invalid) {
-        res.frameAddr = res.finalPosMesh->vboAddress + (res.finalPosMesh->vertexCount * sizeof(VertexPosition));
+        // Skinned scratch stores positions, then animated tangent frames:
+        // the frame stream begins one position array past the base.
+        res.frameAddr = Vk::DeviceAddress<VertexTangentFrame>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(res.finalPosMesh->vertexCount));
     }
 
     return res;
 }
 
-}
+} // namespace
 
 uint32_t PackMaterialSamplerAddresses(const MaterialSamplerAddresses& addresses, size_t first) noexcept {
     return EncodeMaterialSamplerWord(addresses, first);
+}
+
+struct DrawAddressPack {
+    Vk::DeviceAddress<>                   blasAddress;
+    Vk::DeviceAddress<VertexPosition>     skinPosAddress;
+    Vk::DeviceAddress<VertexTangentFrame> skinFrameAddress;
+    Vk::DeviceAddress<uint32_t>           skinDataAddress;
+};
+
+// Everything a DrawCommand keeps from the resolved source meshes: the BLAS
+// address for the TLAS, and the three skinning input streams (from the
+// source meshes, not the animated scratch the outputs land in).
+[[nodiscard]] DrawAddressPack AddressesOf(const ResolvedMeshMaterial& res) noexcept {
+    return {
+        .blasAddress      = res.posMesh->blasAddress,
+        .skinPosAddress   = Vk::DeviceAddress<VertexPosition>::Cast(res.posMesh->vboAddress),
+        .skinFrameAddress = res.frameMesh != nullptr ? Vk::DeviceAddress<VertexTangentFrame>::Cast(res.frameMesh->vboAddress) :
+                                                       Vk::DeviceAddress<VertexTangentFrame> {nullptr},
+        .skinDataAddress  = res.skinMesh != nullptr ? Vk::DeviceAddress<uint32_t>::Cast(res.skinMesh->vboAddress) : Vk::DeviceAddress<uint32_t> {nullptr},
+    };
 }
 
 void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
@@ -350,7 +377,8 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(lines.size() * 2), maxLineVerts);
 
     auto mappedRegion = frames.lineVbos[presenter.frameIndex].Map(allocator);
-    if (!mappedRegion) return;
+    if (!mappedRegion)
+        return;
     auto* basePosPtr     = mappedRegion->As<VertexPosition>();
     auto* baseSurfacePtr = reinterpret_cast<VertexSurface*>(basePosPtr + maxLineVerts);
 
@@ -360,7 +388,7 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
             break;
         }
 
-        basePosPtr[vertIdx]  = {.position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()}};
+        basePosPtr[vertIdx]     = {.position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()}};
         baseSurfacePtr[vertIdx] = {
             .uv    = Math::PackUV(0.0f, 0.0f),
             .color = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW()),
@@ -368,7 +396,7 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
         };
         vertIdx++;
 
-        basePosPtr[vertIdx]  = {.position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()}};
+        basePosPtr[vertIdx]     = {.position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()}};
         baseSurfacePtr[vertIdx] = {
             .uv    = Math::PackUV(1.0f, 1.0f),
             .color = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW()),
@@ -386,8 +414,8 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     const VkDeviceSize    posBytes    = static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexPosition);
     const auto            positions   = lineBuffer.Subspan(0, posBytes);
     const auto            surfaces    = lineBuffer.Subspan(posBytes, static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexSurface));
-    const VkDeviceAddress posAddr     = positions.Address();
-    const VkDeviceAddress surfaceAddr = surfaces.Address();
+    const VkDeviceAddress posAddr     = positions.Address().Get();
+    const VkDeviceAddress surfaceAddr = surfaces.Address().Get();
 
     auto mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator);
     if (!mappedInst) {
@@ -406,9 +434,7 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
             .cullRadius     = 10000.0f,
         }
     );
-
 }
-
 
 void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;
@@ -416,7 +442,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
     auto resolved = ResolveDrawInputs(_impl.get(), material, mesh, params.skinnedVertexBuffer);
     if (!resolved) [[unlikely]] {
-        if (_impl->invalidDrawWarningCount.fetch_add(1, std::memory_order_relaxed) < 5) {
+        if (_impl->invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
             ZHLN::LogWarning("RenderContext::Draw skipped draw call with invalid mesh, material, or skinned scratch handle.");
         }
         return;
@@ -432,15 +458,16 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     uint32_t isSkinned        = (params.skinnedVertexBuffer == Invalid && (params.flags & Skinned) != None) ? 1u : 0u;
     uint32_t activeMorphCount = (params.skinnedVertexBuffer != Invalid) ? 0 : params.activeMorphCount;
 
+    const auto addr = AddressesOf(*resolved);
     _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
                  .resolved                 = &*resolved,
                  .world                    = params.transform,
                  .prevWorld                = params.prevTransform,
-                 .posAddress               = resolved->posAddr,
-                 .tangentFrameAddress      = resolved->frameAddr,
-                 .surfaceAddress           = resolved->surfaceAddr,
+                 .posAddress               = resolved->posAddr.Get(),
+                 .tangentFrameAddress      = resolved->frameAddr.Get(),
+                 .surfaceAddress           = resolved->surfaceAddr.Get(),
                  .indices                  = tex,
                  .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel              = isViewmodel != 0u,
@@ -492,9 +519,10 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
          ),
          .material            = resolved->material,
          .prePassMaterial     = resolved->prePassMaterial,
-         .posMesh             = resolved->posMesh,
-         .frameMesh           = resolved->frameMesh,
-         .skinMesh            = resolved->skinMesh,
+         .blasAddress         = addr.blasAddress,
+         .skinPosAddress      = addr.skinPosAddress,
+         .skinFrameAddress    = addr.skinFrameAddress,
+         .skinDataAddress     = addr.skinDataAddress,
          .skinnedVertexBuffer = params.skinnedVertexBuffer,
          .jointOffset         = params.jointOffset,
          .morphOffset         = params.morphOffset,
@@ -516,15 +544,16 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
 
         uint32_t isSkinned = (skinnedVertexBuffer == BufferHandle::Invalid && (flags & DrawFlags::Skinned) != DrawFlags::None) ? 1u : 0u;
 
+        const auto addr = AddressesOf(*resolved);
         return DrawCommand {
             .instanceData = BuildGPUInstanceData(
                 InstanceDataDesc {
                     .resolved                 = &*resolved,
                     .world                    = transform,
                     .prevWorld                = prevTransform,
-                    .posAddress               = resolved->posAddr,
-                    .tangentFrameAddress      = resolved->frameAddr,
-                    .surfaceAddress           = resolved->surfaceAddr,
+                    .posAddress               = resolved->posAddr.Get(),
+                    .tangentFrameAddress      = resolved->frameAddr.Get(),
+                    .surfaceAddress           = resolved->surfaceAddr.Get(),
                     .indices                  = tex,
                     .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                     .isSkinned                = isSkinned != 0u,
@@ -565,9 +594,10 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
             ),
             .material            = resolved->material,
             .prePassMaterial     = resolved->prePassMaterial,
-            .posMesh             = resolved->posMesh,
-            .frameMesh           = resolved->frameMesh,
-            .skinMesh            = resolved->skinMesh,
+            .blasAddress         = addr.blasAddress,
+            .skinPosAddress      = addr.skinPosAddress,
+            .skinFrameAddress    = addr.skinFrameAddress,
+            .skinDataAddress     = addr.skinDataAddress,
             .skinnedVertexBuffer = skinnedVertexBuffer,
             .jointOffset         = jointOffset,
             .morphOffset         = 0,
@@ -614,4 +644,4 @@ void RenderContext::DrawDecal(const DecalParams& params) noexcept {
     );
 }
 
-}
+} // namespace ZHLN

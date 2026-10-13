@@ -49,7 +49,7 @@ auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height,
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
         .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = Adopt(std::move(tex.image), std::move(tex.view));
+            const auto index = Adopt(std::move(tex.image), tex.viewInfo);
             if (index) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
             }
@@ -63,7 +63,7 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
         .UploadCube({.faceData = faces, .size = size, .format = VK_FORMAT_R8G8B8A8_UNORM})
         .and_then([&](Vk::TextureResource tex) -> std::expected<TextureHandle, ErrorCode> {
-            auto index = Adopt(std::move(tex.image), std::move(tex.view));
+            auto index = Adopt(std::move(tex.image), tex.viewInfo);
             return index.transform([&](uint32_t slot) {
                 Vk::Debug::SetImageName(_ctx, _slotImages[slot].Handle(), std::format("BindlessCubeTexture{:03}", slot));
                 return RegisterAnonymous(slot, VK_FORMAT_R8G8B8A8_UNORM, size, size);
@@ -243,11 +243,10 @@ TextureManager::~TextureManager() {
 }
 
 void TextureManager::DestroyAllSlots() noexcept {
-    // Never destroy a VMA image while any of its Vulkan views still exists.
-    _slotViews.clear();
+    _slotInfos.clear();
     for (auto& pending: _pendingFrees) {
         for (auto& released: pending) {
-            released.view = {};
+            released.viewInfo = {};
         }
     }
     for (auto& image: _slotImages) {
@@ -270,12 +269,12 @@ void TextureManager::Reset() {
     Lock(_mutex, [&] { _textures.ForEach([&](uint64_t, TextureRecord& record) { record.gpuBindlessIndex = kFallbackWhiteTextureIndex; }); });
 }
 
-auto TextureManager::AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode> {
-    const VkFormat format = view.Format();
-    return Adopt(std::move(image), std::move(view)).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
+auto TextureManager::AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height) -> std::expected<TextureHandle, ErrorCode> {
+    const VkFormat format = viewInfo.format;
+    return Adopt(std::move(image), viewInfo).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
-auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode> {
     uint32_t index = 0;
     if (!_freeSlots.empty()) {
         index = _freeSlots.back();
@@ -283,8 +282,8 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
             ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
-            // A consuming sink also owns its rejected arguments.
-            view = {};
+            // A consuming sink also owns its rejected argument.
+            viewInfo = {};
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
         }
@@ -293,19 +292,19 @@ auto TextureManager::Adopt(Vk::Image image, Vk::ImageView view) -> std::expected
 
     if (_slotImages.size() <= index) {
         _slotImages.resize(static_cast<size_t>(index) + 1);
-        _slotViews.resize(static_cast<size_t>(index) + 1);
+        _slotInfos.resize(static_cast<size_t>(index) + 1);
     }
 
-    WriteSlotToHeap(index, view);
-    _slotViews[index]  = std::move(view);
+    WriteSlotToHeap(index, viewInfo);
+    _slotInfos[index]  = viewInfo;
     _slotImages[index] = std::move(image);
     return index;
 }
 
 void TextureManager::RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept {
     for (auto& released: pending) {
-        WriteSlotToHeap(released.index, _slotViews[kFallbackWhiteTextureIndex]);
-        released.view = {};
+        WriteSlotToHeap(released.index, _slotInfos[kFallbackWhiteTextureIndex]);
+        released.viewInfo = {};
         _allocator.DestroyImage(released.image);
         _freeSlots.push_back(released.index);
     }
@@ -333,7 +332,7 @@ void TextureManager::ReleaseSlot(uint32_t bindlessIndex) noexcept {
     }
 
     _pendingFrees[_frameIndex].push_back(
-        ReleasedSlot {.index = bindlessIndex, .image = std::move(_slotImages[bindlessIndex]), .view = std::move(_slotViews[bindlessIndex])}
+        ReleasedSlot {.index = bindlessIndex, .image = std::move(_slotImages[bindlessIndex]), .viewInfo = _slotInfos[bindlessIndex]}
     );
 }
 
@@ -346,9 +345,9 @@ void TextureManager::NameSlots() noexcept {
     }
 }
 
-void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept {
+void TextureManager::WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept {
     const Vk::TextureHandle slot {_bindlessBaseSlot + bindlessIndex};
-    _heaps.WriteImage(slot, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    _heaps.WriteImage(slot, viewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 } // namespace ZHLN

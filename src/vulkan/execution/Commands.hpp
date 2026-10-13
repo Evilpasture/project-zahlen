@@ -12,9 +12,6 @@ namespace ZHLN::Vk {
 
 struct DrawState {
     VkPipeline       pipeline      = VK_NULL_HANDLE;
-    VkPipelineLayout layout        = VK_NULL_HANDLE;
-    VkDescriptorSet  set           = VK_NULL_HANDLE;
-    bool             heap          = false;
     uint32_t         vertexCount   = 0;
     uint32_t         indexCount    = 0;
     uint32_t         instanceCount = 1;
@@ -25,9 +22,6 @@ struct DrawState {
 
 struct MeshTaskState {
     VkPipeline       pipeline    = VK_NULL_HANDLE;
-    VkPipelineLayout layout      = VK_NULL_HANDLE;
-    VkDescriptorSet  set         = VK_NULL_HANDLE;
-    bool             heap        = false;
     uint32_t         groupCountX = 1;
     uint32_t         groupCountY = 1;
     uint32_t         groupCountZ = 1;
@@ -36,9 +30,6 @@ struct MeshTaskState {
 template <typename Command>
 struct IndirectDrawState {
     VkPipeline       pipeline       = VK_NULL_HANDLE;
-    VkPipelineLayout layout         = VK_NULL_HANDLE;
-    VkDescriptorSet  set            = VK_NULL_HANDLE;
-    bool             heap           = false;
     VkBuffer         argumentBuffer = VK_NULL_HANDLE;
     VkDeviceSize     offset         = 0;
     uint32_t         drawCount      = 0;
@@ -52,9 +43,6 @@ struct IndirectDrawState {
 template <typename Command>
 struct IndirectCountDrawState {
     VkPipeline       pipeline          = VK_NULL_HANDLE;
-    VkPipelineLayout layout            = VK_NULL_HANDLE;
-    VkDescriptorSet  set               = VK_NULL_HANDLE;
-    bool             heap              = false;
     VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
     VkDeviceSize     offset            = 0;
     VkBuffer         countBuffer       = VK_NULL_HANDLE;
@@ -241,41 +229,21 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
 }
 
 
-inline constexpr VkShaderStageFlags kMeshTaskPushStages = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
 class CommandEncoder {
   public:
-    VkCommandBuffer  cmd               = VK_NULL_HANDLE;
-    VkPipeline       lastPipeline      = VK_NULL_HANDLE;
-    VkPipelineLayout lastLayout        = VK_NULL_HANDLE;
-    VkDescriptorSet  lastDescriptorSet = VK_NULL_HANDLE;
-    VkCullModeFlags  lastCullMode      = VK_CULL_MODE_BACK_BIT;
-    bool             hasCullMode       = false;
+    VkCommandBuffer cmd          = VK_NULL_HANDLE;
+    VkPipeline      lastPipeline = VK_NULL_HANDLE;
+    VkCullModeFlags lastCullMode = VK_CULL_MODE_BACK_BIT;
+    bool            hasCullMode  = false;
 
     CommandEncoder() = default;
     explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
     }
 
-    void BindPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
+    void BindPipeline(VkPipeline pipeline) noexcept {
         if (pipeline != VK_NULL_HANDLE && pipeline != lastPipeline) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-            lastPipeline      = pipeline;
-            lastLayout        = layout;
-            lastDescriptorSet = VK_NULL_HANDLE;
-        }
-    }
-
-    void BindDescriptorSet(VkDescriptorSet set) noexcept {
-        if (set != VK_NULL_HANDLE && set != lastDescriptorSet) {
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, 0, 1, &set, 0, nullptr);
-            lastDescriptorSet = set;
-        }
-    }
-
-    void BindDescriptorSets(uint32_t firstSet, std::span<const VkDescriptorSet> sets) noexcept {
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, lastLayout, firstSet, static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
-        if (!sets.empty()) {
-            lastDescriptorSet = sets[0];
+            lastPipeline = pipeline;
         }
     }
 
@@ -297,29 +265,13 @@ class CommandEncoder {
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void Draw(
-        uint32_t           vertexCount,
-        uint32_t           instanceCount,
-        const T&           pushConstants,
-        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw's push struct is written for: DrawInstanced<Shaders::Modules::X>(...)");
-        static_assert(
-            PushConstantLayoutMatchesAll<T, Modules...>(),
-            "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-        );
-        Push(cmd, lastLayout, stages, pushConstants);
-        vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
-    }
-
-    template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawHeap(uint32_t vertexCount, uint32_t instanceCount, const T& pushConstants) noexcept {
         PushDrawData<Modules...>(pushConstants);
         vkCmdDraw(cmd, vertexCount, instanceCount, 0, 0);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void PushDrawData(const T& pushConstants, VkShaderStageFlags  = 0) noexcept {
+    void PushDrawData(const T& pushConstants) noexcept {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw's push struct is written for: DrawInstanced<Shaders::Modules::X>(...)");
         static_assert(
             PushConstantLayoutMatchesAll<T, Modules...>(),
@@ -329,71 +281,51 @@ class CommandEncoder {
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawInstanced(
-        const DrawState&   state,
-        const T&           pushConstants,
-        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawInstanced(const DrawState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDraw(cmd, state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawIndirect(
-        const DrawIndirectState& state,
-        const T&                 pushConstants,
-        VkShaderStageFlags       stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawIndirect(const DrawIndirectState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawIndirectCount(
-        const DrawIndirectCountState& state,
-        const T&                      pushConstants,
-        VkShaderStageFlags            stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawIndirectCount(const DrawIndirectCountState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawIndexedIndirect(
-        const DrawIndexedIndirectState& state,
-        const T&                        pushConstants,
-        VkShaderStageFlags              stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawIndexedIndirect(const DrawIndexedIndirectState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawIndexedIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawIndexedIndirectCount(
-        const DrawIndexedIndirectCountState& state,
-        const T&                             pushConstants,
-        VkShaderStageFlags                   stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-    ) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawIndexedIndirectCount(const DrawIndexedIndirectCountState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawMeshTasksEXT(cmd, state.groupCountX, state.groupCountY, state.groupCountZ);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawMeshTasksIndirectEXT(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DrawMeshTasksIndirectCount(const MeshTaskIndirectCountState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
-        BindDraw<Modules...>(state, pushConstants, stages);
+    void DrawMeshTasksIndirectCount(const MeshTaskIndirectCountState& state, const T& pushConstants) noexcept {
+        BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawMeshTasksIndirectCountEXT(
             cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride
         );
@@ -401,14 +333,9 @@ class CommandEncoder {
 
   private:
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void BindDraw(const auto& state, const T& pushConstants, VkShaderStageFlags stages) noexcept {
-        BindPipeline(state.pipeline, state.layout);
-        if (state.heap) {
-            PushDrawData<Modules...>(pushConstants);
-        } else {
-            BindDescriptorSet(state.set);
-            Push(cmd, state.layout, stages, pushConstants);
-        }
+    void BindDraw(const auto& state, const T& pushConstants) noexcept {
+        BindPipeline(state.pipeline);
+        PushDrawData<Modules...>(pushConstants);
     }
 };
 

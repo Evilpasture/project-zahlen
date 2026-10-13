@@ -52,6 +52,12 @@ auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode val
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
         .RequireExtension<VkPhysicalDeviceMaintenance5FeaturesKHR>(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, [](auto& f) { f.maintenance5 = VK_TRUE; })
+        // Optional: pipeline binaries replace the VkPipelineCache object as
+        // the warm-start mechanism. Absent (e.g. MoltenVK), creation simply
+        // compiles from scratch -- there is no cache handle either way.
+        .OptionalExtension<VkPhysicalDevicePipelineBinaryFeaturesKHR>(
+            VK_KHR_PIPELINE_BINARY_EXTENSION_NAME, [](auto& f) { f.pipelineBinaries = VK_TRUE; }
+        )
         .RequireWithOptional<VkPhysicalDeviceVulkan12Features>(
             [validationMode](auto& f) {
                 f.descriptorIndexing                           = VK_TRUE;
@@ -124,7 +130,6 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl               = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName           = cfg.appName;
-    impl->pipelineCachePath = cfg.pipelineCachePath;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(target);
@@ -252,7 +257,6 @@ void RenderContext::Destroy() noexcept {
             if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
-            Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         }
 
         _impl->DestroyDestinations();
@@ -264,6 +268,13 @@ void RenderContext::Destroy() noexcept {
         _impl->gpuDiagnostics.Shutdown();
         _impl->submittedStaging.reset();
     }
+}
+
+std::vector<uint8_t> RenderContext::GetPipelineBinaryData() const noexcept {
+    if (_impl) {
+        return _impl->pipelineBinaries.Serialize();
+    }
+    return {};
 }
 
 RenderContext::~RenderContext() {

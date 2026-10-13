@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/ShadowPass.hpp"
+#include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
@@ -12,21 +13,30 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct PunctualPush {
-    uint32_t lightIndex;
+// The atlas tile this draw rasterizes into, in one push-constant block. Spelled
+// exactly as `shadow_atlas.slang` spells it: one member, the same name, the same
+// 64 bytes -- `PushConstantLayoutMatches` holds the two together at compile time.
+struct ShadowTilePush {
+    JPH::Mat44 viewProj;
 };
-static_assert(GpuAbi::ScenePassPayload<PunctualPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+static_assert(
+    GpuAbi::ScenePassPayload<ShadowTilePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared"
+);
 
-// One slot per shadow-casting view: slot 0 is the cascade pass, slots 4..7 the
-// punctual lights'.
-constexpr uint32_t kSlotCount        = 8;
-constexpr uint32_t kFirstPunctualSlot = 4;
+// Slot 0 is the cascade pass; one slot per shadow-casting light follows. A
+// light's faces all share its slot, because they all see the same instances:
+// the culling runs once per light and the six cube faces replay the result.
+constexpr uint32_t kCascadeSlot    = 0;
+constexpr uint32_t kFirstAtlasSlot = 1;
+
+[[nodiscard]] constexpr auto IndirectOffsetForSlot(uint32_t slot) noexcept -> uint32_t {
+    return slot == kCascadeSlot ? 0
+                                : RenderContext::Impl::kGpuCullingMaxInstances + (slot - kFirstAtlasSlot) * ShadowRenderer::kAtlasInstancesPerLight;
+}
 
 } // namespace
 
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
-    using enum LightType;
-
     PassContext    passCtx(cmd, impl, impl.InheritsHeaps());
     auto&          ctx        = passCtx.ctx;
     const uint32_t frameIndex = ctx.presenter.frameIndex;
@@ -42,30 +52,29 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     if (!mapped) return;
     auto* indirectCmdsBase = mapped->As<VkDrawIndirectCommand>();
 
-    std::array<uint32_t, kSlotCount> passWriteOffsets {};
-    passWriteOffsets[0] = 0;
-    for (uint32_t l = 0; l < RenderContext::Impl::MAX_PUNCTUAL_LIGHTS; ++l) {
-        passWriteOffsets[kFirstPunctualSlot + l] = (kFirstPunctualSlot + l) * kGpuCullingMaxInstances;
-    }
+    const auto placements = ctx.shadowAtlas.Placements();
 
-    std::array<uint32_t, kSlotCount> passDrawCounts {};
+    // A cached tile is still valid only if nothing that casts into it moved.
+    // The atlas answers for the light itself -- same tile, same matrix -- and
+    // only the draw list knows about the casters, so the other half of the test
+    // is here. A path that does not maintain `prevWorld` simply reads as
+    // "moved": the tiles re-rasterize, which is slow and correct rather than
+    // fast and stale.
+    bool anyMovedCaster = false;
 
-    std::array<const Light*, RenderContext::Impl::MAX_PUNCTUAL_LIGHTS> activeShadowLights {};
-    uint32_t                                                           activeShadowLightCount = 0;
-    for (const auto& light: ctx.mappedLights) {
-        if (light.shadowLayer >= 0 && light.type == Point) {
-            activeShadowLights[activeShadowLightCount++] = &light;
-            if (activeShadowLightCount >= RenderContext::Impl::MAX_PUNCTUAL_LIGHTS) {
-                break;
-            }
-        }
-    }
+    std::array<uint32_t, ShadowAtlas::kMaxLights + 1> passDrawCounts {};
 
     for (uint32_t i = 0; i < ctx.queues.Draws().size(); ++i) {
         const auto& drawCmd = ctx.queues.Draws()[i];
 
         if (!IsVisibleIn(drawCmd.flags, RenderPassType::Shadow) || IsForwardOnly(drawCmd.instanceData.flags)) {
             continue;
+        }
+
+        if (!anyMovedCaster) {
+            const bool skinned = (drawCmd.instanceData.flags & (1u << 8)) != 0u;
+            const bool morphed = drawCmd.activeMorphCount > 0;
+            anyMovedCaster     = skinned || morphed || !(drawCmd.instanceData.prevWorld == drawCmd.instanceData.world);
         }
 
         const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
@@ -80,30 +89,39 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             }
         }
         if (inAnyCascade) {
-            const uint32_t writeIdx = passWriteOffsets[0] + passDrawCounts[0];
+            const uint32_t writeIdx = IndirectOffsetForSlot(kCascadeSlot) + passDrawCounts[kCascadeSlot];
             indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
-            passDrawCounts[0]++;
+            passDrawCounts[kCascadeSlot]++;
         }
 
-        for (uint32_t l = 0; l < activeShadowLightCount; ++l) {
-            const auto* light   = activeShadowLights[l];
-            const uint32_t slotIdx = kFirstPunctualSlot + light->shadowLayer;
-            if (slotIdx >= kSlotCount) {
+        // One range test per light, not per tile: a point light's six faces see
+        // the same instances, so they share one culled list.
+        for (uint32_t p = 0; p < placements.size(); ++p) {
+            const auto& placement = placements[p];
+            if (placement.tileBase < 0 || placement.lightIndex < 0) {
+                continue;
+            }
+            const uint32_t slot = kFirstAtlasSlot + p;
+            if (slot >= passDrawCounts.size() || passDrawCounts[slot] >= ShadowRenderer::kAtlasInstancesPerLight) {
                 continue;
             }
 
-            const JPH::Vec3 lightPos(light->position[0], light->position[1], light->position[2]);
-            const float     distToLightSq = (meshPos - lightPos).LengthSq();
-            const float     maxRange      = light->range + radius;
-
-            if (distToLightSq <= (maxRange * maxRange)) {
-                const uint32_t pWriteIdx = passWriteOffsets[slotIdx] + passDrawCounts[slotIdx];
-                indirectCmdsBase[pWriteIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
-                passDrawCounts[slotIdx]++;
+            const auto& light = ctx.mappedLights[static_cast<size_t>(placement.lightIndex)];
+            // `Light::position` is the GPU struct's Float3, not a Vec3.
+            const JPH::Vec3 lightPos {light.position};
+            const float   distToLightSq = (meshPos - lightPos).LengthSq();
+            const float   maxRange      = light.range + radius;
+            if (distToLightSq > maxRange * maxRange) {
+                continue;
             }
+
+            const uint32_t writeIdx = IndirectOffsetForSlot(slot) + passDrawCounts[slot];
+            indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
+            passDrawCounts[slot]++;
         }
     }
 
+    // --- cascades ----------------------------------------------------------
     {
         const bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 
@@ -112,7 +130,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         });
         const bool useMeshShadowPath = ctx.MeshShadingActive() && multiviewMesh && ctx.shadows.CascadeMeshPipeline() != VK_NULL_HANDLE;
 
-        const uint32_t csmDrawCount = passDrawCounts[0];
+        const uint32_t csmDrawCount = passDrawCounts[kCascadeSlot];
 
         const auto shadowMapArrayImage = ctx.graphResources.shadowMap.AsSlice().Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
@@ -124,7 +142,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 if (useMeshShadows) {
                     for (uint32_t d = 0; d < csmDrawCount; ++d) {
-                        const uint32_t instanceIdx = indirectCmdsBase[passWriteOffsets[0] + d].firstInstance;
+                        const uint32_t instanceIdx = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].firstInstance;
                         if (instanceIdx >= ctx.queues.Draws().size()) {
                             continue;
                         }
@@ -132,22 +150,17 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         if (shadowDraw.instanceData.meshletCount == 0) {
                             passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
-                                 .layout        = ctx.shadows.CascadeLayout(),
-                                 .heap          = true,
-                                 .vertexCount   = indirectCmdsBase[passWriteOffsets[0] + d].vertexCount,
+                                 .vertexCount   = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].vertexCount,
                                  .instanceCount = 1,
                                  .firstVertex   = 0,
                                  .firstInstance = instanceIdx},
-                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1},
-                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                             );
                             continue;
                         }
 
                         passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
-                             .layout      = ctx.shadows.CascadeLayout(),
-                             .heap        = true,
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
                              .groupCountZ = 1},
@@ -157,13 +170,10 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 } else if (csmDrawCount > 0) {
                     passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
-                         .layout         = ctx.shadows.CascadeLayout(),
-                         .heap           = true,
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
-                         .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
+                         .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
                          .drawCount      = csmDrawCount},
-                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
-                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}
                     );
                 }
 
@@ -173,49 +183,85 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             });
     }
 
-    if (ctx.shadows.PunctualPipeline() != VK_NULL_HANDLE && !ctx.targets.PunctualViews().empty()) {
-        auto ExecutePunctualPass = [&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage, auto&& recordFn) {
-            Vk::DynamicPass(subViewImage.Extent())
-                .ViewMask(ShadowRenderer::kCubemapFaceMask)
-                .AddDepth(subViewImage, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
-                .Execute(cmd, std::forward<decltype(recordFn)>(recordFn));
-        };
+    // --- shadow atlas -------------------------------------------------------
+    //
+    // One render pass over the whole atlas, loaded rather than cleared: a tile
+    // this frame does not redraw keeps last frame's depth, which is what makes
+    // the atlas cheap to keep populated. Each tile is cleared and drawn inside
+    // the pass with its own viewport and scissor.
+    if (ctx.shadows.AtlasPipeline() != VK_NULL_HANDLE && !placements.empty()) {
+        const auto atlasImage = Vk::ImageSlice {
+            ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.AtlasView(),
+            VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT
+        }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
-        for (uint32_t l_idx = 0; l_idx < ctx.mappedLights.size(); ++l_idx) {
-            const auto& light = ctx.mappedLights[l_idx];
-            if (light.shadowLayer < 0) {
-                continue;
-            }
+        const auto tiles = ctx.shadowAtlas.Tiles();
 
-            const uint32_t slotIdx   = kFirstPunctualSlot + light.shadowLayer;
-            const uint32_t drawCount = passDrawCounts[slotIdx];
+        Vk::DynamicPass(atlasImage.Extent())
+            .AddDepth(atlasImage, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, ShadowRenderer::kShadowClearDepth)
+            .Execute(cmd, [&]() {
+                for (uint32_t p = 0; p < placements.size(); ++p) {
+                    const auto& placement = placements[p];
+                    if (placement.tileBase < 0) {
+                        continue;
+                    }
+                    const uint32_t drawCount = passDrawCounts[kFirstAtlasSlot + p];
 
-            if (drawCount == 0 && ctx.queues.MeshParticleEmitters().empty()) {
-                continue;
-            }
+                    // Nothing moved and the light did not either: the texels
+                    // already in the atlas are this frame's answer.
+                    if (placement.cached && !anyMovedCaster) {
+                        continue;
+                    }
 
-            const auto subViewImage = Vk::ImageSlice {
-                ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.PunctualViews()[light.shadowLayer], VkExtent2D {1024, 1024},
-                VK_FORMAT_D32_SFLOAT
-            }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+                    const uint32_t tileBase = static_cast<uint32_t>(placement.tileBase);
+                    const uint32_t faces    = std::min<uint32_t>(placement.faceCount, ShadowAtlas::kPointFaces);
 
-            ExecutePunctualPass(subViewImage, [&]() {
-                if (drawCount > 0) {
-                    const PunctualPush pc = {l_idx};
-                    passCtx.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
-                        {
-                            .pipeline       = ctx.shadows.PunctualPipeline(),
-                            .layout         = ctx.shadows.PunctualLayout(),
-                            .heap           = true,
-                            .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
-                            .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[slotIdx]),
-                            .drawCount      = drawCount,
-                        },
-                        pc, VK_SHADER_STAGE_VERTEX_BIT
-                    );
+                    for (uint32_t face = 0; face < faces; ++face) {
+                        const uint32_t tileIndex = tileBase + face;
+                        if (tileIndex >= tiles.size()) {
+                            break;
+                        }
+                        const ShadowTile           tile = tiles[tileIndex];
+                        const ShadowAtlas::TileRect rect = ShadowAtlas::TileRectOf(tile);
+
+                        // This tile only. Clearing the attachment on load would
+                        // take every cached tile with it.
+                        const VkClearAttachment clearAttachment {
+                            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                            .colorAttachment = 0,
+                            .clearValue      = {.depthStencil = {.depth = ShadowRenderer::kShadowClearDepth, .stencil = 0}},
+                        };
+                        const VkClearRect clearRect {
+                            .rect           = {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)},
+                                               .extent = {rect.size, rect.size}},
+                            .baseArrayLayer = 0,
+                            .layerCount     = 1,
+                        };
+                        vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
+
+                        if (drawCount == 0) {
+                            continue;
+                        }
+
+                        passCtx.encoder.SetViewport(
+                            VkViewport {static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.size),
+                                        static_cast<float>(rect.size), 0.0f, 1.0f}
+                        );
+                        passCtx.encoder.SetScissor(
+                            VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}}
+                        );
+
+                        const ShadowTilePush push {tile.viewProj};
+                        passCtx.encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
+                            {.pipeline       = ctx.shadows.AtlasPipeline(),
+                             .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
+                             .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kFirstAtlasSlot + p)),
+                             .drawCount      = drawCount},
+                            push
+                        );
+                    }
                 }
             });
-        }
     }
 }
 

@@ -52,6 +52,7 @@ module;
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <expected>
@@ -324,18 +325,14 @@ auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
     return Wire::MakeFailure(error, static_cast<decltype(args)>(args)...);
 }
 
-auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
-    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
-    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
-    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
-    out.push_back(static_cast<uint8_t>(value & 0xFFu));
+[[nodiscard]] auto EncodeBE32(uint32_t value) noexcept -> std::array<uint8_t, 4> {
+    return {static_cast<uint8_t>((value >> 24) & 0xFFu), static_cast<uint8_t>((value >> 16) & 0xFFu),
+            static_cast<uint8_t>((value >> 8) & 0xFFu), static_cast<uint8_t>(value & 0xFFu)};
 }
 
-auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
-    out.push_back(static_cast<uint8_t>(value & 0xFFu));
-    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
-    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
-    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
+[[nodiscard]] auto EncodeLE32(uint32_t value) noexcept -> std::array<uint8_t, 4> {
+    return {static_cast<uint8_t>(value & 0xFFu), static_cast<uint8_t>((value >> 8) & 0xFFu),
+            static_cast<uint8_t>((value >> 16) & 0xFFu), static_cast<uint8_t>((value >> 24) & 0xFFu)};
 }
 
 auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
@@ -403,7 +400,8 @@ auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vect
         if (compressed && compressed->size() + 4 + 32 < payload.size()) {
             flags |= FRAME_FLAG_COMPRESSED;
             body.reserve(compressed->size() + 4);
-            PutLE32(body, static_cast<uint32_t>(payload.size())); // announced raw length
+            const auto rawLength = EncodeLE32(static_cast<uint32_t>(payload.size())); // announced raw length
+            body.insert(body.end(), rawLength.begin(), rawLength.end());
             body.insert(body.end(), compressed->begin(), compressed->end());
         }
     }
@@ -416,7 +414,8 @@ auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vect
     frameBody.reserve(body.size() + 5);
     frameBody.push_back(flags);
     frameBody.insert(frameBody.end(), body.begin(), body.end());
-    PutLE32(frameBody, Wire::Checksum::Crc32(payload));
+    const auto checksum = EncodeLE32(Wire::Checksum::Crc32(payload));
+    frameBody.insert(frameBody.end(), checksum.begin(), checksum.end());
     return frameBody;
 }
 
@@ -442,7 +441,8 @@ auto EncodeFrame(std::span<const uint8_t> payload) -> Wire::Result<std::vector<u
     }
     std::vector<uint8_t> frame;
     frame.reserve(body->size() + 4);
-    PutBE32(frame, static_cast<uint32_t>(body->size()));
+    const auto length = EncodeBE32(static_cast<uint32_t>(body->size()));
+    frame.insert(frame.end(), length.begin(), length.end());
     frame.insert(frame.end(), body->begin(), body->end());
     return frame;
 }

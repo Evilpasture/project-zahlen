@@ -241,13 +241,15 @@ auto RunCommandLine(int argc, char** argv) -> int {
                 stored->second.stage = source.stage;
             }
         } else if (argument == "--slang-define") {
-            SlangDefine                                    define  = ParseSlangDefine(next());
-            std::vector<std::pair<std::string, std::string>>& defines = options.slangSources[define.macro].defines;
-            const auto duplicate = ZHLN::Ranges::FindIf(defines, [&define](const std::pair<std::string, std::string>& existing) { return existing.first == define.name; });
-            if (duplicate != defines.end()) {
+            SlangDefine define = ParseSlangDefine(next());
+            auto&       source = options.slangSources[define.macro];
+            const auto  duplicate = ZHLN::Ranges::FindIf(source.defines, [&define](const std::pair<std::string, std::string>& existing) {
+                return existing.first == define.name;
+            });
+            if (duplicate != source.defines.end()) {
                 Fail("--slang-define {}={} given twice", define.macro, define.name);
             }
-            defines.emplace_back(std::move(define.name), std::move(define.value));
+            source.defines.emplace_back(std::move(define.name), std::move(define.value));
         } else if (argument == "--module") {
             const auto [type, macro] = ParseModule(next());
             if (!options.catalog.emplace(type, macro).second) {

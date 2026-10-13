@@ -198,10 +198,9 @@ struct Components {
         AAState state {};
     };
     struct ShadowSettingsComponent {
-        float shadowWidth        = 200.0f;
-        int   shadowResolution   = 2048;
-        int   maxPunctualShadows = 0;
-        float sunSize            = 0.05f;
+        float shadowWidth      = 200.0f;
+        int   shadowResolution = 2048;
+        float sunSize          = 0.05f;
     };
     // The culling pass's published counters. Its *scratch* -- the derived planes
     // and the freeze-frame corners -- is node state and lives in CullingScratch on
@@ -432,7 +431,11 @@ struct Components {
         float      range       = 0.0f;
         JPH::Mat44 points      = JPH::Mat44::sIdentity();
         uint32_t   twoSided    = 0;
-        int32_t    shadowLayer = -1;
+        // Asks the shadow atlas for a tile. How many lights get one is not
+        // capped here: the atlas sub-allocates from one depth image and steps
+        // a light's tile resolution down with distance instead of switching
+        // its shadows off at a hard budget.
+        bool       castsShadow = false;
         // Spot cone angles in radians from the axis (0 = no authored cone:
         // the packer emits the -1/-1 "full sphere" sentinel instead).
         float innerConeRadians = 0.0f;

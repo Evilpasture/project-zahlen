@@ -21,6 +21,7 @@
 #include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -29,7 +30,7 @@ namespace ZHLN::BSP {
 // Source `_light` brightness (the 4th component, typically 150-300) is in
 // Source lighting units, not renderer intensity. Passed through raw, every
 // point/spot light lands ~30x too hot (intensity 200 against an engine
-// convention of single digits for punctual lights and 3-28 for suns) and
+// convention of single digits for point/spot lights and 3-28 for suns) and
 // blows the scene out to white. Dividing by ~30 calibrates a stock
 // brightness-200 room light to engine intensity ~6.7, matching the physical
 // inches->metres rescale (unitScale^2) and Source's authored brightness scale.
@@ -286,7 +287,7 @@ struct InteractiveSubmodel {
 // pass the entity lights the scene already gathered. Name-gate strengths only:
 // this layer has no VFS, so there is no .vmt / .vtf refinement here.
 [[nodiscard]] auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, const std::vector<BspPointLight>& entityLights
+    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
 ) -> std::vector<BspPointLight>;
 
 // Faces + displacements -> per-material native streams; entities -> lights.

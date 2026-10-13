@@ -96,7 +96,8 @@ template <typename Range>
     return value;
 }
 
-[[nodiscard]] bool MatchesAny(std::string_view value, std::span<const std::string_view> aliases, bool allowSuffix) noexcept {
+template <size_t N>
+[[nodiscard]] bool MatchesAny(std::string_view value, std::span<const std::string_view, N> aliases, bool allowSuffix) noexcept {
     for (std::string_view alias: aliases) {
         if (value == alias || (allowSuffix && value.size() > alias.size() && value.ends_with(alias))) {
             return true;
@@ -107,7 +108,7 @@ template <typename Range>
 
 template <size_t N>
 [[nodiscard]] bool MatchesAny(std::string_view value, const std::array<std::string_view, N>& aliases, bool allowSuffix) noexcept {
-    return MatchesAny(value, std::span<const std::string_view>(aliases), allowSuffix);
+    return MatchesAny(value, std::span<const std::string_view, N> {aliases}, allowSuffix);
 }
 
 [[nodiscard]] bool MatchesBone(std::string_view name, CharacterBone bone, bool allowSuffix) noexcept {

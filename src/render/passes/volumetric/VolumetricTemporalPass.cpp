@@ -22,7 +22,7 @@ void VolumetricTemporalPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
 
     const Vk::HeapBlockBase block = impl.fog.Temporal().WriteHeapParameters<Shaders::VolumetricTemporal>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(impl.graphResources.voxelIntegrated)),
         Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(impl.graphResources.voxelHistory)),
         Vk::Slot<"outVoxelIntegratedResolved">(Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
@@ -30,7 +30,7 @@ void VolumetricTemporalPass::operator()(VkCommandBuffer cmd) const noexcept {
     );
     const VolumetricTemporalPushConstants temporalPC = {};
 
-    impl.fog.Temporal().DispatchHeap<Shaders::Modules::VolumetricTemporalCS>(impl.ctx, cmd, block, temporalPC);
+    impl.fog.Temporal().DispatchHeap<Shaders::Modules::VolumetricTemporalCS>(cmd, block, temporalPC);
 }
 
 }

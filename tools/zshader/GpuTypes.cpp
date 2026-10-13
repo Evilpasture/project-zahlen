@@ -190,6 +190,11 @@ struct StructDef {
     std::vector<Field> fields {};
 };
 
+struct StructBuildResult {
+    StructDef              definition;
+    std::vector<StructDef> nested;
+};
+
 // What the member asked for. One annotation is left: [CxxEnum], which names
 // the engine enum a uint/int scalar is. Every name outside the vocabulary
 // fails here, so a misspelled or future annotation is loud rather than
@@ -384,14 +389,15 @@ auto MapMember(
 // member extent up to the widest member alignment. Nested structs recurse --
 // Slang rejects infinitely-sized types at compile time, so the walk
 // terminates by construction.
-auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layout, std::vector<StructDef>& nestedOut) -> StructDef {
+auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layout) -> StructBuildResult {
     std::vector<slang::VariableLayoutReflection*> members;
     for (unsigned i: std::views::iota(0u, layout->getFieldCount())) {
         members.push_back(layout->getFieldByIndex(i));
     }
     std::ranges::sort(members, {}, [](slang::VariableLayoutReflection* member) { return member->getOffset(kUniform); });
 
-    StructDef def {.name = std::string {structName}};
+    StructBuildResult result {.definition = StructDef {.name = std::string {structName}}};
+    StructDef& def = result.definition;
     uint32_t  cursor   = 0;
     uint32_t  padIndex = 0;
     for (slang::VariableLayoutReflection* member: members) {
@@ -440,11 +446,12 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
                 Fail("gpu types: {}.{} is an unnamed struct; a nested type has nothing to be checked by", structName, memberName);
             }
             RejectStructAttributes(nestedName, memberLayout->getType());
-            StructDef inner   = BuildStruct(nestedName, memberLayout, nestedOut);
-            mapped.spelling = inner.name;
-            mapped.size     = inner.size;
-            mapped.cxxAlign = inner.align;
-            nestedOut.push_back(std::move(inner));
+            StructBuildResult inner = BuildStruct(nestedName, memberLayout);
+            mapped.spelling = inner.definition.name;
+            mapped.size     = inner.definition.size;
+            mapped.cxxAlign = inner.definition.align;
+            std::ranges::move(inner.nested, std::back_inserter(result.nested));
+            result.nested.push_back(std::move(inner.definition));
         } else if (static_cast<uint32_t>(memberLayout->getSize(kUniform)) != mapped.size) {
             Fail(
                 "gpu types: {}.{} occupies {} bytes but its spelling spans {}; only tight layouts map",
@@ -482,7 +489,7 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
             .isPad      = true,
         });
     }
-    return def;
+    return result;
 }
 
 constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
@@ -707,7 +714,9 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
             Fail("gpu types: '{}.{}' is an unnamed struct; a struct has nothing to be checked by", options.module, name);
         }
         RejectStructAttributes(typeName, memberLayout->getType());
-        structs.push_back(BuildStruct(typeName, memberLayout, nested));
+        StructBuildResult built = BuildStruct(typeName, memberLayout);
+        std::ranges::move(built.nested, std::back_inserter(nested));
+        structs.push_back(std::move(built.definition));
     }
 
     std::vector<StructDef> defs;

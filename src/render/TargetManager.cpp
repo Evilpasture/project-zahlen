@@ -9,12 +9,11 @@
 
 namespace ZHLN {
 
-auto TargetManager::CreateCascadeViews(const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::ImageView>, ErrorCode> {
-    ZHLN::Array<Vk::ImageView> out;
+auto TargetManager::CreateCascadeViews(VkDevice device, const Vk::Image& image) const -> std::expected<ZHLN::Array<Vk::AttachmentView>, ErrorCode> {
+    ZHLN::Array<Vk::AttachmentView> out;
     out.resize(kCascades);
     for (uint32_t i = 0; i < kCascades; ++i) {
-        auto view_res =
-            image.CreateView(_ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i, .layerCount = 1});
+        auto view_res = image.CreateAttachmentView(device, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
         if (!view_res) {
             return std::unexpected(view_res.error());
         }
@@ -44,12 +43,12 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
         } else if constexpr (Tag::is_3d) {
             result = assign(
                 rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        _allocator, _ctx, voxelExtent, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
+                        _allocator, _ctx.Device(), voxelExtent, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr (requires {
                                  rt.mipLevels;
-                                 rt.mipViews;
+                                 rt.mipAttachmentViews;
                              }) {
             // HiZ is compute-writable; transmission is a color attachment at
             // mip 0, with the complete chain sampled by the forward shader.
@@ -57,19 +56,19 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Tag, Res_HiZ>) {
                 usage |= Vk::ImageUsage::Storage;
             }
-            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx, ext, usage));
+            result = assign(rt, Vk::MipmappedRenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, usage));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiIrradiance>) {
             const VkExtent2D ddgiIrrExt = {.width = 640u, .height = 320u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiIrrExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiDistance>) {
             const VkExtent2D ddgiDistExt = {.width = 1024u, .height = 512u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiDistExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr (std::is_same_v<Tag, Res_DdgiRays>) {
             const VkExtent2D ddgiRaysExt = {.width = 2048u, .height = 64u};
-            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
+            result = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), ddgiRaysExt, Vk::ImageUsage::Storage | Vk::ImageUsage::TransferDst));
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
-                rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
+                rt, Vk::RenderTarget<Tag::format>::Create(_allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
             );
         } else {
             Vk::ImageUsage extra = Vk::ImageUsage::None;
@@ -92,24 +91,22 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                 extra |= Vk::ImageUsage::TransferDst;
             }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
-            result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx, scaled, extra));
+            result                  = assign(rt, CreateColorTarget<Tag::format>(_allocator, _ctx.Device(), scaled, extra));
         }
     });
 
     if (!result) {
         return result;
     }
-
-    RecreatePunctualShadowViews();
     return {};
 }
 
 auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     const VkExtent2D cascadeExt = {.width = kShadowResolution, .height = kShadowResolution};
-    const VkExtent2D atlasExt   = {.width = kAtlasSize, .height = kAtlasSize};
+    const VkExtent2D atlasExt   = {.width = kShadowAtlasSize, .height = kShadowAtlasSize};
 
     auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+        _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!sm_res) {
         return std::unexpected(sm_res.error());
@@ -120,7 +117,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _graph.shadowMap = std::move(*sm_res);
 
     auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+        _allocator, _ctx.Device(), cascadeExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
     );
     if (!smp_res) {
         return std::unexpected(smp_res.error());
@@ -129,53 +126,43 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     _shadowMapPrev.Destroy(_allocator);
     _shadowMapPrev = std::move(*smp_res);
 
-    if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+    if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
         return std::unexpected(r.error());
     } else {
         _shadowCascadeViews = std::move(*r);
     }
-    if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+    if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
         return std::unexpected(r.error());
     } else {
         _shadowCascadeViewsPrev = std::move(*r);
     }
     for (uint32_t i = 0; i < kCascades; ++i) {
         if (!_shadowCascadeViews[i].Valid() || !_shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
-            return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
+            return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
         }
     }
 
+    // A plain 2D depth image: no layers, no cube compatibility. Every
+    // shadow tile -- a spot's single tile or a point's six faces -- is a
+    // viewport into this one attachment.
     auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-        _allocator, _ctx, atlasExt,
-        {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kAtlasLayers, .cubeCompatible = true}
+        _allocator, _ctx.Device(), atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
     if (!sa_res) [[unlikely]] {
         return std::unexpected(sa_res.error());
     }
-    _punctualShadowViews.clear();
-    _shadowAtlasCubeView = {};
-    _shadowAtlas2DView   = {};
+    _shadowAtlasView = {};
     _graph.shadowAtlas.Destroy(_allocator);
     _graph.shadowAtlas = std::move(*sa_res);
 
-    auto cube_res = _graph.shadowAtlas.image.CreateView(
-        _ctx.Device(), {.kind = Vk::ImageViewKind::CubeArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
-    );
-    if (!cube_res) {
-        return std::unexpected(cube_res.error());
+    auto atlas_res = _graph.shadowAtlas.image.CreateAttachmentView(_ctx.Device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+    if (!atlas_res) {
+        return std::unexpected(atlas_res.error());
     }
-    _shadowAtlasCubeView = std::move(*cube_res);
+    _shadowAtlasView = std::move(*atlas_res);
 
-    auto array_res = _graph.shadowAtlas.image.CreateView(
-        _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .layerCount = kAtlasLayers}
-    );
-    if (!array_res) {
-        return std::unexpected(array_res.error());
-    }
-    _shadowAtlas2DView = std::move(*array_res);
-
-    if (!_shadowAtlasCubeView.Valid() || !_shadowAtlas2DView.Valid()) [[unlikely]] {
-        return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
+    if (!_shadowAtlasView.Valid()) [[unlikely]] {
+        return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
     }
 
     Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
@@ -186,7 +173,6 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         }
     });
 
-    RecreatePunctualShadowViews();
     return {};
 }
 
@@ -199,13 +185,13 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         const VkExtent2D ext = {.width = resolution, .height = resolution};
 
         auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!sm_res) {
             return std::unexpected(sm_res.error());
         }
         auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            _allocator, _ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
+            _allocator, _ctx.Device(), ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = kCascades}
         );
         if (!smp_res) {
             sm_res->Destroy(_allocator);
@@ -220,12 +206,12 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         _graph.shadowMap = std::move(*sm_res);
         _shadowMapPrev   = std::move(*smp_res);
 
-        if (auto r = CreateCascadeViews(_graph.shadowMap.image); !r) {
+        if (auto r = CreateCascadeViews(_ctx.Device(), _graph.shadowMap.image); !r) {
             return std::unexpected(r.error());
         } else {
             _shadowCascadeViews = std::move(*r);
         }
-        if (auto r = CreateCascadeViews(_shadowMapPrev.image); !r) {
+        if (auto r = CreateCascadeViews(_ctx.Device(), _shadowMapPrev.image); !r) {
             return std::unexpected(r.error());
         } else {
             _shadowCascadeViewsPrev = std::move(*r);
@@ -242,19 +228,6 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
         ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         return {};
     });
-}
-
-void TargetManager::RecreatePunctualShadowViews() noexcept {
-    _punctualShadowViews.clear();
-    _punctualShadowViews.resize(kPunctualLights);
-    for (uint32_t i = 0; i < kPunctualLights; ++i) {
-        auto view_res = _graph.shadowAtlas.image.CreateView(
-            _ctx.Device(), {.kind = Vk::ImageViewKind::Texture2DArray, .aspect = Vk::ImageAspect::Depth, .baseLayer = i * 6, .layerCount = 6}
-        );
-        if (view_res.has_value()) {
-            _punctualShadowViews[i] = std::move(*view_res);
-        }
-    }
 }
 
 void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
@@ -324,9 +297,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
 void TargetManager::Clear() noexcept {
     _shadowCascadeViews.clear();
     _shadowCascadeViewsPrev.clear();
-    _punctualShadowViews.clear();
-    _shadowAtlasCubeView = {};
-    _shadowAtlas2DView   = {};
+    _shadowAtlasView = {};
     Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) { target.Destroy(_allocator); });
     // These targets are not part of the render graph's reflected resources.
     _graph.shadowMap.Destroy(_allocator);

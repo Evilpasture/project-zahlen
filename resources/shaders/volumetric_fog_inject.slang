@@ -9,13 +9,6 @@ namespace Dispatch {
     [[vk::constant_id(1002)]] const uint SizeZ = Volumetric.Depth;
 }
 
-struct GPUVolumetricVolume {
-    float4x4 invTransform;
-    float4 extentsAndType;
-    float4 colorAndDensity;
-    float4 emissiveAndAniso;
-};
-
 struct VolumetricFogPushConstants {
     float density;
     float heightFalloff;
@@ -31,10 +24,10 @@ struct VolumetricFogPushConstants {
     float3 emissiveColor;
     float noiseIntensity;
 
-    uint volumeCount;
-    uint enableNoise;
     uint _pad0;
+    uint enableNoise;
     uint _pad1;
+    uint _pad2;
 };
 
 [vk::push_constant]
@@ -44,7 +37,6 @@ RWTexture3D<float4> outVoxelMedia;
 Texture3D<float4> noiseTexture;
 SamplerState noiseSampler;
 ConstantBuffer<FrameUniforms> frame;
-StructuredBuffer<GPUVolumetricVolume> fogVolumes;
 
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float2 uv     = (float2(tid.xy) + 0.5f) / resolution;
@@ -90,31 +82,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float mask     = saturate(1.0f - max(dist.x, max(dist.y, dist.z)));
         scatteringCoeff *= mask;
         extinctionCoeff *= mask;
-    }
-
-    for (uint i = 0; i < fogPC.volumeCount; ++i) {
-        GPUVolumetricVolume vol = fogVolumes[i];
-        float3 localPos         = mul(vol.invTransform, float4(worldPos, 1.0f)).xyz;
-
-        float volMask = 0.0f;
-        if (vol.extentsAndType.w == 0.0f) {
-            float3 d   = abs(localPos) / vol.extentsAndType.xyz;
-            float maxD = max(d.x, max(d.y, d.z));
-            if (maxD < 1.0f) {
-                volMask = smoothstep(1.0f, 0.8f, maxD);
-            }
-        } else {
-            float dist = length(localPos) / vol.extentsAndType.x;
-            if (dist < 1.0f) {
-                volMask = smoothstep(1.0f, 0.0f, dist);
-            }
-        }
-
-        if (volMask > 0.0f) {
-            float vDensity = vol.colorAndDensity.w * volMask;
-            scatteringCoeff += vol.colorAndDensity.xyz * vDensity;
-            extinctionCoeff += vol.colorAndDensity.xyz * vDensity;
-        }
     }
 
     float scalarExtinction = dot(extinctionCoeff, float3(0.2126f, 0.7152f, 0.0722f));

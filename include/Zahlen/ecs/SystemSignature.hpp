@@ -29,21 +29,6 @@ struct QueryArguments<Query<Comps...>> {
     static void ForEach(F&& f) { (f.template operator()<Comps>(), ...); }
 };
 
-inline void AppendAccess(std::vector<ComponentAccess>& accesses, uint32_t id, Access mode) {
-    auto it = std::ranges::find_if(accesses, [id](const auto& access) { return access.familyId == id; });
-    if (it == accesses.end()) {
-        accesses.push_back({id, mode});
-    } else if (mode == Access::Write) {
-        it->mode = Access::Write; // the strongest access to one family wins
-    }
-}
-
-template <typename Comp>
-void AppendComponentAccess(std::vector<ComponentAccess>& accesses) {
-    using Raw = std::remove_cvref_t<Comp>;
-    AppendAccess(accesses, ComponentFamily::GetTypeID<Raw>(), std::is_const_v<std::remove_reference_t<Comp>> ? Access::Read : Access::Write);
-}
-
 // A service is shared state like any component, and the scheduler has to know
 // about it: `ResMut<RenderContext>` in one system and `Res<RenderContext>` in
 // another is a hazard even though neither names a component family. The token
@@ -86,12 +71,23 @@ struct SystemSignature {
     static consteval auto Name() -> std::string_view { return Inspector::Name(); }
     static auto NameCString() -> const char* { return Inspector::NameCString(); }
 
-    static void PopulateAccessPattern(std::vector<ComponentAccess>& accesses) {
+    [[nodiscard]] static auto PopulateAccessPattern() -> std::vector<ComponentAccess> {
+        std::vector<ComponentAccess> accesses;
+        auto appendAccess = [&](uint32_t id, Access mode) {
+            auto it = std::ranges::find_if(accesses, [id](const auto& access) { return access.familyId == id; });
+            if (it == accesses.end()) {
+                accesses.push_back({id, mode});
+            } else if (mode == Access::Write) {
+                it->mode = Access::Write; // the strongest access to one family wins
+            }
+        };
+
         Inspector::ForEachParameter([&]<typename Param>() {
             using Clean = std::remove_cvref_t<Param>;
             if constexpr (TemplatedDetail::IsQuery<Clean>) {
                 TemplatedDetail::QueryArguments<Clean>::ForEach([&]<typename Comp>() {
-                    TemplatedDetail::AppendComponentAccess<Comp>(accesses);
+                    using Raw = std::remove_cvref_t<Comp>;
+                    appendAccess(ComponentFamily::GetTypeID<Raw>(), std::is_const_v<std::remove_reference_t<Comp>> ? Access::Read : Access::Write);
                 });
             } else if constexpr (TemplatedDetail::ResourceView<Clean>::value) {
                 using Target = typename TemplatedDetail::ResourceView<Clean>::Target;
@@ -100,7 +96,7 @@ struct SystemSignature {
                 // service is complete where the systems that use it are declared.
                 if constexpr (CompleteType<Target>) {
                     constexpr Access mode = std::is_same_v<Clean, ResMut<Target>> ? Access::Write : Access::Read;
-                    TemplatedDetail::AppendAccess(accesses, ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
+                    appendAccess(ComponentFamily::GetTypeID<TemplatedDetail::ServiceToken<Target>>(), mode);
                 }
             } else if constexpr (std::is_same_v<Param, Registry&> || std::is_same_v<Param, const Registry&>) {
                 // Direct registry access can touch any component, including
@@ -108,6 +104,7 @@ struct SystemSignature {
                 accesses.push_back({AllComponents, Access::Write});
             }
         });
+        return accesses;
     }
 
     template <template <typename> class Resolver, typename Context>

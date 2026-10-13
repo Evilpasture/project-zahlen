@@ -54,10 +54,9 @@ struct GISettings {
 };
 
 struct ShadowSettings {
-    float    width              = 200.0f;
-    uint32_t resolution         = 2048;
-    uint32_t maxPunctualShadows = 0;
-    float    sunSize            = 0.05f;
+    float    width      = 200.0f;
+    uint32_t resolution = 2048;
+    float    sunSize    = 0.05f;
 
     auto operator==(const ShadowSettings&) const noexcept -> bool = default;
 };
@@ -225,7 +224,7 @@ static_assert([] -> bool {
     return settings.antiAliasing.mode == AAMode::SMAA && settings.post.mode == 0 && settings.post.giIntensity == 1.0f
            && settings.post.enableSSR == 0 && settings.post.enableRTR == 0 && settings.post.exposure == 1.0f
            && settings.post.bloomStrength == 0.0f && settings.post.glowIntensity == 0.0f && settings.post.vignetteIntensity == 0.0f
-           && settings.post.tonemapper == 3 && settings.shadows.maxPunctualShadows == 0
+           && settings.post.tonemapper == 3 && settings.shadows.resolution == 2048
            && !settings.rayTracing.enableShadows && !settings.rayTracing.enableReflections && !settings.rayTracing.enableDiffuseGI
            && settings.rayTracing.denoiserPasses == 2 && settings.environment.ambientExposure == 1.0f;
 }());

@@ -39,12 +39,9 @@ void SubmitDrawInstanced(
     uint32_t            instanceIdx,
     const T&            pushConstants,
     bool                meshShadingActive,
-    VkPipeline          pipelineOverride = VK_NULL_HANDLE,
-    VkPipelineLayout    layoutOverride   = VK_NULL_HANDLE,
-    VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    VkPipeline          pipelineOverride = VK_NULL_HANDLE
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
-    auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
     // Cull mode is dynamic on typed material pipelines, so sidedness does not
     // expand the shared pipeline cache. Bit 9 is the existing material flag.
@@ -54,8 +51,6 @@ void SubmitDrawInstanced(
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
             {.pipeline    = nativeMat->meshPipeline,
-             .layout      = layout,
-             .heap        = true,
              .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
              .groupCountY = 1,
              .groupCountZ = 1},
@@ -75,8 +70,8 @@ void SubmitDrawInstanced(
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
     encoder.DrawInstanced<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
-        {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
-        pushConstants, stages
+        {.pipeline = pipeline, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
+        pushConstants
     );
 }
 

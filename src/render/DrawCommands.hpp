@@ -8,7 +8,9 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include "GpuLayout.hpp"
+#include <Zahlen/Error.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -21,9 +23,12 @@ namespace ZHLN {
 struct NativeMesh {
     Vk::Buffer                 buffer;
     uint32_t                   vertexCount = 0;
-    VkDeviceAddress            vboAddress  = 0;
+    // Stream-agnostic record: the same NativeMesh backs position, frame,
+    // surface, index and meshlet buffers, so the address stays type-erased
+    // here and gains its element type at the point of use (Cast<>).
+    Vk::DeviceAddress<>        vboAddress;
     Vk::AccelerationStructure  blas;
-    VkDeviceAddress            blasAddress = 0;
+    Vk::DeviceAddress<>        blasAddress;
     Vk::Buffer                 blasBuffer;
 
     NativeMesh() = default;
@@ -33,20 +38,19 @@ struct NativeMesh {
     NativeMesh(
         Vk::Buffer                buf,
         uint32_t                  count,
-        VkDeviceAddress           vboAddr,
+        Vk::DeviceAddress<>       vboAddr,
         Vk::AccelerationStructure b    = {},
-        VkDeviceAddress           addr = 0,
+        Vk::DeviceAddress<>       addr = nullptr,
         Vk::Buffer                bBuf = {}
     ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(std::move(b)), blasAddress(addr), blasBuffer(std::move(bBuf)) {
     }
 };
 
 // Stable registry entry: GPU pipelines are retired by PipelineRegistry, never
-// by destruction of the pool slot. The layout is borrowed from the renderer.
+// by destruction of the pool slot.
 struct NativeMaterial {
-    VkPipeline       pipeline     = VK_NULL_HANDLE;
-    VkPipelineLayout layout       = VK_NULL_HANDLE;
-    VkPipeline       meshPipeline = VK_NULL_HANDLE;
+    VkPipeline pipeline     = VK_NULL_HANDLE;
+    VkPipeline meshPipeline = VK_NULL_HANDLE;
 
     NativeMaterial() = default;
     NativeMaterial(const NativeMaterial&) = delete;
@@ -69,10 +73,20 @@ struct DrawCommand {
     InstanceData         instanceData;
     NativeMaterial*      material;
     NativeMaterial*      prePassMaterial;
-    NativeMesh*          posMesh;
-    NativeMesh*          frameMesh;
-    NativeMesh*          skinMesh;
-    BufferHandle         skinnedVertexBuffer;
+    // Everything the frame passes need from the source meshes, copied in as
+    // addresses at draw time. Pass recording never dereferences stream
+    // records -- and never sees a VkAccelerationStructureKHR handle: the
+    // BLAS object stays with NativeMesh, which owns build and retirement,
+    // while its address is all a TLAS instance or a skinning dispatch names.
+    // (The skinned scratch buffer is the one exception: its BLAS is rebuilt
+    // after the skinning dispatch each frame, so its address reaches
+    // BuildTLAS through the per-frame SkinnedBlasEntry list instead.)
+    Vk::DeviceAddress<>                    blasAddress;
+    Vk::DeviceAddress<VertexPosition>      skinPosAddress;
+    Vk::DeviceAddress<VertexTangentFrame>  skinFrameAddress;
+    // The skinning shader reads the skin stream as raw uint words.
+    Vk::DeviceAddress<uint32_t>            skinDataAddress;
+    BufferHandle                           skinnedVertexBuffer;
     uint32_t             jointOffset;
     uint32_t             morphOffset;
     uint32_t             activeMorphCount;
@@ -84,6 +98,32 @@ struct DrawCommand {
 };
 
 static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
+
+// One rebuilt skinned-scratch BLAS: which scratch buffer, and the address
+// its TLAS instance must name this frame. Produced by the skinning stage,
+// consumed by BuildTLAS -- the ordering between them is carried by this
+// data, not by a convention about which Impl method runs first.
+struct SkinnedBlasEntry {
+    BufferHandle        scratch;
+    Vk::DeviceAddress<> address;
+};
+
+// (Re)builds the BLAS of one skinned scratch buffer from the vertex stream
+// the skinning dispatch just wrote. Creates the backing buffer and the
+// acceleration structure on first use and keeps them on the scratch mesh;
+// later frames rebuild in place. Returns the BLAS address for the caller's
+// SkinnedBlasEntry.
+//
+// A free function, deliberately: everything it touches arrives as a
+// parameter, and every failure -- unsupported ray tracing, allocation
+// failure, a failed create -- comes back as an error instead of being
+// swallowed. On failure during first creation the half-created state is
+// rolled back; on failure of a later rebuild the previous BLAS (and the
+// address the caller already has) remains intact.
+[[nodiscard]] auto RebuildSkinnedBLAS(
+    VkCommandBuffer cmd, Vk::Context& ctx, Vk::Allocator& allocator, Vk::DeletionQueue& deletionQueue, const DrawCommand& drawCmd,
+    NativeMesh& scratchMesh
+) -> std::expected<Vk::DeviceAddress<>, ErrorCode>;
 
 struct CSGDrawCommand {
     DrawCommand eyeDraw;

@@ -39,7 +39,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const RenderContext::Impl::ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline, ctx.csgPipelineLayout);
+            SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline);
         }
 
         auto activePipeline = ctx.csgDifferencePipeline.Get();
@@ -51,7 +51,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
         }
 
         const RenderContext::Impl::ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline, ctx.csgPipelineLayout);
+        SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline);
     }
 }
 
@@ -80,14 +80,14 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress          = posMesh->vboAddress,
+            .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
                 JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor =
                 JPH::Float4 {gpuMat->emissiveFactor[0], gpuMat->emissiveFactor[1], gpuMat->emissiveFactor[2], gpuMat->emissiveFactor[3]},
-            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress : 0,
-            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
-            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress.Get() : 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
             .indexCount          = gpuMesh->indexCount,
             .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
@@ -106,8 +106,6 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout,
-             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
@@ -141,13 +139,13 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress          = posMesh->vboAddress,
+            .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
                 JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor      = {},
             .tangentFrameAddress = 0,
-            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
-            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
             .indexCount          = gpuMesh->indexCount,
             .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx           = 0,
@@ -166,13 +164,11 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout,
-             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
              .firstInstance = 0},
-            rpc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+            rpc
         );
     }
 }

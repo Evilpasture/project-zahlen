@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GpuHandwritten.hpp"
 #include "RenderInternal.hpp"
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
@@ -57,8 +56,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
             );
         })
         .and_then([&]() {
-            return shadows.CompilePunctualPipeline(
-                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+            // The atlas shares basic.slang's alpha-tested shadow fragment stage
+            // with the cascades: masked foliage should punch the same holes in
+            // a light's atlas tile that it punches in a sun cascade.
+            return shadows.CompileAtlasPipeline(
+                *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
             );
         })
         .and_then([&]() { return InitCSGPipelines(); });
@@ -90,7 +92,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
-    pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, pipelineCachePath);
+    pipelineBinaries.Init(ctx.Device(), ctx.PipelineBinariesSupported(), cfg.initialPipelineBinaryData);
 
     return allocator.Init(ctx)
         .and_then([&]() {
@@ -117,15 +119,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return SetupUI(); })
-        .and_then([&]() { return InitParallelRecorders(); })
-        .transform([&]() {
-            auto fvb_res = CreatePerFrame(
-                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
-            );
-            if (fvb_res) {
-                frames.fogVolumesBuffer = std::move(*fvb_res);
-            }
-        });
+        .and_then([&]() { return InitParallelRecorders(); });
 }
 
 } // namespace ZHLN

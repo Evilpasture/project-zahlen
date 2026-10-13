@@ -36,7 +36,7 @@ void MeshParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
             .p                  = emitter.params
         };
 
-        impl.meshParticleUpdatePass.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(impl.ctx, cmd, emitter.maxParticles, 1, 1, pushPC);
+        impl.meshParticleUpdatePass.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, pushPC);
     }
 }
 

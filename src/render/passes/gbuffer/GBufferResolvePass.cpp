@@ -40,13 +40,13 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
         .passIndex      = 1,
     };
     const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
+        ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
         Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
         Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
     );
-    ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
+    ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
@@ -72,8 +72,6 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
                 passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
-                        .layout         = group.material->layout,
-                        .heap           = true,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(),
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,

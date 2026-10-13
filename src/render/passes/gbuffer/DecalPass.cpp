@@ -28,7 +28,7 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 
     PassContext passCtx(cmd, impl);
-    passCtx.encoder.BindPipeline(impl.decalPipeline.Get(), impl.decalPipelineLayout);
+    passCtx.encoder.BindPipeline(impl.decalPipeline.Get());
 
     const JPH::Mat44 invViewProj = impl.unjittered_view_proj.Inversed();
 
@@ -42,7 +42,7 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
             .metallic    = decalCmd.metallic
         };
 
-        passCtx.encoder.BindPipeline(impl.decalPipeline.Get(), impl.decalPipelineLayout);
+        passCtx.encoder.BindPipeline(impl.decalPipeline.Get());
         passCtx.encoder.DrawHeap<Shaders::Modules::DecalVS, Shaders::Modules::DecalPS>(36, 1, decalPC);
     }
 }

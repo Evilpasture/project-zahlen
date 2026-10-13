@@ -67,6 +67,14 @@ enum class GLTFImportError : uint8_t {
 
 namespace {
 
+// A material map that resolved to a real upload. Anything else -- invalid
+// or one of the built-in fallback textures -- means the import fell back
+// instead of referencing the image it was supposed to load.
+[[nodiscard]] bool IsFallbackTexture(ZHLN::TextureHandle handle) noexcept {
+    return handle == ZHLN::TextureHandle::Invalid || handle == ZHLN::SystemTextures::Black || handle == ZHLN::SystemTextures::White ||
+           handle == ZHLN::SystemTextures::FlatNormal;
+}
+
 constexpr std::string_view kVirtualPath = "ProceduralAnimationBaseRig.glb";
 
 [[nodiscard]] auto ReadAssetBytes() -> std::vector<uint8_t> {
@@ -899,7 +907,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document, 0, {.omitEmpty = true}), bin);
 }
 
-// A mesh node that also carries a punctual light, alongside the emissive
+// A mesh node that also carries a KHR_lights_punctual light, alongside the emissive
 // extension: two extensions on one document, one of them unread.
 [[nodiscard]] auto MakeLitMeshFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfMeshNodeWithLight, GltfEmissiveStrengthMaterial> document {
@@ -920,7 +928,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
-// Geometry-free document carrying only a punctual light -- the shape zcook
+// Geometry-free document carrying only a KHR_lights_punctual light -- the shape zcook
 // emits for a cooked scene light (tools/zcook/GLB.cpp).
 [[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
@@ -1314,7 +1322,7 @@ struct GLTFImportTestSuite {
             if (!litMesh || litMesh->nodes.size() != 1 || litMesh->parts.size() != 1) {
                 return std::unexpected(GLTFImportError::PrefabLoadFailed);
             }
-            // Check that the punctual light was imported:
+            // Check that the KHR_lights_punctual light was imported:
             if (litMesh->lights.size() != 1 || std::string_view(litMesh->lights[0].name) != "TestPoint" || litMesh->lights[0].intensity != 42.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1380,7 +1388,7 @@ struct GLTFImportTestSuite {
             }
             const auto& material = textured->parts[0].defaultMaterial;
             if (material.emissiveFactor != JPH::Float4 {0.0f, 1.0f, 0.0f, 1.0f} || material.emissiveMap == ZHLN::TextureHandle::Invalid ||
-                material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || rc.GetBindlessIndex(material.emissiveMap) <= 2u) {
+                material.emissiveMap != material.albedoMap || material.emissiveMap == material.pbrMap || IsFallbackTexture(material.emissiveMap)) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
 
@@ -1434,7 +1442,7 @@ struct GLTFImportTestSuite {
             const auto& material = prefab->parts[0].defaultMaterial;
             if (std::abs(material.anisotropyStrength - expected.anisotropy_strength) > 1e-5f ||
                 std::abs(material.anisotropyRotation - expected.anisotropy_rotation) > 1e-5f || material.anisotropyMap == ZHLN::TextureHandle::Invalid ||
-                rc.GetBindlessIndex(material.anisotropyMap) <= 2u || material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f ||
+                IsFallbackTexture(material.anisotropyMap) || material.metallicFactor != 1.0f || material.roughnessFactor != 0.15f ||
                 material.clearcoatFactor != 0.0f) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1698,7 +1706,7 @@ struct GLTFImportTestSuite {
                 std::abs(mat.baseColorFactor[3] - expected.pbr_metallic_roughness.base_color_factor[3]) > 1e-5f ||
                 std::abs(mat.metallicFactor - expected.pbr_metallic_roughness.metallic_factor) > 1e-5f ||
                 std::abs(mat.transmissionFactor - expected.transmission.transmission_factor) > 1e-5f || mat.albedoMap == ZHLN::TextureHandle::Invalid ||
-                mat.transmissionMap == ZHLN::TextureHandle::Invalid || mat.albedoMap == mat.transmissionMap || rc.GetBindlessIndex(mat.transmissionMap) <= 2u ||
+                mat.transmissionMap == ZHLN::TextureHandle::Invalid || mat.albedoMap == mat.transmissionMap || IsFallbackTexture(mat.transmissionMap) ||
                 opaqueMat.transmissionMap == ZHLN::TextureHandle::Invalid) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
@@ -1766,8 +1774,8 @@ struct GLTFImportTestSuite {
                 material.occlusionMap == ZHLN::TextureHandle::Invalid || material.albedoMap != material.sheenColorMap ||
                 material.pbrMap != material.sheenRoughnessMap || material.sheenRoughnessMap != material.occlusionMap ||
                 std::abs(material.occlusionStrength - 0.4f) > 1e-5f || material.albedoMap == material.pbrMap ||
-                rc.GetBindlessIndex(material.sheenColorMap) <= 2 || rc.GetBindlessIndex(material.sheenRoughnessMap) <= 2 ||
-                rc.GetBindlessIndex(material.albedoMap) == rc.GetBindlessIndex(material.pbrMap)) {
+                IsFallbackTexture(material.sheenColorMap) || IsFallbackTexture(material.sheenRoughnessMap) ||
+                material.albedoMap == material.pbrMap) {
                 return std::unexpected(GLTFImportError::ExtensionMismatch);
             }
             const ZHLN::Material defaults {};

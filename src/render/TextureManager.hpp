@@ -58,8 +58,11 @@ class TextureManager {
     [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto AdoptTexture(Vk::Image image, Vk::ImageView view, uint32_t width, uint32_t height)
+    [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
         -> std::expected<TextureHandle, ErrorCode>;
+    // Renderer-internal: draw submission translating handles into descriptor
+    // indices at pack time. Not reachable from the public API -- outside code
+    // holds TextureHandles, period.
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
     void Clear();
@@ -70,19 +73,18 @@ class TextureManager {
 
     // Raw slots are only for internal fallback, render-target and LUT setup.
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto Adopt(Vk::Image image, Vk::ImageView view) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;
 
     [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
-    [[nodiscard]] const Vk::Image&     Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
-    [[nodiscard]] const Vk::ImageView& View(uint32_t slot) const noexcept { return _slotViews[slot]; }
-    // A slice borrows the exact view metadata, including cube/array/3D shape
-    // and mip/layer range. Appending slots cannot relocate a deque element;
-    // slot release/replacement, Reset, or manager destruction ends the borrow.
+    [[nodiscard]] const Vk::Image&             Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
+    [[nodiscard]] const VkImageViewCreateInfo& ViewInfo(uint32_t slot) const noexcept { return _slotInfos[slot]; }
+    // A slice borrows the exact view description, including cube/array/3D
+    // shape and mip/layer range. Appending slots cannot relocate a deque
+    // element; slot release, Reset, or manager destruction ends the borrow.
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
-        const Vk::ImageView& view = _slotViews[slot];
-        return Vk::ImageSlice {_slotImages[slot].Handle(), view, extent, view.Format()};
+        return Vk::ImageSlice {_slotInfos[slot], {extent.width, extent.height, 1}};
     }
     void NameSlots() noexcept;
 
@@ -99,14 +101,14 @@ class TextureManager {
     };
 
     struct ReleasedSlot {
-        uint32_t      index = 0;
-        Vk::Image     image;
-        Vk::ImageView view;
+        uint32_t              index = 0;
+        Vk::Image             image;
+        VkImageViewCreateInfo viewInfo {};
     };
 
     // Assign an opaque, never-reused handle to a newly adopted GPU slot.
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
-    void WriteSlotToHeap(uint32_t bindlessIndex, const Vk::ImageView& view) noexcept;
+    void WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept;
     void RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
     void DestroyAllSlots() noexcept;
 
@@ -120,7 +122,9 @@ class TextureManager {
     uint32_t _frameIndex = 0;
 
     ZHLN::Array<Vk::Image> _slotImages;
-    std::deque<Vk::ImageView> _slotViews;
+    // Plain view descriptions, not handles. A deque because heap writes
+    // borrow element addresses through VkImageDescriptorInfoEXT::pView.
+    std::deque<VkImageViewCreateInfo> _slotInfos;
     uint32_t _nextSlotIndex = 0;
     ZHLN::Array<uint32_t> _freeSlots;
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;

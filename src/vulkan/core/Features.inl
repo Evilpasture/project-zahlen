@@ -30,6 +30,8 @@ template <typename T>
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDescriptorHeapFeaturesEXT>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDevicePipelineBinaryFeaturesKHR>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMeshShaderFeaturesEXT>) {
@@ -126,6 +128,8 @@ template <typename T>
         return offsetof(VkPhysicalDeviceRobustness2FeaturesEXT, nullDescriptor) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDescriptorHeapFeaturesEXT>) {
         return offsetof(VkPhysicalDeviceDescriptorHeapFeaturesEXT, descriptorHeapCaptureReplay) + sizeof(VkBool32);
+    } else if constexpr (std::is_same_v<T, VkPhysicalDevicePipelineBinaryFeaturesKHR>) {
+        return offsetof(VkPhysicalDevicePipelineBinaryFeaturesKHR, pipelineBinaries) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>) {
         return offsetof(VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT, dynamicRenderingUnusedAttachments) + sizeof(VkBool32);
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceMeshShaderFeaturesEXT>) {

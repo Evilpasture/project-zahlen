@@ -67,10 +67,11 @@ struct FrameData {
     uint32_t frameIndex = 0;
 };
 
-// One scene light. `shadowLayer` is the renderer's own state riding along: it is
-// assigned when a light is admitted to a shadow cascade, and the engine keeps the
-// assignment with the light so it survives to the next frame. Everything else is
-// what the light *is*, in world space.
+// One scene light. `castsShadow` is what the author asked for and nothing more:
+// whether this frame's shadow atlas has a tile to give the light, and how large
+// that tile is, is the renderer's answer (src/render/features/ShadowAtlas.hpp),
+// not a property of the scene. Everything else is what the light *is*, in world
+// space.
 struct LightDesc {
     LightType type = LightType::Directional;
     JPH::Vec3 position {};
@@ -81,7 +82,9 @@ struct LightDesc {
     float     range = 1000.0f;
     // An area light's quad: one column per lane of the shader's four points.
     JPH::Mat44 points = JPH::Mat44::sIdentity();
-    int32_t    shadowLayer = -1;
+    // Asks for a shadow-atlas tile. A light that does not ask is never
+    // allocated one, so a scene's shadow cost stays an authored decision.
+    bool       castsShadow = false;
     uint32_t   twoSided = 0;
     // Spot cone angles in radians from the axis (0 = no authored cone).
     float innerConeRadians = 0.0f;

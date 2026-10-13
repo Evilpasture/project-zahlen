@@ -168,7 +168,7 @@ void ReflectedLayoutBuilder::AddStageUnsafe(const ShaderDesc& desc, VkShaderStag
     }
 }
 
-auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool {
+auto ReflectedLayoutBuilder::BuildUnsafe(std::span<ReflectedSet, 4> out) noexcept -> bool {
     for (auto& set: out) {
         set.bindings.clear();
     }

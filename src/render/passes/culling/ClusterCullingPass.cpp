@@ -18,7 +18,7 @@ void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
     );
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
-        impl.ctx, impl.clusterCullingHeapBindings,
+        impl.clusterCullingHeapBindings,
         Vk::Slot<"in_Bounds">(impl.clusterBoundsBuffer),
         Vk::Slot<"out_Grid">(impl.frames.clusterGridBuffers[fIdx]),
         Vk::Slot<"out_IndexList">(impl.frames.lightIndexListBuffers[fIdx]),
@@ -27,7 +27,7 @@ void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"lights">(impl.frames.lightStorageBuffers[fIdx])
     );
 
-    impl.clusterCullingPass.DispatchHeapIndexed(impl.ctx, cmd, block);
+    impl.clusterCullingPass.DispatchHeapIndexed(cmd, block);
 }
 
 }

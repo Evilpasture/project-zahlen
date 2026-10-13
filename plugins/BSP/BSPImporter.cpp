@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <stb_image.h>
 #include <string>
 #include <vector>
@@ -404,9 +405,10 @@ auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte
 //
 // Runs before the prefab is built so the parts' `unlit` flag and the spawned
 // lights agree on which surfaces are emitters.
-auto RefineEmissiveSurfaces(const SourceVFS& vfs, const BSPMap& map, std::vector<EmissiveSurface>& surfaces, ImportedMapData& data) -> uint32_t {
+auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> surfaces, ImportedMapData& data)
+    -> std::vector<EmissiveSurface> {
     if (surfaces.empty()) {
-        return 0;
+        return {};
     }
     std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
     std::vector<EmissiveSurface>                                kept;
@@ -436,15 +438,12 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, const BSPMap& map, std::vector
         kept.push_back(std::move(surface));
     }
 
-    const uint32_t dropped   = static_cast<uint32_t>(surfaces.size() - kept.size());
-    surfaces                 = std::move(kept);
     data.stats.emissiveFaces = 0;
-    for (const EmissiveSurface& surface: surfaces) {
+    for (const EmissiveSurface& surface: kept) {
         data.stats.emissiveFaces += surface.faceCount;
     }
-    data.stats.emissiveSurfaces = static_cast<uint32_t>(surfaces.size());
-    (void) map;
-    return dropped;
+    data.stats.emissiveSurfaces = static_cast<uint32_t>(kept.size());
+    return kept;
 }
 
 // Fills prefab->parts from imported material streams: one compiled part per
@@ -685,7 +684,9 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // reported in the lighting line below.
     uint32_t emissiveProbeDropped = 0;
     if (worldOptions.gatherEmissiveSurfaces) {
-        emissiveProbeDropped = RefineEmissiveSurfaces(vfs, map, imported.emissive, imported);
+        const size_t candidateCount = imported.emissive.size();
+        imported.emissive = RefineEmissiveSurfaces(vfs, imported.emissive, imported);
+        emissiveProbeDropped = static_cast<uint32_t>(candidateCount - imported.emissive.size());
     }
 
     // Lighting accounting: this line is the answer to "why is my scene dark?".
@@ -732,8 +733,24 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
 
     // One prefab per interactive submodel, cached under "<map>#model_<N>" --
     // the source BSPScene stamps on the door/button entity description.
-    // Sliding doors keep their world-space vertices (the entity transform is
-    // just the movement delta); rotating doors are re-based on their hinge.
+    // Re-base every interactive submodel on its pivot, rotating or not.
+    //
+    // The rotating path has always done this; the sliding path did not, on the
+    // theory that "the entity transform is just the movement delta". That left
+    // a sliding door's transform at the identity SceneEntity default -- the map
+    // origin -- and three things read that transform as the door's real
+    // position:
+    //
+    //   * BSPInteraction reads trans->position as the door's closedPosition, so
+    //     the movement system interpolated origin -> origin + movedir*travel
+    //     instead of in place, and the E-to-use proximity check (2.5 m from
+    //     trans->position) never fired anywhere near the actual door.
+    //   * Scene::Instantiate creates the kinematic root collider at
+    //     params.position, so the door's collider sat at the map origin and the
+    //     player walked straight through the door where it really was.
+    //
+    // Re-basing costs nothing visually: the rendered vertex is
+    // pivot + (worldVertex - pivot) == worldVertex, exactly as before.
     for (const InteractiveSubmodel& sub: interactiveSubmodels) {
         ImportOptions subOptions = options;
         subOptions.onlyModel     = sub.modelIndex;
@@ -743,9 +760,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         if (subImported.parts.empty()) {
             continue; // Pure tool faces (clip/hint brushes): nothing to draw.
         }
-        if (sub.rotating) {
-            ShiftImportedGeometry(subImported, -sub.pivot);
-        }
+        ShiftImportedGeometry(subImported, -sub.pivot);
 
         const std::string subPath      = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
         auto              subPrefab    = std::make_unique<ModelPrefab>();

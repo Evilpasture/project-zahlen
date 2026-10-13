@@ -8,6 +8,7 @@
 #endif
 
 #include <Zahlen/Threading/Mutex.hpp>
+#include <span>
 
 // VMA forward declarations. <vk_mem_alloc.h> is pulled in only by
 // Allocator.cpp and VmaImplementation.cpp; every other TU sees VMA as opaque
@@ -22,16 +23,18 @@ namespace ZHLN::Vk {
 class Context;
 class Buffer;
 class Image;
+class AttachmentView;
 class GPUAddressTracker;
 
 struct DeferredDeletionEntry {
-    enum class Type : uint8_t { Buffer, Image, AccelerationStructure, Pipeline };
+    enum class Type : uint8_t { Buffer, Image, AttachmentView, AccelerationStructure, Pipeline };
     Type          type;
     VmaAllocation allocation = nullptr;
     VkDevice      device     = VK_NULL_HANDLE;
     union {
         VkBuffer                   buffer;
         VkImage                    image;
+        VkImageView                imageView;
         VkAccelerationStructureKHR accelerationStructure;
         VkPipeline                 pipeline;
     };
@@ -54,6 +57,10 @@ class DeletionQueue {
     // image, or acceleration structures before their backing buffers.
     void Enqueue(Buffer&& buffer) noexcept;
     void Enqueue(Image&& image) noexcept;
+    // For attachment views that must outlive in-flight rendering (e.g. a
+    // render texture's view whose image is being retired at the same time);
+    // destroyed with the frame slot's fence wait, like the rest.
+    void EnqueueAttachmentView(VkDevice device, AttachmentView&& view) noexcept;
     void EnqueueAccelerationStructure(VkDevice device, AccelerationStructure&& handle) noexcept;
     void EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept;
     // Called only after the frame slot's GPU fence has been waited on.
@@ -62,7 +69,7 @@ class DeletionQueue {
     void Drain() noexcept;
 
   private:
-    void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
+    void CleanupQueue(std::span<const DeferredDeletionEntry> queue) noexcept;
 
     Allocator* _allocator = nullptr; // Must outlive the queue and its final drain.
     // Mutex is trivially default-constructible in release builds: a cold
@@ -375,7 +382,91 @@ class Image {
 
     [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
 
-    [[nodiscard]] auto CreateView(VkDevice device, const ImageViewConfig& config = {}) const -> std::expected<ImageView, ErrorCode>;
+    // The descriptor description of (a subrange of) this image, as the plain
+    // Vulkan struct: this is what descriptor-heap writes consume
+    // (VkImageDescriptorInfoEXT::pView), and it is all a sampled or storage
+    // image ever needs -- no VkImageView handle is created. The view type is
+    // derived from the image's own config and the requested layer count
+    // (3D, cube, cube-array, 2D-array, 2D); pass `viewType` explicitly for
+    // the rare descriptor that must reinterpret the layers, e.g. writing
+    // cube faces through a 2D-array storage view. Out-of-range subranges are
+    // clamped to what the image actually has.
+    [[nodiscard]] constexpr auto ViewInfo(
+        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
+        uint32_t           baseMip = 0,
+        uint32_t           mipCount = VK_REMAINING_MIP_LEVELS,
+        uint32_t           baseLayer = 0,
+        uint32_t           layerCount = VK_REMAINING_ARRAY_LAYERS,
+        VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_MAX_ENUM
+    ) const noexcept -> VkImageViewCreateInfo {
+        const uint32_t mipsAvailable   = baseMip < _config.mipLevels ? _config.mipLevels - baseMip : 0;
+        const uint32_t layersAvailable = baseLayer < _config.arrayLayers ? _config.arrayLayers - baseLayer : 0;
+        const uint32_t levels          = mipCount == VK_REMAINING_MIP_LEVELS ? mipsAvailable : (mipCount < mipsAvailable ? mipCount : mipsAvailable);
+        const uint32_t layers          = layerCount == VK_REMAINING_ARRAY_LAYERS ? layersAvailable : (layerCount < layersAvailable ? layerCount : layersAvailable);
+
+        // A descriptor image view must select exactly one of depth/stencil:
+        // for combined depth-stencil formats the format aspect contains both,
+        // which is legal for attachments but never for sampling/storage.
+        // Descriptors default to depth; pass VK_IMAGE_ASPECT_STENCIL_BIT
+        // explicitly to sample the stencil aspect instead.
+        VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
+        if ((effectiveAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
+            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+            effectiveAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+
+        if (viewType == VK_IMAGE_VIEW_TYPE_MAX_ENUM) {
+            if (_config.dimension == ImageDimension::Texture3D) {
+                viewType = VK_IMAGE_VIEW_TYPE_3D;
+            } else if (_config.cubeCompatible && layers == 6) {
+                viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+            } else if (_config.cubeCompatible && layers > 6 && layers % 6 == 0) {
+                viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+            } else if (layers > 1) {
+                viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            } else {
+                viewType = VK_IMAGE_VIEW_TYPE_2D;
+            }
+        }
+
+        return VkImageViewCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .image = _handle,
+            .viewType = viewType,
+            .format = _config.format,
+            .components =
+                {
+                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                },
+            .subresourceRange =
+                {
+                    .aspectMask = effectiveAspect,
+                    .baseMipLevel = baseMip,
+                    .levelCount = levels,
+                    .baseArrayLayer = baseLayer,
+                    .layerCount = layers,
+                },
+        };
+    }
+
+    // Creates a real VkImageView handle. Attachments only: call this solely
+    // for views that will be bound through VkRenderingAttachmentInfo. The
+    // arguments mirror ViewInfo()'s; invalid subranges are rejected instead
+    // of clamped.
+    [[nodiscard]] auto CreateAttachmentView(
+        VkDevice           device,
+        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
+        uint32_t           baseMip = 0,
+        uint32_t           mipCount = VK_REMAINING_MIP_LEVELS,
+        uint32_t           baseLayer = 0,
+        uint32_t           layerCount = VK_REMAINING_ARRAY_LAYERS,
+        VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_MAX_ENUM
+    ) const -> std::expected<AttachmentView, ErrorCode>;
 
     [[nodiscard]] auto Format() const noexcept -> VkFormat {
         return _config.format;

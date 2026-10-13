@@ -107,8 +107,6 @@ struct Mesh {
 struct Material {
     PipelineHandle            pipeline                 = PipelineHandle::Invalid;
     PipelineHandle            prePassPipeline          = PipelineHandle::Invalid;
-    ResourceGroupHandle       resourceGroup            = ResourceGroupHandle::Invalid;
-    BufferHandle              constantBuffer           = BufferHandle::Invalid;
     TextureHandle             albedoMap                = TextureHandle::Invalid;
     TextureHandle             normalMap                = TextureHandle::Invalid;
     TextureHandle             pbrMap                   = TextureHandle::Invalid;

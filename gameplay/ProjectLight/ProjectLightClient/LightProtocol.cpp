@@ -124,26 +124,8 @@ constexpr std::array<std::string_view, PROPERTY_CHANNEL_COUNT> kPropertyNames = 
     "ClassName"
 };
 
-void AppendByte(std::vector<uint8_t>& out, uint8_t value) {
-    out.push_back(value);
-}
-
-void AppendBE16(std::vector<uint8_t>& out, uint16_t value) {
-    out.push_back(static_cast<uint8_t>(value >> 8));
-    out.push_back(static_cast<uint8_t>(value));
-}
-
-void AppendBE32(std::vector<uint8_t>& out, uint32_t value) {
-    out.push_back(static_cast<uint8_t>(value >> 24));
-    out.push_back(static_cast<uint8_t>(value >> 16));
-    out.push_back(static_cast<uint8_t>(value >> 8));
-    out.push_back(static_cast<uint8_t>(value));
-}
-
-void AppendBE64(std::vector<uint8_t>& out, uint64_t value) {
-    for (int shift = 56; shift >= 0; shift -= 8) {
-        out.push_back(static_cast<uint8_t>(value >> shift));
-    }
+[[nodiscard]] auto EncodeBE32(uint32_t value) noexcept -> std::array<uint8_t, 4> {
+    return {static_cast<uint8_t>(value >> 24), static_cast<uint8_t>(value >> 16), static_cast<uint8_t>(value >> 8), static_cast<uint8_t>(value)};
 }
 
 auto ReadBE16(std::span<const uint8_t> bytes, size_t& cursor) -> std::optional<uint16_t> {
@@ -177,142 +159,182 @@ auto ReadBE64(std::span<const uint8_t> bytes, size_t& cursor) -> std::optional<u
     return value;
 }
 
-void EncodeLength(std::vector<uint8_t>& out, size_t count, uint8_t fixBase, size_t fixMax, uint8_t code8, uint8_t code16, uint8_t code32) {
-    if (count <= fixMax) {
-        out.push_back(static_cast<uint8_t>(fixBase | static_cast<uint8_t>(count)));
-    } else if (code8 != 0 && count <= std::numeric_limits<uint8_t>::max()) {
-        out.push_back(code8);
-        out.push_back(static_cast<uint8_t>(count));
-    } else if (count <= std::numeric_limits<uint16_t>::max()) {
-        out.push_back(code16);
-        AppendBE16(out, static_cast<uint16_t>(count));
-    } else {
-        out.push_back(code32);
-        AppendBE32(out, static_cast<uint32_t>(count));
-    }
-}
-
-void EncodeValue(const MsgPackValue& value, std::vector<uint8_t>& out, unsigned depth) {
-    if (depth > 64) {
-        out.push_back(0xC0);
-        return;
+class MsgPackWriter {
+  public:
+    [[nodiscard]] auto Take() && -> std::vector<uint8_t> {
+        return std::move(_bytes);
     }
 
-    switch (value.kind) {
-        case MsgPackValue::Kind::Nil:
-            out.push_back(0xC0);
+    void Encode(const MsgPackValue& value, unsigned depth) {
+        if (depth > 64) {
+            WriteByte(0xC0);
             return;
-        case MsgPackValue::Kind::Bool:
-            out.push_back(value.boolVal ? 0xC3 : 0xC2);
-            return;
-        case MsgPackValue::Kind::Int: {
-            const int64_t number = value.intVal;
-            if (number >= 0) {
-                const auto positive = static_cast<uint64_t>(number);
-                if (positive <= 0x7F) {
-                    out.push_back(static_cast<uint8_t>(positive));
-                } else if (positive <= 0xFF) {
-                    out.push_back(0xCC);
-                    AppendByte(out, static_cast<uint8_t>(positive));
-                } else if (positive <= 0xFFFF) {
-                    out.push_back(0xCD);
-                    AppendBE16(out, static_cast<uint16_t>(positive));
-                } else if (positive <= 0xFFFFFFFFull) {
-                    out.push_back(0xCE);
-                    AppendBE32(out, static_cast<uint32_t>(positive));
+        }
+
+        switch (value.kind) {
+            case MsgPackValue::Kind::Nil:
+                WriteByte(0xC0);
+                return;
+            case MsgPackValue::Kind::Bool:
+                WriteByte(value.boolVal ? 0xC3 : 0xC2);
+                return;
+            case MsgPackValue::Kind::Int: {
+                const int64_t number = value.intVal;
+                if (number >= 0) {
+                    const auto positive = static_cast<uint64_t>(number);
+                    if (positive <= 0x7F) {
+                        WriteByte(static_cast<uint8_t>(positive));
+                    } else if (positive <= 0xFF) {
+                        WriteByte(0xCC);
+                        WriteByte(static_cast<uint8_t>(positive));
+                    } else if (positive <= 0xFFFF) {
+                        WriteByte(0xCD);
+                        WriteBE16(static_cast<uint16_t>(positive));
+                    } else if (positive <= 0xFFFFFFFFull) {
+                        WriteByte(0xCE);
+                        WriteBE32(static_cast<uint32_t>(positive));
+                    } else {
+                        WriteByte(0xCF);
+                        WriteBE64(positive);
+                    }
+                } else if (number >= -32) {
+                    WriteByte(static_cast<uint8_t>(number));
+                } else if (number >= std::numeric_limits<int8_t>::min()) {
+                    WriteByte(0xD0);
+                    WriteByte(static_cast<uint8_t>(number));
+                } else if (number >= std::numeric_limits<int16_t>::min()) {
+                    WriteByte(0xD1);
+                    WriteBE16(static_cast<uint16_t>(number));
+                } else if (number >= std::numeric_limits<int32_t>::min()) {
+                    WriteByte(0xD2);
+                    WriteBE32(static_cast<uint32_t>(number));
                 } else {
-                    out.push_back(0xCF);
-                    AppendBE64(out, positive);
+                    WriteByte(0xD3);
+                    WriteBE64(static_cast<uint64_t>(number));
                 }
-            } else if (number >= -32) {
-                out.push_back(static_cast<uint8_t>(number));
-            } else if (number >= std::numeric_limits<int8_t>::min()) {
-                out.push_back(0xD0);
-                AppendByte(out, static_cast<uint8_t>(number));
-            } else if (number >= std::numeric_limits<int16_t>::min()) {
-                out.push_back(0xD1);
-                AppendBE16(out, static_cast<uint16_t>(number));
-            } else if (number >= std::numeric_limits<int32_t>::min()) {
-                out.push_back(0xD2);
-                AppendBE32(out, static_cast<uint32_t>(number));
-            } else {
-                out.push_back(0xD3);
-                AppendBE64(out, static_cast<uint64_t>(number));
+                return;
             }
-            return;
+            case MsgPackValue::Kind::UInt: {
+                const uint64_t number = value.uintVal;
+                if (number <= 0x7F) {
+                    WriteByte(static_cast<uint8_t>(number));
+                } else if (number <= 0xFF) {
+                    WriteByte(0xCC);
+                    WriteByte(static_cast<uint8_t>(number));
+                } else if (number <= 0xFFFF) {
+                    WriteByte(0xCD);
+                    WriteBE16(static_cast<uint16_t>(number));
+                } else if (number <= 0xFFFFFFFFull) {
+                    WriteByte(0xCE);
+                    WriteBE32(static_cast<uint32_t>(number));
+                } else {
+                    WriteByte(0xCF);
+                    WriteBE64(number);
+                }
+                return;
+            }
+            case MsgPackValue::Kind::Float:
+                WriteByte(0xCB);
+                WriteBE64(std::bit_cast<uint64_t>(value.floatVal));
+                return;
+            case MsgPackValue::Kind::String: {
+                const size_t count = value.strVal.size();
+                if (count <= 31) {
+                    WriteByte(static_cast<uint8_t>(0xA0 | count));
+                } else if (count <= 0xFF) {
+                    WriteByte(0xD9);
+                    WriteByte(static_cast<uint8_t>(count));
+                } else if (count <= 0xFFFF) {
+                    WriteByte(0xDA);
+                    WriteBE16(static_cast<uint16_t>(count));
+                } else {
+                    WriteByte(0xDB);
+                    WriteBE32(static_cast<uint32_t>(count));
+                }
+                WriteText(std::span<const char> {value.strVal.data(), value.strVal.size()});
+                return;
+            }
+            case MsgPackValue::Kind::Binary: {
+                const size_t count = value.binVal.size();
+                if (count <= 0xFF) {
+                    WriteByte(0xC4);
+                    WriteByte(static_cast<uint8_t>(count));
+                } else if (count <= 0xFFFF) {
+                    WriteByte(0xC5);
+                    WriteBE16(static_cast<uint16_t>(count));
+                } else {
+                    WriteByte(0xC6);
+                    WriteBE32(static_cast<uint32_t>(count));
+                }
+                WriteBytes(value.binVal);
+                return;
+            }
+            case MsgPackValue::Kind::Array:
+                WriteLength(value.arrayVal.size(), 0x90, 15, 0, 0xDC, 0xDD);
+                for (const MsgPackValue& entry: value.arrayVal) {
+                    Encode(entry, depth + 1);
+                }
+                return;
+            case MsgPackValue::Kind::Map:
+                WriteLength(value.mapVal.size(), 0x80, 15, 0, 0xDE, 0xDF);
+                for (const auto& [key, entry]: value.mapVal) {
+                    Encode(key, depth + 1);
+                    Encode(entry, depth + 1);
+                }
+                return;
         }
-        case MsgPackValue::Kind::UInt: {
-            const uint64_t number = value.uintVal;
-            if (number <= 0x7F) {
-                out.push_back(static_cast<uint8_t>(number));
-            } else if (number <= 0xFF) {
-                out.push_back(0xCC);
-                AppendByte(out, static_cast<uint8_t>(number));
-            } else if (number <= 0xFFFF) {
-                out.push_back(0xCD);
-                AppendBE16(out, static_cast<uint16_t>(number));
-            } else if (number <= 0xFFFFFFFFull) {
-                out.push_back(0xCE);
-                AppendBE32(out, static_cast<uint32_t>(number));
-            } else {
-                out.push_back(0xCF);
-                AppendBE64(out, number);
-            }
-            return;
-        }
-        case MsgPackValue::Kind::Float: {
-            const double number = value.floatVal;
-            out.push_back(0xCB);
-            AppendBE64(out, std::bit_cast<uint64_t>(number));
-            return;
-        }
-        case MsgPackValue::Kind::String: {
-            const size_t count = value.strVal.size();
-            if (count <= 31) {
-                out.push_back(static_cast<uint8_t>(0xA0 | count));
-            } else if (count <= 0xFF) {
-                out.push_back(0xD9);
-                AppendByte(out, static_cast<uint8_t>(count));
-            } else if (count <= 0xFFFF) {
-                out.push_back(0xDA);
-                AppendBE16(out, static_cast<uint16_t>(count));
-            } else {
-                out.push_back(0xDB);
-                AppendBE32(out, static_cast<uint32_t>(count));
-            }
-            out.insert(out.end(), value.strVal.begin(), value.strVal.end());
-            return;
-        }
-        case MsgPackValue::Kind::Binary: {
-            const size_t count = value.binVal.size();
-            if (count <= 0xFF) {
-                out.push_back(0xC4);
-                AppendByte(out, static_cast<uint8_t>(count));
-            } else if (count <= 0xFFFF) {
-                out.push_back(0xC5);
-                AppendBE16(out, static_cast<uint16_t>(count));
-            } else {
-                out.push_back(0xC6);
-                AppendBE32(out, static_cast<uint32_t>(count));
-            }
-            out.insert(out.end(), value.binVal.begin(), value.binVal.end());
-            return;
-        }
-        case MsgPackValue::Kind::Array:
-            EncodeLength(out, value.arrayVal.size(), 0x90, 15, 0, 0xDC, 0xDD);
-            for (const MsgPackValue& entry: value.arrayVal) {
-                EncodeValue(entry, out, depth + 1);
-            }
-            return;
-        case MsgPackValue::Kind::Map:
-            EncodeLength(out, value.mapVal.size(), 0x80, 15, 0, 0xDE, 0xDF);
-            for (const auto& [key, entry]: value.mapVal) {
-                EncodeValue(key, out, depth + 1);
-                EncodeValue(entry, out, depth + 1);
-            }
-            return;
     }
-}
+
+  private:
+    void WriteByte(uint8_t value) {
+        _bytes.push_back(value);
+    }
+
+    void WriteBE16(uint16_t value) {
+        WriteByte(static_cast<uint8_t>(value >> 8));
+        WriteByte(static_cast<uint8_t>(value));
+    }
+
+    void WriteBE32(uint32_t value) {
+        const auto bytes = EncodeBE32(value);
+        WriteBytes(bytes);
+    }
+
+    void WriteBE64(uint64_t value) {
+        for (int shift = 56; shift >= 0; shift -= 8) {
+            WriteByte(static_cast<uint8_t>(value >> shift));
+        }
+    }
+
+    void WriteLength(size_t count, uint8_t fixBase, size_t fixMax, uint8_t code8, uint8_t code16, uint8_t code32) {
+        if (count <= fixMax) {
+            WriteByte(static_cast<uint8_t>(fixBase | static_cast<uint8_t>(count)));
+        } else if (code8 != 0 && count <= std::numeric_limits<uint8_t>::max()) {
+            WriteByte(code8);
+            WriteByte(static_cast<uint8_t>(count));
+        } else if (count <= std::numeric_limits<uint16_t>::max()) {
+            WriteByte(code16);
+            WriteBE16(static_cast<uint16_t>(count));
+        } else {
+            WriteByte(code32);
+            WriteBE32(static_cast<uint32_t>(count));
+        }
+    }
+
+    void WriteBytes(std::span<const uint8_t> bytes) {
+        if (!bytes.empty()) {
+            _bytes.insert(_bytes.end(), bytes.begin(), bytes.end());
+        }
+    }
+
+    void WriteText(std::span<const char> text) {
+        for (const char character: text) {
+            WriteByte(static_cast<uint8_t>(character));
+        }
+    }
+
+    std::vector<uint8_t> _bytes;
+};
 
 class MsgPackReader {
   public:
@@ -1012,9 +1034,9 @@ void MsgPackValue::SetIntKey(int64_t key, MsgPackValue value) {
 // ============================================================================
 
 auto EncodeMsgPack(const MsgPackValue& value) -> std::vector<uint8_t> {
-    std::vector<uint8_t> output;
-    EncodeValue(value, output, 0);
-    return output;
+    MsgPackWriter writer;
+    writer.Encode(value, 0);
+    return std::move(writer).Take();
 }
 
 auto DecodeMsgPack(std::span<const uint8_t> bytes) -> std::expected<MsgPackValue, std::string> {
@@ -1085,7 +1107,8 @@ auto EncodeStreamFrame(const MsgPackValue& payload, bool compress) -> std::expec
     }
     std::vector<uint8_t> frame;
     frame.reserve(body->size() + 4);
-    AppendBE32(frame, static_cast<uint32_t>(body->size()));
+    const auto length = EncodeBE32(static_cast<uint32_t>(body->size()));
+    frame.insert(frame.end(), length.begin(), length.end());
     frame.insert(frame.end(), body->begin(), body->end());
     return frame;
 }

@@ -12,6 +12,7 @@ import uniforms;
 public struct GpuAbiTypes {
     public FrameUniforms frame;
     public Light light;
+    public ShadowTile shadowTile;
     public InstanceData instance;
     public GPUMeshlet meshlet;
     public Particle particle;
@@ -37,6 +38,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.frame.ddgiGridCounts.x);
     acc += asuint(abi.frame.ddgiParams.x);
     acc += abi.light.type;
+    acc += abi.light.shadowTileBase;
+    acc += asuint(abi.shadowTile.uvOrigin.x);
+    acc += asuint(abi.shadowTile.uvScale);
     acc += abi.instance.vertexCount;
     acc += abi.meshlet.vertexCount;
     acc += asuint(abi.particle.params.x);

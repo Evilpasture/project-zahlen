@@ -67,8 +67,9 @@ struct MeshletBuildResult {
 ) noexcept;
 
 // Packs logical descs into the wire records the mesh shaders read:
-// out.size() == meshlets.size() * kMeshletPackedBytes. The record layout lives
-// in src/render/GpuHandwritten.hpp; this declaration is its only public trace.
+// out.size() == meshlets.size() * kMeshletPackedBytes. The record layout is
+// the generated GPUMeshlet in src/render/GpuLayout.hpp; this declaration is its
+// only public trace.
 [[nodiscard]] ZHLN_API std::vector<uint8_t> PackMeshlets(std::span<const MeshletDesc> meshlets) noexcept;
 
 }

@@ -70,11 +70,18 @@ class ZHLN_API RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
-    // Explicit teardown: drains the device, saves the pipeline cache, and
-    // releases destinations, diagnostics and pending staging work. The
-    // destructor calls this; hosts may also call it to release GPU resources
-    // before the RenderContext itself goes away.
+    // Explicit teardown: drains the device and releases destinations,
+    // diagnostics and pending staging work. The destructor calls this;
+    // hosts may also call it to release GPU resources before the
+    // RenderContext itself goes away.
     void Destroy() noexcept;
+
+    // The captured GPU pipeline binaries as raw bytes, for the host to
+    // persist however it likes (disk, VFS, embedded blob). The renderer
+    // never touches storage itself and owns no pipeline cache handle.
+    // Empty when pipeline binaries are unavailable on this device; call
+    // before Destroy() -- after teardown there is nothing left to extract.
+    [[nodiscard]] std::vector<uint8_t> GetPipelineBinaryData() const noexcept;
 
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
@@ -157,13 +164,13 @@ class ZHLN_API RenderContext {
 
     void ReleaseTarget(const PresentationTarget& target) noexcept;
 
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<RenderTextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
 
-    // Only draw submission needs the GPU descriptor index; resource creation
-    // and lifetime use TextureHandle throughout.
-    [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
+    // TextureHandles are the only texture identity outside the renderer.
+    // The descriptor index a handle maps to is draw-submission business and
+    // stays inside; nothing out here can ask for it.
 
     // Unnamed uploads each get a fresh handle; release it with UnloadTexture.
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;

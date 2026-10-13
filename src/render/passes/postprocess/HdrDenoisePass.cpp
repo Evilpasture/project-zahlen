@@ -39,7 +39,7 @@ void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget);
     const auto norm     = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer);
 
-    Vk::ComputeChain atrousChain(impl.ctx, impl.heapManager, cmd);
+    Vk::ComputeChain atrousChain(impl.heapManager, cmd);
 
     const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
         atrousChain.Step<Shaders::HdrDenoise>(

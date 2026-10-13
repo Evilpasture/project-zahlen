@@ -98,8 +98,8 @@ void SpatialGrid::RemoveEntity(ECS::Registry& reg, Entity handle) {
     }
 }
 
-auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const -> uint32_t {
-    uint32_t count = 0;
+auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity> reusable) const -> std::vector<Entity> {
+    reusable.clear();
 
     const auto cell_size = static_cast<double>(_cellSize);
     const auto rad       = static_cast<double>(radius);
@@ -127,15 +127,14 @@ auto SpatialGrid::Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radiu
 
                 const float dist_sq = (comp->position - pos).LengthSq();
                 if (dist_sq <= radius_sq) {
-                    out_buffer.push_back(current);
-                    count++;
+                    reusable.push_back(current);
                 }
 
                 current = comp->next_in_grid;
             }
         }
     }
-    return count;
+    return reusable;
 }
 
 } // namespace ZHLN::ALife

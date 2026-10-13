@@ -25,7 +25,7 @@ usage; repos default to `build/fidelity/`.
 ## What the harness does — and does not — do
 
 RemoteGLBSample "looked good" because of a hand-tuned studio profile (0.08
-exposure, `ambientExposure = 4`, an extra sun with two punctual fills, and a
+exposure, `ambientExposure = 4`, an extra sun with two point/spot fills, and a
 0.03-roughness mirror floor). This harness builds none of that studio. It does
 use the display transform selected by Khronos' glTF Sample Viewer fidelity
 wrapper: ACES Hill with the historical 1/0.6 exposure boost. The interactive

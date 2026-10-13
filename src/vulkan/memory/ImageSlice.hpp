@@ -16,38 +16,109 @@ namespace ZHLN::Vk {
 template <VkImageLayout Layout, VkFormat Format>
 struct TypedImage;
 
-// A borrowed view of an image and, when available, its owning ImageView. Keep
-// slices within the lifetime and address-stability of that view owner. WSI or
-// externally-owned views can use the raw-handle constructors without metadata.
+// A borrowed subresource range of an image: plain data, no ownership and no
+// pointers back to an owning view object. `attachmentView` is the only
+// VkImageView handle a slice may carry, and it is set only when the slice
+// can be bound as a dynamic-rendering attachment; descriptor-heap writes
+// ignore it entirely and use ViewInfo() below.
 struct ImageSlice {
     VkImage            image = VK_NULL_HANDLE;
-    VkImageView        view = VK_NULL_HANDLE;
+    VkImageView        attachmentView = VK_NULL_HANDLE;
     VkExtent3D         extent {};
     VkFormat           format = VK_FORMAT_UNDEFINED;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    const ImageView*   viewResource = nullptr;
+    uint32_t           baseMip = 0;
+    uint32_t           mipCount = 1;
+    uint32_t           baseLayer = 0;
+    uint32_t           layerCount = 1;
+    VkImageViewType    viewType = VK_IMAGE_VIEW_TYPE_2D;
 
     constexpr ImageSlice() noexcept = default;
 
-    constexpr ImageSlice(VkImage img, VkImageView v, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT) noexcept:
-        image(img), view(v), extent({ext.width, ext.height, 1}), format(fmt), aspect(asp) {
+    constexpr ImageSlice(
+        VkImage img, VkImageView attachment, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT
+    ) noexcept:
+        image(img), attachmentView(attachment), extent({ext.width, ext.height, 1}), format(fmt), aspect(asp) {
     }
-    constexpr ImageSlice(VkImage img, VkImageView v, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT) noexcept:
-        image(img), view(v), extent(ext), format(fmt), aspect(asp) {
+    constexpr ImageSlice(
+        VkImage img, VkImageView attachment, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_COLOR_BIT
+    ) noexcept:
+        image(img), attachmentView(attachment), extent(ext), format(fmt), aspect(asp) {
     }
 
-    ImageSlice(VkImage img, const ImageView& owner, VkExtent3D ext, VkFormat fmt) noexcept:
-        image(img), view(owner.Get()), extent(ext), format(fmt), aspect(owner.AspectFlags()), viewResource(&owner) {
+    // Copy of the descriptor description only; discards attachment
+    // capability. Used when a sampled/storage view of the same image is
+    // needed and no handle exists (or must not be created).
+    constexpr explicit ImageSlice(const VkImageViewCreateInfo& info, VkExtent3D ext) noexcept:
+        image(info.image), extent(ext), format(info.format), aspect(info.subresourceRange.aspectMask),
+        baseMip(info.subresourceRange.baseMipLevel), mipCount(info.subresourceRange.levelCount),
+        baseLayer(info.subresourceRange.baseArrayLayer), layerCount(info.subresourceRange.layerCount),
+        viewType(info.viewType) {
     }
-    ImageSlice(VkImage img, const ImageView& owner, VkExtent2D ext, VkFormat fmt) noexcept:
-        ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt) {
+
+    // Slice of an image that owns an attachment view: carries the handle for
+    // attachment use and copies the view's subresource range and type, so
+    // ViewInfo() below describes exactly the same subresources. The aspect
+    // defaults to the view's own; pass one to narrow it (e.g. sampling the
+    // depth aspect of a depth-stencil target).
+    ImageSlice(
+        VkImage img, const AttachmentView& owner, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
+    ) noexcept:
+        image(img), attachmentView(owner.Get()), extent(ext), format(fmt),
+        aspect(asp != VK_IMAGE_ASPECT_NONE ? asp : owner.AspectFlags()), baseMip(owner.CreateInfo().subresourceRange.baseMipLevel),
+        mipCount(owner.CreateInfo().subresourceRange.levelCount), baseLayer(owner.CreateInfo().subresourceRange.baseArrayLayer),
+        layerCount(owner.CreateInfo().subresourceRange.layerCount), viewType(owner.CreateInfo().viewType) {
+    }
+    ImageSlice(
+        VkImage img, const AttachmentView& owner, VkExtent2D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
+    ) noexcept:
+        ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt, asp) {
+    }
+    // Everything a descriptor-heap write needs, as the plain Vulkan struct:
+    // this becomes VkImageDescriptorInfoEXT::pView. Valid even when
+    // attachmentView is VK_NULL_HANDLE. Like Image::ViewInfo(), a combined
+    // depth-stencil aspect (which a slice may carry for barrier/attachment
+    // purposes) is normalized to depth only here; the stored `aspect` field
+    // itself is left alone for barriers and attachments.
+    [[nodiscard]] constexpr auto ViewInfo() const noexcept -> VkImageViewCreateInfo {
+        VkImageAspectFlags descriptorAspect = aspect;
+        if ((descriptorAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
+            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+            descriptorAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+        return VkImageViewCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .image = image,
+            .viewType = viewType,
+            .format = format,
+            .components =
+                {
+                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                    .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+                },
+            .subresourceRange =
+                {
+                    .aspectMask = descriptorAspect,
+                    .baseMipLevel = baseMip,
+                    .levelCount = mipCount,
+                    .baseArrayLayer = baseLayer,
+                    .layerCount = layerCount,
+                },
+        };
     }
 
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return image;
     }
+    [[nodiscard]] constexpr auto HasAttachmentView() const noexcept -> bool {
+        return attachmentView != VK_NULL_HANDLE;
+    }
     [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return image != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
+        return image != VK_NULL_HANDLE;
     }
     constexpr explicit operator bool() const noexcept {
         return Valid();

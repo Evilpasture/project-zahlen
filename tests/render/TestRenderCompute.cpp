@@ -43,10 +43,16 @@ struct RenderComputeTestSuite {
             if (!ZHLN::Test::ExpectNe(*bakeRes, ZHLN::TextureHandle::Invalid)) {
                 return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
             }
-            ZHLN::Test::ExpectGt(rc.GetBindlessIndex(*bakeRes), 2u);
+            ZHLN::Test::ExpectTrue(*bakeRes != ZHLN::SystemTextures::Black && *bakeRes != ZHLN::SystemTextures::White &&
+                                   *bakeRes != ZHLN::SystemTextures::FlatNormal);
 
             rc.UnloadTexture(*bakeRes);
-            ZHLN::Test::ExpectEq(rc.GetBindlessIndex(*bakeRes), rc.GetBindlessIndex(ZHLN::TextureHandle::Invalid));
+            // A fresh bake must not resurrect the retired handle.
+            const auto rebaked = rc.BakeProceduralTexture(128, 128, 0, 4.0f, 1.0f);
+            if (!ZHLN::Test::ExpectTrue(rebaked.has_value() && *rebaked != *bakeRes)) {
+                return std::unexpected(RenderComputeTestError::ProceduralBakeFailed);
+            }
+            rc.UnloadTexture(*rebaked);
             return {};
         }
     };

@@ -5,17 +5,9 @@
 #include "pipeline/DescriptorHeap.hpp"
 #include "pipeline/SamplerConfig.hpp"
 
-#include <cmath>
-
 namespace ZHLN::Vk {
 
 namespace {
-
-enum class SamplerCreationError : uint8_t {
-    NullDevice ZHLN_ANNOTATION(ZHLN::Description<"Null device for sampler creation">{}) = 1,
-    InvalidConfiguration ZHLN_ANNOTATION(ZHLN::Description<"Invalid sampler configuration">{}),
-    CreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Sampler creation failed">{}),
-};
 
 [[nodiscard]] constexpr auto ToVkFilter(SamplerFilter filter) noexcept -> VkFilter {
     switch (filter) {
@@ -71,24 +63,6 @@ enum class SamplerCreationError : uint8_t {
 }
 
 } // namespace
-
-auto SamplerConfig::Create(VkDevice device) const noexcept -> std::expected<Sampler, ErrorCode> {
-    using enum SamplerCreationError;
-    if (device == VK_NULL_HANDLE) {
-        return std::unexpected(NullDevice);
-    }
-    if (!std::isfinite(minLod) || !std::isfinite(maxLod) || minLod > maxLod ||
-        (anisotropy && (!std::isfinite(maxAnisotropy) || maxAnisotropy < 1.0F))) {
-        return std::unexpected(InvalidConfiguration);
-    }
-
-    const VkSamplerCreateInfo info = ToVkCreateInfo(*this);
-    VkSampler sampler = VK_NULL_HANDLE;
-    if (vkCreateSampler(device, &info, nullptr, &sampler) != VK_SUCCESS) {
-        return std::unexpected(CreationFailed);
-    }
-    return Sampler {device, sampler};
-}
 
 struct SamplerWriteBatch::Impl {
     std::vector<SamplerConfig> configs;

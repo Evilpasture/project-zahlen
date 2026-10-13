@@ -7,7 +7,14 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode> {
+// A render texture is an ordinary bindless texture whose image also has
+// attachment usage, so it gets the same TextureHandle as any other texture:
+// materials and sampling passes read it through scene.globalTextures,
+// resolved from the handle inside the renderer, exactly like an uploaded
+// texture. The only extra state is the attachment side (slice + view +
+// layout), kept in the registry below and looked up by that handle when a
+// FrameTarget resolves.
+auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode> {
     if (width == 0 || height == 0 || ctx.Device() == VK_NULL_HANDLE) {
         return std::unexpected(Vk::DescriptorHeapError::AllocationFailed);
     }
@@ -22,36 +29,39 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     }
     auto image = std::move(*imageRes);
     defer _([&] { allocator.DestroyImage(image); });
+    const VkImage imageHandle = image.Handle();
 
-    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
+    // One real handle for the attachment role, held by the RenderTexture
+    // itself; the bindless descriptor side only gets a create-info.
+    auto viewRes = image.CreateAttachmentView(ctx.Device());
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
-    auto view = std::move(*viewRes);
+    auto attachmentView = std::move(*viewRes);
 
-    auto bindless = textureManager.Adopt(std::move(image), std::move(view));
-    if (!bindless) {
-        return std::unexpected(bindless.error());
+    const VkImageViewCreateInfo descriptorInfo = image.ViewInfo();
+    auto texture = textureManager.AdoptTexture(std::move(image), descriptorInfo, width, height);
+    if (!texture) {
+        return std::unexpected(texture.error());
     }
 
-    const auto handle = static_cast<RenderTextureHandle>(nextRenderTextureId.fetch_add(1, std::memory_order::relaxed));
-    renderTextures.emplace(handle, RenderTexture {
-        .image = textureManager.Slice(*bindless, {width, height}),
-        .bindlessIndex = *bindless,
-    });
-    return handle;
+    auto& entry = renderTextures.emplace(*texture, RenderTexture {}).first->second;
+    entry.attachmentView = std::move(attachmentView);
+    entry.image = Vk::ImageSlice {imageHandle, entry.attachmentView, VkExtent2D {width, height}, format};
+    return *texture;
 }
 
-void RenderContext::Impl::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
+void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     const auto it = renderTextures.find(handle);
     if (it == renderTextures.end()) {
         return;
     }
-    const uint32_t bindlessIndex = it->second.bindlessIndex;
+    // The attachment view may still be referenced by in-flight rendering;
+    // retire it with the frame fence, and the texture slot through the same
+    // deferred path every other texture takes.
+    deletionQueue.EnqueueAttachmentView(ctx.Device(), std::move(it->second.attachmentView));
     renderTextures.erase(it);
-    if (bindlessIndex > kFallbackNormalTextureIndex) {
-        textureManager.ReleaseSlot(bindlessIndex);
-    }
+    textureManager.Unload(handle);
 }
 
 }

@@ -26,8 +26,11 @@ class LightingSystem {
         bool fromEnvironment;
     };
 
-    static void Update(ECS::Query<Components::LightComponent&, const Components::WorldTransformComponent,
-                                  const Components::TransformComponent, const Components::ShadowSettingsComponent> query,
+    // Read-only: the system ranks lights and publishes them, and the shadow
+    // budget is no longer its business. Which lights get a shadow tile is
+    // decided where the tiles are (the renderer's shadow atlas).
+    static void Update(ECS::Query<const Components::LightComponent, const Components::WorldTransformComponent,
+                                  const Components::TransformComponent> query,
                        ECS::Query<const Components::CameraComponent> cameraQuery, ECS::ResMut<SceneData> scene);
 
     static SunLight GetSun(SunQuery reg) noexcept;

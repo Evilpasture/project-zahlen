@@ -19,7 +19,7 @@ void ReflectionPipeline::Dispatch(
     const Passes::ReflectionInputs inputs = Passes::GatherReflectionInputs(impl);
 
     const Vk::HeapBlockBase block = pass.WriteHeapParameters<Shaders::Reflection>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(surface.depth),
         Vk::Slot<"texNormalRoughness">(surface.normals),
@@ -43,7 +43,7 @@ void ReflectionPipeline::Dispatch(
     );
 
     pass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
-        impl.ctx, ctx.Cmd(), Passes::ReflectionVariant(impl), pc, block
+        ctx.Cmd(), Passes::ReflectionVariant(impl), pc, block
     );
 }
 

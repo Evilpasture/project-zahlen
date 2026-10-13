@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include "helpers/BinaryWriter.hpp"
 #include "helpers/CookerFixture.hpp"
 #include <AssetCooking/EnvironmentPreparation.hpp>
 #include <AssetCooking/RadianceDecoder.hpp>
@@ -31,58 +32,47 @@ enum class RadianceTestError : uint8_t {
 
 namespace {
 
-void Append(std::vector<std::byte>& out, std::string_view text) {
-    for (const char c: text) {
-        out.push_back(static_cast<std::byte>(c));
-    }
-}
-
-void AppendByte(std::vector<std::byte>& out, uint8_t value) {
-    out.push_back(static_cast<std::byte>(value));
-}
+using ZHLN::Test::BinaryWriter;
 
 // e = 136 -> scale 1. RGB bytes are the float values.
-void AppendPixel(std::vector<std::byte>& out, uint8_t r, uint8_t g, uint8_t b) {
-    AppendByte(out, r);
-    AppendByte(out, g);
-    AppendByte(out, b);
-    AppendByte(out, 136);
+[[nodiscard]] auto EncodePixel(uint8_t r, uint8_t g, uint8_t b) noexcept -> std::array<std::byte, 4> {
+    return {static_cast<std::byte>(r), static_cast<std::byte>(g), static_cast<std::byte>(b), static_cast<std::byte>(136)};
 }
 
 std::vector<std::byte> FlatHdr(uint32_t width, uint32_t height, std::string_view ySign, float exposure, uint8_t r0, uint8_t r1) {
-    std::vector<std::byte> out;
-    Append(out, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n");
-    Append(out, "EXPOSURE=");
-    Append(out, exposure == 2.0f ? "2" : "1");
-    Append(out, "\n\n");
-    Append(out, ySign);
-    Append(out, " ");
-    Append(out, std::to_string(height));
-    Append(out, " +X ");
-    Append(out, std::to_string(width));
-    Append(out, "\n");
+    BinaryWriter out;
+    out.append_text("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n");
+    out.append_text("EXPOSURE=");
+    out.append_text(exposure == 2.0f ? "2" : "1");
+    out.append_text("\n\n");
+    out.append_text(ySign);
+    out.append_text(" ");
+    out.append_text(std::to_string(height));
+    out.append_text(" +X ");
+    out.append_text(std::to_string(width));
+    out.append_text("\n");
     for (uint32_t y = 0; y < height; ++y) {
         const uint8_t r = y == 0 ? r0 : r1;
         for (uint32_t x = 0; x < width; ++x) {
-            AppendPixel(out, r, 64, 32);
+            out.append_object(EncodePixel(r, 64, 32));
         }
     }
-    return out;
+    return std::move(out).take();
 }
 
 std::vector<std::byte> RleHdr() {
-    std::vector<std::byte> out;
-    Append(out, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 8\n");
-    AppendByte(out, 2);
-    AppendByte(out, 2);
-    AppendByte(out, 0);
-    AppendByte(out, 8);
+    BinaryWriter out;
+    out.append_text("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 8\n");
+    out.append_byte(2);
+    out.append_byte(2);
+    out.append_byte(0);
+    out.append_byte(8);
     const uint8_t channels[4] = {128, 64, 32, 136};
     for (const uint8_t value: channels) {
-        AppendByte(out, 128 + 8); // run of 8
-        AppendByte(out, value);
+        out.append_byte(128 + 8); // run of 8
+        out.append_byte(value);
     }
-    return out;
+    return std::move(out).take();
 }
 
 [[nodiscard]] auto HotspotEnvironment(bool secondSun = false) -> ZHLN::EnvironmentImage {
@@ -218,14 +208,14 @@ struct RadianceTestSuite {
         std::expected<void, ZHLN::ErrorCode> negative_x_is_flipped() {
             // Width < 8, so the scanline is flat. The file stores the rightmost
             // column first; the decoder mirrors it back to +X on the left.
-            std::vector<std::byte> bytes;
-            Append(bytes, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 -X 4\n");
+            BinaryWriter bytes;
+            bytes.append_text("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 -X 4\n");
             const uint8_t reds[4] = {30, 20, 10, 1};
             for (const uint8_t red: reds) {
-                AppendPixel(bytes, red, 0, 0);
+                bytes.append_object(EncodePixel(red, 0, 0));
             }
             RadianceFixture fixture;
-            auto decoded = fixture.Decode(bytes);
+            auto decoded = fixture.Decode(bytes.bytes());
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }
@@ -236,13 +226,13 @@ struct RadianceTestSuite {
         }
 
         std::expected<void, ZHLN::ErrorCode> wide_scanline_without_rle_marker_is_flat() {
-            std::vector<std::byte> bytes;
-            Append(bytes, "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 8\n");
+            BinaryWriter bytes;
+            bytes.append_text("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 8\n");
             for (uint32_t x = 0; x < 8; ++x) {
-                AppendPixel(bytes, static_cast<uint8_t>(x + 1), 0, 0);
+                bytes.append_object(EncodePixel(static_cast<uint8_t>(x + 1), 0, 0));
             }
             RadianceFixture fixture;
-            auto decoded = fixture.Decode(bytes);
+            auto decoded = fixture.Decode(bytes.bytes());
             if (!decoded) {
                 return std::unexpected(decoded.error());
             }

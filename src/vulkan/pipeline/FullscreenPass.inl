@@ -17,7 +17,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     uint32_t                        indexPushOffset,
     HeapLifecycle                   lifecycle,
     bool                            additive,
-    VkPipelineCache                 cache
+    PipelineBinaryStore*              binaries
 ) noexcept {
     // Reflection only: the binding structure drives the mapping table.
     if (!layoutInstance.Build(device, shaders)) {
@@ -30,8 +30,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
-                       .Layout(VK_NULL_HANDLE)
-                       .Cache(cache)
+                       .Binaries(binaries)
                        .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                        .ColorFormats(colorFormats)
                        .NoDepth()
@@ -58,7 +57,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     uint32_t                              indexPushOffset,
     HeapLifecycle                         lifecycle,
     bool                                  additive,
-    VkPipelineCache                       cache
+    PipelineBinaryStore*                    binaries
 ) noexcept {
     // Specialization does not change the descriptor interface, so one mapping
     // table covers every variant.
@@ -76,8 +75,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     for (const auto& spec: specInfos) {
         auto builder = PipelineBuilder {}
                            .Shaders(shaders)
-                           .Layout(VK_NULL_HANDLE)
-                           .Cache(cache)
+                           .Binaries(binaries)
                            .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                            .ColorFormats(colorFormats)
                            .Specialization(&spec)
@@ -102,13 +100,13 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
 
 template <typename LayoutT>
 template <typename Declared, typename... Slots>
-auto FullscreenPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
-    return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
+auto FullscreenPass<LayoutT>::WriteHeapParameters(HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
+    return heap.template WriteHeapParameters<Declared>(heapBindings, slots...);
 }
 
 template <typename LayoutT>
 template <ShaderProgram... Modules, FullscreenPushPayload T>
-void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
+void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw is recorded for: ExecuteHeap<Shaders::Modules::X>(...)");
     static_assert(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
@@ -128,7 +126,6 @@ void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cm
 template <typename LayoutT>
 template <ShaderProgram... Modules, FullscreenPushPayload T>
 void FullscreenPass<LayoutT>::ExecuteVariantHeap(
-    const Context&  ctx,
     VkCommandBuffer cmd,
     uint32_t        variantIdx,
     const T&        pushData,
@@ -152,7 +149,7 @@ void FullscreenPass<LayoutT>::ExecuteVariantHeap(
 }
 
 template <typename LayoutT>
-void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
+void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");

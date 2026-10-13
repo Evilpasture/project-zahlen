@@ -19,6 +19,7 @@
 #include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "features/PostProcessFeature.hpp"
+#include "features/ShadowAtlas.hpp"
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
 #include "graph/RenderGraph.hpp"
@@ -75,23 +76,25 @@ struct TaskSystemScheduler {
 namespace ZHLN::Vk {
 
 struct IBLPayload {
-    Image     brdfLutImage;
-    ImageView brdfLutView;
-    Image     prefilteredImage;
-    ImageView prefilteredView;
+    // Baked textures keep no VkImageView handles at all: only the plain view
+    // descriptions their heap writes are built from.
+    Image                 brdfLutImage;
+    VkImageViewCreateInfo brdfLutInfo {};
+    Image                 prefilteredImage;
+    VkImageViewCreateInfo prefilteredInfo {};
     // Original RGBA32F sky, only retained when the lighting cube was cooked
     // from a different (sunless) panorama and the skybox is visible.
     Image                    visualSkyImage;
-    ImageView                visualSkyView;
+    VkImageViewCreateInfo    visualSkyInfo {};
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
     int                      environmentMode   = 0;
 
     void Destroy(Allocator& allocator) noexcept {
-        brdfLutView     = {};
-        prefilteredView = {};
-        visualSkyView   = {};
+        brdfLutInfo     = {};
+        prefilteredInfo = {};
+        visualSkyInfo   = {};
         allocator.DestroyImage(brdfLutImage);
         allocator.DestroyImage(prefilteredImage);
         allocator.DestroyImage(visualSkyImage);
@@ -234,9 +237,8 @@ struct RenderContext::Impl {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
     };
 
-    static constexpr uint32_t SHADOW_RES          = TargetManager::kShadowResolution;
-    static constexpr uint32_t NUM_CASCADES        = TargetManager::kCascades;
-    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = TargetManager::kPunctualLights;
+    static constexpr uint32_t SHADOW_RES   = TargetManager::kShadowResolution;
+    static constexpr uint32_t NUM_CASCADES = TargetManager::kCascades;
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
@@ -247,8 +249,7 @@ struct RenderContext::Impl {
     PresentationTarget&                                           presentationTarget;
     String64                                                      appName;
     Vk::Context                                                   ctx;
-    Vk::PipelineCache                                             pipelineCache;
-    std::string                                                   pipelineCachePath;
+    Vk::PipelineBinaryStore                                       pipelineBinaries;
     Vk::Allocator                                                 allocator;
     Vk::SwapchainPresenter                                        presenter;
     PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;
@@ -264,6 +265,7 @@ struct RenderContext::Impl {
     // passes need, so a pass is a description of recording work rather than a
     // holder of GPU state.
     ShadowRenderer      shadows;
+    ShadowAtlas         shadowAtlas;
     VolumetricFogSystem fog;
     PostProcessFeature  postProcess;
 
@@ -317,6 +319,7 @@ struct RenderContext::Impl {
         PerFrame<Vk::Buffer>      globalCounterBuffers;
         PerFrame<Vk::Buffer>      frameUniformBuffers;
         PerFrame<Vk::Buffer>      lightStorageBuffers;
+        PerFrame<Vk::Buffer>      shadowTileBuffers;
         PerFrame<Vk::Buffer>      instanceDataBuffers;
         PerFrame<Vk::Buffer>      indirectCommandsBuffers;
         PerFrame<Vk::Buffer>      indirectCommandsBuffersPass2;
@@ -326,11 +329,15 @@ struct RenderContext::Impl {
         // Its physical lifetime follows the N-slot frame ring, not PingPong.
         PerFrame<Vk::Buffer>                jointBuffers;
         PerFrame<Vk::AccelerationStructure> tlas;
+        // The address is the TLAS's only identity outside the build: passes,
+        // descriptors and instances consume it, never the object handle.
+        // Cached at creation (BuildTLAS builds into the same objects, so
+        // these stay valid for the objects' whole lifetime).
+        PerFrame<Vk::DeviceAddress<>>       tlasAddresses;
         PerFrame<Vk::Buffer>                tlasBuffer;
         PerFrame<Vk::Buffer>                tlasScratchBuffer;
         PerFrame<Vk::Buffer>                tlasInstanceBuffers;
         PerFrame<BufferHandle>              debugMeshHandles;
-        PerFrame<Vk::Buffer>                fogVolumesBuffer;
     };
 
     PerFrameResources                                         frames;
@@ -375,15 +382,6 @@ struct RenderContext::Impl {
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
 
-    VkPipelineLayout emptyPipelineLayout = VK_NULL_HANDLE;
-
-    Vk::Sampler globalSampler;
-    Vk::Sampler clampSampler;
-    Vk::Sampler defaultSampler;
-    Vk::Sampler pointSampler;
-
-    Vk::Sampler blueNoiseSampler;
-
     Vk::FullscreenPass<TAALayout>        taaPass;
     Vk::FullscreenPass<FXAALayout>       fxaaPass;
     Vk::FullscreenPass<MLAALayout>       mlaaPass;
@@ -400,7 +398,6 @@ struct RenderContext::Impl {
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
-    Vk::PipelineLayout     skinningPipelineLayout;
 
     bool enableMeshShading = true;
 
@@ -421,19 +418,15 @@ struct RenderContext::Impl {
     EmitterStorageMap meshParticleEmitters;
 
     Vk::DynamicComputePass      particleUpdatePass;
-    VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::DynamicComputePass meshParticleUpdatePass;
-    VkPipelineLayout       meshParticleRenderLayout = VK_NULL_HANDLE;
     Vk::Pipeline           meshParticleRenderPipeline;
     Vk::Pipeline           meshParticleShadowPipeline;
 
     Vk::ReflectedLayout decalDescLayout;
-    VkPipelineLayout    decalPipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline        decalPipeline;
 
-    VkPipelineLayout linePipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline     linePipeline;
     uint32_t                  activeLineVertexCount = 0;
     uint32_t                  lineInstanceId        = 0;
@@ -474,12 +467,10 @@ struct RenderContext::Impl {
     Vk::ReflectedLayout proceduralBakeDescLayout;
     Vk::ReflectedLayout iblBakeDescLayout;
 
-    Vk::Sampler shadowSampler;
-
     Vk::Image     ltcMatImage;
-    Vk::ImageView ltcMatView;
+    VkImageViewCreateInfo ltcMatInfo {};
     Vk::Image     ltcAmpImage;
-    Vk::ImageView ltcAmpView;
+    VkImageViewCreateInfo ltcAmpInfo {};
 
     Vk::IBLPayload iblPayload;
 
@@ -506,6 +497,12 @@ struct RenderContext::Impl {
 
     ZHLN::Array<Light> mappedLights;
 
+    // The shadow atlas's answer to this frame's lights: one tile base per
+    // submitted light, in submitted order, -1 for the lights that asked and did
+    // not fit (and the ones that never asked). `UploadSubmittedLights` fills it
+    // before it packs, so the packed lights carry the atlas's decision.
+    ZHLN::Array<int32_t> lightTileBases;
+
     // SetLights takes descriptions; this holds the packed structs for the frame
     // a pass is about to upload, so the conversion happens once per frame
     // instead of per consumer.
@@ -521,7 +518,6 @@ struct RenderContext::Impl {
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;
-    VkPipelineLayout csgPipelineLayout = VK_NULL_HANDLE;
 
     UIRenderer uiRenderer;
 
@@ -529,15 +525,16 @@ struct RenderContext::Impl {
 
     struct RenderTexture {
         Vk::ImageSlice       image {};
-        uint32_t             bindlessIndex = 0;
+        // Owns the attachment handle `image` borrows; the descriptor side of
+        // this texture needs no handle (TextureManager stores a create-info).
+        Vk::AttachmentView   attachmentView;
         Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
         bool                 drawn         = false;
     };
-    std::unordered_map<RenderTextureHandle, RenderTexture> renderTextures;
+    std::unordered_map<TextureHandle, RenderTexture> renderTextures;
 
-    // Process-wide IDs prevent stale handles or frame capabilities from
-    // aliasing resources in a new renderer after device-loss recovery.
-    static inline std::atomic<uint64_t> nextRenderTextureId {1};
+    // A process-wide renderer ID prevents stale frame capabilities from
+    // aliasing a new renderer after device-loss recovery.
     static inline std::atomic<uint64_t> nextRendererId {1};
     uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
     uint64_t                            frameSerial = 0;
@@ -607,8 +604,8 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
     void               ReleaseTarget(const PresentationTarget& aux) noexcept;
     void               DestroyDestinations() noexcept;
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
     [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride)
         -> BufferHandle;
     void EvictInactiveEmitters() noexcept;
@@ -675,7 +672,7 @@ struct RenderContext::Impl {
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher),
+        pipelines(ctx, pipelineBinaries, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher),
         reflectionPipeline(*this) {
     }
 
@@ -704,13 +701,16 @@ struct RenderContext::Impl {
         for (auto& tlas: frames.tlas) {
             tlas = Vk::AccelerationStructure {};
         }
+        for (auto& tlasAddress: frames.tlasAddresses) {
+            tlasAddress = nullptr;
+        }
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);
         fog.DestroyNoise(allocator);
         textureManager.Reset();
         iblPayload.Destroy(allocator);
-        ltcMatView = {};
-        ltcAmpView = {};
+        ltcMatInfo = {};
+        ltcAmpInfo = {};
         allocator.DestroyImage(ltcMatImage);
         allocator.DestroyImage(ltcAmpImage);
         targets.Clear();
@@ -729,6 +729,7 @@ struct RenderContext::Impl {
         destroyFrames(frames.globalCounterBuffers);
         destroyFrames(frames.frameUniformBuffers);
         destroyFrames(frames.lightStorageBuffers);
+        destroyFrames(frames.shadowTileBuffers);
         destroyFrames(frames.instanceDataBuffers);
         destroyFrames(frames.indirectCommandsBuffers);
         destroyFrames(frames.indirectCommandsBuffersPass2);
@@ -738,7 +739,6 @@ struct RenderContext::Impl {
         destroyFrames(frames.tlasBuffer);
         destroyFrames(frames.tlasScratchBuffer);
         destroyFrames(frames.tlasInstanceBuffers);
-        destroyFrames(frames.fogVolumesBuffer);
         allocator.DestroyBuffer(clusterBoundsBuffer);
         allocator.DestroyBuffer(morphDeltasBuffer);
 
@@ -832,14 +832,16 @@ struct RenderContext::Impl {
     using PPPushConstants        = ScenePassPushConstants;
 
     struct alignas(8) SkinningConstants {
-        VkDeviceAddress inPosAddr;
-        VkDeviceAddress inFrameAddr;
-        VkDeviceAddress inSkinAddr;
-        VkDeviceAddress outPosAddr;
-        VkDeviceAddress outFrameAddr;
-        VkDeviceAddress jointsAddr;
-        VkDeviceAddress morphDeltasAddr;
-        uint32_t        vertexCount;
+        Vk::DeviceAddress<VertexPosition>     inPosAddr;
+        Vk::DeviceAddress<VertexTangentFrame> inFrameAddr;
+        // The shader reads the skin stream as raw uint words (packed joint
+        // indices + weight bits); there is no CPU-side element struct.
+        Vk::DeviceAddress<uint32_t>           inSkinAddr;
+        Vk::DeviceAddress<VertexPosition>     outPosAddr;
+        Vk::DeviceAddress<VertexTangentFrame> outFrameAddr;
+        Vk::DeviceAddress<JPH::Mat44>         jointsAddr; // shader GPUJoint: four float4 columns
+        Vk::DeviceAddress<JPH::Float4>        morphDeltasAddr;
+        uint32_t                              vertexCount;
         uint32_t        jointOffset;
         uint32_t        morphOffset;
         uint32_t        activeMorphCount;
@@ -868,18 +870,30 @@ struct RenderContext::Impl {
         "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
-    void UploadSubmittedLights() noexcept;
+    // Packs the submitted lights, and answers their shadow asks first: the
+    // atlas allocation has to exist before the pack, because a light's tile
+    // base is one of the fields the shader reads.
+    void UploadSubmittedLights(const Camera& cam) noexcept;
+    void AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept;
 
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                         DispatchSkinningPasses(VkCommandBuffer cmd);
+    // Skins every queued skinned draw, then rebuilds each scratch buffer's
+    // BLAS. The returned entries are the only channel from the rebuild to
+    // BuildTLAS: a scratch buffer whose rebuild failed is simply absent
+    // (and the failure is handed back alongside, never swallowed).
+    struct SkinnedBlasOutcome {
+        ZHLN::Array<SkinnedBlasEntry> addresses;
+        std::optional<ErrorCode>      failure;
+    };
+    [[nodiscard]] auto DispatchSkinningPasses(VkCommandBuffer cmd) -> SkinnedBlasOutcome;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
         -> std::expected<TextureHandle, ErrorCode>;
 
-    void BuildTLAS(VkCommandBuffer cmd) noexcept;
+    void BuildTLAS(VkCommandBuffer cmd, std::span<const SkinnedBlasEntry> skinnedBlas) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
@@ -900,7 +914,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh);
 
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
@@ -922,10 +935,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept;
-    template <Vk::ShaderProgram ShaderModule, typename PushConstants = void>
-    [[nodiscard]] auto LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
-        -> std::expected<Vk::Pipeline, ErrorCode>;
-
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
@@ -938,21 +947,17 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
     return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
         defer _([&] { allocator.DestroyImage(image); });
-        auto  viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
-        if (!viewRes) {
-            return std::unexpected(viewRes.error());
-        }
-        Vk::ImageView view = std::move(*viewRes);
+        const VkImageViewCreateInfo viewInfo = image.ViewInfo();
         heapManager.BeginImmediate();
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(ctx, bakeHeapBindings, Vk::Slot<"outTexture">(view));
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(viewInfo));
 
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
             heapManager.BindHeaps(cmd);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-            pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
+            pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
         });
-        return textureManager.Adopt(std::move(image), std::move(view));
+        return textureManager.Adopt(std::move(image), viewInfo);
     });
 }
 
@@ -1026,22 +1031,6 @@ template <VkShaderStageFlagBits Stage>
         return {.storage = std::move(aligned)};
     }
     return {.fallback = bytes};
-}
-
-template <Vk::ShaderProgram ShaderModule, typename PushConstants>
-auto RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
-    -> std::expected<Vk::Pipeline, ErrorCode> {
-    const auto           loaded = LoadShaderData(cs);
-    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
-    gpuDiagnostics.RegisterShader(shader, "CSMain");
-    if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    if (!pass.ReflectDispatchLayout(shader)) {
-        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
-    }
-
-    return Vk::ComputePipeline<ShaderModule, PushConstants>::Create(ctx, shader, Vk::PipelineCreateBindings {.layout = layout}, pipelineCache.Get());
 }
 
 template <typename T = Vk::Buffer, typename... Args>

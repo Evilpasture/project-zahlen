@@ -333,10 +333,6 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
     }
 }
 
-auto RenderContext::GetBindlessIndex(TextureHandle handle) const noexcept -> uint32_t {
-    return _impl->textureManager.GetBindlessIndex(handle);
-}
-
 void RenderContext::ClearGPUCaches() noexcept {
     if (_impl->ctx.Device() != VK_NULL_HANDLE) {
         auto res = Vk::WaitIdle(_impl->ctx.Device());
@@ -351,8 +347,9 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->pipelines.RetireAll();
     _impl->geometry.ClearMaterials();
 
-    for (const auto& entry: _impl->renderTextures) {
-        _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
+    for (auto& entry: _impl->renderTextures) {
+        _impl->textureManager.Unload(entry.first);
+        _impl->deletionQueue.EnqueueAttachmentView(_impl->ctx.Device(), std::move(entry.second.attachmentView));
     }
     _impl->renderTextures.clear();
     _impl->textureManager.Clear();
@@ -541,8 +538,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     return Material {
         .pipeline                 = basicMat.pipeline,
         .prePassPipeline          = basicMat.prePassPipeline,
-        .resourceGroup            = basicMat.resourceGroup,
-        .constantBuffer           = basicMat.constantBuffer,
         .albedoMap                = desc.albedoMap,
         .normalMap                = desc.normalMap,
         .pbrMap                   = desc.pbrMap,
@@ -687,22 +682,14 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
     });
 
-    auto viewRes = image.CreateView(ctx.Device(), {.kind = Vk::ImageViewKind::Texture2D});
-    if (!viewRes) {
-        return std::unexpected(viewRes.error());
-    }
-    Vk::ImageView view = std::move(*viewRes);
+    const VkImageViewCreateInfo viewInfo = image.ViewInfo();
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
+    // Retained only as a config: InitPassSamplerDescriptors writes it into
+    // the sampler heap (e.g. Reflection's "blueNoiseSampler" slot).
     blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto samplerRes        = blueNoiseSamplerConfig.Create(ctx.Device());
-    if (!samplerRes) {
-        return std::unexpected(samplerRes.error());
-    }
-
-    blueNoiseSampler  = std::move(*samplerRes);
-    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
+    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), viewInfo);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }
@@ -712,47 +699,53 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     return {};
 }
 
-void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) {
-    if (!ctx.RayTracingSupported() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
-        return;
+auto RebuildSkinnedBLAS(
+    VkCommandBuffer cmd, Vk::Context& ctx, Vk::Allocator& allocator, Vk::DeletionQueue& deletionQueue, const DrawCommand& drawCmd,
+    NativeMesh& scratchMesh
+) -> std::expected<Vk::DeviceAddress<>, ErrorCode> {
+    if (!ctx.RayTracingSupported()) {
+        return std::unexpected(RenderFeatureError::FeatureNotSupported);
+    }
+    if (cmd == VK_NULL_HANDLE || drawCmd.skinPosAddress == nullptr || scratchMesh.vertexCount == 0) {
+        return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
     }
 
     Vk::BlasGeometryDesc geom = {
-        .vertex_data   = scratchMesh->vboAddress,
+        .vertex_data   = scratchMesh.vboAddress.Get(),
         .vertex_stride = sizeof(VertexPosition),
-        .max_vertex    = scratchMesh->vertexCount > 0 ? scratchMesh->vertexCount - 1 : 0,
+        .max_vertex    = scratchMesh.vertexCount - 1,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
         .index_data    = drawCmd.instanceData.iboAddress,
         .index_type    = (drawCmd.instanceData.iboAddress != 0) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR
     };
 
-    uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
+    const uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh.vertexCount / 3;
 
     const Vk::AccelerationStructureSizes sizes = Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount);
 
-    const bool creatingBlas = !scratchMesh->blas;
+    const bool creatingBlas = !scratchMesh.blas;
     if (creatingBlas) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator, sizes.acceleration_structure_size, Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress,
             Vk::MemoryUsage::GPUOnly
         );
         if (!blasBufOpt) {
-            return;
+            return std::unexpected(blasBufOpt.error());
         }
-        scratchMesh->blasBuffer = std::move(*blasBufOpt);
+        scratchMesh.blasBuffer = std::move(*blasBufOpt);
         auto blas               = Vk::CreateAccelerationStructure(
-            ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
+            ctx.Device(), scratchMesh.blasBuffer.Handle(), sizes.acceleration_structure_size, Vk::AccelerationStructureType::BottomLevel
         );
         if (!blas) {
-            allocator.DestroyBuffer(scratchMesh->blasBuffer);
-            return;
+            allocator.DestroyBuffer(scratchMesh.blasBuffer);
+            return std::unexpected(blas.error());
         }
-        scratchMesh->blas = std::move(*blas);
-        if (!scratchMesh->blas.Valid()) {
-            allocator.DestroyBuffer(scratchMesh->blasBuffer);
-            return;
+        scratchMesh.blas = std::move(*blas);
+        if (!scratchMesh.blas.Valid()) {
+            allocator.DestroyBuffer(scratchMesh.blasBuffer);
+            return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
         }
-        scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
+        scratchMesh.blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh.blas.Get())};
     }
 
     auto scratchBufOpt =
@@ -761,15 +754,16 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         // No build was recorded: do not leave an uninitialized AS for the
         // next frame to treat as an existing, updateable BLAS.
         if (creatingBlas) {
-            scratchMesh->blas = {};
-            allocator.DestroyBuffer(scratchMesh->blasBuffer);
-            scratchMesh->blasAddress = 0;
+            scratchMesh.blas = {};
+            allocator.DestroyBuffer(scratchMesh.blasBuffer);
+            scratchMesh.blasAddress = nullptr;
         }
-        return;
+        return std::unexpected(scratchBufOpt.error());
     }
     Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
-    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
+    Vk::BuildBLAS(cmd, geom, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
     deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
+    return scratchMesh.blasAddress;
 }
 
 void RenderContext::DrawDebugTriangles(
@@ -913,11 +907,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     const Vk::BlasGeometryDesc geom {
-        .vertex_data   = posMesh->vboAddress,
+        .vertex_data   = posMesh->vboAddress.Get(),
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress : 0,
+        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress.Get() : 0,
         .index_type    = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
     const uint32_t                       primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
@@ -977,7 +971,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     // The old BLAS may still be referenced by another in-flight frame.
     impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
     impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
-    posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get());
+    posMesh->blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get())};
     posMesh->blasBuffer  = std::move(*bufferRes);
     posMesh->blas        = std::move(blas);
     return {};

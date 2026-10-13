@@ -15,17 +15,14 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
-    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get()); !built) {
+    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, &pipelineBinaries); !built) {
         return std::unexpected(built.error());
     }
-
-    particleRenderLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::ParticleRenderVS>(), Vk::MakeStageSource<Shaders::Modules::ParticleRenderPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders.View())
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -34,7 +31,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
                 .AdditiveBlend()
                 .AlphaBlend()
                 .CullNone()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -43,24 +40,21 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
-    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
+    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, &pipelineBinaries)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
-
-    meshParticleRenderLayout = emptyPipelineLayout;
 
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderVS>(), Vk::MakeStageSource<Shaders::Modules::MeshParticleRenderPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders.View())
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
@@ -71,13 +65,12 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
                         .Shaders(shaders.View())
-                        .Layout(emptyPipelineLayout)
                         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                         .DepthOnly()
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .ViewMask(ShadowRenderer::kCascadeViewMask)
                         .CullNone()
-                        .Cache(pipelineCache.Get())
+                        .Binaries(&pipelineBinaries)
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) -> auto { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
@@ -85,17 +78,16 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
 }
 
 auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCode> {
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .AddPushConstant(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(SkinningConstants))
-        .Build()
-        .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
-            skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader<Shaders::Modules::SkinningCS, SkinningConstants>(
-                       Vk::MakeStageSource<Shaders::Modules::SkinningCS>(), skinningPass.pipelineLayout.Get(), skinningPass
-            )
-                .transform([&](auto&& pipeline) -> auto { skinningPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
+    const auto source = Vk::MakeStageSource<Shaders::Modules::SkinningCS>();
+    const auto loaded = LoadShaderData(source);
+    const auto bytes  = loaded.Code();
+    if (bytes.empty()) {
+        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
+    }
+
+    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
+    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(
@@ -135,13 +127,10 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 }
 
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
-    linePipelineLayout = emptyPipelineLayout;
-
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSForward>(), Vk::MakeStageSource<Shaders::Modules::ForwardPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -150,7 +139,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
                 .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
                 .CullNone()
                 .AlphaBlend()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -159,15 +148,9 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    return shadowSamplerConfig.Create(ctx.Device())
-        .transform_error([](auto err) -> ErrorCode { return err; })
-
-        .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
-            shadowSampler = std::forward<decltype(sampler)>(sampler);
-            return {};
-        })
-
-        .and_then([&]() -> std::expected<void, ErrorCode> { return targets.InitShadows(); })
+    // shadowSamplerConfig is consumed directly by the heap sampler writes
+    // (e.g. VolumetricFogSystem's "shadowSampler" slot); no VkSampler object.
+    return targets.InitShadows()
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 
@@ -182,7 +165,16 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        .transform([&](auto&& lsb) -> void { frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb); });
+        .and_then([&](auto&& lsb) -> auto {
+            frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
+            return CreatePerFrame(
+                allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::CPUToGPU
+            )
+                .transform_error([](auto err) -> ErrorCode { return err; });
+        })
+
+        .transform([&](auto&& stb) -> void { frames.shadowTileBuffers = std::forward<decltype(stb)>(stb); });
 }
 
 auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
@@ -196,7 +188,6 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     BuildDecalHeapMappings();
-    decalPipelineLayout = emptyPipelineLayout;
 
     std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
     mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
@@ -212,7 +203,6 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
                 .Shaders(shaders.View())
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&mergedInfo, &mergedInfo)
                 .ColorFormats(decalFormats)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -220,7 +210,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
                 .DepthWrite(false)
                 .CullFront()
                 .AlphaBlend()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -235,10 +225,8 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     // One owner outlives all three synchronous builds; the view only carries
     // pointers into its current SPIR-V buffers.
     const auto stages = shaders->View();
-    csgPipelineLayout = emptyPipelineLayout;
     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)
-        .Layout(emptyPipelineLayout)
         .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
         .ColorFormats(ActiveGBuffer::array)
         .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -247,14 +235,13 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .CullNone()
         .ColorWriteEnable(false)
         .StencilWriteMask(1)
-        .Cache(pipelineCache.Get())
+        .Binaries(&pipelineBinaries)
         .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -262,7 +249,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthWrite(true)
                 .CullBack()
                 .StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
@@ -271,7 +258,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
-                .Layout(emptyPipelineLayout)
                 .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats(ActiveGBuffer::array)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
@@ -279,7 +265,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthWrite(true)
                 .CullBack()
                 .StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
@@ -298,16 +284,18 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCode> {
-    auto built = Vk::PipelineLayoutBuilder(ctx.Device())
-                     .Build()
-                     .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-                     .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
-                         hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-                         return LoadAndCreateComputeShader<Shaders::Modules::HangGpuCS>(
-                                    Vk::MakeStageSource<Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
-                         )
-                             .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-                     });
+    auto built = [&]() -> std::expected<void, ErrorCode> {
+        const auto source = Vk::MakeStageSource<Shaders::Modules::HangGpuCS>();
+        const auto loaded = LoadShaderData(source);
+        const auto bytes  = loaded.Code();
+        if (bytes.empty()) {
+            return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
+        }
+
+        const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
+        gpuDiagnostics.RegisterShader(shader, "CSMain");
+        return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
+    }();
     if (!built) {
         ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());
     }
@@ -327,7 +315,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(built.error());
     }
 
-    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
+    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
@@ -382,7 +370,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
+            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, &pipelineBinaries);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
@@ -464,12 +452,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(built.error());
             }
             return clusterBoundsPass.BuildHeap(
-                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()
+                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, pipelineCache.Get()
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -508,6 +496,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                         if (!frames.tlas[i].Valid()) {
                             return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
                         }
+                        frames.tlasAddresses[i] = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), frames.tlas[i].Get())};
                     }
                     return {};
                 });

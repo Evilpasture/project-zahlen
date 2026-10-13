@@ -136,7 +136,7 @@ inline void WriteValue(std::ostream& stream, const T& value) {
 }
 
 template <typename T, size_t N>
-inline void WriteArray(std::ostream& stream, const std::array<T, N>& arr) {
+inline void WriteArray(std::ostream& stream, std::span<const T, N> arr) {
     static_assert(std::is_trivially_copyable_v<T>);
     for (const auto& item: arr) {
         WriteValue(stream, item);
@@ -332,7 +332,7 @@ class BinaryStreamWriter {
     }
 
     template <typename T, size_t N>
-    void WriteArray(const std::array<T, N>& arr) {
+    void WriteArray(std::span<const T, N> arr) {
         static_assert(std::is_trivially_copyable_v<T>);
         for (const auto& item: arr) {
             WriteValue(item);
@@ -364,10 +364,10 @@ class BinaryStreamWriter {
         WriteValue(static_cast<uint32_t>(manifest.materials.size()));
         for (const auto& mat: manifest.materials) {
             WriteString(mat.id);
-            WriteArray(mat.baseColor);
+            WriteArray(std::span {mat.baseColor});
             WriteValue(mat.metallic);
             WriteValue(mat.roughness);
-            WriteArray(mat.emissiveFactor);
+            WriteArray(std::span {mat.emissiveFactor});
             WriteValue(mat.emissiveStrength);
             WriteValue(static_cast<uint8_t>(mat.doubleSided ? 1u : 0u));
             WriteString(mat.albedoMap);
@@ -408,8 +408,8 @@ class BinaryStreamWriter {
             WriteString(node.id);
             WriteString(node.parentId);
             WriteValue(static_cast<uint8_t>(node.visible ? 1u : 0u));
-            WriteArray(node.localMatrix);
-            WriteArray(node.worldMatrix);
+            WriteArray(std::span {node.localMatrix});
+            WriteArray(std::span {node.worldMatrix});
             WriteString(node.meshId);
             WriteString(node.skinId);
             WriteString(node.lightId);
@@ -420,7 +420,7 @@ class BinaryStreamWriter {
         for (const auto& light: manifest.lights) {
             WriteString(light.id);
             WriteString(light.type);
-            WriteArray(light.color);
+            WriteArray(std::span {light.color});
             WriteValue(light.intensity);
         }
 

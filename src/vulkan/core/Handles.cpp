@@ -6,21 +6,15 @@
 
 namespace ZHLN::Vk {
 
-void DestroyPipelineLayout::operator()(const VkDevice device, const VkPipelineLayout handle) const noexcept {
-    if (vkDestroyPipelineLayout != nullptr) {
-        vkDestroyPipelineLayout(device, handle, nullptr);
-    }
-}
-
 void DestroyPipeline::operator()(const VkDevice device, const VkPipeline handle) const noexcept {
     if (vkDestroyPipeline != nullptr) {
         vkDestroyPipeline(device, handle, nullptr);
     }
 }
 
-void DestroyPipelineCache::operator()(const VkDevice device, const VkPipelineCache handle) const noexcept {
-    if (vkDestroyPipelineCache != nullptr) {
-        vkDestroyPipelineCache(device, handle, nullptr);
+void DestroyPipelineBinary::operator()(const VkDevice device, const VkPipelineBinaryKHR handle) const noexcept {
+    if (vkDestroyPipelineBinaryKHR != nullptr) {
+        vkDestroyPipelineBinaryKHR(device, handle, nullptr);
     }
 }
 
@@ -30,13 +24,7 @@ void DestroySemaphore::operator()(const VkDevice device, const VkSemaphore handl
     }
 }
 
-void DestroySampler::operator()(const VkDevice device, const VkSampler handle) const noexcept {
-    if (vkDestroySampler != nullptr) {
-        vkDestroySampler(device, handle, nullptr);
-    }
-}
-
-void DestroyImageView::operator()(const VkDevice device, const VkImageView handle) const noexcept {
+void DestroyAttachmentView::operator()(const VkDevice device, const VkImageView handle) const noexcept {
     if (vkDestroyImageView != nullptr) {
         vkDestroyImageView(device, handle, nullptr);
     }

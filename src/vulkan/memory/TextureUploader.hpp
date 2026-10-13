@@ -78,7 +78,7 @@ class TextureUploader {
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, 1},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
 
             if (desc.generateMips && mips > 1) {
                 GenerateMipmaps(cmd, imgRes->Handle(), desc.width, desc.height);
@@ -89,8 +89,7 @@ class TextureUploader {
             }
         });
 
-        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Texture2D, .mipCount = mips});
-        if (!viewRes) return std::unexpected(viewRes.error());
+        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
@@ -98,7 +97,7 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view   = std::move(*viewRes),
+            .viewInfo = viewInfo,
             .extent = {desc.width, desc.height, 1}
         };
     }
@@ -131,14 +130,13 @@ class TextureUploader {
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, desc.depth},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
         });
 
-        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Texture3D});
-        if (!viewRes) return std::unexpected(viewRes.error());
+        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
@@ -146,7 +144,7 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view   = std::move(*viewRes),
+            .viewInfo = viewInfo,
             .extent = {desc.width, desc.height, desc.depth}
         };
     }
@@ -178,8 +176,7 @@ class TextureUploader {
             );
         });
 
-        auto viewRes = imgRes->CreateView(_ctx.Device(), {.kind = ImageViewKind::Cube});
-        if (!viewRes) return std::unexpected(viewRes.error());
+        const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
 
         if (!desc.debugName.empty()) {
             Debug::SetImageName(_ctx, imgRes->Handle(), desc.debugName);
@@ -187,7 +184,7 @@ class TextureUploader {
 
         return TextureResource {
             .image     = std::move(*imgRes),
-            .view   = std::move(*viewRes),
+            .viewInfo = viewInfo,
             .extent = {desc.size, desc.size, 1}
         };
     }

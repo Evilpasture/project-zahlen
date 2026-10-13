@@ -18,19 +18,19 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     const uint32_t lightVariant = rtrActive ? 1 : 0;
 
     const Vk::HeapBlockBase block = impl.lightingPass.WriteHeapParameters<Shaders::Lighting>(
-        impl.ctx, impl.heapManager,
+        impl.heapManager,
         Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"lights">(impl.frames.lightStorageBuffers[fIdx]),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(impl.graphResources.shadowMap)),
-        Vk::Slot<"ltc_mat">(impl.ltcMatView),
-        Vk::Slot<"ltc_amp">(impl.ltcAmpView),
+        Vk::Slot<"ltc_mat">(impl.ltcMatInfo),
+        Vk::Slot<"ltc_amp">(impl.ltcAmpInfo),
         Vk::Slot<"clusterGrid">(impl.frames.clusterGridBuffers[fIdx]),
         Vk::Slot<"clusterIndexList">(impl.frames.lightIndexListBuffers[fIdx]),
-        Vk::Slot<"punctualShadowCube">(impl.targets.AtlasCubeView()),
-        Vk::Slot<"punctualShadow2D">(impl.targets.Atlas2DView()),
+        Vk::Slot<"shadowAtlas">(impl.graphResources.shadowAtlas.image.ViewInfo(VK_IMAGE_ASPECT_DEPTH_BIT)),
+        Vk::Slot<"shadowTiles">(impl.frames.shadowTileBuffers[fIdx]),
         Vk::Slot<"texEmissive">(Vk::Assume<Vk::ShaderRead<Res_Emissive>>(impl.graphResources.emissiveBuffer)),
         Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(impl.graphResources.ao)),
         Vk::Slot<"texClearcoat">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
@@ -40,7 +40,7 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::FragmentAndComputeRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );
-    impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(impl.ctx, ctx.Cmd(), lightVariant, pc, block);
+    impl.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(ctx.Cmd(), lightVariant, pc, block);
 }
 
 }

@@ -60,12 +60,12 @@ struct FullscreenPassRecorder {
         auto args = std::invoke(std::forward<Prepare>(prepare));
         const Vk::HeapBlockBase block = std::apply(
             [&impl, &pass](const auto&... slots) noexcept {
-                return pass.template WriteHeapParameters<Declared>(impl.ctx, impl.heapManager, slots...);
+                return pass.template WriteHeapParameters<Declared>(impl.heapManager, slots...);
             },
             args.slots
         );
 
-        const auto execute = [&]() noexcept { pass.template ExecuteHeap<Modules...>(impl.ctx, cmd, args.push, block); };
+        const auto execute = [&]() noexcept { pass.template ExecuteHeap<Modules...>(cmd, args.push, block); };
         std::invoke(std::forward<Draw>(draw), impl, cmd, execute);
     }
 };

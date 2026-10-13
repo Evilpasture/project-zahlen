@@ -18,23 +18,23 @@ void RtgiHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 
     const uint32_t fIdx = impl.presenter.frameIndex;
-    if (!impl.frames.tlas[fIdx]) {
+    if (impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::AsAddressWrite tlas {
-        .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
+        .address = impl.frames.tlasAddresses[fIdx].Get()
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtgiHalf>(
-        impl.ctx, impl.postProcess.RtgiHalfHeapBindings(),
+        impl.postProcess.RtgiHalfHeapBindings(),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
-        Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx)),
+        Vk::Slot<"blueNoiseTex">(impl.textureManager.ViewInfo(impl.blueNoiseTexIdx)),
         Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtgiHalf)),
         Vk::Slot<"tlas">(tlas),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
@@ -45,7 +45,7 @@ void RtgiHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .halfRes = {impl.graphResources.rtgiHalf.extent.width, impl.graphResources.rtgiHalf.extent.height}, ._pad = {}
     };
     impl.postProcess.RtgiHalf().DispatchHeapIndexedThreads<Shaders::Modules::RtgiHalfCS>(
-        impl.ctx, cmd, block, impl.graphResources.rtgiHalf.extent.width, impl.graphResources.rtgiHalf.extent.height, 1, push
+        cmd, block, impl.graphResources.rtgiHalf.extent.width, impl.graphResources.rtgiHalf.extent.height, 1, push
     );
 }
 

@@ -445,13 +445,13 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::RenderTextureHandle texture = *textureRes;
+            const ZHLN::TextureHandle texture = *textureRes;
             const auto hdrTextureRes = rc.CreateRenderTexture(160, 160, true);
             if (!ZHLN::Test::ExpectTrue(hdrTextureRes.has_value())) {
                 rc.DestroyRenderTexture(texture);
                 return std::unexpected(UITestError::RenderTextureFailed);
             }
-            const ZHLN::RenderTextureHandle hdrTexture = *hdrTextureRes;
+            const ZHLN::TextureHandle hdrTexture = *hdrTextureRes;
 
             const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 

@@ -28,8 +28,9 @@ class ZHLN_STATIC_API SpatialGrid {
     // Unlink before destroying the ECS component: its next link lives there.
     void RemoveEntity(ECS::Registry& reg, Entity handle);
 
-    // Returns number of items found and populates out_buffer
-    auto Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity>& out_buffer) const -> uint32_t;
+    // Returns matching entities. A caller may move in a reusable buffer to retain its capacity.
+    [[nodiscard]] auto Query(const ECS::Registry& reg, JPH::RVec3Arg pos, float radius, std::vector<Entity> reusable = {}) const
+        -> std::vector<Entity>;
 
     [[nodiscard]] auto GetCellIndex(JPH::RVec3Arg pos) const noexcept -> int32_t;
 

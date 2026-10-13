@@ -87,7 +87,7 @@ namespace {
     sun.direction = {0.4f, 1.0f, 0.3f};
     sun.color     = {1.0f, 0.96f, 0.88f};
     sun.intensity = 180.0f;
-    // A sun is not a ranged light; the punctual defaults would put it in the
+    // A sun is not a ranged light; the point/spot defaults would put it in the
     // cluster grid.
     sun.radius = 0.0f;
     sun.range  = 0.0f;

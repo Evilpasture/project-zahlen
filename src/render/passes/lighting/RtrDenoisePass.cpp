@@ -37,7 +37,7 @@ void RtrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx   = impl.presenter.frameIndex;
     const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
     if (!impl.ctx.RayTracingSupported() || !impl.settings.rayTracing.enableReflections || !impl.settings.post.enableRTR || passes == 0 ||
-        impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+        impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
@@ -53,7 +53,7 @@ void RtrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const float temporalW = impl.rtHistoryValid ? 0.85f : 0.0f;
 
-    Vk::ComputeChain atrousChain(impl.ctx, impl.heapManager, cmd);
+    Vk::ComputeChain atrousChain(impl.heapManager, cmd);
     const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
         atrousChain.Step<Shaders::RtgiDenoise>(
             impl.postProcess.RtgiDenoise(), impl.postProcess.RtgiDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize, tempWeight),

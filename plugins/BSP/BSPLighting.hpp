@@ -39,6 +39,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,10 +62,10 @@ inline constexpr int32_t kSurfNolight = 0x400;
 
 // Source `_light` brightness (the 4th component, typically 15-300) is in
 // Source lighting units, not renderer intensity. See BSPGeometry.hpp for the
-// punctual-light derivation; the sun needs its own because the engine's
+// point/spot derivation; the sun needs its own because the engine's
 // directional term is a different quantity (LightDesc documents it as lux
-// against LightingSystem::GetSun's own default of 180) while the punctual
-// convention is single digits. Running a sun through the punctual constant
+// against LightingSystem::GetSun's own default of 180) while the point/spot
+// convention is single digits. Running a sun through the point/spot constant
 // lands a stock brightness-200 sun at 6.7 -- 27x below the engine's default --
 // which is the single largest reason a map whose VRAD output is unused reads
 // as pitch black outdoors. Calibrate so a stock Source sun lands on the engine
@@ -77,7 +78,7 @@ inline constexpr float kSourceSunBrightnessToEngine = 0.9f; // 200 -> 180
 inline constexpr float kAmbientBrightnessLadder = 30.0f;
 
 // Below this ambient irradiance (colour * brightness/30) a scene reads as black
-// under PBR no matter how many punctual lights it carries: the engine's ambient
+// under PBR no matter how many point/spot lights it carries: the engine's ambient
 // is EvaluateSH(N, frame.sh), and frame.sh integrates the sky gradient, so a
 // black sky is a black scene. This is the rule that fires on a map whose VRAD
 // output was replaced -- the light_environment is still there, but its ambient
@@ -95,7 +96,7 @@ inline constexpr float kFillLightRangeMetres = 40.0f;
 
 // Equivalent Source `_light` brightness per square metre of emissive surface.
 // A 0.05 m^2 white lamp panel then reads as brightness 200 -- the stock
-// `light` default -- so a housing panel and the punctual light inside it
+// `light` default -- so a housing panel and the point/spot light inside it
 // contribute the same order of magnitude instead of the panel being invisible
 // or blinding.
 inline constexpr float kEmissiveSourceBrightnessPerSquareMetre = 250.0f;
@@ -104,7 +105,7 @@ inline constexpr float kEmissiveSourceBrightnessPerSquareMetre = 250.0f;
 // (brightness * area) is what makes a 25 m2 video wall out-shine a 32x32 lamp
 // panel, but it is unbounded, and one proxy at 200+ intensity monopolises the
 // renderer's intensity/distance shadow-layer sort and blows out the frame.
-// A stock punctual `light` lands at 6.67, so this is ~6 of them: clearly the
+// A stock point/spot `light` lands at 6.67, so this is ~6 of them: clearly the
 // brightest thing in the room without being the only thing visible.
 inline constexpr float kEmissiveMaxLightIntensity = 40.0f;
 
@@ -218,7 +219,7 @@ struct SourceLightValue {
 // has to be able to check the three spellings apart.
 [[nodiscard]] auto ParseRenderColorValue(const BSPEntity& entity) noexcept -> SourceLightValue;
 
-// Harvests every punctual/sun light the entity lump describes. A light is
+// Harvests every point/spot/sun light the entity lump describes. A light is
 // dropped (not emitted) when it is switched off, when it is black, or when it
 // is a beam cone whose "No Dynamic Light" spawnflag is set -- Source sets that
 // light's scale to exactly zero, so emitting it would double a fixture that
@@ -271,7 +272,7 @@ struct EmissiveMaterialProbe {
 // kEmissiveClusterCellInches cell), damps the ones that share a fixture with
 // an entity light, ranks by strength * area and truncates to kEmissiveMaxLights.
 [[nodiscard]] auto FinalizeEmissiveSurfaces(
-    std::vector<EmissiveSurface> surfaces, const std::vector<BspPointLight>& entityLights, float unitScale, uint32_t maxLights
+    std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights
 ) -> std::vector<EmissiveSurface>;
 
 // The area-light proxy for one emissive surface: a point light pushed just off
@@ -288,7 +289,7 @@ struct EmissiveMaterialProbe {
 // rules that fill it are here.
 
 [[nodiscard]] auto AuditLighting(
-    const std::vector<BspPointLight>& entityLights, const std::vector<EmissiveSurface>& emissive, const AmbientTerm& ambient,
+    std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient,
     const BSPMap& map
 ) -> LightingDiagnostics;
 

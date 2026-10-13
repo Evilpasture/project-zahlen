@@ -483,8 +483,8 @@ auto Image::Create(Allocator& allocatorRef, const ImageConfig& config) noexcept 
     return result;
 }
 
-auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode> {
-    using enum ImageViewCreationError;
+auto AttachmentView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<AttachmentView, ErrorCode> {
+    using enum AttachmentViewCreationError;
     if (device == VK_NULL_HANDLE || info.sType != VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO || info.image == VK_NULL_HANDLE ||
         info.format == VK_FORMAT_UNDEFINED || info.subresourceRange.aspectMask == VK_IMAGE_ASPECT_NONE || info.subresourceRange.levelCount == 0 ||
         info.subresourceRange.layerCount == 0) {
@@ -500,101 +500,45 @@ auto ImageView::Create(VkDevice device, const VkImageViewCreateInfo& info) -> st
             default: return std::unexpected(CreationFailed);
         }
     }
-    return ImageView {device, view, info};
+    return AttachmentView {device, view, info};
 }
 
-auto Image::CreateView(VkDevice device, const ImageViewConfig& config) const -> std::expected<ImageView, ErrorCode> {
-    using enum ImageViewCreationError;
-    const ImageConfig& image = _config;
+auto Image::CreateAttachmentView(
+    VkDevice           device,
+    VkImageAspectFlags aspect,
+    uint32_t           baseMip,
+    uint32_t           mipCount,
+    uint32_t           baseLayer,
+    uint32_t           layerCount,
+    VkImageViewType    viewType
+) const -> std::expected<AttachmentView, ErrorCode> {
+    using enum AttachmentViewCreationError;
     if (!Valid() || device == VK_NULL_HANDLE) {
         return std::unexpected(InvalidConfiguration);
     }
-
-    const uint32_t layerCount = config.layerCount == 0 ? image.arrayLayers - std::min(config.baseLayer, image.arrayLayers) : config.layerCount;
-    const uint32_t mipCount = config.mipCount == 0 ? image.mipLevels - std::min(config.baseMip, image.mipLevels) : config.mipCount;
-    if (config.baseLayer >= image.arrayLayers || config.baseMip >= image.mipLevels || layerCount == 0 || mipCount == 0 ||
-        layerCount > image.arrayLayers - config.baseLayer || mipCount > image.mipLevels - config.baseMip) {
+    if (baseMip >= _config.mipLevels || baseLayer >= _config.arrayLayers ||
+        (mipCount != VK_REMAINING_MIP_LEVELS && (mipCount == 0 || mipCount > _config.mipLevels - baseMip)) ||
+        (layerCount != VK_REMAINING_ARRAY_LAYERS && (layerCount == 0 || layerCount > _config.arrayLayers - baseLayer))) {
         return std::unexpected(InvalidConfiguration);
     }
-
-    ImageViewKind kind = config.kind;
-    if (kind == ImageViewKind::Inferred) {
-        if (image.dimension == ImageDimension::Texture3D) {
-            kind = ImageViewKind::Texture3D;
-        } else if (image.cubeCompatible && layerCount == 6) {
-            kind = ImageViewKind::Cube;
-        } else if (image.cubeCompatible && layerCount > 6) {
-            kind = ImageViewKind::CubeArray;
-        } else if (layerCount > 1) {
-            kind = ImageViewKind::Texture2DArray;
-        } else {
-            kind = ImageViewKind::Texture2D;
-        }
-    }
-
-    VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D;
-    switch (kind) {
-        case ImageViewKind::Texture2D:
-            if (image.dimension != ImageDimension::Texture2D || layerCount != 1) return std::unexpected(InvalidConfiguration);
-            viewType = VK_IMAGE_VIEW_TYPE_2D;
-            break;
-        case ImageViewKind::Texture2DArray:
-            if (image.dimension != ImageDimension::Texture2D) return std::unexpected(InvalidConfiguration);
-            viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-            break;
-        case ImageViewKind::Texture3D:
-            if (image.dimension != ImageDimension::Texture3D || config.baseLayer != 0 || layerCount != 1) return std::unexpected(InvalidConfiguration);
-            viewType = VK_IMAGE_VIEW_TYPE_3D;
-            break;
-        case ImageViewKind::Cube:
-            if (!image.cubeCompatible || config.baseLayer % 6 != 0 || layerCount != 6) return std::unexpected(InvalidConfiguration);
-            viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-            break;
-        case ImageViewKind::CubeArray:
-            if (!image.cubeCompatible || config.baseLayer % 6 != 0 || layerCount < 6 || layerCount % 6 != 0) return std::unexpected(InvalidConfiguration);
-            viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
-            break;
-        case ImageViewKind::Inferred:
-        default:
-            return std::unexpected(InvalidConfiguration);
-    }
-
-    VkImageAspectFlags aspect = GetFormatAspect(image.format);
-    switch (config.aspect) {
-        case ImageAspect::Inferred: break;
-        case ImageAspect::Color: aspect = VK_IMAGE_ASPECT_COLOR_BIT; break;
-        case ImageAspect::Depth: aspect = VK_IMAGE_ASPECT_DEPTH_BIT; break;
-        case ImageAspect::Stencil: aspect = VK_IMAGE_ASPECT_STENCIL_BIT; break;
-        case ImageAspect::DepthStencil: aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; break;
-        default: return std::unexpected(InvalidConfiguration);
-    }
-    const VkImageAspectFlags formatAspect = GetFormatAspect(image.format);
-    if (aspect == VK_IMAGE_ASPECT_NONE || (aspect & formatAspect) != aspect) {
+    const VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
+    const VkImageAspectFlags formatAspect    = GetFormatAspect(_config.format);
+    if (effectiveAspect == VK_IMAGE_ASPECT_NONE || (effectiveAspect & formatAspect) != effectiveAspect) {
         return std::unexpected(InvalidConfiguration);
     }
-
-    const VkImageViewCreateInfo info {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = 0,
-        .image = _handle,
-        .viewType = viewType,
-        .format = image.format,
-        .components = {
-            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-        },
-        .subresourceRange = {
-            .aspectMask = aspect,
-            .baseMipLevel = config.baseMip,
-            .levelCount = mipCount,
-            .baseArrayLayer = config.baseLayer,
-            .layerCount = layerCount,
-        },
-    };
-    return ImageView::Create(device, info);
+    if (viewType == VK_IMAGE_VIEW_TYPE_3D && (_config.dimension != ImageDimension::Texture3D || baseLayer != 0)) {
+        return std::unexpected(InvalidConfiguration);
+    }
+    if ((viewType == VK_IMAGE_VIEW_TYPE_CUBE || viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) && !_config.cubeCompatible) {
+        return std::unexpected(InvalidConfiguration);
+    }
+    // ViewInfo() produces the descriptor description, which normalizes a
+    // combined depth-stencil aspect down to depth only. An attachment view
+    // is the one place both aspects may (and for a depth-stencil target,
+    // must) be selected together, so restore the validated aspect.
+    VkImageViewCreateInfo info = ViewInfo(aspect, baseMip, mipCount, baseLayer, layerCount, viewType);
+    info.subresourceRange.aspectMask = effectiveAspect;
+    return AttachmentView::Create(device, info);
 }
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:
@@ -802,6 +746,7 @@ void DeletionQueue::Drain() noexcept {
     Lock(_mutex, [&] {
         for (auto& queue: _queues) {
             CleanupQueue(queue);
+            queue.clear();
         }
     });
 }
@@ -824,6 +769,14 @@ void DeletionQueue::Enqueue(Image&& image) noexcept {
     });
 }
 
+void DeletionQueue::EnqueueAttachmentView(VkDevice device, AttachmentView&& view) noexcept {
+    if (!view.Valid())
+        return;
+    Lock(_mutex, [&] {
+        _queues[_currentFrameIndex].push_back({.type = DeferredDeletionEntry::Type::AttachmentView, .device = device, .imageView = view.Release()});
+    });
+}
+
 void DeletionQueue::EnqueueAccelerationStructure(VkDevice device, AccelerationStructure&& handle) noexcept {
     if (!handle.Valid())
         return;
@@ -843,11 +796,13 @@ void DeletionQueue::EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexce
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
     Lock(_mutex, [&] {
         _currentFrameIndex = FrameSlot(frameIndex);
-        CleanupQueue(_queues[_currentFrameIndex]);
+        auto& queue = _queues[_currentFrameIndex];
+        CleanupQueue(queue);
+        queue.clear();
     });
 }
 
-void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept {
+void DeletionQueue::CleanupQueue(std::span<const DeferredDeletionEntry> queue) noexcept {
     for (const auto& entry: queue) {
         switch (entry.type) {
             case DeferredDeletionEntry::Type::Buffer:
@@ -855,6 +810,11 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
                 break;
             case DeferredDeletionEntry::Type::Image:
                 vmaDestroyImage(_allocator != nullptr ? _allocator->Handle() : nullptr, entry.image, entry.allocation);
+                break;
+            case DeferredDeletionEntry::Type::AttachmentView:
+                if (entry.device != VK_NULL_HANDLE && entry.imageView != VK_NULL_HANDLE) {
+                    vkDestroyImageView(entry.device, entry.imageView, nullptr);
+                }
                 break;
             case DeferredDeletionEntry::Type::AccelerationStructure:
                 vkDestroyAccelerationStructureKHR(entry.device, entry.accelerationStructure, nullptr);
@@ -864,7 +824,6 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
                 break;
         }
     }
-    queue.clear();
 }
 
 } // namespace ZHLN::Vk

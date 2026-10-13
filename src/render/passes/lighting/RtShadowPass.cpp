@@ -17,23 +17,23 @@ static_assert(GpuAbi::ScenePassPayload<RTShadowPushConstants>, "a pass payload t
 void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx   = impl.presenter.frameIndex;
     const bool     wantRT = (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) || impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || !impl.frames.tlas[fIdx]) {
+    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
     impl.BindHeapsAndPushFrame(cmd);
 
     const Vk::AsAddressWrite tlas {
-        .address = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), impl.frames.tlas[fIdx].Get())
+        .address = impl.frames.tlasAddresses[fIdx].Get()
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtShadow>(
-        impl.ctx, impl.postProcess.RtShadowHeapBindings(),
+        impl.postProcess.RtShadowHeapBindings(),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"outShadow">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtShadowMask)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"tlas">(tlas),
-        Vk::Slot<"blueNoiseTex">(impl.textureManager.View(impl.blueNoiseTexIdx))
+        Vk::Slot<"blueNoiseTex">(impl.textureManager.ViewInfo(impl.blueNoiseTexIdx))
     );
 
     const RTShadowPushConstants push {
@@ -43,7 +43,7 @@ void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         ._pad        = 0u,
     };
     impl.postProcess.RtShadow().DispatchHeapIndexedThreads<Shaders::Modules::RtShadowCS>(
-        impl.ctx, cmd, block, impl.graphResources.rtShadowMask.extent.width, impl.graphResources.rtShadowMask.extent.height, 1, push
+        cmd, block, impl.graphResources.rtShadowMask.extent.width, impl.graphResources.rtShadowMask.extent.height, 1, push
     );
 }
 

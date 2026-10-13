@@ -265,19 +265,19 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
 
 * Descriptors are produced on the host with `vkWriteResourceDescriptorsEXT` /
   `vkWriteSamplerDescriptorsEXT` and written directly into the mapped heap
-  memory (with a cache flush). They are opaque bytes — there are no
-  `VkDescriptorSet` objects at all.
+  memory (with a cache flush). They are opaque bytes — no descriptor-set
+  objects are created.
 * Command buffers consume the heaps after `vkCmdBindResourceHeapEXT` /
   `vkCmdBindSamplerHeapEXT`. The tail of each heap buffer is reserved for the
   implementation (`minResourceHeapReservedRange` / `minSamplerHeapReservedRange`).
 * Legacy set/binding decorations in the (unchanged) Slang shaders are remapped
   onto the heaps at **pipeline creation** through
   `VkShaderDescriptorSetAndBindingMappingEXT` chains
-  (`PipelineBuilder::HeapMappings` and `PipelineBuilder::HeapPipeline()`).
-  No shader changes were required.
+  (`PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings`).
+  All pipeline creation uses descriptor-heap mode, and no shader changes were
+  required.
 * Per-draw data travels through `vkCmdPushDataEXT` (`Vk::PushData` /
-  `CommandEncoder::PushDrawData`); legacy `push_constant` blocks in SPIR-V read
-  the push-data blob directly.
+  `CommandEncoder::PushDrawData`); SPIR-V push blocks read the push-data blob directly.
 * `Dispatch`, `DispatchHeap`, and `DispatchHeapIndexed` use fixed logical
   domains reflected from `Dispatch.SizeX/Y/Z` (spec-constant IDs 1000-1002).
   Dynamic kernels use explicitly named `*Threads` overloads with runtime
@@ -299,10 +299,9 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   indices remain unchanged.
 
 State-model caveat: heap/push-data commands and legacy descriptor-set/push-
-constant commands invalidate each other within a command buffer. Ported passes
-call `BindHeapsAndPushFrame()` at the start of their segment; the remaining
-legacy passes (HiZ, cluster culling, volumetric, post-processing, ImGui) still
-use descriptor sets and are ordered so their invalidations are harmless.
+constant commands invalidate each other within a command buffer. The renderer
+now emits only heap/push-data commands; every pass calls
+`BindHeapsAndPushFrame()` at the start of its segment.
 
 ### Descriptor Bindings (heaps only)
 The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
@@ -368,7 +367,7 @@ Vk::Specialization<SpecData> spec;
 Reflect::ForEachFieldInfo<SpecData>(spec);
 
 const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/};
-const auto       specInfos = spec.Infos(variants); // std::span<const VkSpecializationInfo>
+const auto       specInfos = spec.Infos(std::span {variants}); // fixed-size array of specialization infos
 ```
 
 The walk is a line at the call site, and that is load-bearing. A build without
