@@ -802,6 +802,7 @@ void DeletionQueue::Drain() noexcept {
     Lock(_mutex, [&] {
         for (auto& queue: _queues) {
             CleanupQueue(queue);
+            queue.clear();
         }
     });
 }
@@ -843,11 +844,13 @@ void DeletionQueue::EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexce
 void DeletionQueue::BeginFrame(uint32_t frameIndex) noexcept {
     Lock(_mutex, [&] {
         _currentFrameIndex = FrameSlot(frameIndex);
-        CleanupQueue(_queues[_currentFrameIndex]);
+        auto& queue = _queues[_currentFrameIndex];
+        CleanupQueue(queue);
+        queue.clear();
     });
 }
 
-void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept {
+void DeletionQueue::CleanupQueue(std::span<const DeferredDeletionEntry> queue) noexcept {
     for (const auto& entry: queue) {
         switch (entry.type) {
             case DeferredDeletionEntry::Type::Buffer:
@@ -864,7 +867,6 @@ void DeletionQueue::CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noex
                 break;
         }
     }
-    queue.clear();
 }
 
 } // namespace ZHLN::Vk

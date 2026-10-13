@@ -91,20 +91,18 @@ void UpdateBounds(JPH::Float3& boundsMin, JPH::Float3& boundsMax, bool& first, J
     return out;
 }
 
-void DropDuplicateCorners(std::vector<JPH::Vec3>& winding) {
+[[nodiscard]] auto DropDuplicateCorners(std::span<const JPH::Vec3> winding) -> std::vector<JPH::Vec3> {
     std::vector<JPH::Vec3> unique;
     unique.reserve(winding.size());
-    for (const auto& point: winding) {
+    for (const JPH::Vec3& point: winding) {
         if (unique.empty() || (point - unique.back()).LengthSq() > kEpsilon * kEpsilon) {
             unique.push_back(point);
         }
     }
-    if (unique.size() > 1) {
-        if ((unique.front() - unique.back()).LengthSq() <= kEpsilon * kEpsilon) {
-            unique.pop_back();
-        }
+    if (unique.size() > 1 && (unique.front() - unique.back()).LengthSq() <= kEpsilon * kEpsilon) {
+        unique.pop_back();
     }
-    winding = std::move(unique);
+    return unique;
 }
 
 struct FaceProjection {
@@ -164,7 +162,7 @@ struct FaceProjection {
 }
 
 // Vertex centroid of a winding (unweighted -- the caller weights by area).
-[[nodiscard]] auto WindingCentroid(const std::vector<JPH::Vec3>& winding) noexcept -> JPH::Vec3 {
+[[nodiscard]] auto WindingCentroid(std::span<const JPH::Vec3> winding) noexcept -> JPH::Vec3 {
     if (winding.empty()) {
         return JPH::Vec3::sZero();
     }
@@ -178,7 +176,7 @@ struct FaceProjection {
 // Planar area of a closed convex winding (Source faces are convex planar
 // polygons), in square Source units. Used for the twin audit's coverage test
 // and for the emissive surfaces' area budget.
-[[nodiscard]] auto WindingArea(const std::vector<JPH::Vec3>& winding) noexcept -> double {
+[[nodiscard]] auto WindingArea(std::span<const JPH::Vec3> winding) noexcept -> double {
     if (winding.size() < 3) {
         return 0.0;
     }
@@ -562,7 +560,7 @@ auto CollectInteractiveSubmodels(const BSPMap& map, const ImportOptions& options
 // reflectivity and the SURF_NOLIGHT flag. Kept in step with the inline version
 // in ImportMapGeometry -- if one changes, the other must.
 auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, const std::vector<BspPointLight>& entityLights
+    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
 ) -> std::vector<BspPointLight> {
     std::vector<BspPointLight> out;
     if (!options.gatherEmissiveSurfaces) {
@@ -591,7 +589,7 @@ auto GatherEmissiveAreaLights(
             if (!winding) {
                 continue;
             }
-            DropDuplicateCorners(*winding);
+            *winding = DropDuplicateCorners(*winding);
             if (winding->size() < 3) {
                 continue;
             }
@@ -633,7 +631,7 @@ auto GatherEmissiveAreaLights(
     }
 
     const std::vector<EmissiveSurface> proxies =
-        FinalizeEmissiveSurfaces(std::move(faces), entityLights, options.unitScale, options.maxEmissiveLights);
+        FinalizeEmissiveSurfaces(faces, entityLights, options.unitScale, options.maxEmissiveLights);
 
     out.reserve(proxies.size());
     for (const EmissiveSurface& surface: proxies) {
@@ -684,7 +682,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 ++result.stats.droppedNoWinding;
                 continue;
             }
-            DropDuplicateCorners(*winding);
+            *winding = DropDuplicateCorners(*winding);
             if (winding->size() < 3) {
                 ++result.stats.droppedDegenerate;
                 continue;
@@ -967,7 +965,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
         const size_t before    = result.lights.size();
         const size_t faceCount = emissiveFaces.size();
         result.emissive =
-            FinalizeEmissiveSurfaces(std::move(emissiveFaces), result.lights, options.unitScale, options.maxEmissiveLights);
+            FinalizeEmissiveSurfaces(emissiveFaces, result.lights, options.unitScale, options.maxEmissiveLights);
 
         // One point light per surviving proxy. These are the lights that carry
         // a self-illuminated surface into the PBR path, and the ones RTGI/DDGI

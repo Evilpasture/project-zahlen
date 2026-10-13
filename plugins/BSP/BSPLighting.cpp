@@ -708,7 +708,7 @@ auto GatherEntityLights(const BSPMap& map, const ImportOptions& options) -> std:
 // Emissive surface assembly
 // ---------------------------------------------------------------------------
 
-auto FinalizeEmissiveSurfaces(std::vector<EmissiveSurface> surfaces, const std::vector<BspPointLight>& entityLights, float unitScale, uint32_t maxLights)
+auto FinalizeEmissiveSurfaces(std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights)
     -> std::vector<EmissiveSurface> {
     const float cellMetres      = std::max(kEmissiveClusterCellInches * unitScale, 0.1f);
     const float fixtureMetres   = std::max(kEmissiveFixtureRadiusInches * unitScale, 0.1f);
@@ -854,7 +854,7 @@ auto EmissiveLightFor(const EmissiveSurface& surface, const ImportOptions& optio
 // Diagnostics / guarantee
 // ---------------------------------------------------------------------------
 
-auto AuditLighting(const std::vector<BspPointLight>& entityLights, const std::vector<EmissiveSurface>& emissive, const AmbientTerm& ambient, const BSPMap& map)
+auto AuditLighting(std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient, const BSPMap& map)
     -> LightingDiagnostics {
     LightingDiagnostics out;
     uint32_t            offered   = 0;

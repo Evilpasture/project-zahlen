@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <span>
 #include <stb_image.h>
 #include <string>
 #include <vector>
@@ -404,9 +405,10 @@ auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<std::byte
 //
 // Runs before the prefab is built so the parts' `unlit` flag and the spawned
 // lights agree on which surfaces are emitters.
-auto RefineEmissiveSurfaces(const SourceVFS& vfs, const BSPMap& map, std::vector<EmissiveSurface>& surfaces, ImportedMapData& data) -> uint32_t {
+auto RefineEmissiveSurfaces(const SourceVFS& vfs, std::span<EmissiveSurface> surfaces, ImportedMapData& data)
+    -> std::vector<EmissiveSurface> {
     if (surfaces.empty()) {
-        return 0;
+        return {};
     }
     std::unordered_map<std::string, std::optional<VMTMaterial>> vmtCache;
     std::vector<EmissiveSurface>                                kept;
@@ -436,15 +438,12 @@ auto RefineEmissiveSurfaces(const SourceVFS& vfs, const BSPMap& map, std::vector
         kept.push_back(std::move(surface));
     }
 
-    const uint32_t dropped   = static_cast<uint32_t>(surfaces.size() - kept.size());
-    surfaces                 = std::move(kept);
     data.stats.emissiveFaces = 0;
-    for (const EmissiveSurface& surface: surfaces) {
+    for (const EmissiveSurface& surface: kept) {
         data.stats.emissiveFaces += surface.faceCount;
     }
-    data.stats.emissiveSurfaces = static_cast<uint32_t>(surfaces.size());
-    (void) map;
-    return dropped;
+    data.stats.emissiveSurfaces = static_cast<uint32_t>(kept.size());
+    return kept;
 }
 
 // Fills prefab->parts from imported material streams: one compiled part per
@@ -685,7 +684,9 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
     // reported in the lighting line below.
     uint32_t emissiveProbeDropped = 0;
     if (worldOptions.gatherEmissiveSurfaces) {
-        emissiveProbeDropped = RefineEmissiveSurfaces(vfs, map, imported.emissive, imported);
+        const size_t candidateCount = imported.emissive.size();
+        imported.emissive = RefineEmissiveSurfaces(vfs, imported.emissive, imported);
+        emissiveProbeDropped = static_cast<uint32_t>(candidateCount - imported.emissive.size());
     }
 
     // Lighting accounting: this line is the answer to "why is my scene dark?".

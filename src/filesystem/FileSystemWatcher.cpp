@@ -9,6 +9,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -174,7 +175,7 @@ struct FileSystemWatcher::Impl {
         return snapshots;
     }
 
-    void Stage(std::vector<StagedEvent>& events) {
+    void Stage(std::span<StagedEvent> events) {
         if (events.empty()) {
             return;
         }
@@ -186,7 +187,9 @@ struct FileSystemWatcher::Impl {
         }
     }
 
-    static void PromoteSettled(FileWatchHandle handle, WorkerWatch& watch, SteadyClock::time_point now, std::vector<StagedEvent>& ready) {
+    [[nodiscard]] static auto PromoteSettled(FileWatchHandle handle, WorkerWatch& watch, SteadyClock::time_point now)
+        -> std::vector<StagedEvent> {
+        std::vector<StagedEvent> ready;
         const auto settleWindow = std::chrono::milliseconds {watch.descriptor.debounceMs};
         for (auto& [key, entry]: watch.entries) {
             static_cast<void>(key);
@@ -198,12 +201,14 @@ struct FileSystemWatcher::Impl {
             entry.settleState     = SettleState::Idle;
             entry.deliveredExists = entry.pendingAction != FileWatchAction::Deleted;
         }
+        return ready;
     }
 
-    static void Observe(FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now, std::vector<StagedEvent>& ready) {
+    [[nodiscard]] static auto Observe(FileWatchHandle handle, WorkerWatch& watch, const ScanResult& scan, SteadyClock::time_point now)
+        -> std::vector<StagedEvent> {
         if (!watch.initialized) {
             if (!scan.complete) {
-                return;
+                return {};
             }
 
             for (const auto& [key, observed]: scan.entries) {
@@ -218,7 +223,7 @@ struct FileSystemWatcher::Impl {
                 );
             }
             watch.initialized = true;
-            return;
+            return {};
         }
 
         for (const auto& [key, observed]: scan.entries) {
@@ -261,7 +266,7 @@ struct FileSystemWatcher::Impl {
             }
         }
 
-        PromoteSettled(handle, watch, now, ready);
+        return PromoteSettled(handle, watch, now);
     }
 
     void Run() {
@@ -279,7 +284,10 @@ struct FileSystemWatcher::Impl {
                 if (inserted) {
                     watch.descriptor = snapshot.descriptor;
                 }
-                Observe(snapshot.handle, watch, Scan(watch.descriptor), now, ready);
+                auto observed = Observe(snapshot.handle, watch, Scan(watch.descriptor), now);
+                for (StagedEvent& event: observed) {
+                    ready.push_back(std::move(event));
+                }
             }
 
             for (auto it = watches.begin(); it != watches.end();) {

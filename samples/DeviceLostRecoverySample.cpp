@@ -91,17 +91,17 @@ inline const JPH::Vec4     kSkyGround {0.20f, 0.28f, 0.20f, 1.0f};
     return end != value ? parsed : 0;
 }
 
-void ClearArena(ZHLN::Engine& engine, std::vector<ZHLN::Entity>& entities) {
+void ClearArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> entities) {
     for (ZHLN::Entity entity: entities) {
         if (engine.GetRegistry().IsAlive(entity)) {
             ZHLN::DespawnEntity(engine, entity);
         }
     }
-    entities.clear();
 }
 
-void BuildArena(ZHLN::Engine& engine, std::vector<ZHLN::Entity>& entities) {
-    ClearArena(engine, entities);
+[[nodiscard]] auto BuildArena(ZHLN::Engine& engine, std::span<const ZHLN::Entity> previous = {}) -> std::vector<ZHLN::Entity> {
+    ClearArena(engine, previous);
+    std::vector<ZHLN::Entity> entities;
     auto& registry = engine.GetRegistry();
 
     for (ZHLN::Entity e: registry.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>()) {
@@ -149,6 +149,7 @@ void BuildArena(ZHLN::Engine& engine, std::vector<ZHLN::Entity>& entities) {
             .type = ZHLN::LightType::Sun, .color = kSunColor, .intensity = kSunIntensity, .direction = JPH::Vec3(0.45f, 1.00f, 0.30f).Normalized()
         }
     ));
+    return entities;
 }
 
 } // namespace
@@ -209,8 +210,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::FreeCam::Install(*engine);
     engine->InitializeDefaultScene();
 
-    std::vector<ZHLN::Entity> arena;
-    BuildArena(*engine, arena);
+    std::vector<ZHLN::Entity> arena = BuildArena(*engine);
 
     uint32_t recoveries = 0;
     engine->AddDeviceLostCallback([&](ZHLN::Engine& recovered) -> void {
@@ -219,7 +219,7 @@ auto main(int argc, char* argv[]) -> int {
             "[Sample] Device-lost callback #{} (DeviceLostCount={}, subscribers={}). Re-uploading arena.", recoveries,
             recovered.GetRenderContext().GetDeviceLostCount(), recovered.DeviceLostCallbackCount()
         );
-        BuildArena(recovered, arena);
+        arena = BuildArena(recovered, arena);
     });
 
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");

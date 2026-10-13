@@ -372,15 +372,14 @@ struct SystemGraphTestSuite {
                 return std::unexpected(SystemGraphTestError::DeclarativeSignatureFailed);
             }
 
-            std::vector<ComponentAccess> writer, reader, multiple, wildcard, functor, lambda, member, nullary;
-            SystemSignature<&DeclarativeWriter>::PopulateAccessPattern(writer);
-            SystemSignature<&DeclarativeReader>::PopulateAccessPattern(reader);
-            SystemSignature<&MultipleQueries>::PopulateAccessPattern(multiple);
-            SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern(wildcard);
-            SystemSignature<ReadFunctor {}>::PopulateAccessPattern(functor);
-            SystemSignature<ReadLambda>::PopulateAccessPattern(lambda);
-            SystemSignature<&ReadStatic::Update>::PopulateAccessPattern(member);
-            SystemSignature<&NullarySystem>::PopulateAccessPattern(nullary);
+            const auto writer = SystemSignature<&DeclarativeWriter>::PopulateAccessPattern();
+            const auto reader = SystemSignature<&DeclarativeReader>::PopulateAccessPattern();
+            const auto multiple = SystemSignature<&MultipleQueries>::PopulateAccessPattern();
+            const auto wildcard = SystemSignature<&WildcardRegistrySystem>::PopulateAccessPattern();
+            const auto functor = SystemSignature<ReadFunctor {}>::PopulateAccessPattern();
+            const auto lambda = SystemSignature<ReadLambda>::PopulateAccessPattern();
+            const auto member = SystemSignature<&ReadStatic::Update>::PopulateAccessPattern();
+            const auto nullary = SystemSignature<&NullarySystem>::PopulateAccessPattern();
             const uint32_t idA = ComponentFamily::GetTypeID<TestCompA>();
             const uint32_t idB = ComponentFamily::GetTypeID<TestCompB>();
             if (writer.size() != 1 || writer[0].familyId != idA || writer[0].mode != Access::Write ||

@@ -21,6 +21,7 @@
 #include <Zahlen/Vertex.hpp>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -286,7 +287,7 @@ struct InteractiveSubmodel {
 // pass the entity lights the scene already gathered. Name-gate strengths only:
 // this layer has no VFS, so there is no .vmt / .vtf refinement here.
 [[nodiscard]] auto GatherEmissiveAreaLights(
-    const BSPMap& map, const ImportOptions& options, const std::vector<BspPointLight>& entityLights
+    const BSPMap& map, const ImportOptions& options, std::span<const BspPointLight> entityLights
 ) -> std::vector<BspPointLight>;
 
 // Faces + displacements -> per-material native streams; entities -> lights.

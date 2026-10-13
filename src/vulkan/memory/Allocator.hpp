@@ -8,6 +8,7 @@
 #endif
 
 #include <Zahlen/Threading/Mutex.hpp>
+#include <span>
 
 // VMA forward declarations. <vk_mem_alloc.h> is pulled in only by
 // Allocator.cpp and VmaImplementation.cpp; every other TU sees VMA as opaque
@@ -62,7 +63,7 @@ class DeletionQueue {
     void Drain() noexcept;
 
   private:
-    void CleanupQueue(std::vector<DeferredDeletionEntry>& queue) noexcept;
+    void CleanupQueue(std::span<const DeferredDeletionEntry> queue) noexcept;
 
     Allocator* _allocator = nullptr; // Must outlive the queue and its final drain.
     // Mutex is trivially default-constructible in release builds: a cold

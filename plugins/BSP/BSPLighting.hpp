@@ -39,6 +39,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -271,7 +272,7 @@ struct EmissiveMaterialProbe {
 // kEmissiveClusterCellInches cell), damps the ones that share a fixture with
 // an entity light, ranks by strength * area and truncates to kEmissiveMaxLights.
 [[nodiscard]] auto FinalizeEmissiveSurfaces(
-    std::vector<EmissiveSurface> surfaces, const std::vector<BspPointLight>& entityLights, float unitScale, uint32_t maxLights
+    std::span<const EmissiveSurface> surfaces, std::span<const BspPointLight> entityLights, float unitScale, uint32_t maxLights
 ) -> std::vector<EmissiveSurface>;
 
 // The area-light proxy for one emissive surface: a point light pushed just off
@@ -288,7 +289,7 @@ struct EmissiveMaterialProbe {
 // rules that fill it are here.
 
 [[nodiscard]] auto AuditLighting(
-    const std::vector<BspPointLight>& entityLights, const std::vector<EmissiveSurface>& emissive, const AmbientTerm& ambient,
+    std::span<const BspPointLight> entityLights, std::span<const EmissiveSurface> emissive, const AmbientTerm& ambient,
     const BSPMap& map
 ) -> LightingDiagnostics;
 

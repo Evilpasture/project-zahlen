@@ -8,11 +8,13 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include "helpers/BinaryWriter.hpp"
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -23,17 +25,7 @@ std::string GetPoorMansStacktrace() {
 
 namespace {
 
-template <typename T>
-void AppendBytes(std::vector<std::byte>& buf, const T& val) {
-    static_assert(std::is_trivially_copyable_v<T>);
-    const auto* ptr = reinterpret_cast<const std::byte*>(&val);
-    buf.insert(buf.end(), ptr, ptr + sizeof(T));
-}
-
-void AppendRawBytes(std::vector<std::byte>& buf, const void* data, size_t size) {
-    const auto* ptr = static_cast<const std::byte*>(data);
-    buf.insert(buf.end(), ptr, ptr + size);
-}
+using ZHLN::Test::BinaryWriter;
 
 // Builds a synthetic minimal .MDL buffer
 auto BuildSyntheticMDL(
@@ -43,7 +35,7 @@ auto BuildSyntheticMDL(
     std::initializer_list<std::string_view> textureNames,
     int32_t                                 numBodyParts = 1
 ) -> std::vector<std::byte> {
-    std::vector<std::byte> buf;
+    BinaryWriter buf;
     const std::span<const std::string_view> cdTexSpan  {cdTextures.begin(), cdTextures.size()};
     const std::span<const std::string_view> texNameSpan {textureNames.begin(), textureNames.size()};
 
@@ -80,7 +72,7 @@ auto BuildSyntheticMDL(
     for (size_t i = 0; i < cdTexSpan.size(); ++i) {
         const int32_t strOffset = static_cast<int32_t>(buf.size());
         std::memcpy(buf.data() + offsetTablePos + i * sizeof(int32_t), &strOffset, sizeof(int32_t));
-        AppendRawBytes(buf, cdTexSpan[i].data(), cdTexSpan[i].size());
+        buf.append(std::span<const char> {cdTexSpan[i].data(), cdTexSpan[i].size()});
         buf.push_back(std::byte {0});
         align4(buf);
     }
@@ -100,7 +92,7 @@ auto BuildSyntheticMDL(
         ZHLN::BSP::StudioTexture tex {};
         tex.sznameindex = relOffset;
         std::memcpy(buf.data() + texStructPos, &tex, sizeof(tex));
-        AppendRawBytes(buf, texNameSpan[i].data(), texNameSpan[i].size());
+        buf.append(std::span<const char> {texNameSpan[i].data(), texNameSpan[i].size()});
         buf.push_back(std::byte {0});
         align4(buf);
     }
@@ -118,7 +110,7 @@ auto BuildSyntheticMDL(
         bodyPart.nummodels = 1;
         bodyPart.base = 1;
         bodyPart.modelindex = sizeof(ZHLN::BSP::StudioBodyPart);
-        AppendBytes(buf, bodyPart);
+        buf.append_object(bodyPart);
 
         // One model
         align4(buf);
@@ -129,7 +121,7 @@ auto BuildSyntheticMDL(
         model.meshindex = sizeof(ZHLN::BSP::StudioModel);
         model.numvertices = 3;
         model.vertexindex = 0;
-        AppendBytes(buf, model);
+        buf.append_object(model);
 
         // One mesh
         align4(buf);
@@ -138,14 +130,14 @@ auto BuildSyntheticMDL(
         mesh.modelindex = -static_cast<int32_t>(sizeof(ZHLN::BSP::StudioModel));
         mesh.numvertices = 3;
         mesh.vertexoffset = 0;
-        AppendBytes(buf, mesh);
+        buf.append_object(mesh);
     }
 
     align4(buf);
     hdr.length = static_cast<int32_t>(buf.size());
     std::memcpy(buf.data(), &hdr, sizeof(hdr));
 
-    return buf;
+    return std::move(buf).take();
 }
 
 // Builds a synthetic minimal .VVD buffer
@@ -154,7 +146,7 @@ auto BuildSyntheticVVD(
     std::span<const ZHLN::BSP::StudioVertex>   vertices,
     std::span<const ZHLN::BSP::VvdFixup>       fixups = {}
 ) -> std::vector<std::byte> {
-    std::vector<std::byte> buf;
+    BinaryWriter buf;
 
     ZHLN::BSP::VvdHeader hdr {};
     hdr.id = ZHLN::BSP::kVvdMagic;
@@ -169,7 +161,7 @@ auto BuildSyntheticVVD(
         hdr.numFixups = static_cast<int32_t>(fixups.size());
         hdr.fixupTableStart = static_cast<int32_t>(buf.size());
         for (const auto& f : fixups) {
-            AppendBytes(buf, f);
+            buf.append_object(f);
         }
     } else {
         hdr.numFixups = 0;
@@ -178,13 +170,13 @@ auto BuildSyntheticVVD(
 
     hdr.vertexDataStart = static_cast<int32_t>(buf.size());
     for (const auto& v : vertices) {
-        AppendBytes(buf, v);
+        buf.append_object(v);
     }
 
     hdr.tangentDataStart = 0;
 
     std::memcpy(buf.data(), &hdr, sizeof(hdr));
-    return buf;
+    return std::move(buf).take();
 }
 
 // Builds a synthetic minimal .VTX buffer (LOD 0, 1 bodypart, 1 model, 1 mesh, 1 stripgroup)
@@ -194,7 +186,7 @@ auto BuildSyntheticVTX(
     std::span<const uint16_t>               indices,
     bool                                    isTriStrip = false
 ) -> std::vector<std::byte> {
-    std::vector<std::byte> buf;
+    BinaryWriter buf;
 
     ZHLN::BSP::VtxHeader hdr {};
     hdr.version = ZHLN::BSP::kVtxVersion;
@@ -215,14 +207,14 @@ auto BuildSyntheticVTX(
     ZHLN::BSP::VtxBodyPart bp {};
     bp.numModels = 1;
     bp.modelOffset = sizeof(ZHLN::BSP::VtxBodyPart);
-    AppendBytes(buf, bp);
+    buf.append_object(bp);
 
     // Model
     const size_t modelStart = buf.size();
     ZHLN::BSP::VtxModel model {};
     model.numLODs = 1;
     model.lodOffset = sizeof(ZHLN::BSP::VtxModel);
-    AppendBytes(buf, model);
+    buf.append_object(model);
 
     // Model LOD 0
     const size_t lodStart = buf.size();
@@ -230,7 +222,7 @@ auto BuildSyntheticVTX(
     lod.numMeshes = 1;
     lod.meshOffset = sizeof(ZHLN::BSP::VtxModelLOD);
     lod.switchPoint = 0.0f;
-    AppendBytes(buf, lod);
+    buf.append_object(lod);
 
     // Mesh
     const size_t meshStart = buf.size();
@@ -238,7 +230,7 @@ auto BuildSyntheticVTX(
     mesh.numStripGroups = 1;
     mesh.stripGroupHeaderOffset = sizeof(ZHLN::BSP::VtxMesh);
     mesh.flags = 0;
-    AppendBytes(buf, mesh);
+    buf.append_object(mesh);
 
     // StripGroup
     const size_t sgStart = buf.size();
@@ -249,7 +241,7 @@ auto BuildSyntheticVTX(
     sg.flags = 0;
 
     // We will fill offsets after sizing
-    AppendBytes(buf, sg);
+    buf.append_object(sg);
 
     // Vertices
     while (buf.size() % 4 != 0) {
@@ -257,7 +249,7 @@ auto BuildSyntheticVTX(
     }
     const size_t vertOfs = buf.size() - sgStart;
     for (const auto& v : vertices) {
-        AppendBytes(buf, v);
+        buf.append_object(v);
     }
 
     // Indices
@@ -266,7 +258,7 @@ auto BuildSyntheticVTX(
     }
     const size_t idxOfs = buf.size() - sgStart;
     for (uint16_t idx : indices) {
-        AppendBytes(buf, idx);
+        buf.append_object(idx);
     }
 
     // Strips
@@ -281,7 +273,7 @@ auto BuildSyntheticVTX(
     strip.vertOffset = 0;
     strip.numBones = 1;
     strip.flags = isTriStrip ? 0x02 : 0x01;
-    AppendBytes(buf, strip);
+    buf.append_object(strip);
 
     // Patch offsets in StripGroup
     sg.vertOffset = static_cast<int32_t>(vertOfs);
@@ -290,12 +282,12 @@ auto BuildSyntheticVTX(
     std::memcpy(buf.data() + sgStart, &sg, sizeof(sg));
 
     std::memcpy(buf.data(), &hdr, sizeof(hdr));
-    return buf;
+    return std::move(buf).take();
 }
 
 // Builds a synthetic minimal .PHY buffer
 auto BuildSyntheticPHY(int32_t checksum, int32_t solidCount = 1) -> std::vector<std::byte> {
-    std::vector<std::byte> buf;
+    BinaryWriter buf;
 
     ZHLN::BSP::PhyHeader hdr {};
     hdr.size = sizeof(ZHLN::BSP::PhyHeader);
@@ -312,11 +304,11 @@ auto BuildSyntheticPHY(int32_t checksum, int32_t solidCount = 1) -> std::vector<
         surf.version = 0x0100;
         surf.modelType = 0;
         surf.surfaceSize = 0;
-        AppendBytes(buf, surf);
+        buf.append_object(surf);
     }
 
     std::memcpy(buf.data(), &hdr, sizeof(hdr));
-    return buf;
+    return std::move(buf).take();
 }
 
 } // namespace

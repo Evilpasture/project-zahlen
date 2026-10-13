@@ -11,11 +11,14 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
+#include "helpers/BinaryWriter.hpp"
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ZHLN {
@@ -26,18 +29,7 @@ std::string GetPoorMansStacktrace() {
 
 namespace {
 
-// Helper to write raw binary data into a byte vector
-template <typename T>
-void AppendBytes(std::vector<std::byte>& buf, const T& val) {
-    static_assert(std::is_trivially_copyable_v<T>);
-    const auto* ptr = reinterpret_cast<const std::byte*>(&val);
-    buf.insert(buf.end(), ptr, ptr + sizeof(T));
-}
-
-void AppendRawBytes(std::vector<std::byte>& buf, const void* data, size_t size) {
-    const auto* ptr = static_cast<const std::byte*>(data);
-    buf.insert(buf.end(), ptr, ptr + size);
-}
+using ZHLN::Test::BinaryWriter;
 
 // Builds a synthetic BSP file buffer containing a LUMP_GAMELUMP with static props
 auto BuildSyntheticBspWithStaticProps(
@@ -47,7 +39,7 @@ auto BuildSyntheticBspWithStaticProps(
     std::span<const std::byte>      propDataBytes,
     int32_t                         propCount
 ) -> std::vector<std::byte> {
-    std::vector<std::byte> fileBytes;
+    BinaryWriter fileBytes;
 
     // 1. BSP Header
     ZHLN::BSP::BspHeader header {};
@@ -59,33 +51,33 @@ auto BuildSyntheticBspWithStaticProps(
     fileBytes.resize(headerSize, std::byte {0});
 
     // 2. Build sprp lump payload
-    std::vector<std::byte> sprpPayload;
+    BinaryWriter sprpPayload;
 
     // Dictionary
     const int32_t dictCount = static_cast<int32_t>(dictModels.size());
-    AppendBytes(sprpPayload, dictCount);
+    sprpPayload.append_object(dictCount);
     for (const auto& model : dictModels) {
         char nameBuf[128] {};
         std::strncpy(nameBuf, model.c_str(), sizeof(nameBuf) - 1);
-        AppendRawBytes(sprpPayload, nameBuf, sizeof(nameBuf));
+        sprpPayload.append(std::span<const char> {nameBuf});
     }
 
     // Leaf indices
     const int32_t leafCount = static_cast<int32_t>(leafIndices.size());
-    AppendBytes(sprpPayload, leafCount);
+    sprpPayload.append_object(leafCount);
     for (uint16_t leaf : leafIndices) {
-        AppendBytes(sprpPayload, leaf);
+        sprpPayload.append_object(leaf);
     }
 
     // Static props
-    AppendBytes(sprpPayload, propCount);
-    AppendRawBytes(sprpPayload, propDataBytes.data(), propDataBytes.size());
+    sprpPayload.append_object(propCount);
+    sprpPayload.append(propDataBytes);
 
     // 3. Game Lump Directory
     // Directory contains 2 entries: an arbitrary game lump, then 'sprp'
     const int32_t lumpCount = 2;
-    std::vector<std::byte> gameLumpDir;
-    AppendBytes(gameLumpDir, lumpCount);
+    BinaryWriter gameLumpDir;
+    gameLumpDir.append_object(lumpCount);
 
     const size_t gameLumpDirOffset = fileBytes.size();
     const size_t gameLumpDirLen = sizeof(int32_t) + lumpCount * sizeof(ZHLN::BSP::DGameLump);
@@ -100,7 +92,7 @@ auto BuildSyntheticBspWithStaticProps(
     dummyLump.version = 1;
     dummyLump.fileofs = 0;
     dummyLump.filelen = 0;
-    AppendBytes(gameLumpDir, dummyLump);
+    gameLumpDir.append_object(dummyLump);
 
     // Entry 1: 'sprp' lump
     ZHLN::BSP::DGameLump sprpLump {};
@@ -109,7 +101,7 @@ auto BuildSyntheticBspWithStaticProps(
     sprpLump.version = sprpVersion;
     sprpLump.fileofs = static_cast<int32_t>(sprpDataOffset);
     sprpLump.filelen = static_cast<int32_t>(sprpDataLen);
-    AppendBytes(gameLumpDir, sprpLump);
+    gameLumpDir.append_object(sprpLump);
 
     // Write Game Lump header into BSP Header
     header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::GameLump)].fileofs = static_cast<int32_t>(gameLumpDirOffset);
@@ -120,10 +112,10 @@ auto BuildSyntheticBspWithStaticProps(
     std::memcpy(fileBytes.data(), &header, sizeof(header));
 
     // Append game lump dir and sprp payload
-    AppendRawBytes(fileBytes, gameLumpDir.data(), gameLumpDir.size());
-    AppendRawBytes(fileBytes, sprpPayload.data(), sprpPayload.size());
+    fileBytes.append(gameLumpDir.bytes());
+    fileBytes.append(sprpPayload.bytes());
 
-    return fileBytes;
+    return std::move(fileBytes).take();
 }
 
 struct BSPStaticPropsTestSuite {
@@ -160,7 +152,7 @@ struct BSPStaticPropsTestSuite {
             // propType: 0
             // firstLeaf: 0, leafCount: 1, solid: 6, flags: 1, skin: 2
             // fadeMin: 100.0, fadeMax: 1000.0, lightingOrigin: (10.0, 20.0, 30.0)
-            std::vector<std::byte> propBytes;
+            BinaryWriter propBytes;
             {
                 const float origin[3] = {100.0f, 200.0f, 50.0f};
                 const float angles[3] = {0.0f, 90.0f, 0.0f};
@@ -174,17 +166,17 @@ struct BSPStaticPropsTestSuite {
                 const float    fadeMax = 1000.0f;
                 const float    lightingOrigin[3] = {10.0f, 20.0f, 30.0f};
 
-                AppendRawBytes(propBytes, origin, sizeof(origin));
-                AppendRawBytes(propBytes, angles, sizeof(angles));
-                AppendBytes(propBytes, propType);
-                AppendBytes(propBytes, firstLeaf);
-                AppendBytes(propBytes, leafCount);
-                AppendBytes(propBytes, solid);
-                AppendBytes(propBytes, flags);
-                AppendBytes(propBytes, skin);
-                AppendBytes(propBytes, fadeMin);
-                AppendBytes(propBytes, fadeMax);
-                AppendRawBytes(propBytes, lightingOrigin, sizeof(lightingOrigin));
+                propBytes.append(std::span<const float> {origin});
+                propBytes.append(std::span<const float> {angles});
+                propBytes.append_object(propType);
+                propBytes.append_object(firstLeaf);
+                propBytes.append_object(leafCount);
+                propBytes.append_object(solid);
+                propBytes.append_object(flags);
+                propBytes.append_object(skin);
+                propBytes.append_object(fadeMin);
+                propBytes.append_object(fadeMax);
+                propBytes.append(std::span<const float> {lightingOrigin});
             }
             // Prop 1:
             {
@@ -200,20 +192,20 @@ struct BSPStaticPropsTestSuite {
                 const float    fadeMax = 500.0f;
                 const float    lightingOrigin[3] = {0.0f, 0.0f, 0.0f};
 
-                AppendRawBytes(propBytes, origin, sizeof(origin));
-                AppendRawBytes(propBytes, angles, sizeof(angles));
-                AppendBytes(propBytes, propType);
-                AppendBytes(propBytes, firstLeaf);
-                AppendBytes(propBytes, leafCount);
-                AppendBytes(propBytes, solid);
-                AppendBytes(propBytes, flags);
-                AppendBytes(propBytes, skin);
-                AppendBytes(propBytes, fadeMin);
-                AppendBytes(propBytes, fadeMax);
-                AppendRawBytes(propBytes, lightingOrigin, sizeof(lightingOrigin));
+                propBytes.append(std::span<const float> {origin});
+                propBytes.append(std::span<const float> {angles});
+                propBytes.append_object(propType);
+                propBytes.append_object(firstLeaf);
+                propBytes.append_object(leafCount);
+                propBytes.append_object(solid);
+                propBytes.append_object(flags);
+                propBytes.append_object(skin);
+                propBytes.append_object(fadeMin);
+                propBytes.append_object(fadeMax);
+                propBytes.append(std::span<const float> {lightingOrigin});
             }
 
-            const auto bsp = BuildSyntheticBspWithStaticProps(4, dict, leafs, propBytes, 2);
+            const auto bsp = BuildSyntheticBspWithStaticProps(4, dict, leafs, propBytes.bytes(), 2);
             const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
@@ -257,7 +249,7 @@ struct BSPStaticPropsTestSuite {
             // forcedFadeScale (4 bytes, offset 56)
             // min/max CPU/GPU levels (4 bytes, offset 60)
             // diffuseModulation Color32 (4 bytes, offset 64)
-            std::vector<std::byte> propBytes;
+            BinaryWriter propBytes;
             {
                 const float origin[3] = {0.0f, 0.0f, 120.0f};
                 const float angles[3] = {0.0f, 0.0f, 0.0f};
@@ -274,23 +266,23 @@ struct BSPStaticPropsTestSuite {
                 const uint8_t  levels[4] = {1, 2, 3, 4};
                 const uint8_t  modulation[4] = {255, 128, 64, 255}; // Orange tint
 
-                AppendRawBytes(propBytes, origin, sizeof(origin));
-                AppendRawBytes(propBytes, angles, sizeof(angles));
-                AppendBytes(propBytes, propType);
-                AppendBytes(propBytes, firstLeaf);
-                AppendBytes(propBytes, leafCount);
-                AppendBytes(propBytes, solid);
-                AppendBytes(propBytes, flags);
-                AppendBytes(propBytes, skin);
-                AppendBytes(propBytes, fadeMin);
-                AppendBytes(propBytes, fadeMax);
-                AppendRawBytes(propBytes, lightingOrigin, sizeof(lightingOrigin));
-                AppendBytes(propBytes, forcedFadeScale);
-                AppendRawBytes(propBytes, levels, sizeof(levels));
-                AppendRawBytes(propBytes, modulation, sizeof(modulation));
+                propBytes.append(std::span<const float> {origin});
+                propBytes.append(std::span<const float> {angles});
+                propBytes.append_object(propType);
+                propBytes.append_object(firstLeaf);
+                propBytes.append_object(leafCount);
+                propBytes.append_object(solid);
+                propBytes.append_object(flags);
+                propBytes.append_object(skin);
+                propBytes.append_object(fadeMin);
+                propBytes.append_object(fadeMax);
+                propBytes.append(std::span<const float> {lightingOrigin});
+                propBytes.append_object(forcedFadeScale);
+                propBytes.append(std::span<const uint8_t> {levels});
+                propBytes.append(std::span<const uint8_t> {modulation});
             }
 
-            const auto bsp = BuildSyntheticBspWithStaticProps(8, dict, leafs, propBytes, 1);
+            const auto bsp = BuildSyntheticBspWithStaticProps(8, dict, leafs, propBytes.bytes(), 1);
             const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
@@ -316,7 +308,7 @@ struct BSPStaticPropsTestSuite {
             // v8 base (68 bytes)
             // disableX360/flags (8 bytes, offset 68)
             // uniformScale (4 bytes, offset 76)
-            std::vector<std::byte> propBytes;
+            BinaryWriter propBytes;
             {
                 const float origin[3] = {200.0f, -100.0f, 0.0f};
                 const float angles[3] = {0.0f, 45.0f, 0.0f};
@@ -335,25 +327,25 @@ struct BSPStaticPropsTestSuite {
                 const uint32_t extraFlags[2] = {0, 0};
                 const float    uniformScale = 3.5f;
 
-                AppendRawBytes(propBytes, origin, sizeof(origin));
-                AppendRawBytes(propBytes, angles, sizeof(angles));
-                AppendBytes(propBytes, propType);
-                AppendBytes(propBytes, firstLeaf);
-                AppendBytes(propBytes, leafCount);
-                AppendBytes(propBytes, solid);
-                AppendBytes(propBytes, flags);
-                AppendBytes(propBytes, skin);
-                AppendBytes(propBytes, fadeMin);
-                AppendBytes(propBytes, fadeMax);
-                AppendRawBytes(propBytes, lightingOrigin, sizeof(lightingOrigin));
-                AppendBytes(propBytes, forcedFadeScale);
-                AppendRawBytes(propBytes, levels, sizeof(levels));
-                AppendRawBytes(propBytes, modulation, sizeof(modulation));
-                AppendRawBytes(propBytes, extraFlags, sizeof(extraFlags));
-                AppendBytes(propBytes, uniformScale);
+                propBytes.append(std::span<const float> {origin});
+                propBytes.append(std::span<const float> {angles});
+                propBytes.append_object(propType);
+                propBytes.append_object(firstLeaf);
+                propBytes.append_object(leafCount);
+                propBytes.append_object(solid);
+                propBytes.append_object(flags);
+                propBytes.append_object(skin);
+                propBytes.append_object(fadeMin);
+                propBytes.append_object(fadeMax);
+                propBytes.append(std::span<const float> {lightingOrigin});
+                propBytes.append_object(forcedFadeScale);
+                propBytes.append(std::span<const uint8_t> {levels});
+                propBytes.append(std::span<const uint8_t> {modulation});
+                propBytes.append(std::span<const uint32_t> {extraFlags});
+                propBytes.append_object(uniformScale);
             }
 
-            const auto bsp = BuildSyntheticBspWithStaticProps(11, dict, leafs, propBytes, 1);
+            const auto bsp = BuildSyntheticBspWithStaticProps(11, dict, leafs, propBytes.bytes(), 1);
             const auto mapExp = ZHLN::BSP::ParseBsp(bsp);
             ZHLN::Test::ExpectTrue(mapExp.has_value());
 
@@ -468,7 +460,7 @@ struct BSPStaticPropsTestSuite {
         }
 
         auto hdr_faces_lump_priority() -> std::expected<void, std::string> {
-            std::vector<std::byte> fileBytes;
+            BinaryWriter fileBytes;
             fileBytes.resize(sizeof(ZHLN::BSP::BspHeader), std::byte {0});
 
             ZHLN::BSP::BspHeader header {};
@@ -479,7 +471,7 @@ struct BSPStaticPropsTestSuite {
             ZHLN::BSP::DFace standardFace {};
             standardFace.texinfo = 10;
             const size_t stdFaceOffset = fileBytes.size();
-            AppendBytes(fileBytes, standardFace);
+            fileBytes.append_object(standardFace);
             const size_t stdFaceLen = sizeof(ZHLN::BSP::DFace);
 
             // Two faces in LUMP_FACES_HDR
@@ -488,8 +480,8 @@ struct BSPStaticPropsTestSuite {
             ZHLN::BSP::DFace hdrFace2 {};
             hdrFace2.texinfo = 30;
             const size_t hdrFaceOffset = fileBytes.size();
-            AppendBytes(fileBytes, hdrFace1);
-            AppendBytes(fileBytes, hdrFace2);
+            fileBytes.append_object(hdrFace1);
+            fileBytes.append_object(hdrFace2);
             const size_t hdrFaceLen = sizeof(ZHLN::BSP::DFace) * 2;
 
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::Faces)].fileofs = static_cast<int32_t>(stdFaceOffset);
@@ -499,7 +491,7 @@ struct BSPStaticPropsTestSuite {
 
             std::memcpy(fileBytes.data(), &header, sizeof(header));
 
-            const auto mapExp = ZHLN::BSP::ParseBsp(fileBytes);
+            const auto mapExp = ZHLN::BSP::ParseBsp(fileBytes.bytes());
             ZHLN::Test::ExpectTrue(mapExp.has_value());
             ZHLN::Test::ExpectEq(mapExp->faces.size(), size_t {2});
             ZHLN::Test::ExpectEq(mapExp->faces[0].texinfo, int16_t {20});
@@ -509,7 +501,7 @@ struct BSPStaticPropsTestSuite {
             header.lumps[static_cast<size_t>(ZHLN::BSP::Lump::FacesHDR)].filelen = 0;
             std::memcpy(fileBytes.data(), &header, sizeof(header));
 
-            const auto fallbackMapExp = ZHLN::BSP::ParseBsp(fileBytes);
+            const auto fallbackMapExp = ZHLN::BSP::ParseBsp(fileBytes.bytes());
             ZHLN::Test::ExpectTrue(fallbackMapExp.has_value());
             ZHLN::Test::ExpectEq(fallbackMapExp->faces.size(), size_t {1});
             ZHLN::Test::ExpectEq(fallbackMapExp->faces[0].texinfo, int16_t {10});

@@ -644,7 +644,7 @@ class SystemGraph: public SystemGraphCore {
         SystemInfo info;
         info.name        = Signature::NameCString();
         info.update_func = &CarrierThunk<SystemFn>;
-        Signature::PopulateAccessPattern(info.access_pattern);
+        info.access_pattern = Signature::PopulateAccessPattern();
         // The signature's own description of the state it keeps between frames;
         // the node allocates the block from it. A system with no Local<T> gets an
         // empty layout and no allocation.

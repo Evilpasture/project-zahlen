@@ -22,6 +22,7 @@
 #include <TestsFramework.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Log.hpp>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -501,7 +502,8 @@ struct BSPLightingTestSuite {
         farSurface.normal           = JPH::Vec3(0.0f, 1.0f, 0.0f);
         in.push_back(farSurface);
 
-        const std::vector<EmissiveSurface> out = ZHLN::BSP::FinalizeEmissiveSurfaces(in, {entity}, 1.0f / 39.37f, 64u);
+        const std::array<ZHLN::BSP::BspPointLight, 1> entityLights {entity};
+        const std::vector<EmissiveSurface> out = ZHLN::BSP::FinalizeEmissiveSurfaces(in, entityLights, 1.0f / 39.37f, 64u);
         if (!ZHLN::Test::ExpectEq(out.size(), 2u)) {
             return Fail();
         }

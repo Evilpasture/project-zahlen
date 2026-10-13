@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <utility>
 
 namespace ZHLN::ALife {
 
@@ -166,8 +167,7 @@ void Simulator::Update(Engine& engine, float dt, JPH::RVec3Arg observer_pos) {
                     continue;
                 }
 
-                neighbors.clear();
-                _grid.Query(reg, comp.position, 50.0f, neighbors);
+                neighbors = _grid.Query(reg, comp.position, 50.0f, std::move(neighbors));
 
                 for (Entity neighbor: neighbors) {
                     if (neighbor != e) {
