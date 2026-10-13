@@ -33,8 +33,6 @@ struct ComputeDispatchDesc {
     uint32_t                threadCountZ    = 0;
     VkPipeline              pipeline        = VK_NULL_HANDLE;
     bool                    bind            = false;
-    const Context*          ctx             = nullptr;
-    VkPipelineLayout        legacyLayout    = VK_NULL_HANDLE;
     uint32_t                heapIndexOffset = 0;
     uint32_t                heapIndex       = 0;
 };
@@ -50,15 +48,9 @@ inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* 
     }
     if constexpr (!std::is_same_v<PushT, std::monostate>) {
         ZHLN::Assert(pushData != nullptr);
-        if (desc.legacyLayout != VK_NULL_HANDLE) {
-            Push(desc.cmd, desc.legacyLayout, VK_SHADER_STAGE_COMPUTE_BIT, *pushData);
-        } else {
-            ZHLN::Assert(desc.ctx != nullptr);
-            PushData(desc.cmd, 0, *pushData);
-        }
+        PushData(desc.cmd, 0, *pushData);
     }
     if (desc.heapIndexOffset > 0) {
-        ZHLN::Assert(desc.ctx != nullptr);
         PushHeapIndex(desc.cmd, desc.heapIndexOffset, desc.heapIndex);
     }
     const auto workgroupCount = [](const uint32_t extent, const uint32_t localSize) noexcept {
@@ -76,7 +68,6 @@ inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* 
 
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 struct ComputePass {
-    PipelineLayout          pipelineLayout;
     Pipeline                pipeline;
     std::vector<Pipeline>   pipelines;
     std::array<uint32_t, 3> threadGroupSize {};
@@ -121,7 +112,6 @@ struct ComputePass {
         if (!ReflectDispatchLayout(shader)) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
-        pipelineLayout      = {};
         heapIndexPushOffset = indexPushOffset;
 
         auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(mapping).Cache(cache).Build(device);
@@ -143,7 +133,6 @@ struct ComputePass {
         if (!ReflectDispatchLayout(shader)) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
-        pipelineLayout      = {};
         heapIndexPushOffset = indexPushOffset;
         pipelines.clear();
         pipelines.reserve(specInfos.size());
@@ -187,18 +176,6 @@ struct ComputePass {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[variantIdx].Get());
     }
 
-    template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void PushConstants(VkCommandBuffer cmd, const T& pushData) const noexcept {
-        static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushConstants<Shaders::Modules::X>(...)");
-        static_assert(
-            Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
-            "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-        );
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(pipelineLayout.Valid());
-        Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
-    }
-
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         -> TemplatedDetail::ComputeDispatchDesc {
         return {
@@ -230,26 +207,9 @@ struct ComputePass {
         vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
     }
 
-    template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void DispatchThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const T& pushData) const noexcept
-        requires(Domain == ComputeDomain::Dynamic)
-    {
-        static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: DispatchThreads<Shaders::Modules::X>(...)");
-        static_assert(
-            Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
-            "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-        );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(pipelineLayout.Valid());
-        auto desc          = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
-        desc.bind          = true;
-        desc.legacyLayout  = pipelineLayout.Get();
-        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
-    }
-
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapThreads(
-        const Context&  ctx,
+        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         uint32_t        threadCountX,
         uint32_t        threadCountY,
@@ -267,24 +227,22 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset == 0);
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
-        desc.ctx  = &ctx;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
+    void DispatchHeapThreads([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset == 0);
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
-        desc.ctx  = &ctx;
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapIndexedThreads(
-        const Context&  ctx,
+        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         HeapBlockBase   blockBase,
         uint32_t        threadCountX,
@@ -303,14 +261,13 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset > 0);
         auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind            = true;
-        desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexedThreads(
-        const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        [[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
@@ -318,7 +275,6 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset > 0);
         auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind            = true;
-        desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc);
@@ -330,23 +286,6 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(MakeFixedDispatchDesc(cmd));
     }
 
-    template <ShaderProgram... Modules, GpuTriviallyCopyable T>
-    void Dispatch(VkCommandBuffer cmd, const T& pushData) const noexcept
-        requires(Domain == ComputeDomain::Fixed)
-    {
-        static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: Dispatch<Shaders::Modules::X>(...)");
-        static_assert(
-            Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
-            "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-        );
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(pipelineLayout.Valid());
-        auto desc         = MakeFixedDispatchDesc(cmd);
-        desc.bind         = true;
-        desc.legacyLayout = pipelineLayout.Get();
-        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
-    }
-
     void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
@@ -354,12 +293,11 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset == 0);
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
-        desc.ctx  = &ctx;
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData) const noexcept
+    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: DispatchHeap*<Shaders::Modules::X>(...)");
@@ -371,25 +309,23 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset == 0);
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
-        desc.ctx  = &ctx;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
+    void DispatchHeapIndexed([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset > 0);
         auto desc            = MakeFixedDispatchDesc(cmd);
         desc.bind            = true;
-        desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
+    void DispatchHeapIndexed([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this dispatch is recorded for: DispatchHeap*<Shaders::Modules::X>(...)");
@@ -401,7 +337,6 @@ struct ComputePass {
         ZHLN::Assert(heapIndexPushOffset > 0);
         auto desc            = MakeFixedDispatchDesc(cmd);
         desc.bind            = true;
-        desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
@@ -474,7 +409,7 @@ struct DoubleBufferedComputePass {
         return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
     }
 
-    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, HeapBlockBase blockBase)
+    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, HeapBlockBase blockBase)
         const noexcept -> TemplatedDetail::ComputeDispatchDesc {
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapBindings.indexPushOffset > 0);
@@ -486,23 +421,22 @@ struct DoubleBufferedComputePass {
             .threadCountZ    = threadCountZ,
             .pipeline        = pipeline.Get(),
             .bind            = true,
-            .ctx             = &ctx,
             .heapIndexOffset = heapBindings.indexPushOffset,
             .heapIndex       = blockBase.slot,
         };
     }
 
     void DispatchHeapThreads(
-        const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        [[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, blockBase));
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, blockBase));
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
     void DispatchHeapThreads(
-        const Context&  ctx,
+        [[maybe_unused]] const Context& ctx,
         VkCommandBuffer cmd,
         HeapBlockBase   blockBase,
         uint32_t        threadCountX,
@@ -516,20 +450,20 @@ struct DoubleBufferedComputePass {
             Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, blockBase), &pushData);
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, blockBase), &pushData);
     }
 
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
+    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         TemplatedDetail::RecordComputeDispatch(
-            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, blockBase)
+            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], blockBase)
         );
     }
 
     template <ShaderProgram... Modules, HeapPassPushPayload T>
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
+    void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         static_assert(
@@ -538,7 +472,7 @@ struct DoubleBufferedComputePass {
         );
         ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         TemplatedDetail::RecordComputeDispatch(
-            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, blockBase), &pushData
+            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], blockBase), &pushData
         );
     }
 };
@@ -561,7 +495,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
 
-    return ComputePipelineBuilder().Shader(shader).HeapPipeline().Cache(cache).Build(device).transform([&](Pipeline&& pipeline) {
+    return ComputePipelineBuilder().Shader(shader).Cache(cache).Build(device).transform([&](Pipeline&& pipeline) {
         pass.pipeline = std::move(pipeline);
         return std::move(pass);
     });

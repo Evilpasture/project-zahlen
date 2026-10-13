@@ -77,11 +77,8 @@ inline constexpr size_t k_material_flag_variant_count = 5;
 }
 
 struct PipelineCreateBindings {
-    // Pipeline layout and descriptor-heap mappings are device/runtime objects,
-    // so they remain explicit creation inputs rather than template parameters.
-    VkPipelineLayout layout         = VK_NULL_HANDLE;
-    bool             descriptorHeap = false;
-
+    // Descriptor-heap mapping tables are device/runtime objects, so they remain
+    // explicit creation inputs rather than template parameters.
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vertexMapping   = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* fragmentMapping = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* computeMapping  = nullptr;
@@ -389,16 +386,10 @@ struct ComputePipeline {
         if (context.Device() == VK_NULL_HANDLE) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
-        if (bindings.layout == VK_NULL_HANDLE && !bindings.descriptorHeap) {
-            return std::unexpected(PipelineBuilderError::MissingLayout);
-        }
-
         const ComputePipelineConfig config {
             .shader         = shader,
-            .layout         = bindings.layout,
             .cache          = cache,
             .specialization = bindings.specialization,
-            .descriptorHeap = bindings.descriptorHeap,
             .mapping        = bindings.computeMapping,
         };
         auto pipeline = CreateComputePipeline(context.Device(), config);
@@ -435,7 +426,7 @@ struct GraphicsPipeline {
     }
 
     // The short form supports contracts that provide their own runtime binding
-    // context; otherwise callers with device-owned layouts/heaps use the overload
+    // context; otherwise callers with device-owned heap mappings use the overload
     // above.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(const Context& context, VkPipelineCache cache = VK_NULL_HANDLE) noexcept -> std::expected<Pipeline, ErrorCode> {
@@ -460,15 +451,9 @@ struct GraphicsPipeline {
         if (!stages.Valid() || stages.IsMeshPipeline() != ShaderModule::is_mesh_pipeline) {
             return std::unexpected(PipelineBuilderError::MissingShaders);
         }
-        if (bindings.layout == VK_NULL_HANDLE && !bindings.descriptorHeap) {
-            return std::unexpected(PipelineBuilderError::MissingLayout);
-        }
-
         const PipelineConfig config {
             .stages          = stages,
-            .layout          = bindings.layout,
             .pipelineCache   = cache,
-            .descriptorHeap  = bindings.descriptorHeap,
             .vsMapping       = bindings.vertexMapping,
             .psMapping       = bindings.fragmentMapping,
             .colorFormats    = {Attachments::color_formats.begin(), Attachments::color_formats.end()},

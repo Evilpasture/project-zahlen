@@ -150,20 +150,17 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         if (shadowDraw.instanceData.meshletCount == 0) {
                             passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
-                                 .heap          = true,
                                  .vertexCount   = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].vertexCount,
                                  .instanceCount = 1,
                                  .firstVertex   = 0,
                                  .firstInstance = instanceIdx},
-                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1},
-                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                             );
                             continue;
                         }
 
                         passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
-                             .heap        = true,
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
                              .groupCountZ = 1},
@@ -173,12 +170,10 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 } else if (csmDrawCount > 0) {
                     passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
-                         .heap           = true,
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
                          .drawCount      = csmDrawCount},
-                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1},
-                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}
                     );
                 }
 
@@ -259,11 +254,10 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         const ShadowTilePush push {tile.viewProj};
                         passCtx.encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
                             {.pipeline       = ctx.shadows.AtlasPipeline(),
-                             .heap           = true,
                              .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kFirstAtlasSlot + p)),
                              .drawCount      = drawCount},
-                            push, VK_SHADER_STAGE_VERTEX_BIT
+                            push
                         );
                     }
                 }

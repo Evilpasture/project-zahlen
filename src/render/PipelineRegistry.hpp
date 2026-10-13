@@ -136,7 +136,6 @@ class PipelineRegistry {
 
         RegisterShaderModules<ShaderModule>();
         const Vk::PipelineCreateBindings bindings {
-            .descriptorHeap  = true,
             .vertexMapping   = &_heapMappings.info,
             .fragmentMapping = &_heapMappings.info,
         };

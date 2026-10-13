@@ -47,7 +47,7 @@ namespace {
 } // namespace
 
 auto CreateGraphicsPipeline(const VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode> {
-    if (device == VK_NULL_HANDLE || !config.stages || config.colorFormats.size() > UINT32_MAX || (config.layout == VK_NULL_HANDLE && !config.descriptorHeap)) {
+    if (device == VK_NULL_HANDLE || !config.stages || config.colorFormats.size() > UINT32_MAX) {
         return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
@@ -78,7 +78,7 @@ auto CreateGraphicsPipeline(const VkDevice device, const PipelineConfig& config)
 
         module_infos[stage_count] = VkShaderModuleCreateInfo {
             .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            .pNext    = config.descriptorHeap ? mapping : nullptr,
+            .pNext    = mapping,
             .codeSize = shader.size,
             .pCode    = shader.code,
         };
@@ -186,7 +186,7 @@ auto CreateGraphicsPipeline(const VkDevice device, const PipelineConfig& config)
     };
     const VkGraphicsPipelineCreateInfo pipeline_info {
         .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext               = config.descriptorHeap ? static_cast<const void*>(&heap_flags) : static_cast<const void*>(&rendering_info),
+        .pNext               = &heap_flags,
         .stageCount          = stage_count,
         .pStages             = stage_infos.data(),
         .pVertexInputState   = mesh_pipeline ? nullptr : &vertex_input,
@@ -197,7 +197,7 @@ auto CreateGraphicsPipeline(const VkDevice device, const PipelineConfig& config)
         .pDepthStencilState  = &depth_stencil,
         .pColorBlendState    = &color_blend,
         .pDynamicState       = &dynamic_state,
-        .layout              = config.descriptorHeap ? VK_NULL_HANDLE : config.layout,
+        .layout              = VK_NULL_HANDLE,
         .renderPass          = VK_NULL_HANDLE,
         .subpass             = 0,
         .basePipelineHandle  = VK_NULL_HANDLE,
@@ -213,7 +213,7 @@ auto CreateGraphicsPipeline(const VkDevice device, const PipelineConfig& config)
 }
 
 auto CreateComputePipeline(const VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode> {
-    if (device == VK_NULL_HANDLE || !ValidShader(config.shader) || (config.layout == VK_NULL_HANDLE && !config.descriptorHeap)) {
+    if (device == VK_NULL_HANDLE || !ValidShader(config.shader)) {
         return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
     }
 
@@ -221,7 +221,7 @@ auto CreateComputePipeline(const VkDevice device, const ComputePipelineConfig& c
     const char*                    entry_point = ResolveComputeEntryPoint(config.shader, entry_name);
     const VkShaderModuleCreateInfo module_info {
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .pNext    = config.descriptorHeap ? config.mapping : nullptr,
+        .pNext    = config.mapping,
         .codeSize = config.shader.size,
         .pCode    = config.shader.code,
     };
@@ -239,9 +239,9 @@ auto CreateComputePipeline(const VkDevice device, const ComputePipelineConfig& c
     };
     const VkComputePipelineCreateInfo pipeline_info {
         .sType              = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        .pNext              = config.descriptorHeap ? static_cast<const void*>(&heap_flags) : nullptr,
+        .pNext              = &heap_flags,
         .stage              = stage_info,
-        .layout             = config.descriptorHeap ? VK_NULL_HANDLE : config.layout,
+        .layout             = VK_NULL_HANDLE,
         .basePipelineHandle = VK_NULL_HANDLE,
         .basePipelineIndex  = -1,
     };
@@ -264,11 +264,6 @@ auto ComputePipelineBuilder::Shader(const ShaderDesc& desc) noexcept -> ComputeP
     return *this;
 }
 
-auto ComputePipelineBuilder::Layout(const VkPipelineLayout layout) noexcept -> ComputePipelineBuilder& {
-    _layout = layout;
-    return *this;
-}
-
 auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder& {
     _specialization_info = info;
     return *this;
@@ -280,13 +275,7 @@ auto ComputePipelineBuilder::Cache(const VkPipelineCache cache) noexcept -> Comp
 }
 
 auto ComputePipelineBuilder::HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder& {
-    _descriptor_heap = true;
-    _mapping         = mapping;
-    return *this;
-}
-
-auto ComputePipelineBuilder::HeapPipeline() noexcept -> ComputePipelineBuilder& {
-    _descriptor_heap = true;
+    _mapping = mapping;
     return *this;
 }
 
@@ -296,10 +285,8 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
     }
     const ComputePipelineConfig config {
         .shader         = _shader,
-        .layout         = _layout,
         .cache          = _cache,
         .specialization = _specialization_info,
-        .descriptorHeap = _descriptor_heap,
         .mapping        = _mapping,
     };
     auto pipeline = CreateComputePipeline(device, config);
@@ -317,36 +304,7 @@ auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Er
     if (_shader.size % sizeof(uint32_t) != 0) {
         return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
     }
-    if (_layout == VK_NULL_HANDLE && !_descriptor_heap) {
-        return std::unexpected(MissingLayout);
-    }
     return {};
-}
-
-PipelineLayoutBuilder::PipelineLayoutBuilder(const VkDevice device) noexcept: _device(device) {
-}
-
-auto PipelineLayoutBuilder::AddPushConstant(const VkShaderStageFlags stages, const uint32_t size, const uint32_t offset) noexcept -> PipelineLayoutBuilder& {
-    _pushConstants.push_back({.stageFlags = stages, .offset = offset, .size = size});
-    return *this;
-}
-
-auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ErrorCode> {
-    if (_device == VK_NULL_HANDLE) {
-        return std::unexpected(PipelineBuilderError::LayoutCreationFailed);
-    }
-    const VkPipelineLayoutCreateInfo info {
-        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount         = 0,
-        .pSetLayouts            = nullptr,
-        .pushConstantRangeCount = static_cast<uint32_t>(_pushConstants.size()),
-        .pPushConstantRanges    = _pushConstants.empty() ? nullptr : _pushConstants.data(),
-    };
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    if (vkCreatePipelineLayout(_device, &info, nullptr, &layout) != VK_SUCCESS) {
-        return std::unexpected(PipelineBuilderError::LayoutCreationFailed);
-    }
-    return PipelineLayout(_device, layout);
 }
 
 } // namespace ZHLN::Vk

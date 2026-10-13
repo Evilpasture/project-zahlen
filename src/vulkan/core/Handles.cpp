@@ -6,12 +6,6 @@
 
 namespace ZHLN::Vk {
 
-void DestroyPipelineLayout::operator()(const VkDevice device, const VkPipelineLayout handle) const noexcept {
-    if (vkDestroyPipelineLayout != nullptr) {
-        vkDestroyPipelineLayout(device, handle, nullptr);
-    }
-}
-
 void DestroyPipeline::operator()(const VkDevice device, const VkPipeline handle) const noexcept {
     if (vkDestroyPipeline != nullptr) {
         vkDestroyPipeline(device, handle, nullptr);

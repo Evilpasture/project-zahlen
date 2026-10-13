@@ -2,7 +2,7 @@
 
 Project Zahlen's scene binding model has moved from Vulkan descriptor sets to
 **descriptor heaps** (`VK_EXT_descriptor_heap`, ratified 2025). This document
-describes the new model, what was ported, and what remains on the legacy path.
+describes the heap-only backend and how the migration was completed.
 
 ---
 
@@ -42,20 +42,22 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
 * Device entry points are loaded through Volk once `Vk::Context` creates the
   logical device; the typed context exposes the queues and enabled capabilities.
 
-### Pipeline layouts are NULL for heap pipelines
+### Pipeline creation is heap-only
 
 `VkPipelineCreateFlags2CreateInfoKHR::flags` with
 `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` requires `layout` to be
-`VK_NULL_HANDLE` (not an empty layout). `Vk::PipelineBuilder` sets the required
-null layout in heap mode and rejects it for ordinary pipelines.
+`VK_NULL_HANDLE` (not an empty layout). Every engine pipeline is created in
+heap mode with a null layout. The pipeline builders do not accept or create
+traditional pipeline layouts, and `src/vulkan` has no descriptor-set or classic
+push-constant fallback path.
 
 ### State-model caveat
 
 Within a command buffer, heap/push-data commands and legacy
-descriptor-set/push-constant commands **invalidate each other**. Every ported
-pass therefore calls `RenderContext::Impl::BindHeapsAndPushFrame(cmd)` at the
-start of its segment (bind both heaps + push the per-frame device-address
-block). Legacy passes are ordered so their invalidations are harmless.
+descriptor-set/push-constant commands **invalidate each other**. The renderer
+now records only heap/push-data commands; every pass calls
+`RenderContext::Impl::BindHeapsAndPushFrame(cmd)` at the start of its segment
+(bind both heaps + push the per-frame device-address block).
 
 ---
 
@@ -172,16 +174,15 @@ the old bindless set array.
   treated as a CPU-side producer; `BlitPass` consumes `ImDrawData`, expands it
   into the current frame `uiVbos`, and draws it with the normal `uiPipeline` and
   bindless texture indices.
-* `PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings` set
-  the descriptor-heap mode; the pipeline implementation chains the mapping
-  structs into each `VkPipelineShaderStageCreateInfo` and adds
+* `PipelineBuilder::HeapMappings` / `ComputePipelineBuilder::HeapMappings`
+  supply the per-stage mapping structs. Every pipeline builder enables
+  descriptor-heap mode, and the implementation chains those mappings into each
+  `VkPipelineShaderStageCreateInfo` while adding
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
   `VkPipelineCreateFlags2CreateInfoKHR`.
-* All heap pipelines are created with `layout = VK_NULL_HANDLE`
-  (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`). Heap creation paths do not
-  carry a pipeline-layout handle: the builder defaults to null, and the Vulkan
-  pipeline create info explicitly supplies null whenever descriptor heaps are
-  enabled.
+* Every pipeline create info uses `layout = VK_NULL_HANDLE`
+  (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`); no pipeline-layout handle
+  is accepted or stored by the backend.
 * `HeapBindings.hpp` bakes per-pass mapping tables from the reflected set. A
   pass's non-sampler bindings are one contiguous resource-heap block, and the
   mapping is slot-independent: binding ordinal `i` resolves at
@@ -209,8 +210,9 @@ the old bindless set array.
 * All Vulkan pipelines built in `src/render` use descriptor-heap mode. Skinning uses
   heap-mode push data with no descriptor mapping; `HangGpuCS` is a no-binding
   heap pipeline for the optional device-lost diagnostic.
-* `src/vulkan` retains generic `VkPipelineLayout` and non-heap command/dispatch
-  APIs for traditional Vulkan pipelines; no renderer pipeline uses those paths.
+* The backend has one binding model: all pipelines use descriptor heaps, draw
+  and dispatch payloads use push data, and `src/vulkan` exposes no traditional
+  pipeline-layout, descriptor-set binding, or push-constant fallback API.
 * Everything descriptor-set related was deleted from the render layer after
   the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
   the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,

@@ -320,8 +320,7 @@ void UIRenderer::RecordFallback(
     const VkPipeline pipeline = _impl->fallbackPipeline.Get();
     RecordBatches(encoder, width, height, frameIndex, uiData, [pipeline](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
         cmd.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
-            {.pipeline = pipeline, .heap = true, .vertexCount = count, .instanceCount = 1}, constants,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+            {.pipeline = pipeline, .vertexCount = count, .instanceCount = 1}, constants
         );
     });
 }

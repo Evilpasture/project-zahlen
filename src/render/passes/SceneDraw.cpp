@@ -106,7 +106,6 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
-             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
@@ -165,12 +164,11 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
-             .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
              .firstInstance = 0},
-            rpc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+            rpc
         );
     }
 }

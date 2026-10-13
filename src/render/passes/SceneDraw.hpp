@@ -39,8 +39,7 @@ void SubmitDrawInstanced(
     uint32_t            instanceIdx,
     const T&            pushConstants,
     bool                meshShadingActive,
-    VkPipeline          pipelineOverride = VK_NULL_HANDLE,
-    VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+    VkPipeline          pipelineOverride = VK_NULL_HANDLE
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
 
@@ -52,7 +51,6 @@ void SubmitDrawInstanced(
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
             {.pipeline    = nativeMat->meshPipeline,
-             .heap        = true,
              .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
              .groupCountY = 1,
              .groupCountZ = 1},
@@ -72,8 +70,8 @@ void SubmitDrawInstanced(
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
     encoder.DrawInstanced<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
-        {.pipeline = pipeline, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
-        pushConstants, stages
+        {.pipeline = pipeline, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
+        pushConstants
     );
 }
 

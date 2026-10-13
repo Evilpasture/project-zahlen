@@ -18,10 +18,8 @@ namespace ZHLN::Vk {
 
 enum class PipelineBuilderError : uint8_t {
     MissingShaders         ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages."> {}) = 1,
-    MissingLayout          ZHLN_ANNOTATION(ZHLN::Description<"Missing pipeline layout."> {}),
-    LayoutCreationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Pipeline layout creation failed."> {}),
-    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed."> {}),
-    OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory."> {}),
+    PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed."> {}) = 4,
+    OutOfHostMemory        ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory."> {}) = 5,
 };
 
 struct StencilState {
@@ -29,17 +27,16 @@ struct StencilState {
     VkStencilOpState back {};
 };
 
+// Every pipeline created by this backend uses descriptor-heap mode; the required
+// null layout is supplied internally and is not part of this configuration.
 struct PipelineConfig {
     // Keep stage metadata by value across typed builder transitions; Vulkan's
     // create structures borrow the backing data only during synchronous creation.
     std::optional<ShaderStagesView> stages;
-    VkPipelineLayout                layout = VK_NULL_HANDLE;
+    VkPipelineCache                pipelineCache = VK_NULL_HANDLE;
 
-    VkPipelineCache pipelineCache = VK_NULL_HANDLE;
-
-    bool                                                 descriptorHeap = false;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping      = nullptr;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping      = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping    = nullptr;
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping    = nullptr;
 
     const VkVertexInputBindingDescription*   bindings       = nullptr;
     const VkVertexInputAttributeDescription* attributes     = nullptr;
@@ -71,10 +68,8 @@ struct PipelineConfig {
 
 struct ComputePipelineConfig {
     ShaderDesc                                           shader {};
-    VkPipelineLayout                                     layout         = VK_NULL_HANDLE;
     VkPipelineCache                                      cache          = VK_NULL_HANDLE;
     const VkSpecializationInfo*                          specialization = nullptr;
-    bool                                                 descriptorHeap = false;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping        = nullptr;
 };
 
@@ -100,11 +95,6 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
-        _cfg.layout = l;
-        return *this;
-    }
-
     auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
         _cfg.pipelineCache = cache;
         return *this;
@@ -112,14 +102,8 @@ class PipelineBuilder {
 
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
         -> PipelineBuilder& {
-        _cfg.descriptorHeap = true;
         _cfg.vsMapping      = vsMapping;
         _cfg.psMapping      = psMapping;
-        return *this;
-    }
-
-    auto HeapPipeline() noexcept -> PipelineBuilder& {
-        _cfg.descriptorHeap = true;
         return *this;
     }
 
@@ -354,9 +338,6 @@ class PipelineBuilder {
                 return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
             }
         }
-        if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptorHeap) {
-            return std::unexpected(MissingLayout);
-        }
         return {};
     }
 
@@ -369,13 +350,11 @@ class ComputePipelineBuilder {
 
     auto Shader(const uint32_t* code, size_t size, const char* entry = nullptr) noexcept -> ComputePipelineBuilder&;
     auto Shader(const ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
-    auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
     auto Cache(VkPipelineCache cache) noexcept -> ComputePipelineBuilder&;
 
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
-    auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
 
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ErrorCode>;
 
@@ -383,24 +362,9 @@ class ComputePipelineBuilder {
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
 
     ShaderDesc                                           _shader {};
-    VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
     VkPipelineCache                                      _cache               = VK_NULL_HANDLE;
     const VkSpecializationInfo*                          _specialization_info = nullptr;
-    bool                                                 _descriptor_heap     = false;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping             = nullptr;
-};
-
-class PipelineLayoutBuilder {
-  public:
-    explicit PipelineLayoutBuilder(VkDevice device) noexcept;
-
-    PipelineLayoutBuilder& AddPushConstant(VkShaderStageFlags stages, uint32_t size, uint32_t offset = 0) noexcept;
-
-    [[nodiscard]] auto Build() const noexcept -> std::expected<PipelineLayout, ErrorCode>;
-
-  private:
-    VkDevice                         _device;
-    std::vector<VkPushConstantRange> _pushConstants;
 };
 
 } // namespace ZHLN::Vk

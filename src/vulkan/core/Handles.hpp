@@ -13,10 +13,6 @@ namespace ZHLN::Vk {
 
 // These stateless deleter declarations are needed by DeviceHandle's template;
 // keep the Vulkan calls themselves out of the header in Handles.cpp.
-struct DestroyPipelineLayout {
-    void operator()(VkDevice device, VkPipelineLayout handle) const noexcept;
-};
-
 struct DestroyPipeline {
     void operator()(VkDevice device, VkPipeline handle) const noexcept;
 };
@@ -95,7 +91,6 @@ class DeviceHandle {
     T        _raw    = VK_NULL_HANDLE;
 };
 
-using PipelineLayout        = DeviceHandle<VkPipelineLayout, DestroyPipelineLayout>;
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
 using PipelineCache         = DeviceHandle<VkPipelineCache, DestroyPipelineCache>;
 using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
