@@ -42,11 +42,10 @@ struct NativeMesh {
 };
 
 // Stable registry entry: GPU pipelines are retired by PipelineRegistry, never
-// by destruction of the pool slot. The layout is borrowed from the renderer.
+// by destruction of the pool slot.
 struct NativeMaterial {
-    VkPipeline       pipeline     = VK_NULL_HANDLE;
-    VkPipelineLayout layout       = VK_NULL_HANDLE;
-    VkPipeline       meshPipeline = VK_NULL_HANDLE;
+    VkPipeline pipeline     = VK_NULL_HANDLE;
+    VkPipeline meshPipeline = VK_NULL_HANDLE;
 
     NativeMaterial() = default;
     NativeMaterial(const NativeMaterial&) = delete;

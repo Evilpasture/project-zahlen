@@ -177,8 +177,10 @@ the old bindless set array.
   `VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT` via
   `VkPipelineCreateFlags2CreateInfoKHR`.
 * All heap pipelines are created with `layout = VK_NULL_HANDLE`
-  (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`; `Impl::emptyPipelineLayout`
-  is the named null alias used at the call sites).
+  (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`). Heap creation paths do not
+  carry a pipeline-layout handle: the builder defaults to null, and the Vulkan
+  pipeline create info explicitly supplies null whenever descriptor heaps are
+  enabled.
 * `HeapBindings.hpp` bakes per-pass mapping tables from the reflected set. A
   pass's non-sampler bindings are one contiguous resource-heap block, and the
   mapping is slot-independent: binding ordinal `i` resolves at

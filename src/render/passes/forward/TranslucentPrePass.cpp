@@ -39,8 +39,7 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
                 const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline,
-                    drawCmd.prePassMaterial->layout
+                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline
                 );
             }
         });

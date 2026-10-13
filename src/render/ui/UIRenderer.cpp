@@ -62,7 +62,6 @@ struct UIRenderer::Impl {
     UIVariants<SupportedUITargetFormats> pipelines;
     VkFormat                             fallbackFormat = VK_FORMAT_UNDEFINED;
     Vk::Pipeline                         fallbackPipeline;
-    VkPipelineLayout                     layout = VK_NULL_HANDLE;
     Vk::HeapMappingBundle                mappings;
 
     std::array<Vk::Buffer, Vk::kFramesInFlight>      vbos {};
@@ -96,7 +95,6 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     DestroyBuffers(ctx.allocator);
     impl.textureManager = &ctx.textureManager;
     impl.allocator      = &ctx.allocator;
-    impl.layout         = ctx.emptyPipelineLayout;
 
     const Vk::ReflectedStageInput reflectInputs[2] = {
         {.shader = Vk::CreateShaderDesc<Shaders::Modules::UiVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
@@ -125,7 +123,6 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     auto           MakeBuilder   = [&]() {
         Vk::PipelineBuilder builder;
         builder.Shaders(*uiShaders)
-            .Layout(impl.layout)
             .Cache(ctx.pipelineCache.Get())
             .HeapMappings(&impl.mappings.info, &impl.mappings.info)
             .AlphaBlend()
@@ -320,11 +317,10 @@ void UIRenderer::RecordFallback(
     if (_impl == nullptr || _impl->fallbackFormat != colorFormat || !_impl->fallbackPipeline.Valid()) {
         return;
     }
-    const VkPipeline       pipeline = _impl->fallbackPipeline.Get();
-    const VkPipelineLayout layout   = _impl->layout;
-    RecordBatches(encoder, width, height, frameIndex, uiData, [pipeline, layout](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
+    const VkPipeline pipeline = _impl->fallbackPipeline.Get();
+    RecordBatches(encoder, width, height, frameIndex, uiData, [pipeline](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
         cmd.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
-            {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = count, .instanceCount = 1}, constants,
+            {.pipeline = pipeline, .heap = true, .vertexCount = count, .instanceCount = 1}, constants,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
         );
     });

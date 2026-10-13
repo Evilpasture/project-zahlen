@@ -119,7 +119,6 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
                 passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                     {
                         .pipeline       = group.material->pipeline,
-                        .layout         = group.material->layout,
                         .heap           = true,
                         .argumentBuffer = ctx.frames.indirectCommandsBuffers[frameIndex].Handle(),
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),

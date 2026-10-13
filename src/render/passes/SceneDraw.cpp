@@ -39,7 +39,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const RenderContext::Impl::ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline, ctx.csgPipelineLayout);
+            SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline);
         }
 
         auto activePipeline = ctx.csgDifferencePipeline.Get();
@@ -51,7 +51,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
         }
 
         const RenderContext::Impl::ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline, ctx.csgPipelineLayout);
+        SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline);
     }
 }
 
@@ -106,7 +106,6 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout,
              .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
@@ -166,7 +165,6 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
-             .layout        = ctx.meshParticleRenderLayout,
              .heap          = true,
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,

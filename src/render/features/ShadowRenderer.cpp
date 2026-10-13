@@ -35,20 +35,12 @@ auto ShadowRenderer::CascadePipeline() const noexcept -> VkPipeline {
     return _cascadePipeline.Get();
 }
 
-auto ShadowRenderer::CascadeLayout() const noexcept -> VkPipelineLayout {
-    return _cascadeLayout;
-}
-
 auto ShadowRenderer::CascadeMeshPipeline() const noexcept -> VkPipeline {
     return _cascadeMeshPipeline.Get();
 }
 
 auto ShadowRenderer::AtlasPipeline() const noexcept -> VkPipeline {
     return _atlasPipeline.Get();
-}
-
-auto ShadowRenderer::AtlasLayout() const noexcept -> VkPipelineLayout {
-    return _atlasLayout;
 }
 
 auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer& {
@@ -61,14 +53,11 @@ auto ShadowRenderer::IndirectCommands(uint32_t frameIndex) const noexcept -> con
 
 auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
-    _cascadeLayout = impl.emptyPipelineLayout;
-
     return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
-                .Layout(impl.emptyPipelineLayout)
                 .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
@@ -97,7 +86,6 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
 
             auto pipeline = Vk::PipelineBuilder {}
                                 .Shaders(*shaders)
-                                .Layout(impl.emptyPipelineLayout)
                                 .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
                                 .DepthOnly()
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
@@ -116,13 +104,11 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
 
 auto ShadowRenderer::CompileAtlasPipeline(RenderContext::Impl& impl, VkDevice device, const Vk::ShaderDesc& vert, const Vk::ShaderDesc& frag)
     -> std::expected<void, ErrorCode> {
-    _atlasLayout = impl.emptyPipelineLayout;
     return Vk::ShaderStagesView::Create(vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
         .and_then([this, &impl, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
-                .Layout(impl.emptyPipelineLayout)
                 .HeapMappings(&impl.sceneHeapMappings.info, &impl.sceneHeapMappings.info)
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)

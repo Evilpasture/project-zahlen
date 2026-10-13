@@ -65,7 +65,6 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                     passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
-                         .layout        = ctx.particleRenderLayout,
                          .heap          = true,
                          .vertexCount   = 6,
                          .instanceCount = emitter.maxParticles,
@@ -81,7 +80,6 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                 passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),
-                     .layout        = ctx.linePipelineLayout,
                      .heap          = true,
                      .vertexCount   = ctx.activeLineVertexCount,
                      .instanceCount = 1,

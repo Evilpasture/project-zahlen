@@ -124,7 +124,7 @@ struct ComputePass {
         pipelineLayout      = {};
         heapIndexPushOffset = indexPushOffset;
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Cache(cache).Build(device);
+        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(mapping).Cache(cache).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }
@@ -149,7 +149,7 @@ struct ComputePass {
         pipelines.reserve(specInfos.size());
 
         for (const auto& spec: specInfos) {
-            auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Specialization(&spec).Cache(cache).Build(device);
+            auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(mapping).Specialization(&spec).Cache(cache).Build(device);
             if (!p_res) {
                 return std::unexpected(p_res.error());
             }
@@ -448,7 +448,7 @@ struct DoubleBufferedComputePass {
             return std::unexpected(built.error());
         }
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Cache(cache).Build(device);
+        auto p_res = ComputePipelineBuilder().Shader(shader).HeapMappings(heapBindings.GetInfo()).Cache(cache).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }
@@ -561,7 +561,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
 
-    return ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapPipeline().Cache(cache).Build(device).transform([&](Pipeline&& pipeline) {
+    return ComputePipelineBuilder().Shader(shader).HeapPipeline().Cache(cache).Build(device).transform([&](Pipeline&& pipeline) {
         pass.pipeline = std::move(pipeline);
         return std::move(pass);
     });

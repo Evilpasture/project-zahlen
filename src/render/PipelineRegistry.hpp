@@ -32,11 +32,9 @@ class PipelineRegistry {
         Vk::PipelineCache&     pipelineCache,
         Vk::HeapMappingBundle& sceneHeapMappings,
         Vk::GPUDiagnostics&    gpuDiagnostics,
-        Vk::DeletionQueue&     deletionQueue,
-        VkPipelineLayout       emptyPipelineLayout
+        Vk::DeletionQueue&     deletionQueue
     ) noexcept:
-        _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue),
-        _layout(emptyPipelineLayout) {
+        _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue) {
     }
     ~PipelineRegistry() {
         RetireAll();
@@ -138,7 +136,6 @@ class PipelineRegistry {
 
         RegisterShaderModules<ShaderModule>();
         const Vk::PipelineCreateBindings bindings {
-            .layout          = _layout,
             .descriptorHeap  = true,
             .vertexMapping   = &_heapMappings.info,
             .fragmentMapping = &_heapMappings.info,
@@ -184,7 +181,6 @@ class PipelineRegistry {
             return std::unexpected(MaterialCreationError::MaterialSlotsExhausted);
         }
         material->pipeline     = *vertexPipeline;
-        material->layout       = _layout;
         material->meshPipeline = meshPipeline;
         return Material {
             .pipeline    = handle,
@@ -208,8 +204,6 @@ class PipelineRegistry {
     Vk::HeapMappingBundle& _heapMappings;
     Vk::GPUDiagnostics&    _diagnostics;
     Vk::DeletionQueue&     _deletionQueue;
-    VkPipelineLayout       _layout;
-
     std::array<Vk::Pipeline, kPipelineVariantCount> _sharedPipelines {};
     std::array<bool, kPipelineVariantCount>         _meshVariantAttempted {};
 

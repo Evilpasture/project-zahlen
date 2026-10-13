@@ -376,8 +376,6 @@ struct RenderContext::Impl {
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
 
-    VkPipelineLayout emptyPipelineLayout = VK_NULL_HANDLE;
-
     Vk::Sampler globalSampler;
     Vk::Sampler clampSampler;
     Vk::Sampler defaultSampler;
@@ -422,19 +420,15 @@ struct RenderContext::Impl {
     EmitterStorageMap meshParticleEmitters;
 
     Vk::DynamicComputePass      particleUpdatePass;
-    VkPipelineLayout            particleRenderLayout = VK_NULL_HANDLE;
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::DynamicComputePass meshParticleUpdatePass;
-    VkPipelineLayout       meshParticleRenderLayout = VK_NULL_HANDLE;
     Vk::Pipeline           meshParticleRenderPipeline;
     Vk::Pipeline           meshParticleShadowPipeline;
 
     Vk::ReflectedLayout decalDescLayout;
-    VkPipelineLayout    decalPipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline        decalPipeline;
 
-    VkPipelineLayout linePipelineLayout = VK_NULL_HANDLE;
     Vk::Pipeline     linePipeline;
     uint32_t                  activeLineVertexCount = 0;
     uint32_t                  lineInstanceId        = 0;
@@ -528,7 +522,6 @@ struct RenderContext::Impl {
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;
-    VkPipelineLayout csgPipelineLayout = VK_NULL_HANDLE;
 
     UIRenderer uiRenderer;
 
@@ -682,7 +675,7 @@ struct RenderContext::Impl {
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue, emptyPipelineLayout), fileSystemWatcher(watcher),
+        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher),
         reflectionPipeline(*this) {
     }
 

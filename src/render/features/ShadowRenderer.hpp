@@ -67,10 +67,8 @@ class ShadowRenderer {
     // --- what the shadow pass needs -----------------------------------------
 
     [[nodiscard]] auto CascadePipeline() const noexcept -> VkPipeline;
-    [[nodiscard]] auto CascadeLayout() const noexcept -> VkPipelineLayout;
     [[nodiscard]] auto CascadeMeshPipeline() const noexcept -> VkPipeline;
     [[nodiscard]] auto AtlasPipeline() const noexcept -> VkPipeline;
-    [[nodiscard]] auto AtlasLayout() const noexcept -> VkPipelineLayout;
 
     [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) noexcept -> Vk::Buffer&;
     [[nodiscard]] auto IndirectCommands(uint32_t frameIndex) const noexcept -> const Vk::Buffer&;
@@ -93,9 +91,6 @@ class ShadowRenderer {
     ) noexcept -> JPH::Mat44;
 
   private:
-    VkPipelineLayout _cascadeLayout = VK_NULL_HANDLE;
-    VkPipelineLayout _atlasLayout   = VK_NULL_HANDLE;
-
     Vk::TypedPipeline<0, true> _cascadePipeline;
     Vk::TypedPipeline<0, true> _atlasPipeline;
     Vk::TypedPipeline<0, true> _cascadeMeshPipeline;

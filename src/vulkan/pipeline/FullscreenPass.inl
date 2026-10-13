@@ -30,7 +30,6 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
-                       .Layout(VK_NULL_HANDLE)
                        .Cache(cache)
                        .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                        .ColorFormats(colorFormats)
@@ -76,7 +75,6 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     for (const auto& spec: specInfos) {
         auto builder = PipelineBuilder {}
                            .Shaders(shaders)
-                           .Layout(VK_NULL_HANDLE)
                            .Cache(cache)
                            .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                            .ColorFormats(colorFormats)

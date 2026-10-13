@@ -256,6 +256,10 @@ class CommandEncoder {
     explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
     }
 
+    void BindPipeline(VkPipeline pipeline) noexcept {
+        BindPipeline(pipeline, VK_NULL_HANDLE);
+    }
+
     void BindPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
         if (pipeline != VK_NULL_HANDLE && pipeline != lastPipeline) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -402,10 +406,11 @@ class CommandEncoder {
   private:
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void BindDraw(const auto& state, const T& pushConstants, VkShaderStageFlags stages) noexcept {
-        BindPipeline(state.pipeline, state.layout);
         if (state.heap) {
+            BindPipeline(state.pipeline);
             PushDrawData<Modules...>(pushConstants);
         } else {
+            BindPipeline(state.pipeline, state.layout);
             BindDescriptorSet(state.set);
             Push(cmd, state.layout, stages, pushConstants);
         }

@@ -57,7 +57,6 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
 
-            emptyPipelineLayout = VK_NULL_HANDLE;
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

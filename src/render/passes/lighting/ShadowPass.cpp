@@ -150,7 +150,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         if (shadowDraw.instanceData.meshletCount == 0) {
                             passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadows.CascadePipeline(),
-                                 .layout        = ctx.shadows.CascadeLayout(),
                                  .heap          = true,
                                  .vertexCount   = indirectCmdsBase[IndirectOffsetForSlot(kCascadeSlot) + d].vertexCount,
                                  .instanceCount = 1,
@@ -164,7 +163,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                         passCtx.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadows.CascadeMeshPipeline(),
-                             .layout      = ctx.shadows.CascadeLayout(),
                              .heap        = true,
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
@@ -175,7 +173,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 } else if (csmDrawCount > 0) {
                     passCtx.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadows.CascadePipeline(),
-                         .layout         = ctx.shadows.CascadeLayout(),
                          .heap           = true,
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
@@ -262,7 +259,6 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                         const ShadowTilePush push {tile.viewProj};
                         passCtx.encoder.DrawIndirect<Shaders::Modules::ShadowAtlasVS>(
                             {.pipeline       = ctx.shadows.AtlasPipeline(),
-                             .layout         = ctx.shadows.AtlasLayout(),
                              .heap           = true,
                              .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                              .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kFirstAtlasSlot + p)),
