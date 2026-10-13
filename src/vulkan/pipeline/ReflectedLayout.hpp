@@ -78,7 +78,7 @@ class ReflectedLayoutBuilder {
 
     void AddStageUnsafe(const ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
 
-    [[nodiscard]] auto BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool;
+    [[nodiscard]] auto BuildUnsafe(std::span<ReflectedSet, 4> out) noexcept -> bool;
 
   private:
     struct StageData {

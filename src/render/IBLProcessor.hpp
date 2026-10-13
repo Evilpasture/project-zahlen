@@ -77,7 +77,7 @@ class IBLProcessor {
         const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
         const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
-        const auto toVec4 = [](const std::array<float, 4>& values) {
+        const auto toVec4 = [](std::span<const float, 4> values) {
             return JPH::Vec4(values[0], values[1], values[2], values[3]);
         };
         const JPH::Vec4 skyZenith  = toVec4(sky.skyZenith);
@@ -275,7 +275,7 @@ class IBLProcessor {
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {uploadWidth, uploadHeight, 1},
             };
-            CopyBufferToImage<1>(cmd, staging->Handle(), radianceImage->Handle(), {region});
+            CopyBufferToImage(cmd, staging->Handle(), radianceImage->Handle(), region);
             if (gpuSourceMips) {
                 // The shared helper transitions each generated mip for shader
                 // reads. This bake consumes them in COMPUTE, not FRAGMENT.
@@ -287,7 +287,7 @@ class IBLProcessor {
                         mipRegion.bufferOffset = sourceMipOffsets[mip] * sizeof(float);
                         mipRegion.imageSubresource.mipLevel = mip;
                         mipRegion.imageExtent = {std::max(1u, uploadWidth >> mip), std::max(1u, uploadHeight >> mip), 1u};
-                        CopyBufferToImage<1>(cmd, staging->Handle(), radianceImage->Handle(), {mipRegion});
+                        CopyBufferToImage(cmd, staging->Handle(), radianceImage->Handle(), mipRegion);
                     }
                 }
                 ImageBarrier(
@@ -310,7 +310,7 @@ cmd, ImageBarrierDesc {
                 TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.visualSkyImage.Handle());
                 VkBufferImageCopy2 visualRegion = region;
                 visualRegion.bufferOffset = visualOffsetFloats * sizeof(float);
-                CopyBufferToImage<1>(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), {visualRegion});
+                CopyBufferToImage(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), visualRegion);
                 ImageBarrier(cmd, ImageBarrierDesc {
                     .image      = state.payload.visualSkyImage.Handle(),
                     .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,

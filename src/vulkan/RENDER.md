@@ -368,7 +368,7 @@ Vk::Specialization<SpecData> spec;
 Reflect::ForEachFieldInfo<SpecData>(spec);
 
 const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/};
-const auto       specInfos = spec.Infos(variants); // std::span<const VkSpecializationInfo>
+const auto       specInfos = spec.Infos(std::span {variants}); // fixed-size array of specialization infos
 ```
 
 The walk is a line at the call site, and that is load-bearing. A build without

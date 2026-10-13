@@ -14,6 +14,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <span>
 #include <unordered_map>
 #include <utility>
 
@@ -87,14 +88,14 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
     return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
 }
 
-[[nodiscard]] auto Rec709Luma(const std::array<float, 3>& rgb) noexcept -> float {
+[[nodiscard]] auto Rec709Luma(std::span<const float, 3> rgb) noexcept -> float {
     return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
 }
 
 // Reads up to four whitespace-separated floats out of a keyvalue. Returns how
 // many were read, which is what tells a 3-component legacy `_light`
 // ("119 49 47") from a proper 4-component one.
-[[nodiscard]] auto ParseFloats(std::string_view text, std::array<float, 4>& out) noexcept -> size_t {
+[[nodiscard]] auto ParseFloats(std::string_view text, std::span<float, 4> out) noexcept -> size_t {
     size_t      count = 0;
     const char* cur   = text.data();
     const char* end   = text.data() + text.size();

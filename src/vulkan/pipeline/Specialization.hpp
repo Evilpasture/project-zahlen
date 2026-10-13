@@ -51,7 +51,8 @@ class Specialization {
     }
 
     template <std::size_t N>
-    [[nodiscard]] auto Infos(const std::array<T, N>& values) const noexcept -> std::array<VkSpecializationInfo, N> {
+        requires (N != std::dynamic_extent)
+    [[nodiscard]] auto Infos(std::span<const T, N> values) const noexcept -> std::array<VkSpecializationInfo, N> {
         std::array<VkSpecializationInfo, N> infos {};
         for (std::size_t i = 0; i < N; ++i) {
             infos[i] = Info(values[i]);

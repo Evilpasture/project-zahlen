@@ -130,7 +130,7 @@ constexpr std::array kSampleUV {
     return {image.rgb[offset], image.rgb[offset + 1], image.rgb[offset + 2]};
 }
 
-[[nodiscard]] auto ChannelDifference(const std::array<int, 3>& a, const std::array<int, 3>& b) -> int {
+[[nodiscard]] auto ChannelDifference(std::span<const int, 3> a, std::span<const int, 3> b) -> int {
     return std::abs(a[0] - b[0]) + std::abs(a[1] - b[1]) + std::abs(a[2] - b[2]);
 }
 

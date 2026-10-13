@@ -671,14 +671,14 @@ constexpr auto FormatTo(char (&buf)[N], std::string_view fmt, Args&&... args) no
     return FormatTo(buf, N, fmt, std::forward<Args>(args)...);
 }
 
-template <typename... Args>
-constexpr auto FormatTo(std::span<char> buf, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
+template <size_t N, typename... Args>
+constexpr auto FormatTo(std::span<char, N> buf, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
     return FormatTo(buf.data(), buf.size(), fmt, std::forward<Args>(args)...);
 }
 
 template <size_t N, typename... Args>
 constexpr auto FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
-    return FormatTo(buf.data(), N, fmt, std::forward<Args>(args)...);
+    return FormatTo(std::span<char, N> {buf}, fmt, std::forward<Args>(args)...);
 }
 
 

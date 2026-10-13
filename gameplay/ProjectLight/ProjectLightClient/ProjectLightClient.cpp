@@ -37,6 +37,7 @@
 #include <cstring>
 #include <format>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -478,7 +479,7 @@ auto IsReferenceProperty(std::string_view property) noexcept -> bool {
 auto ReadPropertyName(
     const MsgPackValue& key,
     std::optional<uint16_t> remoteClassNameChannel,
-    const std::array<std::string_view, PROPERTY_CHANNEL_COUNT>& remotePropertyNameOverrides
+    std::span<const std::string_view, PROPERTY_CHANNEL_COUNT> remotePropertyNameOverrides
 ) noexcept -> std::string_view {
     if (key.kind == MsgPackValue::Kind::String) return key.strVal;
     const int64_t index = key.AsInt(-1);

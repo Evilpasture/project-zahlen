@@ -78,7 +78,7 @@ class TextureUploader {
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, 1},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
 
             if (desc.generateMips && mips > 1) {
                 GenerateMipmaps(cmd, imgRes->Handle(), desc.width, desc.height);
@@ -131,7 +131,7 @@ class TextureUploader {
                 .imageOffset       = {0, 0, 0},
                 .imageExtent       = {desc.width, desc.height, desc.depth},
             };
-            CopyBufferToImage<1>(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), {region});
+            CopyBufferToImage(cmd, stagingAlloc.slice.buffer, imgRes->Handle(), region);
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );

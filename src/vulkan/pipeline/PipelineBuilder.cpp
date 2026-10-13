@@ -3,8 +3,10 @@
 
 #include "PipelineBuilder.hpp"
 #include "Rendering.hpp"
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <span>
 #include <spirv_reflect.h>
 
 namespace ZHLN::Vk {
@@ -14,8 +16,8 @@ namespace {
     return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
-[[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::array<char, 64>& name) noexcept -> const char* {
-    name.fill('\0');
+[[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::span<char, 64> name) noexcept -> const char* {
+    std::ranges::fill(name, '\0');
     if (shader.entry_point != nullptr && shader.entry_point[0] != '\0') {
         std::strncpy(name.data(), shader.entry_point, name.size() - 1);
         return name.data();

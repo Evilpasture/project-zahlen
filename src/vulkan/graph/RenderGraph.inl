@@ -561,7 +561,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
 }
 
 template <typename ResourceList>
-constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> const std::array<ImageSlice, ResourceList::size>& {
+constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> std::span<const ImageSlice, ResourceList::size> {
     return _resources;
 }
 
@@ -587,7 +587,7 @@ void CompileTimeFrameGraph<Passes...>::Execute(
     DiagnosticsT*   diagnostics,
     ForkPolicyT*    forker
 ) const {
-    const auto& bindings = binder.GetBindings();
+    const auto bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
@@ -637,7 +637,7 @@ template <typename... Passes>
 template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::ExecutePass(
     VkCommandBuffer                                cmd,
-    const std::array<ImageSlice, NumResources>& bindings,
+    std::span<const ImageSlice, NumResources> bindings,
     const PassType&                                pass,
     uint32_t                                       frameIndex,
     ProfilerT*                                     profiler,
@@ -803,7 +803,7 @@ inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
     VkCommandBuffer                                      cmd,
-    const std::array<ImageSlice, ResourceList::size>& bindings
+    std::span<const ImageSlice, ResourceList::size> bindings
 ) noexcept: RasterPassContextBase(cmd) {
     SetExtent({});
     ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
@@ -845,7 +845,7 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
-    const std::array<ImageSlice, ResourceList::size>& bindings,
+    std::span<const ImageSlice, ResourceList::size> bindings,
     TypeList<Imgs...> /*unused*/,
     TypeList<DImgs...> /*unused*/
 ) noexcept {
@@ -875,7 +875,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(const std::array<ImageSlice, ResourceList::size>& bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
+    BuildColorAttachments(std::span<const ImageSlice, ResourceList::size> bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
     (([&]() {
          using Img              = Imgs;
          constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
@@ -905,7 +905,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
-    const std::array<ImageSlice, ResourceList::size>& bindings,
+    std::span<const ImageSlice, ResourceList::size> bindings,
     VkRenderingAttachmentInfo&                           outDepth,
     TypeList<DImgs...> /*unused*/
 ) noexcept {

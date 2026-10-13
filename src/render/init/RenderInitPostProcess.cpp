@@ -9,6 +9,7 @@
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <span>
 #include <tuple>
 
 namespace ZHLN {
@@ -62,7 +63,7 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
     Reflect::ForEachFieldInfo<SpecData>(spec);
 
     const std::array variants  = {SpecData {.enableRTR = 0}, SpecData {.enableRTR = 1}};
-    const auto       specInfos = spec.Infos(variants);
+    const auto       specInfos = spec.Infos(std::span {variants});
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
@@ -89,7 +90,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
         SpecData {.enableSSR = 0, .enableRTR = 0}, SpecData {.enableSSR = 1, .enableRTR = 0}, SpecData {.enableSSR = 0, .enableRTR = 1},
         SpecData {.enableSSR = 1, .enableRTR = 1}
     };
-    const auto specInfos = spec.Infos(variants);
+    const auto specInfos = spec.Infos(std::span {variants});
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(

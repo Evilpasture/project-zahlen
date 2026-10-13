@@ -82,11 +82,12 @@ template <size_t RegionCount>
 }
 
 template <size_t RegionCount>
+    requires (RegionCount != std::dynamic_extent)
 inline void CopyBufferToImage(
     VkCommandBuffer cmd,
     VkBuffer srcBuffer,
     VkImage dstImage,
-    const std::array<VkBufferImageCopy2, RegionCount>& regions,
+    std::span<const VkBufferImageCopy2, RegionCount> regions,
     VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 ) noexcept {
     const VkCopyBufferToImageInfo2 info {
@@ -109,7 +110,8 @@ inline void CopyBufferToImage(
     const VkBufferImageCopy2& region,
     VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 ) noexcept {
-    CopyBufferToImage<1>(cmd, srcBuffer, dstImage, {region}, layout);
+    const std::span<const VkBufferImageCopy2, 1> regions {&region, 1};
+    CopyBufferToImage<1>(cmd, srcBuffer, dstImage, regions, layout);
 }
 
 void ExecuteCommands(VkCommandBuffer primary, std::span<const VkCommandBuffer> secondaries) noexcept;

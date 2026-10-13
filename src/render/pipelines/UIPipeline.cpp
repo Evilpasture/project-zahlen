@@ -3,6 +3,7 @@
 
 
 #include "UIPipeline.hpp"
+#include <span>
 
 namespace ZHLN::Pipelines {
 
@@ -48,7 +49,7 @@ static_assert(std::same_as<typename BuiltLdrPipeline::value_type,
                            Vk::TypedPipeline<1, false, Vk::AttachmentFormats<VK_FORMAT_UNDEFINED, VK_FORMAT_R8G8B8A8_UNORM>>>);
 static_assert(!std::is_constructible_v<typename BuiltLdrPipeline::value_type, Vk::Pipeline&&>);
 using RuntimePipeline = decltype(std::declval<Vk::PipelineBuilder<>>()
-    .ColorFormats(std::declval<const std::array<VkFormat, 1>&>()).NoDepth().Build(std::declval<VkDevice>()));
+    .ColorFormats(std::declval<std::span<const VkFormat, 1>>()).NoDepth().Build(std::declval<VkDevice>()));
 static_assert(std::same_as<typename RuntimePipeline::value_type, Vk::TypedPipeline<1, false>>);
 
 [[nodiscard]] auto ConfigureViewport(Vk::DynamicPass<0, false> pass, const ViewportRect& viewport) noexcept -> Vk::DynamicPass<0, false> {

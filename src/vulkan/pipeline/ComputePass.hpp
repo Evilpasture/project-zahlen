@@ -7,6 +7,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <array>
+#include <span>
 #include <Zahlen/Log.hpp>
 #include "HeapBindings.hpp"
 
@@ -19,7 +21,7 @@ concept HeapPassPushPayload = GpuTriviallyCopyable<T>;
 
 namespace TemplatedDetail {
 
-[[nodiscard]] inline constexpr auto HasPositiveExtent(const std::array<uint32_t, 3>& extent) noexcept -> bool {
+[[nodiscard]] inline constexpr auto HasPositiveExtent(std::span<const uint32_t, 3> extent) noexcept -> bool {
     return extent[0] > 0 && extent[1] > 0 && extent[2] > 0;
 }
 

@@ -7,6 +7,7 @@
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
+#include <span>
 
 namespace ZHLN {
 
@@ -29,7 +30,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     Reflect::ForEachFieldInfo<BakeSpec>(bakeSpec);
 
     const std::array variants  = {BakeSpec {.bakeType = 0}, BakeSpec {.bakeType = 1}, BakeSpec {.bakeType = 2}};
-    const auto       specInfos = bakeSpec.Infos(variants);
+    const auto       specInfos = bakeSpec.Infos(std::span {variants});
 
     auto build_res = proceduralBakePass.BuildHeapVariants(
         ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get()

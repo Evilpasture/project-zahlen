@@ -10,6 +10,7 @@
 #include <Zahlen/Core/FunctionRef.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
+#include <span>
 #include <string_view>
 
 namespace ZHLN::Vk {
@@ -557,7 +558,7 @@ class ResourceBinder {
     template <typename Image>
     constexpr void Bind(ImageSlice slice) noexcept;
 
-    constexpr auto GetBindings() const noexcept -> const std::array<ImageSlice, ResourceList::size>&;
+    constexpr auto GetBindings() const noexcept -> std::span<const ImageSlice, ResourceList::size>;
 
   private:
     std::array<ImageSlice, ResourceList::size> _resources {};
@@ -663,7 +664,7 @@ class CompileTimeFrameGraph {
     template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
     void ExecutePass(
         VkCommandBuffer                                cmd,
-        const std::array<ImageSlice, NumResources>& bindings,
+        std::span<const ImageSlice, NumResources> bindings,
         const PassType&                                pass,
         uint32_t                                       frameIndex,
         ProfilerT*                                     profiler,
@@ -689,7 +690,7 @@ struct ClearColorOf {
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 class RasterPassContext: public RasterPassContextBase {
   public:
-    RasterPassContext(VkCommandBuffer cmd, const std::array<ImageSlice, ResourceList::size>& bindings) noexcept;
+    RasterPassContext(VkCommandBuffer cmd, std::span<const ImageSlice, ResourceList::size> bindings) noexcept;
 
     ~RasterPassContext() noexcept;
 
@@ -698,21 +699,21 @@ class RasterPassContext: public RasterPassContextBase {
 
     template <typename... Imgs, typename... DImgs>
     void ResolveExtent(
-        const std::array<ImageSlice, ResourceList::size>& bindings,
+        std::span<const ImageSlice, ResourceList::size> bindings,
         TypeList<Imgs...> ,
         TypeList<DImgs...>
     ) noexcept;
 
     template <typename... Imgs>
     void BuildColorAttachments(
-        const std::array<ImageSlice, ResourceList::size>& bindings,
+        std::span<const ImageSlice, ResourceList::size> bindings,
         uint32_t&                                            colorCount,
         TypeList<Imgs...>
     ) noexcept;
 
     template <typename... DImgs>
     bool BuildDepthAttachment(
-        const std::array<ImageSlice, ResourceList::size>& bindings,
+        std::span<const ImageSlice, ResourceList::size> bindings,
         VkRenderingAttachmentInfo&                           outDepth,
         TypeList<DImgs...>
     ) noexcept;

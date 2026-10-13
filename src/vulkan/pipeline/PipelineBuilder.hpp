@@ -7,6 +7,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <span>
+
 #include "../VkError.hpp"
 #include "PipelineTypes.hpp"
 #include <Zahlen/Error.hpp>
@@ -296,9 +298,15 @@ class PipelineBuilder {
     }
 
     template <size_t N>
-    [[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
+        requires (N != std::dynamic_extent)
+    [[nodiscard]] auto ColorFormats(std::span<const VkFormat, N> formats) && noexcept -> PipelineBuilder<N, HasDepth> {
         _cfg.colorFormats.assign(formats.begin(), formats.end());
         return PipelineBuilder<N, HasDepth> {std::move(_cfg)};
+    }
+
+    template <size_t N>
+    [[nodiscard]] auto ColorFormats(const std::array<VkFormat, N>& formats) && noexcept -> PipelineBuilder<N, HasDepth> {
+        return std::move(*this).ColorFormats(std::span<const VkFormat, N> {formats});
     }
 
     // Unlike a runtime array, these values are part of the resulting pipeline
