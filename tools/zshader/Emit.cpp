@@ -218,6 +218,21 @@ namespace {
 
 )ZHLN";
 
+// Clang diagnoses #embed as a C23 extension while compiling the generated C++ TU.
+constexpr std::string_view kSourceEmbedPragmaOpen = R"ZHLN(#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc23-extensions"
+#endif
+
+)ZHLN";
+
+constexpr std::string_view kSourceEmbedPragmaClose = R"ZHLN(
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+)ZHLN";
+
 // ShaderBytecode.cpp from the end of the embedded arrays to the span
 // definitions they are read through.
 constexpr std::string_view kSourceSpansOpen = R"ZHLN(} // namespace
@@ -313,6 +328,7 @@ auto EmitSource(const Options& options) -> std::string {
     Writer      out(text);
 
     out.Raw(kSourcePreamble);
+    out.Raw(kSourceEmbedPragmaOpen);
     for (const BytesInput& input: BytesInputsOf(options)) {
         // A descriptor's C ABI exposes these bytes as uint32_t SPIR-V words.
         out.Line("alignas(uint32_t) constexpr uint8_t {}_bytes[] = {{", input.symbol);
@@ -322,6 +338,7 @@ auto EmitSource(const Options& options) -> std::string {
         out.Blank();
     }
 
+    out.Raw(kSourceEmbedPragmaClose);
     out.Raw(kSourceSpansOpen);
     for (const BytesInput& input: BytesInputsOf(options)) {
         out.Line("const std::span<const uint8_t> {0} {{{0}_bytes}};", input.symbol);
