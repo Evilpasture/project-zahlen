@@ -12,9 +12,9 @@ void DestroyPipeline::operator()(const VkDevice device, const VkPipeline handle)
     }
 }
 
-void DestroyPipelineCache::operator()(const VkDevice device, const VkPipelineCache handle) const noexcept {
-    if (vkDestroyPipelineCache != nullptr) {
-        vkDestroyPipelineCache(device, handle, nullptr);
+void DestroyPipelineBinary::operator()(const VkDevice device, const VkPipelineBinaryKHR handle) const noexcept {
+    if (vkDestroyPipelineBinaryKHR != nullptr) {
+        vkDestroyPipelineBinaryKHR(device, handle, nullptr);
     }
 }
 

@@ -33,7 +33,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     const auto       specInfos = bakeSpec.Infos(std::span {variants});
 
     auto build_res = proceduralBakePass.BuildHeapVariants(
-        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get()
+        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, &pipelineBinaries
     );
     if (!build_res) {
         return std::unexpected(build_res.error());

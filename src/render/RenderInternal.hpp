@@ -249,7 +249,7 @@ struct RenderContext::Impl {
     PresentationTarget&                                           presentationTarget;
     String64                                                      appName;
     Vk::Context                                                   ctx;
-    Vk::PipelineCache                                             pipelineCache;
+    Vk::PipelineBinaryStore                                       pipelineBinaries;
     Vk::Allocator                                                 allocator;
     Vk::SwapchainPresenter                                        presenter;
     PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;
@@ -672,7 +672,7 @@ struct RenderContext::Impl {
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher),
+        pipelines(ctx, pipelineBinaries, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher),
         reflectionPipeline(*this) {
     }
 

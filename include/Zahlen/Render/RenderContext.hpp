@@ -76,11 +76,12 @@ class ZHLN_API RenderContext {
     // RenderContext itself goes away.
     void Destroy() noexcept;
 
-    // The current GPU pipeline cache as raw bytes, for the host to persist
-    // however it likes (disk, VFS, embedded blob). The renderer never
-    // touches storage itself. Empty when no cache exists; call before
-    // Destroy() -- after teardown there is nothing left to extract.
-    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData() const noexcept;
+    // The captured GPU pipeline binaries as raw bytes, for the host to
+    // persist however it likes (disk, VFS, embedded blob). The renderer
+    // never touches storage itself and owns no pipeline cache handle.
+    // Empty when pipeline binaries are unavailable on this device; call
+    // before Destroy() -- after teardown there is nothing left to extract.
+    [[nodiscard]] std::vector<uint8_t> GetPipelineBinaryData() const noexcept;
 
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;

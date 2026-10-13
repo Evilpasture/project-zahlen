@@ -37,7 +37,7 @@ add_library(
   execution/Commands.cpp
   execution/SemaphorePool.cpp
   pipeline/PipelineBuilder.cpp
-  pipeline/PipelineCache.cpp
+  pipeline/PipelineBinaries.cpp
   pipeline/DescriptorHeap.cpp
   pipeline/SamplerConfig.cpp
   pipeline/ShaderStages.cpp
@@ -49,27 +49,27 @@ add_library(
 set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE)
-  target_sources(zahlen_vulkan PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
-  target_compile_definitions(zahlen_vulkan
+    target_sources(zahlen_vulkan PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
+    target_compile_definitions(zahlen_vulkan
                              PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
-  if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
-    target_link_libraries(zahlen_vulkan
+    if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
+        target_link_libraries(zahlen_vulkan
                           PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
-  endif()
+    endif()
 endif()
 
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 
 if(ZHLN_ENABLE_CLANG_TIDY)
-  find_program(CLANG_TIDY_EXE NAMES clang-tidy)
-  if(CLANG_TIDY_EXE)
-    set_target_properties(
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+    if(CLANG_TIDY_EXE)
+        set_target_properties(
       zahlen_vulkan PROPERTIES C_CLANG_TIDY "${CLANG_TIDY_EXE}"
                                CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-  else()
-    message(
+    else()
+        message(
       WARNING "zahlen_vulkan: Clang-Tidy requested but executable not found.")
-  endif()
+    endif()
 endif()
 
 set_source_files_properties(

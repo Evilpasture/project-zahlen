@@ -8,6 +8,9 @@
 #endif
 
 #include <span>
+#include <array>
+#include <type_traits>
+#include <utility>
 
 #include "../VkError.hpp"
 #include "PipelineTypes.hpp"
@@ -15,6 +18,8 @@
 #include <optional>
 
 namespace ZHLN::Vk {
+
+class PipelineBinaryStore;
 
 enum class PipelineBuilderError : uint8_t {
     MissingShaders         ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages."> {}) = 1,
@@ -33,7 +38,7 @@ struct PipelineConfig {
     // Keep stage metadata by value across typed builder transitions; Vulkan's
     // create structures borrow the backing data only during synchronous creation.
     std::optional<ShaderStagesView> stages;
-    VkPipelineCache                pipelineCache = VK_NULL_HANDLE;
+    PipelineBinaryStore*             binaries = nullptr;
 
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping    = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping    = nullptr;
@@ -66,15 +71,19 @@ struct PipelineConfig {
     bool                        colorWriteEnable = true;
 };
 
-struct ComputePipelineConfig {
-    ShaderDesc                                           shader {};
-    VkPipelineCache                                      cache          = VK_NULL_HANDLE;
-    const VkSpecializationInfo*                          specialization = nullptr;
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping        = nullptr;
-};
+// Assembly helpers shared by the builders' Assemble() methods.
+[[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
+[[nodiscard]] auto ValidShader(const ShaderDesc& shader) noexcept -> bool;
+[[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::span<char, 64> name) noexcept -> const char*;
 
-[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const PipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode>;
-[[nodiscard]] auto CreateComputePipeline(VkDevice device, const ComputePipelineConfig& config) noexcept -> std::expected<VkPipeline, ErrorCode>;
+// Pure Vulkan wrappers: create one pipeline from a fully assembled create
+// info, optionally consuming pipeline binaries. VK_NULL_HANDLE is passed as
+// the pipeline cache, unconditionally -- VK_KHR_pipeline_binary (orchestrated
+// by the builders, fed through `binaries`) is the only caching mechanism.
+[[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const VkGraphicsPipelineCreateInfo& createInfo,
+                                          std::span<const VkPipelineBinaryKHR> binaries) noexcept -> std::expected<VkPipeline, ErrorCode>;
+[[nodiscard]] auto CreateComputePipeline(VkDevice device, const VkComputePipelineCreateInfo& createInfo,
+                                         std::span<const VkPipelineBinaryKHR> binaries) noexcept -> std::expected<VkPipeline, ErrorCode>;
 
 template <size_t ColorCount = 1, bool HasDepth = true, typename Formats = RuntimeAttachmentFormats>
 class PipelineBuilder {
@@ -95,8 +104,8 @@ class PipelineBuilder {
         return *this;
     }
 
-    auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
-        _cfg.pipelineCache = cache;
+    auto Binaries(PipelineBinaryStore* binaries) noexcept -> PipelineBuilder& {
+        _cfg.binaries = binaries;
         return *this;
     }
 
@@ -213,10 +222,181 @@ class PipelineBuilder {
         return *this;
     }
 
+    [[nodiscard]] static auto WithConfig(PipelineConfig cfg) noexcept -> PipelineBuilder {
+        return PipelineBuilder {std::move(cfg)};
+    }
+
+    // Fills every Vulkan struct for this builder's configuration and hands
+    // the assembled create info to the callback; all backing storage lives
+    // for the duration of the call. This is where pipeline state becomes a
+    // VkGraphicsPipelineCreateInfo -- creation itself is CreateGraphicsPipeline.
+    template <typename Func>
+    [[nodiscard]] auto Assemble(Func&& callback) const& noexcept -> std::invoke_result_t<Func, const VkGraphicsPipelineCreateInfo&> {
+        const PipelineConfig& config = _cfg;
+        if (!config.stages || config.colorFormats.size() > UINT32_MAX) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+
+        const ShaderStages& shaders       = *config.stages->Get();
+        const bool          mesh_pipeline = shaders.mesh.code != nullptr;
+        if (!mesh_pipeline && shaders.vert.code == nullptr) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+        if (config.stencil.has_value() && !FormatHasStencil(config.depthFormat)) {
+            return std::unexpected(ToError(VK_ERROR_FORMAT_NOT_SUPPORTED));
+        }
+        if (!mesh_pipeline && ((config.bindingCount != 0 && config.bindings == nullptr) || (config.attributeCount != 0 && config.attributes == nullptr))) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+
+        constexpr uint32_t                                        k_max_stages = 3;
+        std::array<VkPipelineShaderStageCreateInfo, k_max_stages> stage_infos {};
+        std::array<VkShaderModuleCreateInfo, k_max_stages>        module_infos {};
+        uint32_t                                                  stage_count = 0;
+
+        const auto append_stage = [&](const ShaderStageData& shader, const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) {
+            if (shader.code == nullptr) {
+                return;
+            }
+            if (shader.size == 0 || shader.size % sizeof(uint32_t) != 0 || stage_count >= k_max_stages) {
+                return;
+            }
+
+            module_infos[stage_count] = VkShaderModuleCreateInfo {
+                .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .pNext    = mapping,
+                .codeSize = shader.size,
+                .pCode    = shader.code,
+            };
+            stage_infos[stage_count] = VkPipelineShaderStageCreateInfo {
+                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .pNext               = &module_infos[stage_count],
+                .stage               = shader.stage,
+                .module              = VK_NULL_HANDLE,
+                .pName               = shader.entryPoint,
+                .pSpecializationInfo = config.specializationInfo,
+            };
+            ++stage_count;
+        };
+
+        if (mesh_pipeline) {
+            append_stage(shaders.task, config.vsMapping);
+            append_stage(shaders.mesh, config.vsMapping);
+        } else {
+            append_stage(shaders.vert, config.vsMapping);
+        }
+        append_stage(shaders.frag, config.psMapping);
+        if (stage_count == 0) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+
+        const VkPipelineVertexInputStateCreateInfo vertex_input {
+            .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount   = config.bindingCount,
+            .pVertexBindingDescriptions      = config.bindingCount > 0 ? config.bindings : nullptr,
+            .vertexAttributeDescriptionCount = config.attributeCount,
+            .pVertexAttributeDescriptions    = config.attributeCount > 0 ? config.attributes : nullptr,
+        };
+        const VkPipelineInputAssemblyStateCreateInfo input_assembly {
+            .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology               = config.topology,
+            .primitiveRestartEnable = VK_FALSE,
+        };
+        const VkPipelineViewportStateCreateInfo viewport_state {
+            .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount  = 1,
+        };
+        const VkPipelineRasterizationStateCreateInfo rasterizer {
+            .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .polygonMode = config.polygonMode,
+            .cullMode    = config.cullMode,
+            .frontFace   = config.frontFace,
+            .lineWidth   = 1.0F,
+        };
+        const VkPipelineMultisampleStateCreateInfo multisampling {
+            .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+        };
+        const VkStencilOpState                      no_stencil {};
+        const VkPipelineDepthStencilStateCreateInfo depth_stencil {
+            .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable   = config.depthTest ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable  = config.depthWrite ? VK_TRUE : VK_FALSE,
+            .depthCompareOp    = VK_COMPARE_OP_LESS,
+            .stencilTestEnable = config.stencil.has_value() ? VK_TRUE : VK_FALSE,
+            .front             = config.stencil.has_value() ? config.stencil->front : no_stencil,
+            .back              = config.stencil.has_value() ? config.stencil->back : no_stencil,
+        };
+
+        const VkColorComponentFlags write_mask =
+            config.colorWriteEnable ? VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT : 0;
+        const VkPipelineColorBlendAttachmentState blend_state {
+            .blendEnable         = config.blendEnable ? VK_TRUE : VK_FALSE,
+            .srcColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = config.additiveBlend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp        = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp        = VK_BLEND_OP_ADD,
+            .colorWriteMask      = write_mask,
+        };
+        std::vector<VkPipelineColorBlendAttachmentState>  blend_attachments(config.colorFormats.size(), blend_state);
+        const VkPipelineColorBlendStateCreateInfo         color_blend {
+            .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .attachmentCount = static_cast<uint32_t>(blend_attachments.size()),
+            .pAttachments    = blend_attachments.empty() ? nullptr : blend_attachments.data(),
+        };
+        constexpr std::array<VkDynamicState, 3> dynamic_states {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR,
+            VK_DYNAMIC_STATE_CULL_MODE,
+        };
+        const VkPipelineDynamicStateCreateInfo dynamic_state {
+            .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = config.dynamicCullMode ? 3U : 2U,
+            .pDynamicStates    = dynamic_states.data(),
+        };
+        const VkPipelineRenderingCreateInfo rendering_info {
+            .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .viewMask                = config.viewMask,
+            .colorAttachmentCount    = static_cast<uint32_t>(config.colorFormats.size()),
+            .pColorAttachmentFormats = config.colorFormats.empty() ? nullptr : config.colorFormats.data(),
+            .depthAttachmentFormat   = config.depthFormat,
+            .stencilAttachmentFormat = FormatHasStencil(config.depthFormat) ? config.depthFormat : VK_FORMAT_UNDEFINED,
+        };
+        const VkPipelineCreateFlags2CreateInfoKHR heap_flags {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
+            .pNext = &rendering_info,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+        };
+        const VkGraphicsPipelineCreateInfo pipeline_info {
+            .sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext               = &heap_flags,
+            .stageCount          = stage_count,
+            .pStages             = stage_infos.data(),
+            .pVertexInputState   = mesh_pipeline ? nullptr : &vertex_input,
+            .pInputAssemblyState = mesh_pipeline ? nullptr : &input_assembly,
+            .pViewportState      = &viewport_state,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState   = &multisampling,
+            .pDepthStencilState  = &depth_stencil,
+            .pColorBlendState    = &color_blend,
+            .pDynamicState       = &dynamic_state,
+            .layout              = VK_NULL_HANDLE,
+            .renderPass          = VK_NULL_HANDLE,
+            .subpass             = 0,
+            .basePipelineHandle  = VK_NULL_HANDLE,
+            .basePipelineIndex   = -1,
+        };
+
+        return callback(pipeline_info);
+    }
+
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     auto Build(VkDevice device) const& noexcept -> std::expected<Pipeline, ErrorCode> {
         return Validate().and_then([&]() -> std::expected<Pipeline, ErrorCode> {
-            auto pipeline = CreateGraphicsPipeline(device, _cfg);
+            auto pipeline = CreatePipeline(device);
             if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
@@ -309,7 +489,7 @@ class PipelineBuilder {
             static_assert(!HasDepth || Formats::depth_format != VK_FORMAT_UNDEFINED, "Typed pipeline must specify its depth attachment format.");
         }
         return Validate().and_then([&]() -> std::expected<TypedPipeline<ColorCount, HasDepth, Formats>, ErrorCode> {
-            auto pipeline = CreateGraphicsPipeline(device, _cfg);
+            auto pipeline = CreatePipeline(device);
             if (!pipeline) {
                 return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
@@ -322,6 +502,27 @@ class PipelineBuilder {
     template <size_t, bool, typename>
     friend class PipelineBuilder;
     explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
+    }
+
+    // The one place pipeline-binary orchestration lives for graphics:
+    // derive the key from the assembled create info, replay or capture
+    // through the session, retry plainly if a replayed binary is rejected.
+    [[nodiscard]] auto CreatePipeline(VkDevice device) const noexcept -> std::expected<VkPipeline, ErrorCode> {
+        if (device == VK_NULL_HANDLE) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+        return Assemble([&](const VkGraphicsPipelineCreateInfo& info) -> std::expected<VkPipeline, ErrorCode> {
+            auto session = PipelineBinarySession::Begin(device, _cfg.binaries, info);
+            auto created = CreateGraphicsPipeline(device, info, session.Binaries());
+            if (!created && session.Replayed()) {
+                session.Invalidate();
+                created = CreateGraphicsPipeline(device, info, {});
+            }
+            if (created) {
+                session.Commit();
+            }
+            return created;
+        });
     }
 
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode> {
@@ -352,17 +553,81 @@ class ComputePipelineBuilder {
     auto Shader(const ShaderDesc& desc) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-    auto Cache(VkPipelineCache cache) noexcept -> ComputePipelineBuilder&;
+    auto Binaries(PipelineBinaryStore* binaries) noexcept -> ComputePipelineBuilder&;
 
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
 
-    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ErrorCode>;
+    // Fills every Vulkan struct for this builder's configuration and hands
+    // the assembled create info to the callback; all backing storage lives
+    // for the duration of the call.
+    template <typename Func>
+    [[nodiscard]] auto Assemble(Func&& callback) const noexcept -> std::invoke_result_t<Func, const VkComputePipelineCreateInfo&> {
+        if (!ValidShader(_shader)) {
+            return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
+        }
+
+        std::array<char, 64>           entry_name {};
+        const char*                    entry_point = ResolveComputeEntryPoint(_shader, entry_name);
+        const VkShaderModuleCreateInfo module_info {
+            .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .pNext    = _mapping,
+            .codeSize = _shader.size,
+            .pCode    = _shader.code,
+        };
+        const VkPipelineShaderStageCreateInfo stage_info {
+            .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext               = &module_info,
+            .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module              = VK_NULL_HANDLE,
+            .pName               = entry_point,
+            .pSpecializationInfo = _specialization_info,
+        };
+        const VkPipelineCreateFlags2CreateInfoKHR heap_flags {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+        };
+        const VkComputePipelineCreateInfo pipeline_info {
+            .sType              = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .pNext              = &heap_flags,
+            .stage              = stage_info,
+            .layout             = VK_NULL_HANDLE,
+            .basePipelineHandle = VK_NULL_HANDLE,
+            .basePipelineIndex  = -1,
+        };
+
+        return callback(pipeline_info);
+    }
+
+    // The one place pipeline-binary orchestration lives for compute:
+    // derive the key from the assembled create info, replay or capture
+    // through the session, retry plainly if a replayed binary is rejected.
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ErrorCode> {
+        if (auto valid = Validate(); !valid) {
+            return std::unexpected(valid.error());
+        }
+        if (device == VK_NULL_HANDLE) {
+            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+        }
+        return Assemble([&](const VkComputePipelineCreateInfo& info) -> std::expected<Pipeline, ErrorCode> {
+            auto session = PipelineBinarySession::Begin(device, _binaries, info);
+            auto created = CreateComputePipeline(device, info, session.Binaries());
+            if (!created && session.Replayed()) {
+                session.Invalidate();
+                created = CreateComputePipeline(device, info, {});
+            }
+            if (!created) {
+                return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+            }
+            session.Commit();
+            return Pipeline(device, *created);
+        });
+    }
 
   private:
     [[nodiscard]] auto Validate() const noexcept -> std::expected<void, ErrorCode>;
 
     ShaderDesc                                           _shader {};
-    VkPipelineCache                                      _cache               = VK_NULL_HANDLE;
+    PipelineBinaryStore*                                   _binaries            = nullptr;
     const VkSpecializationInfo*                          _specialization_info = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping             = nullptr;
 };

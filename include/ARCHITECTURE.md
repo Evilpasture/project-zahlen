@@ -603,11 +603,15 @@ tree resolves exactly what it always did.
 
 This is policy, so it stays private to the layer that owns the process: it has
 no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
-includes it. The pipeline cache crosses into the renderer as data, never as a
+includes it. Pipeline binaries cross into the renderer as data, never as a
 path: the kernel reads `pipeline_cache.bin` itself and hands the bytes in via
-`RenderConfig::initialPipelineCacheData`, then extracts the updated cache
-with `RenderContext::GetPipelineCacheData()` before teardown and writes it
-back, so the RHI works unchanged on hosts with no file system at all. A caller
+`RenderConfig::initialPipelineBinaryData`, then extracts the updated set
+with `RenderContext::GetPipelineBinaryData()` before teardown and writes it
+back, so the RHI works unchanged on hosts with no file system at all. There
+is no `VkPipelineCache` anywhere in the renderer: `VK_KHR_pipeline_binary`
+supplies per-pipeline blobs keyed by the driver's own pipeline keys, held in
+`Vk::PipelineBinaryStore` and replayed or captured inside the pipeline
+builders; hosts without the extension compile from scratch. A caller
 that supplies its own cache bytes keeps persistence for itself; only when it
 supplies none does the kernel fill in the on-disk cache and take on writing it
 back. `RenderConfig::crashDumpPath` is still a path, forwarded into
@@ -615,8 +619,8 @@ back. `RenderConfig::crashDumpPath` is still a path, forwarded into
 in, and a path set by the caller is used as given.
 
 Caches are regenerable by definition: a missing or foreign cache costs compile
-time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on
-another driver or device (`MatchesDevice` in `PipelineCache.cpp`), and an
+time, never correctness -- `Vk::MatchesDevice` discards a store recorded on
+another driver or device (the global pipeline key check in `PipelineBinaries.cpp`), and an
 unwritable directory costs one log line.
 
 `ZHLN_PROJECT_ROOT` (`Config.hpp`) stays a *compile-time source path*. It is only

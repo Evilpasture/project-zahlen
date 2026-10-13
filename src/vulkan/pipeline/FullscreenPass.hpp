@@ -27,7 +27,7 @@ struct FullscreenPass {
         uint32_t                        indexPushOffset,
         HeapLifecycle                   lifecycle,
         bool                            additive = false,
-        VkPipelineCache                 cache    = VK_NULL_HANDLE
+        PipelineBinaryStore*              binaries = nullptr
     ) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildHeapVariants(
@@ -39,7 +39,7 @@ struct FullscreenPass {
         uint32_t                              indexPushOffset,
         HeapLifecycle                         lifecycle,
         bool                                  additive = false,
-        VkPipelineCache                       cache    = VK_NULL_HANDLE
+        PipelineBinaryStore*                    binaries = nullptr
     ) noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

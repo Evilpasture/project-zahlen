@@ -38,7 +38,7 @@ namespace {
 auto VolumetricFogSystem::Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
     const auto build = [&impl](auto& pass, const Vk::ShaderDesc& shader) -> std::expected<void, ErrorCode> {
         if (auto built = pass.BuildHeap(
-                impl.ctx.Device(), impl.heapManager, shader, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, impl.pipelineCache.Get()
+                impl.ctx.Device(), impl.heapManager, shader, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, &impl.pipelineBinaries
             );
             !built) {
             return std::unexpected(built.error());

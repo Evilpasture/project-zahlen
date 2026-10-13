@@ -17,7 +17,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     uint32_t                        indexPushOffset,
     HeapLifecycle                   lifecycle,
     bool                            additive,
-    VkPipelineCache                 cache
+    PipelineBinaryStore*              binaries
 ) noexcept {
     // Reflection only: the binding structure drives the mapping table.
     if (!layoutInstance.Build(device, shaders)) {
@@ -30,7 +30,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
-                       .Cache(cache)
+                       .Binaries(binaries)
                        .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                        .ColorFormats(colorFormats)
                        .NoDepth()
@@ -57,7 +57,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     uint32_t                              indexPushOffset,
     HeapLifecycle                         lifecycle,
     bool                                  additive,
-    VkPipelineCache                       cache
+    PipelineBinaryStore*                    binaries
 ) noexcept {
     // Specialization does not change the descriptor interface, so one mapping
     // table covers every variant.
@@ -75,7 +75,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     for (const auto& spec: specInfos) {
         auto builder = PipelineBuilder {}
                            .Shaders(shaders)
-                           .Cache(cache)
+                           .Binaries(binaries)
                            .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                            .ColorFormats(colorFormats)
                            .Specialization(&spec)

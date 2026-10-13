@@ -35,7 +35,7 @@ template <typename LayoutT>
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeap(
             self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-            additive, self->pipelineCache.Get()
+            additive, &self->pipelineBinaries
         );
     });
 }
@@ -53,7 +53,7 @@ template <typename LayoutT>
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeapVariants(
             self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
-            Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
+            Vk::HeapLifecycle::Frame, additive, &self->pipelineBinaries
         );
     });
 }

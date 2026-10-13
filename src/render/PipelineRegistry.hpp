@@ -29,12 +29,12 @@ class PipelineRegistry {
   public:
     PipelineRegistry(
         Vk::Context&           ctx,
-        Vk::PipelineCache&     pipelineCache,
+        Vk::PipelineBinaryStore& pipelineBinaries,
         Vk::HeapMappingBundle& sceneHeapMappings,
         Vk::GPUDiagnostics&    gpuDiagnostics,
         Vk::DeletionQueue&     deletionQueue
     ) noexcept:
-        _ctx(ctx), _pipelineCache(pipelineCache), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue) {
+        _ctx(ctx), _pipelineBinaries(pipelineBinaries), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue) {
     }
     ~PipelineRegistry() {
         RetireAll();
@@ -139,7 +139,7 @@ class PipelineRegistry {
             .vertexMapping   = &_heapMappings.info,
             .fragmentMapping = &_heapMappings.info,
         };
-        auto created = Vk::GraphicsPipeline<ShaderModule, PassContract, Flags>::Create(_ctx.Device(), bindings, _pipelineCache.Get());
+        auto created = Vk::GraphicsPipeline<ShaderModule, PassContract, Flags>::Create(_ctx.Device(), bindings, &_pipelineBinaries);
         if (!created) {
             return std::unexpected(created.error());
         }
@@ -199,7 +199,7 @@ class PipelineRegistry {
     void LogMeshPipelineFallback(ErrorCode error) const noexcept;
 
     Vk::Context&           _ctx;
-    Vk::PipelineCache&     _pipelineCache;
+    Vk::PipelineBinaryStore& _pipelineBinaries;
     Vk::HeapMappingBundle& _heapMappings;
     Vk::GPUDiagnostics&    _diagnostics;
     Vk::DeletionQueue&     _deletionQueue;

@@ -90,19 +90,19 @@ class IBLProcessor {
             }
         }
         auto brdfPass = CreateHeapComputePass(
-            impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, impl.pipelineCache.Get()
+            impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
         );
         if (!brdfPass) {
             return std::unexpected(brdfPass.error());
         }
         auto specPass = CreateHeapComputePass(
-            impl.ctx.Device(), specShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, impl.pipelineCache.Get()
+            impl.ctx.Device(), specShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
         );
         if (!specPass) {
             return std::unexpected(specPass.error());
         }
         auto shPass = CreateHeapComputePass(
-            impl.ctx.Device(), shShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, impl.pipelineCache.Get()
+            impl.ctx.Device(), shShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
         );
         if (!shPass) {
             return std::unexpected(shPass.error());

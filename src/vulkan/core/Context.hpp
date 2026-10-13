@@ -87,6 +87,11 @@ class Context {
     [[nodiscard]] auto MeshShadersSupported() const noexcept -> bool {
         return _device.MeshShaderEnabled();
     }
+    [[nodiscard]] auto PipelineBinariesSupported() const noexcept -> bool {
+        return HasFeature<VkPhysicalDevicePipelineBinaryFeaturesKHR>(
+            [](const VkPhysicalDevicePipelineBinaryFeaturesKHR& f) { return f.pipelineBinaries == VK_TRUE; }
+        );
+    }
     [[nodiscard]] auto MeshShaderLimits() const noexcept -> Vk::MeshShaderLimits {
         return QueryMeshShaderLimits(_physical.handle);
     }

@@ -17,8 +17,8 @@ struct DestroyPipeline {
     void operator()(VkDevice device, VkPipeline handle) const noexcept;
 };
 
-struct DestroyPipelineCache {
-    void operator()(VkDevice device, VkPipelineCache handle) const noexcept;
+struct DestroyPipelineBinary {
+    void operator()(VkDevice device, VkPipelineBinaryKHR handle) const noexcept;
 };
 
 struct DestroySemaphore {
@@ -88,7 +88,7 @@ class DeviceHandle {
 };
 
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
-using PipelineCache         = DeviceHandle<VkPipelineCache, DestroyPipelineCache>;
+using PipelineBinary        = DeviceHandle<VkPipelineBinaryKHR, DestroyPipelineBinary>;
 using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
 using AttachmentViewHandle  = DeviceHandle<VkImageView, DestroyAttachmentView>;
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, DestroyAccelerationStructure>;

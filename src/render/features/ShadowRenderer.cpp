@@ -63,7 +63,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .ViewMask(kCascadeViewMask)
                 .CullNone()
-                .Cache(impl.pipelineCache.Get())
+                .Binaries(&impl.pipelineBinaries)
                 .Build(device)
                 .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([this](auto&& pipeline) -> auto { _cascadePipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -91,7 +91,7 @@ auto ShadowRenderer::CompileCascadePipelines(RenderContext::Impl& impl, VkDevice
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                                 .ViewMask(kCascadeViewMask)
                                 .CullNone()
-                                .Cache(impl.pipelineCache.Get())
+                                .Binaries(&impl.pipelineBinaries)
                                 .Build(device);
             if (!pipeline) {
                 ZHLN::Log("[ShadowRenderer] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
@@ -113,7 +113,7 @@ auto ShadowRenderer::CompileAtlasPipeline(RenderContext::Impl& impl, VkDevice de
                 .DepthOnly()
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .CullNone()
-                .Cache(impl.pipelineCache.Get())
+                .Binaries(&impl.pipelineBinaries)
                 .Build(device)
                 .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([this](auto&& pipeline) -> auto { _atlasPipeline = std::forward<decltype(pipeline)>(pipeline); });

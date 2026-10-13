@@ -123,7 +123,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     auto           MakeBuilder   = [&]() {
         Vk::PipelineBuilder builder;
         builder.Shaders(*uiShaders)
-            .Cache(ctx.pipelineCache.Get())
+            .Binaries(&ctx.pipelineBinaries)
             .HeapMappings(&impl.mappings.info, &impl.mappings.info)
             .AlphaBlend()
             .CullNone();

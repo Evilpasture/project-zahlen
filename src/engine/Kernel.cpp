@@ -25,14 +25,14 @@ namespace ZHLN {
 
 namespace {
 
-// The kernel is the host: it owns the on-disk pipeline cache. The renderer
+// The kernel is the host: it owns the on-disk pipeline binaries. The renderer
 // only ever sees bytes in and bytes out, so all of this lives here.
-constexpr uint64_t kMaxPipelineCacheBytes = 64ull * 1024 * 1024;
+constexpr uint64_t kMaxPipelineBinaryBytes = 64ull * 1024 * 1024;
 
-[[nodiscard]] auto LoadPipelineCacheBytes(const std::filesystem::path& file) -> std::vector<uint8_t> {
+[[nodiscard]] auto LoadPipelineBinaryBytes(const std::filesystem::path& file) -> std::vector<uint8_t> {
     std::error_code ec;
     const auto      size = std::filesystem::file_size(file, ec);
-    if (ec || size == 0 || size > kMaxPipelineCacheBytes) {
+    if (ec || size == 0 || size > kMaxPipelineBinaryBytes) {
         return {};
     }
     std::ifstream in(file, std::ios::binary);
@@ -47,7 +47,7 @@ constexpr uint64_t kMaxPipelineCacheBytes = 64ull * 1024 * 1024;
     return out;
 }
 
-void StorePipelineCacheBytes(const std::filesystem::path& target, const std::span<const uint8_t> data) {
+void StorePipelineBinaryBytes(const std::filesystem::path& target, const std::span<const uint8_t> data) {
     if (data.empty()) {
         return;
     }
@@ -60,7 +60,7 @@ void StorePipelineCacheBytes(const std::filesystem::path& target, const std::spa
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) {
-            ZHLN::Log("[Kernel] Could not open '{}' for writing the pipeline cache.", temp.string());
+            ZHLN::Log("[Kernel] Could not open '{}' for writing the pipeline binaries.", temp.string());
             return;
         }
         out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
@@ -71,7 +71,7 @@ void StorePipelineCacheBytes(const std::filesystem::path& target, const std::spa
         std::filesystem::remove(temp, ec);
         return;
     }
-    ZHLN::Log("[Kernel] Saved {} KB pipeline cache to '{}'.", data.size() / 1024, target.string());
+    ZHLN::Log("[Kernel] Saved {} KB pipeline binaries to '{}'.", data.size() / 1024, target.string());
 }
 
 } // namespace
@@ -94,12 +94,12 @@ struct Kernel::Impl {
     std::vector<std::unique_ptr<Window>> secondaryWindows;
 
     RenderConfig renderConfig;
-    // Owned storage backing renderConfig.initialPipelineCacheData (the span
+    // Owned storage backing renderConfig.initialPipelineBinaryData (the span
     // in the config is non-owning). Loaded from the on-disk cache when the
-    // caller did not provide bytes; persistPipelineCache records that the
+    // caller did not provide bytes; persistPipelineBinaries records that the
     // kernel took on writing the updated cache back at shutdown.
-    std::vector<uint8_t> pipelineCacheData;
-    bool                 persistPipelineCache = false;
+    std::vector<uint8_t> pipelineBinaryData;
+    bool                 persistPipelineBinaries = false;
     bool                 glfwAcquired         = false;
 };
 
@@ -119,10 +119,10 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->renderConfig      = cfg;
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
 
-    if (_impl->renderConfig.initialPipelineCacheData.empty()) {
-        _impl->pipelineCacheData                    = LoadPipelineCacheBytes(FS::Paths::PipelineCacheFile());
-        _impl->renderConfig.initialPipelineCacheData = _impl->pipelineCacheData;
-        _impl->persistPipelineCache                  = true;
+    if (_impl->renderConfig.initialPipelineBinaryData.empty()) {
+        _impl->pipelineBinaryData                    = LoadPipelineBinaryBytes(FS::Paths::PipelineCacheFile());
+        _impl->renderConfig.initialPipelineBinaryData = _impl->pipelineBinaryData;
+        _impl->persistPipelineBinaries                  = true;
     }
     if (_impl->renderConfig.crashDumpPath.empty()) {
         _impl->renderConfig.crashDumpPath = FS::Paths::CrashDumpFile().string();
@@ -181,8 +181,8 @@ Kernel::~Kernel() {
     // the renderer that allocated them is still alive.
     _impl->assetManager.reset();
     // Extract before reset: Destroy() no longer persists anything itself.
-    if (_impl->persistPipelineCache && _impl->renderContext != nullptr) {
-        StorePipelineCacheBytes(FS::Paths::PipelineCacheFile(), _impl->renderContext->GetPipelineCacheData());
+    if (_impl->persistPipelineBinaries && _impl->renderContext != nullptr) {
+        StorePipelineBinaryBytes(FS::Paths::PipelineCacheFile(), _impl->renderContext->GetPipelineBinaryData());
     }
     _impl->renderContext.reset();
     _impl->audioContext.reset();

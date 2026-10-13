@@ -15,7 +15,7 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
-    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get()); !built) {
+    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, &pipelineBinaries); !built) {
         return std::unexpected(built.error());
     }
 
@@ -31,7 +31,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
                 .AdditiveBlend()
                 .AlphaBlend()
                 .CullNone()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -40,7 +40,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
-    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
+    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, &pipelineBinaries)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -54,7 +54,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
@@ -70,7 +70,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .ViewMask(ShadowRenderer::kCascadeViewMask)
                         .CullNone()
-                        .Cache(pipelineCache.Get())
+                        .Binaries(&pipelineBinaries)
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) -> auto { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
@@ -87,7 +87,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
     gpuDiagnostics.RegisterShader(shader, "CSMain");
-    return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, pipelineCache.Get());
+    return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(
@@ -139,7 +139,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
                 .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
                 .CullNone()
                 .AlphaBlend()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -210,7 +210,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
                 .DepthWrite(false)
                 .CullFront()
                 .AlphaBlend()
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -235,7 +235,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .CullNone()
         .ColorWriteEnable(false)
         .StencilWriteMask(1)
-        .Cache(pipelineCache.Get())
+        .Binaries(&pipelineBinaries)
         .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
@@ -249,7 +249,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthWrite(true)
                 .CullBack()
                 .StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
@@ -265,7 +265,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthWrite(true)
                 .CullBack()
                 .StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
-                .Cache(pipelineCache.Get())
+                .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
@@ -294,7 +294,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
 
         const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
         gpuDiagnostics.RegisterShader(shader, "CSMain");
-        return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, pipelineCache.Get());
+        return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
         ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());
@@ -315,7 +315,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(built.error());
     }
 
-    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
+    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
@@ -370,7 +370,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
+            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, &pipelineBinaries);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
@@ -452,12 +452,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(built.error());
             }
             return clusterBoundsPass.BuildHeap(
-                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()
+                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, pipelineCache.Get()
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

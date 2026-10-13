@@ -52,6 +52,12 @@ auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode val
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
         .RequireExtension<VkPhysicalDeviceMaintenance5FeaturesKHR>(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, [](auto& f) { f.maintenance5 = VK_TRUE; })
+        // Optional: pipeline binaries replace the VkPipelineCache object as
+        // the warm-start mechanism. Absent (e.g. MoltenVK), creation simply
+        // compiles from scratch -- there is no cache handle either way.
+        .OptionalExtension<VkPhysicalDevicePipelineBinaryFeaturesKHR>(
+            VK_KHR_PIPELINE_BINARY_EXTENSION_NAME, [](auto& f) { f.pipelineBinaries = VK_TRUE; }
+        )
         .RequireWithOptional<VkPhysicalDeviceVulkan12Features>(
             [validationMode](auto& f) {
                 f.descriptorIndexing                           = VK_TRUE;
@@ -264,9 +270,9 @@ void RenderContext::Destroy() noexcept {
     }
 }
 
-std::vector<uint8_t> RenderContext::GetPipelineCacheData() const noexcept {
-    if (_impl && _impl->ctx.Device() != nullptr && _impl->pipelineCache.Valid()) {
-        return Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get());
+std::vector<uint8_t> RenderContext::GetPipelineBinaryData() const noexcept {
+    if (_impl) {
+        return _impl->pipelineBinaries.Serialize();
     }
     return {};
 }
