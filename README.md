@@ -2,7 +2,19 @@
 
 A **simple** project that integrates modern Vulkan, Jolt Physics, fast and straightforward creative work conversions and game development with pure C++ interface.
 
-It's kinda like Bevy but C++.
+This project's renderer proudly has zero:
+
+- `VkRenderPass`: Killed by dynamic rendering.
+- `VkFramebuffer`: Killed by dynamic rendering.
+- `VkDescriptorSetLayout`: Killed by descriptor heaps.
+- `VkDescriptorPool`: Killed by descriptor heaps.
+- `VkDescriptorSet`: Killed by descriptor heaps.
+- `VkSampler`: Avoided by using descriptor heaps.
+- `VkPipelineLayout`: Killed by descriptor heaps.
+- `VkShaderModule`: Deprecated in Vulkan 1.4 and killed by VK_KHR_maintenance5.
+- `VkPipelineCache`: Killed by pipeline binaries.
+
+Besides that, it's kinda like Bevy but C++26 and Vulkan.
 
 ## Build Requirements
 * **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later). At this point, if you have a modern compiler I assume you know what you're doing.
