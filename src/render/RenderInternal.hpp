@@ -925,10 +925,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept;
-    template <Vk::ShaderProgram ShaderModule, typename PushConstants = void>
-    [[nodiscard]] auto LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
-        -> std::expected<Vk::Pipeline, ErrorCode>;
-
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
@@ -1029,22 +1025,6 @@ template <VkShaderStageFlagBits Stage>
         return {.storage = std::move(aligned)};
     }
     return {.fallback = bytes};
-}
-
-template <Vk::ShaderProgram ShaderModule, typename PushConstants>
-auto RenderContext::Impl::LoadAndCreateComputeShader(Vk::ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept
-    -> std::expected<Vk::Pipeline, ErrorCode> {
-    const auto           loaded = LoadShaderData(cs);
-    const Vk::ShaderDesc shader = Vk::CreateShaderDesc(loaded.Code(), cs.entryPoint);
-    gpuDiagnostics.RegisterShader(shader, "CSMain");
-    if (shader.code == nullptr || shader.size == 0) {
-        return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    if (!pass.ReflectDispatchLayout(shader)) {
-        return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
-    }
-
-    return Vk::ComputePipeline<ShaderModule, PushConstants>::Create(ctx, shader, Vk::PipelineCreateBindings {.layout = layout}, pipelineCache.Get());
 }
 
 template <typename T = Vk::Buffer, typename... Args>

@@ -290,16 +290,18 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCode> {
-    auto built = Vk::PipelineLayoutBuilder(ctx.Device())
-                     .Build()
-                     .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-                     .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
-                         hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-                         return LoadAndCreateComputeShader<Shaders::Modules::HangGpuCS>(
-                                    Vk::MakeStageSource<Shaders::Modules::HangGpuCS>(), hangGpuPass.pipelineLayout.Get(), hangGpuPass
-                         )
-                             .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-                     });
+    auto built = [&]() -> std::expected<void, ErrorCode> {
+        const auto source = Vk::MakeStageSource<Shaders::Modules::HangGpuCS>();
+        const auto loaded = LoadShaderData(source);
+        const auto bytes  = loaded.Code();
+        if (bytes.empty()) {
+            return std::unexpected(Vk::ShaderStageCreationError::ShaderLoadingFailed);
+        }
+
+        const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
+        gpuDiagnostics.RegisterShader(shader, "CSMain");
+        return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, pipelineCache.Get());
+    }();
     if (!built) {
         ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());
     }

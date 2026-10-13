@@ -204,11 +204,13 @@ the old bindless set array.
   optional per-secondary push-data block; ported passes running in secondaries
   simply bind the heaps themselves (legal with a NULL inheritance chain).
 
-## 5. Still Legacy
+## 5. Backend Compatibility
 
-* `HangGpuCS` only: the device-lost diagnostic remains a traditional compute
-  pipeline with an empty real layout; it uses neither descriptor sets nor push
-  constants.
+* All Vulkan pipelines built in `src/render` use descriptor-heap mode. Skinning uses
+  heap-mode push data with no descriptor mapping; `HangGpuCS` is a no-binding
+  heap pipeline for the optional device-lost diagnostic.
+* `src/vulkan` retains generic `VkPipelineLayout` and non-heap command/dispatch
+  APIs for traditional Vulkan pipelines; no renderer pipeline uses those paths.
 * Everything descriptor-set related was deleted from the render layer after
   the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
   the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,
