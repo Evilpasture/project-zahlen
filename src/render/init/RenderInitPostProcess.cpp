@@ -122,17 +122,11 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
     defaultSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
+    pointSamplerConfig   = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
+    // The config is the sampler: it is written into the sampler heap at
+    // pointSamplerSlot, no VkSampler object is created.
+    WritePointSamplerToHeap(pointSamplerConfig);
     return std::expected<void, ErrorCode> {}
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            return defaultSamplerConfig.Create(ctx.Device()).and_then([&](auto defaultResult) -> auto {
-                defaultSampler = std::move(defaultResult);
-                pointSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithAddressMode(Vk::SamplerAddressMode::ClampToEdge);
-                return pointSamplerConfig.Create(ctx.Device()).transform([&](auto pointResult) -> auto {
-                    pointSampler = std::move(pointResult);
-                    WritePointSamplerToHeap(pointSamplerConfig);
-                });
-            });
-        })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(
                 GraphicsPassDesc {

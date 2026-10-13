@@ -148,15 +148,9 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    return shadowSamplerConfig.Create(ctx.Device())
-        .transform_error([](auto err) -> ErrorCode { return err; })
-
-        .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
-            shadowSampler = std::forward<decltype(sampler)>(sampler);
-            return {};
-        })
-
-        .and_then([&]() -> std::expected<void, ErrorCode> { return targets.InitShadows(); })
+    // shadowSamplerConfig is consumed directly by the heap sampler writes
+    // (e.g. VolumetricFogSystem's "shadowSampler" slot); no VkSampler object.
+    return targets.InitShadows()
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 

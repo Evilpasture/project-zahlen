@@ -24,12 +24,6 @@ void DestroySemaphore::operator()(const VkDevice device, const VkSemaphore handl
     }
 }
 
-void DestroySampler::operator()(const VkDevice device, const VkSampler handle) const noexcept {
-    if (vkDestroySampler != nullptr) {
-        vkDestroySampler(device, handle, nullptr);
-    }
-}
-
 void DestroyImageView::operator()(const VkDevice device, const VkImageView handle) const noexcept {
     if (vkDestroyImageView != nullptr) {
         vkDestroyImageView(device, handle, nullptr);

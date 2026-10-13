@@ -102,7 +102,11 @@ struct SamplerConfig {
         return result;
     }
 
-    [[nodiscard]] auto Create(VkDevice device) const noexcept -> std::expected<Sampler, ErrorCode>;
+    // No VkSampler object is ever created from this config: under
+    // VK_EXT_descriptor_heap the driver materialises the sampler state
+    // directly into the sampler heap from the VkSamplerCreateInfo built
+    // from this struct (see SamplerWriteBatch::Flush in SamplerConfig.cpp).
+    // Heap slots are referenced with the lightweight SamplerHandle instead.
 
 };
 

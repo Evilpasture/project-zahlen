@@ -25,10 +25,6 @@ struct DestroySemaphore {
     void operator()(VkDevice device, VkSemaphore handle) const noexcept;
 };
 
-struct DestroySampler {
-    void operator()(VkDevice device, VkSampler handle) const noexcept;
-};
-
 struct DestroyImageView {
     void operator()(VkDevice device, VkImageView handle) const noexcept;
 };
@@ -94,7 +90,6 @@ class DeviceHandle {
 using Pipeline              = DeviceHandle<VkPipeline, DestroyPipeline>;
 using PipelineCache         = DeviceHandle<VkPipelineCache, DestroyPipelineCache>;
 using Semaphore             = DeviceHandle<VkSemaphore, DestroySemaphore>;
-using Sampler               = DeviceHandle<VkSampler, DestroySampler>;
 using ImageViewHandle       = DeviceHandle<VkImageView, DestroyImageView>;
 using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, DestroyAccelerationStructure>;
 

@@ -65,15 +65,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 .WithLodRange(0.0F, 0.0F);
             clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
-            return globalSamplerConfig.Create(ctx.Device())
-                .and_then([&](auto&& globalRes) -> std::expected<void, ErrorCode> {
-                    globalSampler = std::forward<decltype(globalRes)>(globalRes);
-                    return clampSamplerConfig.Create(ctx.Device())
-                        .and_then([&](auto&& clampRes) -> std::expected<void, ErrorCode> {
-                            clampSampler = std::forward<decltype(clampRes)>(clampRes);
-                            return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
-                        });
-                });
+            // No VkSampler objects: InitSceneHeaps writes these configs
+            // straight into the sampler heap via vkWriteSamplerDescriptorsEXT.
+            return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitBakeHeapBindings(); })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitSkeletalAnimationResources(); })

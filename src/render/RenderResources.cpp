@@ -695,14 +695,10 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
+    // Retained only as a config: InitPassSamplerDescriptors writes it into
+    // the sampler heap (e.g. Reflection's "blueNoiseSampler" slot).
     blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
-    auto samplerRes        = blueNoiseSamplerConfig.Create(ctx.Device());
-    if (!samplerRes) {
-        return std::unexpected(samplerRes.error());
-    }
-
-    blueNoiseSampler  = std::move(*samplerRes);
-    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view));
+    auto blueNoiseIdx      = textureManager.Adopt(std::move(image), std::move(view));
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }

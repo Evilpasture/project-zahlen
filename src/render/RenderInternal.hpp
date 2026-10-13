@@ -376,13 +376,6 @@ struct RenderContext::Impl {
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
 
-    Vk::Sampler globalSampler;
-    Vk::Sampler clampSampler;
-    Vk::Sampler defaultSampler;
-    Vk::Sampler pointSampler;
-
-    Vk::Sampler blueNoiseSampler;
-
     Vk::FullscreenPass<TAALayout>        taaPass;
     Vk::FullscreenPass<FXAALayout>       fxaaPass;
     Vk::FullscreenPass<MLAALayout>       mlaaPass;
@@ -467,8 +460,6 @@ struct RenderContext::Impl {
 
     Vk::ReflectedLayout proceduralBakeDescLayout;
     Vk::ReflectedLayout iblBakeDescLayout;
-
-    Vk::Sampler shadowSampler;
 
     Vk::Image     ltcMatImage;
     Vk::ImageView ltcMatView;
