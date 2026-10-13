@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "GpuHandwritten.hpp"
 #include "RenderInternal.hpp"
 #include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
@@ -120,15 +119,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return SetupUI(); })
-        .and_then([&]() { return InitParallelRecorders(); })
-        .transform([&]() {
-            auto fvb_res = CreatePerFrame(
-                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
-            );
-            if (fvb_res) {
-                frames.fogVolumesBuffer = std::move(*fvb_res);
-            }
-        });
+        .and_then([&]() { return InitParallelRecorders(); });
 }
 
 } // namespace ZHLN

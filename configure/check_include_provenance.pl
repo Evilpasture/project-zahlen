@@ -109,7 +109,6 @@ my %FIRST_PARTY = (
     Mesh             => ['include/Zahlen/Render/Types.hpp'],
     Material         => ['include/Zahlen/Render/Types.hpp'],
     DrawFlags        => ['include/Zahlen/Render/Types.hpp'],
-    GPUVolumetricVolume => ['src/render/GpuHandwritten.hpp'],
     CSGOperation     => ['include/Zahlen/Render/Types.hpp'],
     CSGModifier      => ['include/Zahlen/Render/Types.hpp'],
     # Meshlet contract

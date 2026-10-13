@@ -332,7 +332,6 @@ struct RenderContext::Impl {
         PerFrame<Vk::Buffer>                tlasScratchBuffer;
         PerFrame<Vk::Buffer>                tlasInstanceBuffers;
         PerFrame<BufferHandle>              debugMeshHandles;
-        PerFrame<Vk::Buffer>                fogVolumesBuffer;
     };
 
     PerFrameResources                                         frames;
@@ -747,7 +746,6 @@ struct RenderContext::Impl {
         destroyFrames(frames.tlasBuffer);
         destroyFrames(frames.tlasScratchBuffer);
         destroyFrames(frames.tlasInstanceBuffers);
-        destroyFrames(frames.fogVolumesBuffer);
         allocator.DestroyBuffer(clusterBoundsBuffer);
         allocator.DestroyBuffer(morphDeltasBuffer);
 
