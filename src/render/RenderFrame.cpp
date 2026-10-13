@@ -96,7 +96,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 
             // Only position and tangent-frame streams are animated; the
             // immutable surface stream is read directly by the draw shader.
-            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress};
+            const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress.Get()};
             const VkDeviceSize posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
             const VkDeviceSize frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
             const auto         positions  = output.Subspan(0, posBytes);
@@ -106,13 +106,14 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
             }
 
             SkinningConstants pcs {
-                .inPosAddr        = posMesh->vboAddress,
-                .inFrameAddr      = frameMesh->vboAddress,
-                .inSkinAddr       = (skinMesh != nullptr) ? skinMesh->vboAddress : 0,
-                .outPosAddr       = positions.Address(),
-                .outFrameAddr     = framesOut.Address(),
-                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
-                .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
+                .inPosAddr        = Vk::DeviceAddress<VertexPosition>::Cast(posMesh->vboAddress),
+                .inFrameAddr      = Vk::DeviceAddress<VertexTangentFrame>::Cast(frameMesh->vboAddress),
+                .inSkinAddr       = (skinMesh != nullptr) ? Vk::DeviceAddress<uint32_t>::Cast(skinMesh->vboAddress) :
+                                                            Vk::DeviceAddress<uint32_t> {nullptr},
+                .outPosAddr       = Vk::DeviceAddress<VertexPosition>::Cast(positions.Address()),
+                .outFrameAddr     = Vk::DeviceAddress<VertexTangentFrame>::Cast(framesOut.Address()),
+                .jointsAddr       = Vk::DeviceAddress<JPH::Mat44> {ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle())},
+                .morphDeltasAddr  = Vk::DeviceAddress<JPH::Float4> {ctx.BufferAddress(morphDeltasBuffer.Handle())},
                 .vertexCount      = posMesh->vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,
@@ -166,7 +167,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
         }
 
-        if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
+        if (mesh == nullptr || mesh->blasAddress == nullptr || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
             continue;
         }
 
@@ -186,7 +187,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
             .mask                                   = 0xFF,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
-            .accelerationStructureReference         = mesh->blasAddress
+            .accelerationStructureReference         = mesh->blasAddress.Get()
         };
 
         tlasInstancesScratch.push_back(inst);
@@ -525,11 +526,11 @@ void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 
-auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<RenderTextureHandle, ErrorCode> {
+auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {
     return _impl->CreateRenderTexture(width, height, hdr);
 }
 
-void RenderContext::DestroyRenderTexture(RenderTextureHandle handle) noexcept {
+void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 

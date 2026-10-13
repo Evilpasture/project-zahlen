@@ -80,14 +80,14 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress          = posMesh->vboAddress,
+            .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
                 JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor =
                 JPH::Float4 {gpuMat->emissiveFactor[0], gpuMat->emissiveFactor[1], gpuMat->emissiveFactor[2], gpuMat->emissiveFactor[3]},
-            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress : 0,
-            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
-            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress.Get() : 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
             .indexCount          = gpuMesh->indexCount,
             .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
@@ -139,13 +139,13 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress          = posMesh->vboAddress,
+            .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
                 JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor      = {},
             .tangentFrameAddress = 0,
-            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress : 0,
-            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress : 0,
+            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
+            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
             .indexCount          = gpuMesh->indexCount,
             .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
             .normalIdx           = 0,

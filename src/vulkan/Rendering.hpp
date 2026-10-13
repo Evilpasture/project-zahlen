@@ -55,6 +55,7 @@
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
 #include "memory/ImageSlice.hpp"
+#include "memory/DeviceAddress.hpp"
 #include "memory/BufferSlice.hpp"
 #include "pipeline/PipelineTypes.hpp"
 #include "core/RenderCore.hpp"

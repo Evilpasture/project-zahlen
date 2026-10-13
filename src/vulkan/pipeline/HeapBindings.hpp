@@ -401,8 +401,8 @@ template <typename Arg>
             }
             // Resolve a base address only when the slice did not carry one;
             // Address() adds its relative offset exactly once.
-            if (slice.address == 0) {
-                slice.address = heap.BufferAddress(slice.buffer);
+            if (!slice.address) {
+                slice.address = DeviceAddress<> {heap.BufferAddress(slice.buffer)};
             }
             if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 heap.WriteBuffer(UniformBufferHandle {slot}, slice);

@@ -352,7 +352,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     _impl->geometry.ClearMaterials();
 
     for (auto& entry: _impl->renderTextures) {
-        _impl->textureManager.ReleaseSlot(entry.second.bindlessIndex);
+        _impl->textureManager.Unload(entry.first);
         _impl->deletionQueue.EnqueueAttachmentView(_impl->ctx.Device(), std::move(entry.second.attachmentView));
     }
     _impl->renderTextures.clear();
@@ -542,8 +542,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     return Material {
         .pipeline                 = basicMat.pipeline,
         .prePassPipeline          = basicMat.prePassPipeline,
-        .resourceGroup            = basicMat.resourceGroup,
-        .constantBuffer           = basicMat.constantBuffer,
         .albedoMap                = desc.albedoMap,
         .normalMap                = desc.normalMap,
         .pbrMap                   = desc.pbrMap,
@@ -711,7 +709,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     }
 
     Vk::BlasGeometryDesc geom = {
-        .vertex_data   = scratchMesh->vboAddress,
+        .vertex_data   = scratchMesh->vboAddress.Get(),
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex    = scratchMesh->vertexCount > 0 ? scratchMesh->vertexCount - 1 : 0,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
@@ -745,7 +743,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
             allocator.DestroyBuffer(scratchMesh->blasBuffer);
             return;
         }
-        scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
+        scratchMesh->blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get())};
     }
 
     auto scratchBufOpt =
@@ -756,7 +754,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         if (creatingBlas) {
             scratchMesh->blas = {};
             allocator.DestroyBuffer(scratchMesh->blasBuffer);
-            scratchMesh->blasAddress = 0;
+            scratchMesh->blasAddress = nullptr;
         }
         return;
     }
@@ -906,11 +904,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     auto* indexMesh = mesh.indexBuffer != BufferHandle::Invalid ? impl.geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     const Vk::BlasGeometryDesc geom {
-        .vertex_data   = posMesh->vboAddress,
+        .vertex_data   = posMesh->vboAddress.Get(),
         .vertex_stride = sizeof(VertexPosition),
         .max_vertex    = mesh.vertexCount > 0 ? mesh.vertexCount - 1 : 0,
         .vertex_format = VK_FORMAT_R32G32B32_SFLOAT,
-        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress : 0,
+        .index_data    = indexMesh != nullptr ? indexMesh->vboAddress.Get() : 0,
         .index_type    = indexMesh != nullptr ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_NONE_KHR,
     };
     const uint32_t                       primitiveCount = indexMesh != nullptr ? mesh.indexCount / 3 : mesh.vertexCount / 3;
@@ -970,7 +968,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     // The old BLAS may still be referenced by another in-flight frame.
     impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
     impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
-    posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get());
+    posMesh->blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get())};
     posMesh->blasBuffer  = std::move(*bufferRes);
     posMesh->blas        = std::move(blas);
     return {};

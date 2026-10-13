@@ -21,9 +21,12 @@ namespace ZHLN {
 struct NativeMesh {
     Vk::Buffer                 buffer;
     uint32_t                   vertexCount = 0;
-    VkDeviceAddress            vboAddress  = 0;
+    // Stream-agnostic record: the same NativeMesh backs position, frame,
+    // surface, index and meshlet buffers, so the address stays type-erased
+    // here and gains its element type at the point of use (Cast<>).
+    Vk::DeviceAddress<>        vboAddress;
     Vk::AccelerationStructure  blas;
-    VkDeviceAddress            blasAddress = 0;
+    Vk::DeviceAddress<>        blasAddress;
     Vk::Buffer                 blasBuffer;
 
     NativeMesh() = default;
@@ -33,9 +36,9 @@ struct NativeMesh {
     NativeMesh(
         Vk::Buffer                buf,
         uint32_t                  count,
-        VkDeviceAddress           vboAddr,
+        Vk::DeviceAddress<>       vboAddr,
         Vk::AccelerationStructure b    = {},
-        VkDeviceAddress           addr = 0,
+        Vk::DeviceAddress<>       addr = nullptr,
         Vk::Buffer                bBuf = {}
     ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(std::move(b)), blasAddress(addr), blasBuffer(std::move(bBuf)) {
     }

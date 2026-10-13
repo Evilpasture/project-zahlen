@@ -338,11 +338,11 @@ void ResourceWriteBatch::AddStorageImage(StorageImageHandle handle, const VkImag
 }
 
 void ResourceWriteBatch::AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept {
-    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {.address = slice.Address(), .size = slice.Size()});
+    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()});
 }
 
 void ResourceWriteBatch::AddBuffer(UniformBufferHandle handle, BufferSlice slice) noexcept {
-    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {.address = slice.Address(), .size = slice.Size()});
+    _impl->AddAddress(handle.index, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, {.address = slice.Address().Get(), .size = slice.Size()});
 }
 
 void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept {

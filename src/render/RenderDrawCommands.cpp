@@ -54,13 +54,16 @@ struct ResolvedMeshMaterial {
     NativeMesh*     indexMesh       = nullptr;
     NativeMaterial* material        = nullptr;
     NativeMaterial* prePassMaterial = nullptr;
-    VkDeviceAddress posAddr         = 0;
-    VkDeviceAddress frameAddr       = 0;
-    VkDeviceAddress surfaceAddr     = 0;
+    // Addresses gain their element type here, where the stream each one
+    // feeds is known. Offsets below are then checked arithmetic, not bytes
+    // counted by hand against the wrong struct.
+    Vk::DeviceAddress<VertexPosition>     posAddr;
+    Vk::DeviceAddress<VertexTangentFrame> frameAddr;
+    Vk::DeviceAddress<VertexSurface>      surfaceAddr;
 
-    VkDeviceAddress meshletAddr       = 0;
-    VkDeviceAddress meshletVertexAddr = 0;
-    VkDeviceAddress meshletTriAddr    = 0;
+    Vk::DeviceAddress<GPUMeshlet> meshletAddr;
+    Vk::DeviceAddress<uint32_t>   meshletVertexAddr;
+    Vk::DeviceAddress<uint8_t>    meshletTriAddr;
     uint32_t        meshletCount      = 0;
 };
 
@@ -212,8 +215,8 @@ struct InstanceDataDesc {
         .posAddress          = desc.posAddress,
         .tangentFrameAddress = desc.tangentFrameAddress,
         .surfaceAddress      = desc.surfaceAddress,
-        .skinAddress         = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress : 0ull,
-        .iboAddress          = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress : 0ull,
+        .skinAddress         = (res != nullptr && res->skinMesh != nullptr) ? res->skinMesh->vboAddress.Get() : 0ull,
+        .iboAddress          = (res != nullptr && res->indexMesh != nullptr) ? res->indexMesh->vboAddress.Get() : 0ull,
         .vertexCount         = desc.vertexCount,
         .indexCount          = desc.indexCount,
         .texIndices0         = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
@@ -235,9 +238,9 @@ struct InstanceDataDesc {
         .morphWeights         = desc.morphWeights,
         .baseColorFactor      = desc.baseColorFactor,
         .emissiveFactor       = emissive,
-        .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
-        .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
-        .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
+        .meshletAddress       = (res != nullptr) ? res->meshletAddr.Get() : 0ull,
+        .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr.Get() : 0ull,
+        .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr.Get() : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
         ._paddingMeshlet      = paddingMeshlet,
         .anisotropyStrength   = std::clamp(desc.anisotropyStrength, 0.0f, 1.0f),
@@ -303,9 +306,10 @@ struct InstanceDataDesc {
         return std::nullopt;
     }
 
-    res.posAddr     = res.finalPosMesh->vboAddress;
-    res.frameAddr   = res.frameMesh != nullptr ? res.frameMesh->vboAddress : 0;
-    res.surfaceAddr = res.surfaceMesh->vboAddress;
+    res.posAddr     = Vk::DeviceAddress<VertexPosition>::Cast(res.finalPosMesh->vboAddress);
+    res.frameAddr   = res.frameMesh != nullptr ? Vk::DeviceAddress<VertexTangentFrame>::Cast(res.frameMesh->vboAddress) :
+                                                 Vk::DeviceAddress<VertexTangentFrame> {nullptr};
+    res.surfaceAddr = Vk::DeviceAddress<VertexSurface>::Cast(res.surfaceMesh->vboAddress);
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
         auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
@@ -313,9 +317,9 @@ struct InstanceDataDesc {
         auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
-            res.meshletAddr       = meshletMesh->vboAddress;
-            res.meshletVertexAddr = meshletVtx->vboAddress;
-            res.meshletTriAddr    = meshletTri->vboAddress;
+            res.meshletAddr       = Vk::DeviceAddress<GPUMeshlet>::Cast(meshletMesh->vboAddress);
+            res.meshletVertexAddr = Vk::DeviceAddress<uint32_t>::Cast(meshletVtx->vboAddress);
+            res.meshletTriAddr    = Vk::DeviceAddress<uint8_t>::Cast(meshletTri->vboAddress);
             res.meshletCount      = mesh.meshletCount;
         }
     }
@@ -324,10 +328,14 @@ struct InstanceDataDesc {
     // one buffer. Skinned geometry stores positions then animated frames in
     // scratch; its UVs/color continue to use the original surface buffer.
     if (res.posMesh == res.surfaceMesh) {
-        res.surfaceAddr += RenderContext::Impl::kMaxDebugVertices * sizeof(VertexPosition);
+        // Debug triangles pack positions, then surfaces, in one buffer:
+        // walk kMaxDebugVertices positions forward from the position stream.
+        res.surfaceAddr = Vk::DeviceAddress<VertexSurface>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(RenderContext::Impl::kMaxDebugVertices));
     }
     if (skinnedVertexBuffer != Invalid) {
-        res.frameAddr = res.finalPosMesh->vboAddress + (res.finalPosMesh->vertexCount * sizeof(VertexPosition));
+        // Skinned scratch stores positions, then animated tangent frames:
+        // the frame stream begins one position array past the base.
+        res.frameAddr = Vk::DeviceAddress<VertexTangentFrame>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(res.finalPosMesh->vertexCount));
     }
 
     return res;
@@ -386,8 +394,8 @@ void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     const VkDeviceSize    posBytes    = static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexPosition);
     const auto            positions   = lineBuffer.Subspan(0, posBytes);
     const auto            surfaces    = lineBuffer.Subspan(posBytes, static_cast<VkDeviceSize>(maxLineVerts) * sizeof(VertexSurface));
-    const VkDeviceAddress posAddr     = positions.Address();
-    const VkDeviceAddress surfaceAddr = surfaces.Address();
+    const VkDeviceAddress posAddr     = positions.Address().Get();
+    const VkDeviceAddress surfaceAddr = surfaces.Address().Get();
 
     auto mappedInst = frames.instanceDataBuffers[presenter.frameIndex].Map(allocator);
     if (!mappedInst) {
@@ -438,9 +446,9 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .resolved                 = &*resolved,
                  .world                    = params.transform,
                  .prevWorld                = params.prevTransform,
-                 .posAddress               = resolved->posAddr,
-                 .tangentFrameAddress      = resolved->frameAddr,
-                 .surfaceAddress           = resolved->surfaceAddr,
+                 .posAddress               = resolved->posAddr.Get(),
+                 .tangentFrameAddress      = resolved->frameAddr.Get(),
+                 .surfaceAddress           = resolved->surfaceAddr.Get(),
                  .indices                  = tex,
                  .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                  .isViewmodel              = isViewmodel != 0u,
@@ -522,9 +530,9 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .resolved                 = &*resolved,
                     .world                    = transform,
                     .prevWorld                = prevTransform,
-                    .posAddress               = resolved->posAddr,
-                    .tangentFrameAddress      = resolved->frameAddr,
-                    .surfaceAddress           = resolved->surfaceAddr,
+                    .posAddress               = resolved->posAddr.Get(),
+                    .tangentFrameAddress      = resolved->frameAddr.Get(),
+                    .surfaceAddress           = resolved->surfaceAddr.Get(),
                     .indices                  = tex,
                     .alphaMode                = static_cast<uint32_t>(material.alphaMode) & 0xFFu,
                     .isSkinned                = isSkinned != 0u,

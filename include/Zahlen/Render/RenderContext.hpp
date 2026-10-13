@@ -157,8 +157,8 @@ class ZHLN_API RenderContext {
 
     void ReleaseTarget(const PresentationTarget& target) noexcept;
 
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<RenderTextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
 
     // Only draw submission needs the GPU descriptor index; resource creation

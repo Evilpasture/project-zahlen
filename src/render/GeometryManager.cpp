@@ -100,12 +100,12 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
                 Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
             });
 
-            const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
+            const Vk::DeviceAddress<> address {_ctx.BufferAddress(gpu_buf.Handle())};
             return Adopt(std::move(gpu_buf), elementCount, address);
         });
 }
 
-auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
+auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle {
     const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
     if (handle == BufferHandle::Invalid) {
         _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the buffer, so this frame's copy is all there is. The caller's
@@ -148,7 +148,7 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
 
     return Vk::Buffer::Create(_allocator, size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> BufferHandle {
-            const VkDeviceAddress address = _ctx.BufferAddress(gpu_buf.Handle());
+            const Vk::DeviceAddress<> address {_ctx.BufferAddress(gpu_buf.Handle())};
             return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
         })
         .value_or(BufferHandle::Invalid);

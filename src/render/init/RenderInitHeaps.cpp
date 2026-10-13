@@ -90,7 +90,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address               = ctx.BufferAddress(gpu_buf.Handle());
-                frames.debugMeshHandles[i] = geometry.Adopt(std::move(gpu_buf), kMaxDebugVertices, address);
+                frames.debugMeshHandles[i] = geometry.Adopt(std::move(gpu_buf), kMaxDebugVertices, Vk::DeviceAddress<> {address});
             }
             return {};
         });

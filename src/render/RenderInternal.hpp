@@ -524,15 +524,13 @@ struct RenderContext::Impl {
         // Owns the attachment handle `image` borrows; the descriptor side of
         // this texture needs no handle (TextureManager stores a create-info).
         Vk::AttachmentView   attachmentView;
-        uint32_t             bindlessIndex = 0;
         Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
         bool                 drawn         = false;
     };
-    std::unordered_map<RenderTextureHandle, RenderTexture> renderTextures;
+    std::unordered_map<TextureHandle, RenderTexture> renderTextures;
 
-    // Process-wide IDs prevent stale handles or frame capabilities from
-    // aliasing resources in a new renderer after device-loss recovery.
-    static inline std::atomic<uint64_t> nextRenderTextureId {1};
+    // A process-wide renderer ID prevents stale frame capabilities from
+    // aliasing a new renderer after device-loss recovery.
     static inline std::atomic<uint64_t> nextRendererId {1};
     uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
     uint64_t                            frameSerial = 0;
@@ -602,8 +600,8 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
     void               ReleaseTarget(const PresentationTarget& aux) noexcept;
     void               DestroyDestinations() noexcept;
-    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<RenderTextureHandle, ErrorCode>;
-    void               DestroyRenderTexture(RenderTextureHandle handle) noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
     [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride)
         -> BufferHandle;
     void EvictInactiveEmitters() noexcept;
@@ -827,14 +825,16 @@ struct RenderContext::Impl {
     using PPPushConstants        = ScenePassPushConstants;
 
     struct alignas(8) SkinningConstants {
-        VkDeviceAddress inPosAddr;
-        VkDeviceAddress inFrameAddr;
-        VkDeviceAddress inSkinAddr;
-        VkDeviceAddress outPosAddr;
-        VkDeviceAddress outFrameAddr;
-        VkDeviceAddress jointsAddr;
-        VkDeviceAddress morphDeltasAddr;
-        uint32_t        vertexCount;
+        Vk::DeviceAddress<VertexPosition>     inPosAddr;
+        Vk::DeviceAddress<VertexTangentFrame> inFrameAddr;
+        // The shader reads the skin stream as raw uint words (packed joint
+        // indices + weight bits); there is no CPU-side element struct.
+        Vk::DeviceAddress<uint32_t>           inSkinAddr;
+        Vk::DeviceAddress<VertexPosition>     outPosAddr;
+        Vk::DeviceAddress<VertexTangentFrame> outFrameAddr;
+        Vk::DeviceAddress<JPH::Mat44>         jointsAddr; // shader GPUJoint: four float4 columns
+        Vk::DeviceAddress<JPH::Float4>        morphDeltasAddr;
+        uint32_t                              vertexCount;
         uint32_t        jointOffset;
         uint32_t        morphOffset;
         uint32_t        activeMorphCount;
