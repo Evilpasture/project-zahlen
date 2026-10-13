@@ -124,7 +124,6 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
     -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl               = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName           = cfg.appName;
-    impl->pipelineCachePath = cfg.pipelineCachePath;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(target);
@@ -252,7 +251,6 @@ void RenderContext::Destroy() noexcept {
             if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
             }
-            Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         }
 
         _impl->DestroyDestinations();
@@ -264,6 +262,13 @@ void RenderContext::Destroy() noexcept {
         _impl->gpuDiagnostics.Shutdown();
         _impl->submittedStaging.reset();
     }
+}
+
+std::vector<uint8_t> RenderContext::GetPipelineCacheData() const noexcept {
+    if (_impl && _impl->ctx.Device() != nullptr && _impl->pipelineCache.Valid()) {
+        return Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get());
+    }
+    return {};
 }
 
 RenderContext::~RenderContext() {

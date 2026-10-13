@@ -7,40 +7,11 @@
 #include "PipelineCache.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <optional>
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace ZHLN::Vk {
 
 namespace {
-
-constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
-
-[[nodiscard]] auto ReadWholeFile(std::string_view path) -> std::optional<std::vector<uint8_t>> {
-    std::error_code             ec;
-    const std::filesystem::path file(path);
-
-    const auto size = std::filesystem::file_size(file, ec);
-    if (ec || size == 0 || size > kMaxCacheBytes) {
-        return std::nullopt;
-    }
-
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        return std::nullopt;
-    }
-
-    std::vector<uint8_t> out(static_cast<size_t>(size));
-    in.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size));
-    if (in.gcount() != static_cast<std::streamsize>(size)) {
-        return std::nullopt;
-    }
-    return out;
-}
 
 [[nodiscard]] auto MatchesDevice(const VkPipelineCacheHeaderVersionOne& header, const VkPhysicalDeviceProperties& props) noexcept -> bool {
     return header.headerSize == sizeof(VkPipelineCacheHeaderVersionOne) && header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE
@@ -48,24 +19,23 @@ constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
            && std::memcmp(header.pipelineCacheUUID, props.pipelineCacheUUID, VK_UUID_SIZE) == 0;
 }
 
-}
+} // namespace
 
-auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& props, const std::string_view path) noexcept -> PipelineCache {
+auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& props, const std::span<const uint8_t> initialData) noexcept
+    -> PipelineCache {
     std::vector<uint8_t> data;
 
-    if (!path.empty()) {
-        if (auto loaded = ReadWholeFile(path)) {
-            VkPipelineCacheHeaderVersionOne header {};
-            if (loaded->size() < sizeof(header)) {
-                ZHLN::Log("[PipelineCache] '{}' is smaller than a cache header; starting empty.", path);
+    if (!initialData.empty()) {
+        VkPipelineCacheHeaderVersionOne header {};
+        if (initialData.size() < sizeof(header)) {
+            ZHLN::Log("[PipelineCache] Provided initial data is smaller than a cache header; starting empty.");
+        } else {
+            std::memcpy(&header, initialData.data(), sizeof(header));
+            if (MatchesDevice(header, props)) {
+                ZHLN::Log("[PipelineCache] Reused {} KB from provided cache data.", initialData.size() / 1024);
+                data.assign(initialData.begin(), initialData.end());
             } else {
-                std::memcpy(&header, loaded->data(), sizeof(header));
-                if (MatchesDevice(header, props)) {
-                    ZHLN::Log("[PipelineCache] Reused {} KB from '{}'.", loaded->size() / 1024, path);
-                    data = std::move(*loaded);
-                } else {
-                    ZHLN::Log("[PipelineCache] '{}' was written by a different driver or GPU; discarding.", path);
-                }
+                ZHLN::Log("[PipelineCache] Provided cache data was written by a different driver or GPU; discarding.");
             }
         }
     }
@@ -86,46 +56,23 @@ auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& 
     return PipelineCache(device, cache);
 }
 
-void SavePipelineCache(const VkDevice device, const VkPipelineCache cache, const std::string_view path) noexcept {
-    if (device == VK_NULL_HANDLE || cache == VK_NULL_HANDLE || path.empty()) {
-        return;
+auto SavePipelineCache(const VkDevice device, const VkPipelineCache cache) noexcept -> std::vector<uint8_t> {
+    if (device == VK_NULL_HANDLE || cache == VK_NULL_HANDLE) {
+        return {};
     }
 
     size_t size = 0;
     if (vkGetPipelineCacheData(device, cache, &size, nullptr) != VK_SUCCESS || size == 0) {
-        return;
+        return {};
     }
 
     std::vector<uint8_t> data(size);
     if (vkGetPipelineCacheData(device, cache, &size, data.data()) != VK_SUCCESS) {
-        ZHLN::Log("[PipelineCache] vkGetPipelineCacheData failed; nothing written.");
-        return;
+        ZHLN::Log("[PipelineCache] vkGetPipelineCacheData failed; nothing extracted.");
+        return {};
     }
     data.resize(size);
-
-    const std::filesystem::path target(path);
-    std::error_code             ec;
-    if (const auto parent = target.parent_path(); !parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-    }
-
-    const std::filesystem::path temp = std::filesystem::path(path).concat(".tmp");
-    {
-        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            ZHLN::Log("[PipelineCache] Could not open '{}' for writing.", temp.string());
-            return;
-        }
-        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    }
-
-    std::filesystem::rename(temp, target, ec);
-    if (ec) {
-        ZHLN::Log("[PipelineCache] Renaming '{}' into place failed: {}", temp.string(), ec.message());
-        std::filesystem::remove(temp, ec);
-        return;
-    }
-    ZHLN::Log("[PipelineCache] Saved {} KB to '{}'.", data.size() / 1024, target.string());
+    return data;
 }
 
-}
+} // namespace ZHLN::Vk

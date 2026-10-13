@@ -250,7 +250,6 @@ struct RenderContext::Impl {
     String64                                                      appName;
     Vk::Context                                                   ctx;
     Vk::PipelineCache                                             pipelineCache;
-    std::string                                                   pipelineCachePath;
     Vk::Allocator                                                 allocator;
     Vk::SwapchainPresenter                                        presenter;
     PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;

@@ -8,6 +8,7 @@
 #include <Zahlen/Core/Diagnostics.hpp>
 #include <bit>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <version>
@@ -200,7 +201,11 @@ struct RenderConfig {
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
     bool enableMeshShading = true;
-    std::string pipelineCachePath;
+    // Non-owning: bytes the host already loaded from wherever it keeps the
+    // GPU pipeline cache. Must outlive RenderContext::Create (the renderer
+    // consumes them synchronously during startup). Extract the updated
+    // cache with RenderContext::GetPipelineCacheData() before teardown.
+    std::span<const uint8_t> initialPipelineCacheData;
     std::string crashDumpPath;
     // Explicit diagnostics sink: the caller owns the counters, the renderer
     // writes to them. The sink and counters must outlive RenderContext,

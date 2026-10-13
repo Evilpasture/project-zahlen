@@ -14,10 +14,67 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <new>
+#include <vector>
 
 namespace ZHLN {
 
+
+namespace {
+
+// The kernel is the host: it owns the on-disk pipeline cache. The renderer
+// only ever sees bytes in and bytes out, so all of this lives here.
+constexpr uint64_t kMaxPipelineCacheBytes = 64ull * 1024 * 1024;
+
+[[nodiscard]] auto LoadPipelineCacheBytes(const std::filesystem::path& file) -> std::vector<uint8_t> {
+    std::error_code ec;
+    const auto      size = std::filesystem::file_size(file, ec);
+    if (ec || size == 0 || size > kMaxPipelineCacheBytes) {
+        return {};
+    }
+    std::ifstream in(file, std::ios::binary);
+    if (!in) {
+        return {};
+    }
+    std::vector<uint8_t> out(static_cast<size_t>(size));
+    in.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size));
+    if (in.gcount() != static_cast<std::streamsize>(size)) {
+        return {};
+    }
+    return out;
+}
+
+void StorePipelineCacheBytes(const std::filesystem::path& target, const std::span<const uint8_t> data) {
+    if (data.empty()) {
+        return;
+    }
+    std::error_code ec;
+    if (const auto parent = target.parent_path(); !parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+    }
+    // Write-then-rename so a crash mid-write never leaves a torn cache behind.
+    const std::filesystem::path temp = std::filesystem::path(target).concat(".tmp");
+    {
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            ZHLN::Log("[Kernel] Could not open '{}' for writing the pipeline cache.", temp.string());
+            return;
+        }
+        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    }
+    std::filesystem::rename(temp, target, ec);
+    if (ec) {
+        ZHLN::Log("[Kernel] Renaming '{}' into place failed: {}", temp.string(), ec.message());
+        std::filesystem::remove(temp, ec);
+        return;
+    }
+    ZHLN::Log("[Kernel] Saved {} KB pipeline cache to '{}'.", data.size() / 1024, target.string());
+}
+
+} // namespace
 
 enum class KernelInitError : uint8_t {
     WindowCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
@@ -37,7 +94,13 @@ struct Kernel::Impl {
     std::vector<std::unique_ptr<Window>> secondaryWindows;
 
     RenderConfig renderConfig;
-    bool         glfwAcquired = false;
+    // Owned storage backing renderConfig.initialPipelineCacheData (the span
+    // in the config is non-owning). Loaded from the on-disk cache when the
+    // caller did not provide bytes; persistPipelineCache records that the
+    // kernel took on writing the updated cache back at shutdown.
+    std::vector<uint8_t> pipelineCacheData;
+    bool                 persistPipelineCache = false;
+    bool                 glfwAcquired         = false;
 };
 
 auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
@@ -56,8 +119,10 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->renderConfig      = cfg;
     _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
 
-    if (_impl->renderConfig.pipelineCachePath.empty()) {
-        _impl->renderConfig.pipelineCachePath = FS::Paths::PipelineCacheFile().string();
+    if (_impl->renderConfig.initialPipelineCacheData.empty()) {
+        _impl->pipelineCacheData                    = LoadPipelineCacheBytes(FS::Paths::PipelineCacheFile());
+        _impl->renderConfig.initialPipelineCacheData = _impl->pipelineCacheData;
+        _impl->persistPipelineCache                  = true;
     }
     if (_impl->renderConfig.crashDumpPath.empty()) {
         _impl->renderConfig.crashDumpPath = FS::Paths::CrashDumpFile().string();
@@ -115,6 +180,10 @@ Kernel::~Kernel() {
     // Prefab buffers belong to the asset cache; it must release them while
     // the renderer that allocated them is still alive.
     _impl->assetManager.reset();
+    // Extract before reset: Destroy() no longer persists anything itself.
+    if (_impl->persistPipelineCache && _impl->renderContext != nullptr) {
+        StorePipelineCacheBytes(FS::Paths::PipelineCacheFile(), _impl->renderContext->GetPipelineCacheData());
+    }
     _impl->renderContext.reset();
     _impl->audioContext.reset();
     _impl->fileSystemWatcher.reset();

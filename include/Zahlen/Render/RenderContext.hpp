@@ -70,11 +70,17 @@ class ZHLN_API RenderContext {
     RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept;
     ~RenderContext();
 
-    // Explicit teardown: drains the device, saves the pipeline cache, and
-    // releases destinations, diagnostics and pending staging work. The
-    // destructor calls this; hosts may also call it to release GPU resources
-    // before the RenderContext itself goes away.
+    // Explicit teardown: drains the device and releases destinations,
+    // diagnostics and pending staging work. The destructor calls this;
+    // hosts may also call it to release GPU resources before the
+    // RenderContext itself goes away.
     void Destroy() noexcept;
+
+    // The current GPU pipeline cache as raw bytes, for the host to persist
+    // however it likes (disk, VFS, embedded blob). The renderer never
+    // touches storage itself. Empty when no cache exists; call before
+    // Destroy() -- after teardown there is nothing left to extract.
+    [[nodiscard]] std::vector<uint8_t> GetPipelineCacheData() const noexcept;
 
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;

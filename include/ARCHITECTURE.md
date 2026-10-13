@@ -603,12 +603,16 @@ tree resolves exactly what it always did.
 
 This is policy, so it stays private to the layer that owns the process: it has
 no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
-includes it. The renderer and the RHI are *told* where to read and write --
-`RenderConfig::pipelineCachePath` and `RenderConfig::crashDumpPath`, the latter
-forwarded into `Vk::DiagnosticConfig::crashDumpPath` -- so a host can override
-either one, and the decision can change without touching a consumer's API. An
-empty path is what the engine fills in; a path set by the caller is used as
-given.
+includes it. The pipeline cache crosses into the renderer as data, never as a
+path: the kernel reads `pipeline_cache.bin` itself and hands the bytes in via
+`RenderConfig::initialPipelineCacheData`, then extracts the updated cache
+with `RenderContext::GetPipelineCacheData()` before teardown and writes it
+back, so the RHI works unchanged on hosts with no file system at all. A caller
+that supplies its own cache bytes keeps persistence for itself; only when it
+supplies none does the kernel fill in the on-disk cache and take on writing it
+back. `RenderConfig::crashDumpPath` is still a path, forwarded into
+`Vk::DiagnosticConfig::crashDumpPath`; an empty path is what the engine fills
+in, and a path set by the caller is used as given.
 
 Caches are regenerable by definition: a missing or foreign cache costs compile
 time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on

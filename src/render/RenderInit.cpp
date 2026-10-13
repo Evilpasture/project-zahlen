@@ -92,7 +92,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
-    pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, pipelineCachePath);
+    pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, cfg.initialPipelineCacheData);
 
     return allocator.Init(ctx)
         .and_then([&]() {
