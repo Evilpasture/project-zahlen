@@ -116,7 +116,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
                 .morphWeights     = drawCmd.morphWeights
             };
 
-            skinningPass.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, vertexCount, 1, 1, pcs);
+            compute.skinning.DispatchHeapThreads<Shaders::Modules::SkinningCS>(cmd, vertexCount, 1, 1, pcs);
         }
     }
 
@@ -700,7 +700,7 @@ auto FrameScope::End() && noexcept -> FrameOutcome<PresentSuboptimal> {
 }
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {
-    if (!hangGpuPass.pipeline.Valid()) {
+    if (!compute.hangGpu.pipeline.Valid()) {
         return;
     }
 
@@ -712,12 +712,12 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     }
 
     if (const VkCommandBuffer cmd = FrameCommand(); cmd != VK_NULL_HANDLE) {
-        hangGpuPass.Bind(cmd);
-        hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
+        compute.hangGpu.Bind(cmd);
+        compute.hangGpu.DispatchGroups(cmd, 1, 1, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto immediateCmd) -> auto {
-            hangGpuPass.Bind(immediateCmd);
-            hangGpuPass.DispatchGroups(immediateCmd, 1, 1, 1);
+            compute.hangGpu.Bind(immediateCmd);
+            compute.hangGpu.DispatchGroups(immediateCmd, 1, 1, 1);
         });
     }
 }

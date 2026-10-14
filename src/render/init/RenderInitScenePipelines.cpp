@@ -87,7 +87,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
     diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
-    return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
+    return compute.skinning.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::AllocateDynamicVertexBuffers(
@@ -294,7 +294,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
 
         const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
         diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
-        return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
+        return compute.hangGpu.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
         ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error());

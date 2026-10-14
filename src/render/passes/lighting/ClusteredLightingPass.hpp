@@ -18,7 +18,8 @@ struct ClusteredLightingPass: Vk::RenderPass<
                                   Vk::FragmentAndComputeRead<Res_Clearcoat>, Vk::FragmentAndComputeRead<Res_Sheen>, Vk::FragmentAndComputeRead<Res_Anisotropy>, Vk::FragmentAndComputeRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,
                                   Vk::ShaderRead<Res_Ao>, Vk::ShaderRead<Res_RtShadowMask>, Vk::FragmentAndComputeRead<Res_DdgiIrradiance>,
                                   Vk::FragmentAndComputeRead<Res_DdgiDistance>, Vk::ColorWrite<Res_Lighting>> {
-    RenderContext::Impl&                 impl;
+    const PostProcessResources&          post;
+    RenderFrameContext&                  frame;
     GeneratedGpu::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;

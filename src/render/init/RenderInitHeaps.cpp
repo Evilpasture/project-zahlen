@@ -230,7 +230,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::Hiz>(heapManager, culling.hizHeapBindings, Vk::UnreadSampler<"pointSampler">(pointConfig));
     Vk::InitHeapPassSamplers<Shaders::Culling>(heapManager, culling.cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointConfig));
     Vk::InitHeapPassSamplers<Shaders::Lighting>(
-        heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
+        heapManager, post.lighting.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"shadowSampler">(shadowConfig),
         Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"pointSampler">(pointConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
@@ -244,7 +244,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::SmaaEdge>(heapManager, antiAliasing.smaaEdge.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
-    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
+    Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     // The passes below own their own pipelines and heap bindings, so they
     // write the sampler descriptors those bindings declare.
     postProcess.InitSamplers(*this);
@@ -367,8 +367,8 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 
     ltcMatImage = std::move(*matImg);
     ltcAmpImage = std::move(*ampImg);
-    ltcMatInfo  = matInfo;
-    ltcAmpInfo  = ampInfo;
+    post.ltcMat  = matInfo;
+    post.ltcAmp  = ampInfo;
     ApplyImageDebugNames(*this);
     return {};
 }

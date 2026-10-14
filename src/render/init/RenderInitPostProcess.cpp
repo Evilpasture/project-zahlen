@@ -67,12 +67,12 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
-            this, lightingPass, Vk::MakeStageSource<Shaders::Modules::LightingVS>(),
+            this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingVS>(),
             Vk::MakeStageSource<Shaders::Modules::LightingPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
         );
     }
     return BuildPassVariants(
-        this, lightingPass, Vk::MakeStageSource<Shaders::Modules::LightingNortVS>(),
+        this, post.lighting, Vk::MakeStageSource<Shaders::Modules::LightingNortVS>(),
         Vk::MakeStageSource<Shaders::Modules::LightingNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
@@ -106,7 +106,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, blitPass, Vk::MakeStageSource<Shaders::Modules::BlitVS>(), Vk::MakeStageSource<Shaders::Modules::BlitPS>(),
+        this, post.blit, Vk::MakeStageSource<Shaders::Modules::BlitVS>(), Vk::MakeStageSource<Shaders::Modules::BlitPS>(),
         {presenter.GetPresentFormat()}
     );
 }
@@ -172,7 +172,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
-                    .pass        = blitPass,
+                    .pass        = post.blit,
                     .name        = "Blit",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::BlitVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::BlitPS>(),

@@ -32,7 +32,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     const std::array variants  = {BakeSpec {.bakeType = 0}, BakeSpec {.bakeType = 1}, BakeSpec {.bakeType = 2}};
     const auto       specInfos = bakeSpec.Infos(std::span {variants});
 
-    auto build_res = proceduralBakePass.BuildHeapVariants(
+    auto build_res = compute.proceduralBake.BuildHeapVariants(
         ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, &pipelineBinaries
     );
     if (!build_res) {
@@ -73,12 +73,12 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
-                proceduralBakePass.BindVariant(cmd, variantIdx);
+                compute.proceduralBake.BindVariant(cmd, variantIdx);
                 Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
                     cmd, BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion}
                 );
                 Vk::PushHeapIndex(cmd, bakeHeapBindings.indexPushOffset, block.slot);
-                proceduralBakePass.DispatchThreads(cmd, width, height, 1);
+                compute.proceduralBake.DispatchThreads(cmd, width, height, 1);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });

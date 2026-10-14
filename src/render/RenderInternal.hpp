@@ -12,11 +12,13 @@
 #include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
 #include "PassPayloads.hpp"
+#include "ComputePassResources.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
 #include "passes/culling/CullingResources.hpp"
 #include "passes/SceneDrawResources.hpp"
 #include "passes/forward/ForwardResources.hpp"
 #include "passes/gbuffer/DecalResources.hpp"
+#include "passes/postprocess/PostProcessResources.hpp"
 #include "passes/simulation/ParticleUpdateResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
@@ -98,8 +100,6 @@ namespace Diag {
 } // namespace Diag
 
 using GlobalSceneLayout    = Vk::ReflectedLayout;
-using LightingLayout       = Vk::ReflectedLayout;
-using BlitLayout           = Vk::ReflectedLayout;
 using CullingLayout        = Vk::ReflectedLayout;
 using HiZGenerateLayout    = Vk::ReflectedLayout;
 using ClusterCullingLayout = Vk::ReflectedLayout;
@@ -199,12 +199,11 @@ struct RenderContext::Impl : RenderFrameContext {
     // The six AA pipelines, owned as one group by the passes that read them.
     AntiAliasingResources antiAliasing;
 
-    Vk::FullscreenPass<LightingLayout> lightingPass;
-    Vk::FullscreenPass<BlitLayout>     blitPass;
+    // The two fullscreen passes, plus the LTC lookup-table view infos they read.
+    PostProcessResources post;
 
-    Vk::DynamicComputePass skinningPass;
-    Vk::DynamicComputePass proceduralBakePass;
-    Vk::DynamicComputePass hangGpuPass;
+    // The three standalone compute passes, dispatched from Impl itself.
+    ComputePassResources compute;
 
     struct EmitterStorage {
         BufferHandle buffer = BufferHandle::Invalid;
@@ -249,10 +248,8 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::ReflectedLayout proceduralBakeDescLayout;
     Vk::ReflectedLayout iblBakeDescLayout;
 
-    Vk::Image     ltcMatImage;
-    VkImageViewCreateInfo ltcMatInfo {};
-    Vk::Image     ltcAmpImage;
-    VkImageViewCreateInfo ltcAmpInfo {};
+    Vk::Image ltcMatImage;
+    Vk::Image ltcAmpImage;
 
     // Billboards: renderer-owned storage, one slot per (texture, blend, facing, call) --
     // a host that draws the same texture twice in a frame gets two slots rather than one
@@ -418,8 +415,8 @@ struct RenderContext::Impl : RenderFrameContext {
         fog.DestroyNoise(allocator);
         textureManager.Reset();
         iblPayload.Destroy(allocator);
-        ltcMatInfo = {};
-        ltcAmpInfo = {};
+        post.ltcMat = {};
+        post.ltcAmp = {};
         allocator.DestroyImage(ltcMatImage);
         allocator.DestroyImage(ltcAmpImage);
         targets.Clear();

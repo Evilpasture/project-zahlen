@@ -90,7 +90,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc},
         Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.impl = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
-        Passes::ClusteredLightingPass {.impl = self, .pc = pc},
+        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
         Passes::RtrHalfTracePass {.impl = self}, Passes::RtgiHalfTracePass {.impl = self},
         Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self}, Passes::RtgiCompositePass {.impl = self},
         OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
@@ -117,7 +117,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
 
     // 3. Tone-mapping and the blit onto this frame's presentation image.
     auto blit = Vk::MakePassPack(
-        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {.impl = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)}
+        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {.post = self.post, .frame = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)}
     );
 
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
