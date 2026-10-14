@@ -15,6 +15,9 @@
 #include "passes/aa/AntiAliasingResources.hpp"
 #include "passes/culling/CullingResources.hpp"
 #include "passes/SceneDrawResources.hpp"
+#include "passes/forward/ForwardResources.hpp"
+#include "passes/gbuffer/DecalResources.hpp"
+#include "passes/simulation/ParticleUpdateResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -213,15 +216,12 @@ struct RenderContext::Impl : RenderFrameContext {
     EmitterStorageMap particleEmitters;
     EmitterStorageMap meshParticleEmitters;
 
-    Vk::DynamicComputePass      particleUpdatePass;
-    Vk::TypedPipeline<1, false> particleRenderPipeline;
+    // The emitter-advance pipelines: billboard and mesh particle simulation.
+    ParticleUpdateResources particleUpdate;
 
-    Vk::DynamicComputePass meshParticleUpdatePass;
-
-    Vk::ReflectedLayout decalDescLayout;
-    Vk::Pipeline        decalPipeline;
-
-    Vk::Pipeline     linePipeline;
+    // Decals, and the forward pass's lines and billboard particles.
+    DecalResources   decals;
+    ForwardResources forward;
     std::span<const LineSegment> pendingLines {};
 
     std::expected<void, ErrorCode> BuildLinePipeline();

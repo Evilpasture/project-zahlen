@@ -15,7 +15,7 @@ namespace ZHLN {
 auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
-    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, &pipelineBinaries); !built) {
+    if (auto built = particleUpdate.particles.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, &pipelineBinaries); !built) {
         return std::unexpected(built.error());
     }
 
@@ -33,14 +33,14 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
                 .CullNone()
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
-                .transform([&](auto&& pipeline) -> auto { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([&](auto&& pipeline) -> auto { forward.particles = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
 auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
     auto csMeshShader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>();
 
-    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, &pipelineBinaries)) {
+    if (!particleUpdate.mesh.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, &pipelineBinaries)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -141,7 +141,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
                 .AlphaBlend()
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
-                .transform([&](auto&& pipeline) -> auto { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([&](auto&& pipeline) -> auto { forward.line = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
@@ -184,7 +184,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
         Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
         Vk::ReflectedStageInput {.shader = Vk::CreateShaderDesc<Shaders::Modules::DecalPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
-    if (!decalDescLayout.Build(ctx.Device(), std::span {reflectInputs})) {
+    if (!decals.layout.Build(ctx.Device(), std::span {reflectInputs})) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     BuildDecalHeapMappings();
@@ -212,7 +212,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
                 .AlphaBlend()
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
-                .transform([&](auto&& pipeline) -> auto { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([&](auto&& pipeline) -> auto { decals.pass = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 

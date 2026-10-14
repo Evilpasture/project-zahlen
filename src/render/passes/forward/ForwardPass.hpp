@@ -14,7 +14,8 @@ namespace ZHLN::Passes {
 struct ForwardPass: Vk::RenderPass<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>> {
     using PushConstants = ObjectConstants;
 
-    RenderContext::Impl& impl;
+    const ForwardResources& forward;
+    RenderFrameContext&      frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

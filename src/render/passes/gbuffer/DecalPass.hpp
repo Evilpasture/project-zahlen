@@ -13,7 +13,8 @@ namespace ZHLN::Passes {
 // reads depth read-only, so it is a plain automatic render pass -- the graph
 // opens it, hands over a context, and closes it.
 struct DecalPass: Vk::RenderPass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>> {
-    RenderContext::Impl& impl;
+    const DecalResources& decals;
+    RenderFrameContext&   frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };

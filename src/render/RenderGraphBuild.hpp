@@ -86,7 +86,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
     // than for the pass's own `impl`.
     auto core = Vk::MakePassPack(
         Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
-        Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
+        Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self}, Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.impl = self},
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc},
         Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.impl = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
@@ -94,7 +94,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::RtrHalfTracePass {.impl = self}, Passes::RtgiHalfTracePass {.impl = self},
         Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self}, Passes::RtgiCompositePass {.impl = self},
         OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
-        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.impl = self}, Passes::BloomPass {.impl = self}
+        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.impl = self}
     );
 
     // 2. Anti-aliasing tail. Which passes exist at all depends on the mode, so

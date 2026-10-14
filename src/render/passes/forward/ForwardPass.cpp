@@ -19,15 +19,15 @@ static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass pay
 } // namespace
 
 void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
-    auto& ctx = impl;
+    auto& ctx = frame;
 
     ctx.BindHeapsAndPushFrame(cmd);
 
-    PassContext passCtx(cmd, impl);
-    const auto  sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, frame);
+    const auto  sceneVp = frame.EffectiveViewport();
 
-    const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor);
-    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(impl.presenter.depthTarget);
+    const auto litColor = Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor);
+    const auto depth    = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(frame.presenter.depthTarget);
 
     Vk::DynamicPass(litColor.Extent())
         .Viewport(sceneVp)
@@ -50,7 +50,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                 SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
-            if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
+            if (forward.particles.Valid() && !ctx.queues.ParticleEmitters().empty()) {
                 for (const auto& emitter: ctx.queues.ParticleEmitters()) {
                     auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer);
                     if (!buffer) {
@@ -64,7 +64,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                     };
 
                     passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
-                        {.pipeline      = ctx.particleRenderPipeline.Get(),
+                        {.pipeline      = forward.particles.Get(),
                          .vertexCount   = 6,
                          .instanceCount = emitter.maxParticles,
                          .firstVertex   = 0,
@@ -74,11 +74,11 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
             }
 
-            if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
+            if (forward.line.Valid() && ctx.activeLineVertexCount > 0) {
                 const ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
 
                 passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
-                    {.pipeline      = ctx.linePipeline.Get(),
+                    {.pipeline      = forward.line.Get(),
                      .vertexCount   = ctx.activeLineVertexCount,
                      .instanceCount = 1,
                      .firstVertex   = 0,

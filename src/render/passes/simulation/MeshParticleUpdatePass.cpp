@@ -17,26 +17,26 @@ struct alignas(16) MeshParticleComputePush {
 static_assert(GpuAbi::ScenePassPayload<MeshParticleComputePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void MeshParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
-    if (!impl.meshParticleUpdatePass.pipeline.Valid() || impl.queues.MeshParticleEmitters().empty()) {
+    if (!particles.mesh.pipeline.Valid() || frame.queues.MeshParticleEmitters().empty()) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    for (const auto& emitter: impl.queues.MeshParticleEmitters()) {
-        auto* buffer = impl.geometry.Resolve(emitter.gpuBuffer);
+    for (const auto& emitter: frame.queues.MeshParticleEmitters()) {
+        auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
         if (!buffer) {
             continue;
         }
 
         const MeshParticleComputePush pushPC = {
-            .particleBufferAddr = impl.ctx.BufferAddress(buffer->buffer.Handle()),
+            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()),
             .particleCount      = emitter.maxParticles,
             .deltaTime          = dt,
             .p                  = emitter.params
         };
 
-        impl.meshParticleUpdatePass.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, pushPC);
+        particles.mesh.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, pushPC);
     }
 }
 

@@ -17,29 +17,29 @@ struct alignas(16) ComputePushConstants {
 static_assert(GpuAbi::ScenePassPayload<ComputePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
-    if (!impl.particleUpdatePass.pipeline.Valid() || impl.queues.ParticleEmitters().empty()) {
+    if (!particles.particles.pipeline.Valid() || frame.queues.ParticleEmitters().empty()) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    for (const auto& emitter: impl.queues.ParticleEmitters()) {
+    for (const auto& emitter: frame.queues.ParticleEmitters()) {
         if (!emitter.simulate) {
             continue; // authored on the CPU this frame: render it, do not integrate it again
         }
-        auto* buffer = impl.geometry.Resolve(emitter.gpuBuffer);
+        auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
         if (!buffer) {
             continue;
         }
 
         const ComputePushConstants particlePC = {
-            .particleBufferAddr = impl.ctx.BufferAddress(buffer->buffer.Handle()),
+            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()),
             .particleCount      = emitter.maxParticles,
             .deltaTime          = dt,
             .p                  = emitter.params
         };
 
-        impl.particleUpdatePass.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, particlePC);
+        particles.particles.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, particlePC);
     }
 }
 

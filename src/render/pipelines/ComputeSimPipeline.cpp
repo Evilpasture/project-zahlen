@@ -68,8 +68,8 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
                             Passes::VolumetricLightInjectPass {.impl = impl},
                             Passes::VolumetricIntegrationPass {.impl = impl},
                             Passes::VolumetricTemporalPass {.impl = impl},
-                            Passes::ParticleUpdatePass {.impl = impl, .dt = dt},
-                            Passes::MeshParticleUpdatePass {.impl = impl, .dt = dt}
+                            Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt},
+                            Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt}
     )
                             .BuildGraph();
 

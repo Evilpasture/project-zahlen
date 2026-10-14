@@ -21,18 +21,18 @@ static_assert(GpuAbi::ScenePassPayload<DecalPushConstants>, "a pass payload that
 
 void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     auto cmd = ctx.Cmd();
-    if (!impl.decalPipeline.Valid() || impl.queues.Decals().empty()) {
+    if (!decals.pass.Valid() || frame.queues.Decals().empty()) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    PassContext passCtx(cmd, impl);
-    passCtx.encoder.BindPipeline(impl.decalPipeline.Get());
+    PassContext passCtx(cmd, frame);
+    passCtx.encoder.BindPipeline(decals.pass.Get());
 
-    const JPH::Mat44 invViewProj = impl.unjittered_view_proj.Inversed();
+    const JPH::Mat44 invViewProj = frame.unjittered_view_proj.Inversed();
 
-    for (const auto& decalCmd: impl.queues.Decals()) {
+    for (const auto& decalCmd: frame.queues.Decals()) {
         const DecalPushConstants decalPC {
             .worldMatrix = decalCmd.transform,
             .clipToLocal = decalCmd.invTransform * invViewProj,
@@ -42,7 +42,7 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
             .metallic    = decalCmd.metallic
         };
 
-        passCtx.encoder.BindPipeline(impl.decalPipeline.Get());
+        passCtx.encoder.BindPipeline(decals.pass.Get());
         passCtx.encoder.DrawHeap<Shaders::Modules::DecalVS, Shaders::Modules::DecalPS>(36, 1, decalPC);
     }
 }

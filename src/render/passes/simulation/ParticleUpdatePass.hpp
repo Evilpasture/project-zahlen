@@ -12,8 +12,9 @@ namespace ZHLN::Passes {
 // dependency-free compute slot in the simulation graph, which is where the
 // ordering against the volumetric passes comes from.
 struct ParticleUpdatePass: Vk::RenderPass<"ParticleUpdate"> {
-    RenderContext::Impl& impl;
-    float                dt;
+    const ParticleUpdateResources& particles;
+    RenderFrameContext&            frame;
+    float                           dt;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

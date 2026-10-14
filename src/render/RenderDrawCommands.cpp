@@ -369,7 +369,7 @@ struct DrawAddressPack {
 void RenderContext::Impl::FlushLineQueue(std::span<const LineSegment> lines) {
     activeLineVertexCount = 0;
 
-    if (lines.empty() || !linePipeline.Valid()) {
+    if (lines.empty() || !forward.line.Valid()) {
         return;
     }
 

@@ -11,8 +11,9 @@ namespace ZHLN::Passes {
 // the two have different parameter blocks and different pipelines, and because
 // the graph can then fork them -- they touch disjoint buffers.
 struct MeshParticleUpdatePass: Vk::RenderPass<"MeshParticleUpdate"> {
-    RenderContext::Impl& impl;
-    float                dt;
+    const ParticleUpdateResources& particles;
+    RenderFrameContext&            frame;
+    float                           dt;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
