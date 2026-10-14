@@ -9,8 +9,8 @@
 // walks the reflected layout: member
 // offsets, sizes, strides and alignments come from the compiler's own model.
 // The Slang type decides the C++ spelling by itself -- float2/float3/float4
-// to JPH::Float2/Float3/Float4, float4x4 to JPH::Mat44, a fixed array to
-// std::array of its element, and enum declarations to generated C++ enum types.
+// to JPH::Float2/Float3/Float4, uint2/int2 to std::array lanes, float4x4 to
+// JPH::Mat44, a fixed array to std::array of its element, and enums to generated types.
 // There is no table here restating either half, so a Slang edit carries its
 // spelling with it and nothing can skew a layout behind the shader's back.
 //
@@ -278,9 +278,10 @@ auto SameEnum(const EnumDef& lhs, const EnumDef& rhs) -> bool {
     return true;
 }
 
-// The Slang-kind-to-C++ mapping for one member: a float vector is its Jolt pod
-// lane type, a float4x4 is JPH::Mat44, a fixed array is std::array of its
-// element, scalar kinds map to stdint, and a Slang enum gets a generated enum.
+// The Slang-kind-to-C++ mapping for one member: float vectors are their Jolt
+// pod lane type, 32-bit integer vectors are std::array lanes, a float4x4 is
+// JPH::Mat44, scalar kinds map to stdint, and a Slang enum gets a generated
+// enum. Fixed arrays map to std::array when their reflected stride is tight.
 auto MapMember(
     std::string_view structName,
     std::string_view memberName,
@@ -363,19 +364,30 @@ auto MapMember(
         return {.form = CxxForm::Array, .element = std::move(boxed), .count = count, .size = footprint, .cxxAlign = elementAlign};
     }
     if (kind == Kind::Vector) {
-        if (!isFloat32) {
-            Fail("gpu types: {}.{} is not a float vector; only float vectors map", structName, memberName);
-        }
+        using Scalar = slang::TypeReflection::ScalarType;
         const uint32_t components = static_cast<uint32_t>(type->getElementCount());
         if (components < 2 || components > 4) {
             Fail("gpu types: {}.{} has {} vector components; only 2, 3 and 4 map", structName, memberName, components);
         }
-        // The pod lane type: same lanes as the shader, layout 4-byte aligned
-        // and 4/8/12/16 bytes wide, which is what the reflected offsets were
-        // measured with. A float4 landing mid-16-byte-boundary is the shader's
-        // own padding rule, and BuildStruct puts the _pad there.
-        const std::string_view lanes = components == 2 ? kFloat2 : (components == 3 ? kFloat3 : kFloat4);
-        return {.form = CxxForm::Vec, .spelling = std::string {lanes}, .size = 4 * components, .cxxAlign = 4};
+        if (isFloat32) {
+            // The pod lane type: same lanes as the shader, layout 4-byte
+            // aligned and 4/8/12/16 bytes wide. Slang's reflected alignment
+            // supplies any wider vector boundary with alignas in the header.
+            const std::string_view lanes = components == 2 ? kFloat2 : (components == 3 ? kFloat3 : kFloat4);
+            return {.form = CxxForm::Vec, .spelling = std::string {lanes}, .size = 4 * components, .cxxAlign = 4};
+        }
+        if (scalar == Scalar::UInt32 || scalar == Scalar::Int32) {
+            // std::array preserves the lane count and footprint; the Slang
+            // alignment (often 8 for uint2/int2) is emitted separately.
+            const std::string_view lane = scalar == Scalar::UInt32 ? "uint32_t" : "int32_t";
+            return {
+                .form = CxxForm::Vec,
+                .spelling = std::format("::std::array<{}, {}>", lane, components),
+                .size = 4 * components,
+                .cxxAlign = 4,
+            };
+        }
+        Fail("gpu types: {}.{} has a vector scalar type with no C++ spelling here", structName, memberName);
     }
     if (kind == Kind::Scalar) {
         using Scalar = slang::TypeReflection::ScalarType;

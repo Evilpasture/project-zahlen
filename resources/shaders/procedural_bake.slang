@@ -1,17 +1,11 @@
 
+import gpu_push_constants;
+
 [vk::constant_id(0)]
 const int BAKE_TYPE = 0;
 
-struct PushConstants {
-    uint  width;
-    uint  height;
-    float scale;
-    float randomness;
-    float distortion;
-};
-
 [vk::push_constant]
-PushConstants pc;
+BakePush pc;
 
 RWTexture2D<float4> outTexture;
 

@@ -6,19 +6,6 @@
 
 namespace ZHLN::Passes {
 
-struct GtaoPushConstants {
-    uint32_t   halfRes[2];
-    float      rcpFullRes[2];
-    float      time;
-    float      aoRadius;
-    float      aoBias;
-    float      aoPower;
-    uint32_t   giSamples;
-    JPH::Mat44 invViewProj;
-    JPH::Mat44 viewProj;
-};
-static_assert(GpuAbi::ScenePassPayload<GtaoPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
     const int giMode = impl.settings.post.mode;
     if (giMode != 3 && giMode != 4) {

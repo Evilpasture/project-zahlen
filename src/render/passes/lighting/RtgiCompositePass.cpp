@@ -6,13 +6,6 @@
 
 namespace ZHLN::Passes {
 
-struct RtgiCompositePushConstants {
-    uint32_t fullRes[2];
-    uint32_t enabled;
-    float    giIntensity;
-};
-static_assert(GpuAbi::ScenePassPayload<RtgiCompositePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 void RtgiCompositePass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 

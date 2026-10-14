@@ -123,10 +123,12 @@ class SpirvTypes {
         Kind     kind       = Kind::Opaque;
     };
     struct Member {
-        uint32_t typeId     = 0;
-        uint32_t offset     = 0;
-        uint32_t nameOffset = 0;
-        uint32_t nameLength = 0;
+        uint32_t typeId         = 0;
+        uint32_t offset         = 0;
+        uint32_t nameOffset     = 0;
+        uint32_t nameLength     = 0;
+        uint32_t matrixStride   = 0;
+        bool     hasMatrixStride = false;
     };
     struct Name {
         uint32_t id     = 0;
@@ -160,6 +162,7 @@ class SpirvTypes {
     };
 
     std::array<Type, kTypeCapacity>               _types {};
+    std::array<uint32_t, kTypeCapacity>            _typeOrder {};
     std::array<Member, kMemberCapacity>           _members {};
     std::array<Name, kNameCapacity>               _names {};
     std::array<MemberName, kMemberNameCapacity>   _memberNames {};
@@ -169,6 +172,7 @@ class SpirvTypes {
     std::array<Variable, kVariableCapacity>       _variables {};
     std::span<const uint8_t>                      _bytes {};
     uint32_t                                      _typeCount        = 0;
+    uint32_t                                      _typeOrderCount   = 0;
     uint32_t                                      _memberCount      = 0;
     uint32_t                                      _nameCount        = 0;
     uint32_t                                      _memberNameCount  = 0;
@@ -179,6 +183,22 @@ class SpirvTypes {
     bool                                          _truncated        = false;
 
     [[nodiscard]] constexpr auto TypeIndexAt(uint32_t id) const noexcept -> std::optional<uint32_t> {
+        if (_typeOrderCount == _typeCount) {
+            uint32_t first = 0;
+            uint32_t last  = _typeOrderCount;
+            while (first < last) {
+                const uint32_t middle = first + (last - first) / 2;
+                if (_types[_typeOrder[middle]].id < id) {
+                    first = middle + 1;
+                } else {
+                    last = middle;
+                }
+            }
+            if (first < _typeOrderCount && _types[_typeOrder[first]].id == id) {
+                return _typeOrder[first];
+            }
+            return std::nullopt;
+        }
         for (uint32_t i = 0; i < _typeCount; ++i) {
             if (_types[i].id == id) {
                 return i;
@@ -196,28 +216,10 @@ class SpirvTypes {
         }
         return false;
     }
-    [[nodiscard]] constexpr auto MemberNameAt(uint32_t structId, uint32_t index, uint32_t* offset, uint32_t* length) const noexcept -> bool {
-        for (uint32_t i = 0; i < _memberNameCount; ++i) {
-            if (_memberNames[i].structId == structId && _memberNames[i].index == index) {
-                *offset = _memberNames[i].offset;
-                *length = _memberNames[i].length;
-                return true;
-            }
-        }
-        return false;
-    }
     [[nodiscard]] constexpr auto StrideOf(uint32_t typeId) const noexcept -> std::optional<uint32_t> {
         for (uint32_t i = 0; i < _strideCount; ++i) {
             if (_strides[i].typeId == typeId) {
                 return _strides[i].stride;
-            }
-        }
-        return std::nullopt;
-    }
-    [[nodiscard]] constexpr auto DecorationFor(uint32_t target, uint32_t member, Decoration kind) const noexcept -> std::optional<uint32_t> {
-        for (uint32_t i = 0; i < _decorationCount; ++i) {
-            if (_decorations[i].target == target && _decorations[i].member == member && _decorations[i].kind == kind) {
-                return _decorations[i].value;
             }
         }
         return std::nullopt;
@@ -446,6 +448,23 @@ class SpirvTypes {
         word += count;
     }
 
+    // Type IDs are sparse, so keep an ordered index rather than a bound-sized
+    // array. Reflection lookup is frequent below; binary search keeps it cheap
+    // without depending on SPIR-V's declaration order matching its result IDs.
+    for (uint32_t i = 0; i < out._typeCount; ++i) {
+        out._typeOrder[i] = i;
+    }
+    for (uint32_t i = 1; i < out._typeCount; ++i) {
+        const uint32_t typeIndex = out._typeOrder[i];
+        uint32_t       at        = i;
+        while (at > 0 && out._types[out._typeOrder[at - 1]].id > out._types[typeIndex].id) {
+            out._typeOrder[at] = out._typeOrder[at - 1];
+            --at;
+        }
+        out._typeOrder[at] = typeIndex;
+    }
+    out._typeOrderCount = out._typeCount;
+
     for (uint32_t i = 0; i < out._typeCount; ++i) {
         uint32_t offset = 0;
         uint32_t length = 0;
@@ -454,29 +473,51 @@ class SpirvTypes {
             out._types[i].nameLength = length;
         }
     }
+    // Member names and decorations are recorded before OpTypeStruct in the
+    // SPIR-V annotation section. Resolve each annotation once here instead of
+    // rescanning the full annotation tables for every member; the ABI module
+    // carries enough structs that the former quadratic walk can exhaust
+    // clang's constexpr step budget.
+    for (uint32_t i = 0; i < out._memberNameCount; ++i) {
+        const MemberName& name = out._memberNames[i];
+        const std::optional<uint32_t> typeIndex = out.TypeIndexAt(name.structId);
+        if (!typeIndex || out._types[*typeIndex].kind != Kind::Struct || name.index >= out._types[*typeIndex].count) {
+            continue;
+        }
+        Member& member = out._members[out._types[*typeIndex].first + name.index];
+        member.nameOffset = name.offset;
+        member.nameLength = name.length;
+    }
+    for (uint32_t i = 0; i < out._decorationCount; ++i) {
+        const DecorationEntry& decoration = out._decorations[i];
+        if (decoration.kind != Decoration::MemberOffset && decoration.kind != Decoration::MemberMatrixStride) {
+            continue;
+        }
+        const std::optional<uint32_t> typeIndex = out.TypeIndexAt(decoration.target);
+        if (!typeIndex || out._types[*typeIndex].kind != Kind::Struct || decoration.member >= out._types[*typeIndex].count) {
+            continue;
+        }
+        Member& member = out._members[out._types[*typeIndex].first + decoration.member];
+        if (decoration.kind == Decoration::MemberOffset) {
+            member.offset = decoration.value;
+        } else {
+            member.matrixStride = decoration.value;
+            member.hasMatrixStride = true;
+        }
+    }
     for (uint32_t t = 0; t < out._typeCount; ++t) {
         if (out._types[t].kind != Kind::Struct) {
             continue;
         }
-        const uint32_t structId = out._types[t].id;
         for (uint32_t index = 0; index < out._types[t].count; ++index) {
-            Member&      member   = out._members[out._types[t].first + index];
-            uint32_t     offset   = 0;
-            uint32_t     length   = 0;
-            const auto   offsetAt = out.DecorationFor(structId, index, Decoration::MemberOffset);
-            member.offset         = offsetAt.has_value() ? *offsetAt : 0;
-            if (out.MemberNameAt(structId, index, &offset, &length)) {
-                member.nameOffset = offset;
-                member.nameLength = length;
-            }
-            const auto stride = out.DecorationFor(structId, index, Decoration::MemberMatrixStride);
+            const Member& member = out._members[out._types[t].first + index];
             const std::optional<uint32_t> memberIndex = out.TypeIndexAt(member.typeId);
-            if (stride.has_value() && memberIndex.has_value() && out._types[*memberIndex].kind == Kind::Matrix) {
+            if (member.hasMatrixStride && memberIndex.has_value() && out._types[*memberIndex].kind == Kind::Matrix) {
                 if (out._strideCount == kStrideCapacity) {
                     out._truncated = true;
                     return out;
                 }
-                out._strides[out._strideCount++] = Stride {.typeId = member.typeId, .stride = *stride};
+                out._strides[out._strideCount++] = Stride {.typeId = member.typeId, .stride = member.matrixStride};
             }
         }
     }

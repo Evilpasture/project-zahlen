@@ -1,13 +1,8 @@
 
-struct KawasePush {
-    int   mode;
-    float rcpWidth;
-    float rcpHeight;
-    float glowIntensity;
-};
+import gpu_push_constants;
 
 [vk::push_constant]
-KawasePush pc;
+KawasePushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;

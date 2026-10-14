@@ -1,15 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import pbr_helpers;
 import uniforms;
-
-struct RTShadowPushConstants {
-    uint  samples;
-    float normalBias;
-    float maxDistance;
-    uint  _pad;
-};
 
 [vk::push_constant]
 RTShadowPushConstants pc;

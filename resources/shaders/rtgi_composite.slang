@@ -1,15 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import math.math;
 import pbr_helpers;
 import uniforms;
 
-struct RtgiCompositePushConstants {
-    uint2 fullRes;
-    uint enabled;
-    float giIntensity;
-};
 [vk::push_constant]
 RtgiCompositePushConstants pc;
 

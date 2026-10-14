@@ -2,17 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import gpu_buffer;
+import gpu_push_constants;
 import instance_data;
 import vertex_format;
-
-struct UIObjectConstants {
-    float4x4 orthoMatrix;
-    uint64_t posAddress;
-    uint64_t surfaceAddress;
-    uint albedoIdx;
-    uint isSDF;
-    uint useTextureColor;
-};
 
 [vk::push_constant]
 UIObjectConstants uiObj;

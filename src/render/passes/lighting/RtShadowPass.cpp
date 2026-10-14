@@ -6,14 +6,6 @@
 
 namespace ZHLN::Passes {
 
-struct RTShadowPushConstants {
-    uint32_t samples;
-    float    normalBias;
-    float    maxDistance;
-    uint32_t _pad;
-};
-static_assert(GpuAbi::ScenePassPayload<RTShadowPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 void RtShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     const uint32_t fIdx   = impl.presenter.frameIndex;
     const bool     wantRT = (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) || impl.settings.rayTracing.enableShadows;

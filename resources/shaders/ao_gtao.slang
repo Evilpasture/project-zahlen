@@ -1,19 +1,9 @@
 
+import gpu_push_constants;
 import hash;
 import pbr_helpers;
 import uniforms;
 
-struct GtaoPushConstants {
-    uint2    halfRes;
-    float2   rcpFullRes;
-    float    time;
-    float    aoRadius;
-    float    aoBias;
-    float    aoPower;
-    uint     giSamples;
-    float4x4 invViewProj;
-    float4x4 viewProj;
-};
 [vk::push_constant]
 GtaoPushConstants pc;
 

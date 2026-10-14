@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import pbr_helpers;
 import uniforms;
 
@@ -15,20 +16,8 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-struct PushConstants {
-    float vignetteIntensity;
-    float vignettePower;
-    int fullBright;
-    float exposure;
-    float bloomStrength;
-    float contrast;
-    float saturation;
-    int tonemapper;
-    float3 colorFilter;
-    float _padding;
-};
 [vk::push_constant]
-PushConstants pc;
+BlitPushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;

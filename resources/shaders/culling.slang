@@ -1,18 +1,11 @@
 import common;
+import gpu_push_constants;
 
 struct DrawIndirectCommand {
     uint vertexCount;
     uint instanceCount;
     uint firstVertex;
     uint firstInstance;
-};
-
-struct CullingConstants {
-    float4x4 viewProj;
-    float2 hizScreenSize;
-    uint maxHiZMipLevel;
-    uint drawCount;
-    uint passIndex;
 };
 
 [vk::push_constant]

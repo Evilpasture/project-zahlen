@@ -1,17 +1,8 @@
 
-struct ThresholdPush {
-    int mode;
-    float rcpWidth;
-    float rcpHeight;
-    float glowIntensity;
-    // Camera exposure (the same value the final blit multiplies by). The
-    // threshold pass reads the raw, pre-exposure HDR scene, so the bloom
-    // knee has to be evaluated in exposed units; see CSMain.
-    float exposure;
-};
+import gpu_push_constants;
 
 [vk::push_constant]
-ThresholdPush pc;
+ThresholdPushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;

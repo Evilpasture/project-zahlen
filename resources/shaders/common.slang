@@ -3,12 +3,7 @@ module common;
 __exported import instance_data;
 __exported import uniforms;
 __exported import vertex_format;
-
-
-public struct ObjectConstants {
-    public uint instanceId;
-    public uint isShadowPass;
-};
+__exported import gpu_push_constants;
 
 public struct GPUJoint {
     public float4 col0;

@@ -7,23 +7,6 @@
 
 namespace ZHLN::Passes {
 
-struct KawasePushConstants {
-    int   mode;
-    float rcpWidth;
-    float rcpHeight;
-    float glowIntensity;
-};
-static_assert(GpuAbi::ScenePassPayload<KawasePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
-struct ThresholdPushConstants {
-    int   mode;
-    float rcpWidth;
-    float rcpHeight;
-    float glowIntensity;
-    float exposure;
-};
-static_assert(GpuAbi::ScenePassPayload<ThresholdPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 void BloomPass::operator()(VkCommandBuffer cmd) const noexcept {
     impl.BindHeapsAndPushFrame(cmd);
 

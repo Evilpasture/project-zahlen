@@ -101,13 +101,13 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
             }
 
             SkinningConstants pcs {
-                .inPosAddr        = drawCmd.skinPosAddress,
-                .inFrameAddr      = drawCmd.skinFrameAddress,
-                .inSkinAddr       = drawCmd.skinDataAddress,
-                .outPosAddr       = Vk::DeviceAddress<VertexPosition>::Cast(positions.Address()),
-                .outFrameAddr     = Vk::DeviceAddress<VertexTangentFrame>::Cast(framesOut.Address()),
-                .jointsAddr       = Vk::DeviceAddress<JPH::Mat44> {ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle())},
-                .morphDeltasAddr  = Vk::DeviceAddress<JPH::Float4> {ctx.BufferAddress(morphDeltasBuffer.Handle())},
+                .inPosAddr        = drawCmd.skinPosAddress.Get(),
+                .inFrameAddr      = drawCmd.skinFrameAddress.Get(),
+                .inSkinAddr       = drawCmd.skinDataAddress.Get(),
+                .outPosAddr       = positions.Address().Get(),
+                .outFrameAddr     = framesOut.Address().Get(),
+                .jointsAddr       = ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+                .morphDeltasAddr  = ctx.BufferAddress(morphDeltasBuffer.Handle()),
                 .vertexCount      = vertexCount,
                 .jointOffset      = drawCmd.jointOffset,
                 .morphOffset      = drawCmd.morphOffset,

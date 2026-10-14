@@ -1,4 +1,5 @@
 import gpu_buffer;
+import gpu_push_constants;
 import vertex_format;
 
 struct GPUJoint {
@@ -6,21 +7,6 @@ struct GPUJoint {
     float4 col1;
     float4 col2;
     float4 col3;
-};
-
-struct SkinningConstants {
-    uint64_t inPosAddr;
-    uint64_t inFrameAddr;
-    uint64_t inSkinAddr;
-    uint64_t outPosAddr;
-    uint64_t outFrameAddr;
-    uint64_t jointsAddr;
-    uint64_t morphDeltasAddr;
-    uint32_t vertexCount;
-    uint32_t jointOffset;
-    uint32_t morphOffset;
-    uint32_t activeMorphCount;
-    float morphWeights[4];
 };
 
 [vk::push_constant]

@@ -6,21 +6,10 @@
 
 namespace ZHLN::Passes {
 
-struct RtrAtrousPushConstants {
-    uint32_t stepSize;
-    float    phiDepth;
-    float    phiNormal;
-    float    phiLuma;
-    float    temporalWeight;
-    float    maxRoughness;
-    uint32_t _pad[2];
-};
-static_assert(GpuAbi::ScenePassPayload<RtrAtrousPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
-
 namespace {
 
-[[nodiscard]] auto Atrous(uint32_t stepSize, float temporalWeight) noexcept -> RtrAtrousPushConstants {
-    return RtrAtrousPushConstants {
+[[nodiscard]] auto Atrous(uint32_t stepSize, float temporalWeight) noexcept -> RtgiAtrousPushConstants {
+    return RtgiAtrousPushConstants {
         .stepSize       = stepSize,
         .phiDepth       = 0.02f,
         .phiNormal      = 16.0f,

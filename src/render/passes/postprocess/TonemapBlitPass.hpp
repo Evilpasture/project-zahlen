@@ -14,24 +14,6 @@ namespace ZHLN::Passes {
 template <AAMode Mode>
 using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
-struct BlitPushConstants {
-    float vignetteIntensity;
-    float vignettePower;
-    int   fullBright;
-    float exposure;
-    float bloomStrength;
-    float contrast;
-    float saturation;
-    int   tonemapper;
-    float colorFilter[3];
-    float _padding;
-};
-static_assert(sizeof(BlitPushConstants) == 48, "BlitPushConstants must exactly mirror blit.slang");
-static_assert(
-    offsetof(BlitPushConstants, colorFilter) == 32 && offsetof(BlitPushConstants, _padding) == 44,
-    "BlitPushConstants field offsets must exactly mirror blit.slang"
-);
-
 template <AAMode Mode, typename GetSwapchainImageT>
 struct TonemapBlitPass: Vk::RenderPass<
                             "Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>,

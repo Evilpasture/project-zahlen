@@ -8,6 +8,7 @@ import descriptor_heap_layout;
 import instance_data;
 import particles;
 import uniforms;
+import gpu_push_constants;
 
 public struct GpuAbiTypes {
     public FrameUniforms frame;
@@ -22,6 +23,20 @@ public struct GpuAbiTypes {
     public ClusterBounds bounds;
     public ClusterVolume volume;
     public DescriptorHeapPushData heap;
+    public ObjectConstants objectConstants;
+    public UIObjectConstants uiObjectConstants;
+    public CullingConstants cullingConstants;
+    public MeshParticleRenderPushConstants meshParticleRenderPush;
+    public SkinningConstants skinningConstants;
+    public BakePush bakePush;
+    public RTShadowPushConstants rtShadowPush;
+    public GtaoPushConstants gtaoPush;
+    public RtgiCompositePushConstants rtgiCompositePush;
+    public RtgiAtrousPushConstants rtgiAtrousPush;
+    public KawasePushConstants kawasePush;
+    public ThresholdPushConstants thresholdPush;
+    public HdrAtrousPushConstants hdrAtrousPush;
+    public BlitPushConstants blitPush;
 };
 
 ConstantBuffer<GpuAbiTypes> abi;
@@ -57,5 +72,25 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += uint(abi.heap.previousJointsAddress);
     acc += uint(abi.heap.morphDeltasAddress);
     acc += abi.heap.heapIndex;
+    acc += abi.objectConstants.instanceId;
+    acc += abi.uiObjectConstants.albedoIdx;
+    acc += uint(abi.uiObjectConstants.posAddress);
+    acc += abi.cullingConstants.drawCount;
+    acc += asuint(abi.cullingConstants.hizScreenSize.x);
+    acc += uint(abi.meshParticleRenderPush.particleBufferAddr);
+    acc += asuint(abi.meshParticleRenderPush.baseColorFactor.x);
+    acc += uint(abi.skinningConstants.inPosAddr);
+    acc += asuint(abi.skinningConstants.morphWeights.x);
+    acc += abi.bakePush.width;
+    acc += abi.rtShadowPush.samples;
+    acc += abi.gtaoPush.halfRes.x;
+    acc += asuint(abi.gtaoPush.rcpFullRes.x);
+    acc += abi.rtgiCompositePush.fullRes.x;
+    acc += abi.rtgiAtrousPush.stepSize;
+    acc += asuint(abi.rtgiAtrousPush._pad.x);
+    acc += uint(abi.kawasePush.mode);
+    acc += asuint(abi.thresholdPush.exposure);
+    acc += abi.hdrAtrousPush.stepSize;
+    acc += asuint(abi.blitPush.colorFilter.x);
     sink[0] = acc;
 }

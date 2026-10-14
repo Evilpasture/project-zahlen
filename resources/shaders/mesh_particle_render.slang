@@ -1,6 +1,7 @@
 
 import common;
 import gpu_buffer;
+import gpu_push_constants;
 import material_model;
 import math.transform;
 import pbr_helpers;
@@ -13,30 +14,6 @@ struct Particle3D {
     float4 rotVel;
     float4 color;
     float4 params;
-};
-
-struct MeshParticleRenderPushConstants {
-    uint64_t particleBufferAddr;
-    uint64_t posAddress;
-    float4 baseColorFactor;
-    float4 emissiveFactor;
-    uint64_t tangentFrameAddress;
-    uint64_t surfaceAddress;
-    uint64_t iboAddress;
-
-    uint indexCount;
-    uint albedoIdx;
-    uint normalIdx;
-    uint pbrIdx;
-    uint emissiveIdx;
-    float roughness;
-    float metallic;
-    float alphaCutoff;
-    uint alphaMode;
-
-    uint samplerCodes0;
-    uint samplerCodes1;
-    uint unlit;
 };
 
 [vk::push_constant]
