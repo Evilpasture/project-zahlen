@@ -25,11 +25,13 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <stb_image.h>
@@ -224,6 +226,30 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
     return found;
 }
 
+// Source shader names are not case-sensitive, and shipped content spells the
+// class every way there is: this map's own prop materials use
+// `VertexLitGeneric`, `vertexlitgeneric` and `vertexlitGeneric`, and the
+// parser preserves whatever the .vmt said. A case-sensitive comparison drops
+// the class on those materials, which loses both the emission scale and the
+// unlit-by-construction flag.
+[[nodiscard]] auto ShaderNameEquals(std::string_view shader, std::string_view expected) noexcept -> bool {
+    if (shader.size() != expected.size()) {
+        return false;
+    }
+    return std::equal(shader.begin(), shader.end(), expected.begin(), [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+    });
+}
+
+[[nodiscard]] auto ShaderNameIn(std::string_view shader, std::initializer_list<std::string_view> names) noexcept -> bool {
+    for (const std::string_view name: names) {
+        if (ShaderNameEquals(shader, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // How emissive each Source shader is when it carries no self-illumination
 // keyvalues of its own. Ordered by construction: UnlitGeneric, Sprite, Cable
 // and Beam have no lighting path at all (every pixel is the albedo, at full
@@ -231,19 +257,19 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
 // VertexLitGeneric is per-vertex lit with a dark ambient, and
 // LightmappedGeneric is baked and dark unless it self-illuminates.
 [[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
-    if (shader == "UnlitGeneric" || shader == "Sprite" || shader == "Cable" || shader == "Beam") {
+    if (ShaderNameIn(shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
         return 1.0f;
     }
-    if (shader == "MonitorScreen") {
+    if (ShaderNameEquals(shader, "MonitorScreen")) {
         return 1.0f;
     }
-    if (shader == "VertexLitGeneric") {
+    if (ShaderNameEquals(shader, "VertexLitGeneric")) {
         return 0.55f;
     }
-    if (shader == "LightmappedGeneric") {
+    if (ShaderNameEquals(shader, "LightmappedGeneric")) {
         return 0.35f;
     }
-    if (shader == "Water" || shader == "Refract") {
+    if (ShaderNameIn(shader, {"Water", "Refract"})) {
         return 0.40f;
     }
     return 0.0f; // WorldVertexTransition, Patch, EyeRefract, ... : not emitters
@@ -283,13 +309,6 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         desc.alphaCutoff = material.alphaCutoff;
     }
 
-    if (material.shader == "UnlitGeneric") {
-        desc.unlit = true;
-        desc.baseColor.x *= kUnlitDim;
-        desc.baseColor.y *= kUnlitDim;
-        desc.baseColor.z *= kUnlitDim;
-    }
-
     // Resolve base texture (albedo)
     if (!material.baseTexture.empty()) {
         const auto texPath = vfs.ResolveTexture(material.baseTexture);
@@ -320,58 +339,10 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         }
     }
 
-    // ---- emission ---------------------------------------------------------
-    // Source maps carry their emission in three places, and this pass reads all
-    // three because a mapper only has to use one of them for the surface to be
-    // dark without them:
-    //
-    //   1. `$selfillum` / `$selfillummask` on a LightmappedGeneric or
-    //      VertexLitGeneric -- the authored case. Self-illuminated
-    //      LightmappedGeneric is not unlit (it still receives light), so it is
-    //      flagged with `unlit = false` plus a non-zero emissive term; an
-    //      UnlitGeneric stays unlit and gets the term as well.
-    //   2. The shader class itself: UnlitGeneric / Sprite / Cable / Beam /
-    //      MonitorScreen are emissive by construction, whatever the keyvalues
-    //      say.
-    //   3. The measured luminance of the base texture and the texdata
-    //      reflectivity vbsp baked, for the maps that ship neither.
-    //
-    // The emissive term is emitted in the material's own colour, scaled by the
-    // strength, and `emissiveFactorScale` stays at 1.0 so Source's authored
-    // linear values survive to the renderer unchanged.
-    // `$selfillum` is either a bare 0/1 mask switch, a single scalar, or a
-    // full "r g b a" colour; all three spell the same intent, so take the
-    // alpha/scalar when there is one and fall back to a plain 1.0 mask.
-    const float shaderStrength    = ShaderEmissiveStrength(material.shader);
-    const float selfIllumStrength = SelfIllumStrength(material);
-    const float textureLuma       = (material.baseTexture.empty()) ? -1.0f : TextureLuma(vfs, material);
-
-    float strength = 0.0f;
-    if (selfIllumStrength >= 0.0f) {
-        strength = selfIllumStrength * std::max(shaderStrength, 0.35f);
-    } else if (textureLuma > 0.0f) {
-        // No authored emission, so the surface emits only as much as its own
-        // texture is bright. A white panel on a dark wall is the case this
-        // catches -- the mapper never wrote a keyvalue, and the panel still
-        // has to glow.
-        strength = textureLuma * shaderStrength;
-    }
-
-    if (strength > kEmissiveStrengthEpsilon) {
-        JPH::Vec3 tint = JPH::Vec3(material.baseColor.x, material.baseColor.y, material.baseColor.z);
-        if (Rec709Luma(tint) < 1e-4f) {
-            tint = JPH::Vec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
-        }
-        // Keep the term at the material's own chromaticity and let its
-        // luminance set the magnitude: a red neon sign emits red, not a grey
-        // scaled by red.
-        const float luma  = std::max(Rec709Luma(tint), kEmissiveStrengthEpsilon);
-        const float scale = strength / luma;
-        desc.emissive     = JPH::Float4(tint.GetX() * scale, tint.GetY() * scale, tint.GetZ() * scale, 1.0f);
-        if (material.shader == "UnlitGeneric" || material.shader == "Sprite" || material.shader == "Cable" || material.shader == "Beam") {
-            desc.unlit = true;
-        }
-    }
+    // Shader class + emission, through the rules every material pass shares
+    // (see ApplyVmtLighting in BSPImporter.hpp). A material has to render the
+    // same on a brush face and on a prop, and Source puts the lamps on props.
+    ApplyVmtLighting(vfs, material, desc);
 
     return desc;
 }
@@ -778,6 +749,94 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// The .vmt lighting rules (declared in BSPImporter.hpp)
+// ---------------------------------------------------------------------------
+
+auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmission {
+    // Source maps carry their emission in three places, and a mapper only has
+    // to use one of them for the surface to be dark without all of them:
+    //
+    //   1. `$selfillum` / `$selfillummask` / `$selfillummaskscale` /
+    //      `$emissiveblendstrength` -- the authored case. `$selfillum` is
+    //      either a bare 0/1 mask switch, a single scalar, or a full
+    //      "r g b a" colour; all three spell the same intent, so take the
+    //      scalar when there is one and fall back to a plain 1.0 mask.
+    //      Self-illuminated LightmappedGeneric is not unlit (it still
+    //      receives light), so the shader class scales the term rather than
+    //      replacing it -- with a 0.35 floor, because a mapper who wrote
+    //      `$selfillum` meant "this emits".
+    //   2. The shader class itself: UnlitGeneric / Sprite / Cable / Beam /
+    //      MonitorScreen are emissive by construction, whatever the keyvalues
+    //      say, and they are the classes a map's lamp panels and screens use.
+    //   3. The measured luminance of the base texture, for the materials that
+    //      author neither. A white panel on a dark wall is the case this
+    //      catches -- the mapper never wrote a keyvalue, and the panel still
+    //      has to glow.
+    //
+    // The term is emitted in the material's own colour, and `emissiveFactorScale`
+    // stays at 1.0 on the prefabs so Source's authored linear values survive to
+    // the renderer unchanged.
+    const float shaderStrength    = ShaderEmissiveStrength(vmt.shader);
+    const float selfIllumStrength = SelfIllumStrength(vmt);
+
+    VmtEmission emission;
+    if (selfIllumStrength >= 0.0f) {
+        emission.strength = selfIllumStrength * std::max(shaderStrength, 0.35f);
+    } else {
+        // No authored emission, so the surface emits only as much as its own
+        // base texture is bright. Measured lazily: decoding a .vtf is not free
+        // and the authored case above never needs it. A white panel on a dark
+        // wall is the case this catches -- the mapper never wrote a keyvalue,
+        // and the panel still has to glow.
+        const float textureLuma = vmt.baseTexture.empty() ? -1.0f : TextureLuma(vfs, vmt);
+        if (textureLuma > 0.0f) {
+            emission.strength = textureLuma * shaderStrength;
+        }
+    }
+
+    // Keep the term at the material's own chromaticity and let its luminance
+    // set the magnitude: a red neon sign emits red, not a grey scaled by red.
+    emission.tint = JPH::Vec3(vmt.baseColor.x, vmt.baseColor.y, vmt.baseColor.z);
+    if (Rec709Luma(emission.tint) < 1e-4f) {
+        emission.tint = JPH::Vec3(1.0f, 1.0f, 1.0f); // a black albedo is "no tint", not "black light"
+    }
+    return emission;
+}
+
+auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc& desc) -> void {
+    // 1. Unlit by construction. UnlitGeneric has no lighting path at all --
+    // the albedo goes straight to the framebuffer -- and Source's white lamp
+    // panels (lights/white and friends) would land at luma 1.0, exactly the
+    // bloom threshold, turning every ceiling fixture into a blinding glare.
+    // Scale them to read bright but sub-threshold. Missing textures would
+    // otherwise fall back to the raw baseColor (usually pure white) and blow
+    // out wherever direct light reaches.
+    if (ShaderNameEquals(vmt.shader, "UnlitGeneric")) {
+        desc.unlit = true;
+        desc.baseColor.x *= kUnlitDim;
+        desc.baseColor.y *= kUnlitDim;
+        desc.baseColor.z *= kUnlitDim;
+    }
+
+    // 2. The emission term.
+    const VmtEmission emission = ResolveVmtEmission(vfs, vmt);
+    if (emission.strength <= kEmissiveStrengthEpsilon) {
+        return;
+    }
+
+    const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
+    const float scale = emission.strength / luma;
+    desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
+
+    // Emissive *and* unlit by construction: an UnlitGeneric that gets here is
+    // already flagged above, and the sprite/cable/beam classes only bypass the
+    // lighting model once they actually emit.
+    if (ShaderNameIn(vmt.shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
+        desc.unlit = true;
+    }
+}
 
 auto LoadBSPPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, const ImportOptions& options) -> ZHLN::Optional<ModelPrefab&> {
     const uint64_t hash   = HashAssetPath(path);

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "BSPImporter.hpp"
 #include "StudioModelImporter.hpp"
 #include "StudioModelLoader.hpp"
 #include "VMTParser.hpp"
@@ -99,6 +100,17 @@ auto ResolveStudioMaterial(RenderContext& ctx, const SourceVFS& vfs, std::string
             }
         }
     }
+
+    // ---- shader class + emission -----------------------------------------
+    // Source puts its lamps on props: a wall light, a ceiling panel, an
+    // emergency light and a floodlight are all StudioModels whose material is
+    // `VertexLitGeneric` + `$selfillum 1`, and a glowing screen or sign is
+    // usually an `UnlitGeneric` panel. This pass reads the same keyvalues
+    // through the same rules the world material pass applies
+    // (ApplyVmtLighting), so a material renders identically on a prop and on a
+    // brush face -- and so the lamp surfaces stop coming up as plain, dark,
+    // lit albedo.
+    ApplyVmtLighting(vfs, vmt, desc);
 
     return desc;
 }

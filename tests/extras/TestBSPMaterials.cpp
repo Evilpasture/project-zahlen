@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <BSP/BSPGeometry.hpp>
+#include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/SourceVFS.hpp>
 #include <BSP/VMTParser.hpp>
@@ -25,6 +26,16 @@ std::string GetPoorMansStacktrace() {
 } // namespace ZHLN
 
 namespace {
+
+// The suite's own error channel: every test returns an expected<void>, and the
+// only failure mode is a failed expectation.
+enum class MaterialsTestError : uint8_t {
+    ExpectationFailed = 1,
+};
+
+auto Fail() -> std::expected<void, ZHLN::ErrorCode> {
+    return std::unexpected(MaterialsTestError::ExpectationFailed);
+}
 
 auto BuildSyntheticMap() -> ZHLN::BSP::BSPMap {
     ZHLN::BSP::BSPMap map;
@@ -494,6 +505,182 @@ struct BSPMaterialsTestSuite {
             std::filesystem::remove_all(tempRoot, ec);
             return {};
         }
+
+        // A prop material has to reach the renderer with the same emission the
+        // world material pass would give it. Source puts its lamps on props --
+        // a `wall_light`, a ceiling panel, an emergency light are all
+        // StudioModels whose material is `VertexLitGeneric` + `$selfillum 1` --
+        // and the StudioModel pass used to drop the term on the floor, so every
+        // fixture in a shipped map came up as plain, dark, lit albedo.
+        std::expected<void, ZHLN::ErrorCode> vmt_emission_reaches_prop_materials() {
+            const std::filesystem::path tempRoot = std::filesystem::temp_directory_path() / "zahlen_selfillum";
+            std::error_code             ec;
+            std::filesystem::remove_all(tempRoot, ec);
+            std::filesystem::create_directories(tempRoot / "materials" / "models" / "props" / "de_nuke", ec);
+            std::filesystem::create_directories(tempRoot / "materials" / "lights", ec);
+
+            // 1. Source's `wall_light` panel: the exact keyvalues the map ships.
+            {
+                std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "light_wall.vmt");
+                f << "VertexLitGeneric\n{\n\t\"$basetexture\" \"models/props/de_nuke/light_wall\"\n\t\"$selfillum\" \"1\"\n}\n";
+            }
+            // 2. The same thing with the shader class spelled lowercase: shader
+            //    names are not case-sensitive in Source, and content does this.
+            {
+                std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "wall_lamp_lower.vmt");
+                f << "vertexlitgeneric\n{\n\t\"$basetexture\" \"models/props/de_nuke/light_wall\"\n\t\"$selfillum\" \"1\"\n}\n";
+            }
+            // 3. A white lamp panel that authors nothing: the shader class alone
+            //    has to carry it (UnlitGeneric is emissive by construction).
+            {
+                std::ofstream f(tempRoot / "materials" / "lights" / "white_panel.vmt");
+                f << "UnlitGeneric\n{\n\t\"$basetexture\" \"lights/white_panel\"\n}\n";
+            }
+            // 4. A panel with no emission keyvalues of its own: the measured
+            //    luminance of the base texture is what makes it glow.
+            {
+                std::ofstream f(tempRoot / "materials" / "lights" / "panel_lit.vmt");
+                f << "VertexLitGeneric\n{\n\t\"$basetexture\" \"lights/white_panel\"\n}\n";
+            }
+            // 5. A prop that authors nothing and has no art on disk: it must
+            //    stay dark rather than silently emitting on a mangled name.
+            {
+                std::ofstream f(tempRoot / "materials" / "models" / "props" / "de_nuke" / "concrete.vmt");
+                f << "VertexLitGeneric\n{\n\t\"$surfaceprop\" \"concrete\"\n}\n";
+            }
+
+            // One 4x4 BC1 `lights/white_panel.vtf`: white endpoints, so every
+            // sampled texel is 255 and the measured luma is 1.0.
+            {
+                std::vector<std::byte> vtf(64 + 8, std::byte {0});
+                auto*                  bytes = reinterpret_cast<uint8_t*>(vtf.data());
+                std::memcpy(bytes + 0, "VTF\0", 4);
+                const uint32_t verMaj = 7;
+                const uint32_t verMin = 2;
+                const uint32_t hdrSz  = 64;
+                const uint16_t w      = 4;
+                const uint16_t h      = 4;
+                const uint16_t fCount = 1;
+                const uint32_t fmt    = 13; // BC1 / DXT1
+                const uint8_t  mips   = 1;
+                const uint32_t lowFmt = 0xFFFFFFFF;
+                std::memcpy(bytes + 4, &verMaj, 4);
+                std::memcpy(bytes + 8, &verMin, 4);
+                std::memcpy(bytes + 12, &hdrSz, 4);
+                std::memcpy(bytes + 16, &w, 2);
+                std::memcpy(bytes + 18, &h, 2);
+                std::memcpy(bytes + 24, &fCount, 2);
+                std::memcpy(bytes + 52, &fmt, 4);
+                std::memcpy(bytes + 56, &mips, 1);
+                std::memcpy(bytes + 57, &lowFmt, 4);
+                const uint8_t block[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+                std::memcpy(bytes + 64, block, sizeof(block));
+
+                std::ofstream f(tempRoot / "materials" / "lights" / "white_panel.vtf", std::ios::binary);
+                f.write(reinterpret_cast<const char*>(vtf.data()), static_cast<std::streamsize>(vtf.size()));
+            }
+
+            ZHLN::BSP::SourceVFS vfs;
+            vfs.AddSearchPath(tempRoot.string());
+
+            struct Parsed {
+                bool                   ok = false;
+                ZHLN::BSP::VMTMaterial material;
+            };
+            auto parseMaterial = [&](std::string_view name) -> Parsed {
+                Parsed out;
+                const auto vmtPath = vfs.ResolveMaterial(name);
+                if (!vmtPath.has_value()) {
+                    return out;
+                }
+                const auto bytes = vfs.ReadFile(*vmtPath);
+                if (!bytes.has_value()) {
+                    return out;
+                }
+                const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+                if (const auto parsed = ZHLN::BSP::ParseVMT(text); parsed.has_value()) {
+                    out.material = *parsed;
+                    out.ok       = true;
+                }
+                return out;
+            };
+
+            // `$selfillum 1` on VertexLitGeneric: full self-illumination scaled
+            // by the shader class (0.55), emitted untinted, and the material is
+            // still lit (a lamp housing receives light like anything else).
+            for (const std::string_view name: {"models/props/de_nuke/light_wall", "models/props/de_nuke/wall_lamp_lower"}) {
+                const Parsed parsed = parseMaterial(name);
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
+                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.549f, 0.551f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.GetX(), 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.GetY(), 0.999f, 1.001f) ||
+                    !ZHLN::Test::ExpectInRange(emission.tint.GetZ(), 0.999f, 1.001f)) {
+                    return Fail();
+                }
+
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectInRange(desc.emissive.x, 0.549f, 0.551f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.y, 0.549f, 0.551f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.z, 0.549f, 0.551f) ||
+                    !ZHLN::Test::ExpectInRange(desc.emissive.w, 0.999f, 1.001f) || !ZHLN::Test::ExpectEq(desc.unlit, false)) {
+                    return Fail();
+                }
+            }
+
+            // An UnlitGeneric panel is emissive by construction and unlit: no
+            // lighting path at all, dimmed off the bloom threshold, and the
+            // emission comes from the measured texel luminance (1.0 here).
+            {
+                const Parsed parsed = parseMaterial("lights/white_panel");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectEq(desc.unlit, true) || !ZHLN::Test::ExpectInRange(desc.emissive.x, 0.99f, 1.01f) ||
+                    !ZHLN::Test::ExpectInRange(desc.baseColor.x, 0.549f, 0.551f)) {
+                    return Fail();
+                }
+            }
+
+            // A lit shader with a bright panel and no keyvalues: the texture
+            // luminance carries it, at the VertexLitGeneric scale.
+            {
+                const Parsed parsed = parseMaterial("lights/panel_lit");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
+                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.549f, 0.551f)) {
+                    return Fail();
+                }
+            }
+
+            // Nothing authored and no art: no emission, and not unlit either.
+            {
+                const Parsed parsed = parseMaterial("models/props/de_nuke/concrete");
+                if (!ZHLN::Test::ExpectTrue(parsed.ok)) {
+                    return Fail();
+                }
+                const auto emission = ZHLN::BSP::ResolveVmtEmission(vfs, parsed.material);
+                if (!ZHLN::Test::ExpectInRange(emission.strength, 0.0f, 0.0f)) {
+                    return Fail();
+                }
+
+                ZHLN::MaterialDesc desc = ZHLN::MaterialDesc::Basic();
+                ZHLN::BSP::ApplyVmtLighting(vfs, parsed.material, desc);
+                if (!ZHLN::Test::ExpectInRange(desc.emissive.x, 0.0f, 0.0f) || !ZHLN::Test::ExpectEq(desc.unlit, false)) {
+                    return Fail();
+                }
+            }
+
+            std::filesystem::remove_all(tempRoot, ec);
+            return {};
+        }
     };
 };
 
@@ -527,6 +714,7 @@ int main() {
     runTest("vtf_decoder_bgra8888_and_rgb888", [&] { return suite.vtf_decoder_bgra8888_and_rgb888(); });
     runTest("bsp_geometry_leaves_secondary_uv_zero", [&] { return suite.bsp_geometry_leaves_secondary_uv_zero(); });
     runTest("end_to_end_material_and_texture_resolution", [&] { return suite.end_to_end_material_and_texture_resolution(); });
+    runTest("vmt_emission_reaches_prop_materials", [&] { return suite.vmt_emission_reaches_prop_materials(); });
 
     ZHLN::Println("--------------------------------------------------");
     ZHLN::Println("Summary for BSPMaterialsTestSuite: {} Passed, {} Failed", passed, failed);

@@ -558,19 +558,35 @@ ProceduralViewState g_view;
 }
 
 // Which visual parts the first-person view hides. The extension's palette mask
-// already collapses head- and hair-driven joints for skinned meshes, so this
-// only has to catch what a palette cannot reach: nodes parented under a
-// head/face/visor/eye/hair transform, head-only skins, and compact geometry
-// worn on or beside the head (eyebrows, a visor shell, a detached face plate).
-// The head origin and its scale come from the rig itself, so the test is
-// asset-agnostic.
+// collapses head- and hair-driven joints for skinned meshes, so this catches the
+// rest: nodes parented under a head/face/visor/eye/hair transform, head-only
+// skins, and geometry worn on the head. The head origin and its scale come from
+// the rig itself, so the tests are asset-agnostic.
 //
-// That test is a proximity test, not an ancestry one, and that is the point: an
-// accessory can be parented to the hat/head *bone* while its own geometry stays
-// modelled at the model origin and only lands on the head once its transform
-// carries it there -- a beanie and its rim, a pair of goggles. Ancestry and the
-// bone palette both miss those, and their bounds do not grow with the rig, so
-// the size cap is measured against the head rather than a human-sized constant.
+// Worn geometry comes in two shapes, and both are proximity tests rather than
+// ancestry ones:
+//
+//   - A *carried* accessory, parented to the hat/head bone while its own
+//     geometry stays modelled at the model origin and only lands on the head
+//     once its transform carries it there -- a pair of goggles, a detached face
+//     plate. Ancestry misses those, and their bounds do not grow with the rig,
+//     so IsCompactHeadAccessory's size cap is measured against the head rather
+//     than a human-sized constant.
+//   - A part *modelled at the head* -- a beanie shell, its rim, a hair shell.
+//     It needs no transform to land there and so needs no size cap either:
+//     IsHeadRestingPart's test is that its whole rest extent stays above the
+//     neck line and its column overlaps the head's. That is what separates a hat
+//     from a torso, an arm or a shoe, and unlike a cap it has no constant to
+//     calibrate against one rig's proportions.
+//
+// The second shape is also the half the palette mask cannot finish. The mask
+// hides a joint by collapsing its palette row to a point, which erases a vertex
+// only when that joint owns all of the vertex's weight. UziProc.glb's beanie rim
+// is weighted 50/50 between DEF-Head and DEF-Neck -- the head half of that is
+// hidden, the neck half is not -- so the mask leaves the rim at half scale,
+// blended halfway down to the neck, hanging in the view. Flagging the part out
+// of the draw is the only mechanism that removes it, which is why a part this
+// test misses stays visible even when its joints look head-driven.
 [[nodiscard]] bool
     IsCompactHeadAccessory(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition, JPH::Vec3Arg neckPosition, float headScale) {
     for (const ZHLN::ModelPart& part: prefab.parts) {
@@ -594,6 +610,43 @@ ProceduralViewState g_view;
             delta.GetY() <= headScale * 2.5f) {
             return true;
         }
+    }
+    return false;
+}
+
+// A part modelled at the head in its rest pose: a beanie shell, its rim, a visor,
+// a hair shell. Its whole transformed extent has to stay above the neck line --
+// a torso or a limb reaches far below it and is never a head part -- and its
+// column has to overlap the head's. The neck line is the only constant here and
+// it comes from the rig, so the test carries across rigs of any proportion where
+// a size cap does not: UziProc.glb's beanie is 0.27 m across at the head against
+// a DEF-Neck-to-DEF-Head distance of 0.07 m, which is why the compact-accessory
+// cap rejects it.
+[[nodiscard]] bool IsHeadRestingPart(const ZHLN::ModelPrefab& prefab, int32_t nodeIndex, JPH::Vec3Arg headPosition,
+                                     JPH::Vec3Arg neckPosition, float headScale) {
+    for (const ZHLN::ModelPart& part: prefab.parts) {
+        if (part.nodeIndex != nodeIndex) {
+            continue;
+        }
+        const JPH::Mat44 model       = GetPrefabNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
+        const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
+        const JPH::Vec3  localCenter = (localMin + localMax) * 0.5f;
+        const JPH::Vec3  halfExtent  = (localMax - localMin) * 0.5f;
+        const JPH::Vec3  center      = model.Multiply3x3(localCenter) + model.GetTranslation();
+        // Column-absolute form of the same box transform ComputeBounds uses: the
+        // half extent of an axis-aligned box under a rotation.
+        const JPH::Vec3 extent = (model.GetColumn3(0) * halfExtent.GetX()).Abs() + (model.GetColumn3(1) * halfExtent.GetY()).Abs() +
+                                 (model.GetColumn3(2) * halfExtent.GetZ()).Abs();
+        if (center.GetY() - extent.GetY() < neckPosition.GetY() - headScale * 0.35f) {
+            continue;
+        }
+        const float reach = headScale * 1.8f;
+        if (std::abs(center.GetX() - headPosition.GetX()) > reach + extent.GetX() ||
+            std::abs(center.GetZ() - headPosition.GetZ()) > reach + extent.GetZ()) {
+            continue;
+        }
+        return true;
     }
     return false;
 }
@@ -629,7 +682,9 @@ void CollectFirstPersonHeadMeshes(
         const bool underHead     = headNode >= 0 && IsNodeUnder(prefab, mesh->nodeIndex, headNode);
         const auto skeletalMesh  = registry.Get<ZHLN::Components::SkeletalMeshComponent>(entity);
         const bool headSkin      = skeletalMesh && IsHeadDominatedSkin(prefab, skeletalMesh->skeletonIndex);
-        const bool headAccessory = headNode >= 0 && IsCompactHeadAccessory(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale);
+        const bool headAccessory =
+            headNode >= 0 && (IsCompactHeadAccessory(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale) ||
+                              IsHeadRestingPart(prefab, mesh->nodeIndex, headPosition, neckPosition, headScale));
         if (underHead || HasHeadVisualAncestor(prefab, mesh->nodeIndex) || headSkin || headAccessory) {
             state.headMeshes.push_back({.entity = entity, .originalFlags = mesh->flags});
         }
