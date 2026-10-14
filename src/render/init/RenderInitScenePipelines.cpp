@@ -86,7 +86,7 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
     }
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-    gpuDiagnostics.RegisterShader(shader, "CSMain");
+    diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
     return skinningPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
@@ -272,7 +272,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .transform([&](auto&& intersectPipeline) -> auto {
             csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
 
-            shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
+            diagnostics.shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
                     ZHLN::LogError("Failed to hot-reload CSG stencil pipelines: {}", res.error());
@@ -293,7 +293,7 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
         }
 
         const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-        gpuDiagnostics.RegisterShader(shader, "CSMain");
+        diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
         return hangGpuPass.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
@@ -504,7 +504,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         .and_then([&]() -> std::expected<void, ErrorCode> { return BuildSkinningPipeline(); })
         .transform([&]() -> void {
             if constexpr (isDev) {
-                shaderReloads.Register("Skinning", {Shaders::Modules::SkinningCS::Path}, [this]() -> void {
+                diagnostics.shaderReloads.Register("Skinning", {Shaders::Modules::SkinningCS::Path}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
                         ZHLN::LogError("Failed to hot-reload Skinning pipeline: {}", res.error());

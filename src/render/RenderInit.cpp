@@ -16,8 +16,8 @@ auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::Fra
     auto vertex   = LoadShaderData(vs);
     auto fragment = LoadShaderData(ps);
 
-    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint), "VSMain");
-    gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint), "PSMain");
+    diagnostics.gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint), "VSMain");
+    diagnostics.gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint), "PSMain");
 
     return Vk::OwnedShaderStages::Create(std::move(vertex), std::move(fragment), vs.entryPoint, ps.entryPoint);
 }
@@ -32,10 +32,10 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
     const bool meshShaderQueries = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
         return f.meshShaderQueries == VK_TRUE;
     });
-    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphicsFamily, meshShaderQueries); !res) {
+    if (auto res = diagnostics.gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphicsFamily, meshShaderQueries); !res) {
         return std::unexpected(res.error());
     }
-    if (!gpuProfiler.Enabled()) {
+    if (!diagnostics.gpuProfiler.Enabled()) {
         ZHLN::LogWarning("GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
     }
 

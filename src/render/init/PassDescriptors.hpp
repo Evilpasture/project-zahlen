@@ -64,7 +64,7 @@ template <typename PassT>
     if (!result) {
         return result;
     }
-    self->shaderReloads.Register(
+    self->diagnostics.shaderReloads.Register(
         desc.name, {desc.vs.path, desc.ps.path},
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
@@ -87,7 +87,7 @@ template <typename BuildFn>
         return std::unexpected(res.error());
     }
     if constexpr (isDev) {
-        self->shaderReloads.Register(name, watchPaths, [name, build_fn]() -> auto {
+        self->diagnostics.shaderReloads.Register(name, watchPaths, [name, build_fn]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
                 ZHLN::LogError("Failed to hot-reload pipeline '{}': {}", name, reload_res.error());

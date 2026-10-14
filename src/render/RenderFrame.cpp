@@ -271,7 +271,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     // them as an argument -- not because two Impl methods happen to be
     // called in the right sequence.
     const SkinnedBlasOutcome skinnedBlas = DispatchSkinningPasses(cmd);
-    if (skinnedBlas.failure.has_value() && invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
+    if (skinnedBlas.failure.has_value() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
         ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", skinnedBlas.failure.value());
     }
 
@@ -428,12 +428,12 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     _impl->uiRenderer.BeginFrame();
 
     float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;
-    _impl->gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) -> void {
+    _impl->diagnostics.gpuProfiler.RetrieveResults(frame_index, timestampPeriod, [](std::string_view name, float durationMS) -> void {
         CPUProfiler::Record(name, durationMS);
     });
 
-    _impl->gpuProfiler.RetrievePipelineStats(frame_index, [this](std::string_view, const Profiler::PipelineStats& stats) -> void {
-        auto& acc = _impl->pendingPipelineCounters;
+    _impl->diagnostics.gpuProfiler.RetrievePipelineStats(frame_index, [this](std::string_view, const Profiler::PipelineStats& stats) -> void {
+        auto& acc = _impl->diagnostics.pendingPipelineCounters;
         acc.iaPrimitives += stats.iaPrimitives;
         acc.vsInvocations += stats.vsInvocations;
         acc.clipperInvocations += stats.clipperInvocations;
@@ -448,7 +448,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
 
     (void) _impl->presenter.sync.StepTimeline(frame_index);
 
-    _impl->gpuProfiler.Reset(frame_index);
+    _impl->diagnostics.gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
     _impl->parallelRecorders[frame_index].Reset();
 
@@ -577,7 +577,7 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     _impl->sceneTarget.reset();
     resolved->layout             = Vk::AttachmentLayout::ColorAttachment;
     resolved->drawn              = true;
-    _impl->warnedUnwrittenTarget = false;
+    _impl->diagnostics.warnedUnwrittenTarget = false;
     return std::nullopt;
 }
 

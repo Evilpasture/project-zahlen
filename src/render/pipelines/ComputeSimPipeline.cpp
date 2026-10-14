@@ -83,8 +83,8 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
     // and the two are swapped at `EndFrame`.
     BindExternalReflected<ComputeResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(impl.targets.ShadowMapPrev()); });
 
-    auto* diagnostics = impl.gpuDiagnostics.IsActive() ? &impl.gpuDiagnostics : nullptr;
-    computeGraph.Execute(cmd, compBinder, impl.presenter.frameIndex, &impl.gpuProfiler, diagnostics);
+    auto* diagnostics = impl.diagnostics.gpuDiagnostics.IsActive() ? &impl.diagnostics.gpuDiagnostics : nullptr;
+    computeGraph.Execute(cmd, compBinder, impl.presenter.frameIndex, &impl.diagnostics.gpuProfiler, diagnostics);
 }
 
 } // namespace

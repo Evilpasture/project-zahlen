@@ -87,8 +87,8 @@ void ExecuteSceneGraph(
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);
 
-    auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.presenter.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
+    auto* diagnostics = self.diagnostics.gpuDiagnostics.IsActive() ? &self.diagnostics.gpuDiagnostics : nullptr;
+    graph.Execute(cmd, binder, self.presenter.frameIndex, &self.diagnostics.gpuProfiler, diagnostics, self.ForkExecutor());
 }
 
 template <typename Self, typename GetSwapchainImageT>

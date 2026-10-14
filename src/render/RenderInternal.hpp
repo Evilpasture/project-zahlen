@@ -16,6 +16,7 @@
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
 #include "RenderConstants.hpp"
+#include "RenderDiagnostics.hpp"
 #include "Rendering.hpp"
 #include "ShaderReloadRegistry.hpp"
 #include "TargetManager.hpp"
@@ -315,9 +316,6 @@ struct RenderContext::Impl : RenderFrameContext {
     uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
     uint64_t                            frameSerial = 0;
     uint64_t                            nextAcquisition = 1;
-    std::atomic<uint32_t> invalidDrawWarningCount {0};
-    bool warnedUnwrittenTarget = false;
-
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
         }
@@ -374,16 +372,12 @@ struct RenderContext::Impl : RenderFrameContext {
 
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
-    FrameProfiler      gpuProfiler;
-    Vk::GPUDiagnostics gpuDiagnostics;
+    // Step 4 of the decomposition: the profiler, the diagnostic layer, the
+    // shader-reload registry and the warning throttles, as one sub-object. Nothing
+    // a pass can see lives in here.
+    RenderDiagnostics diagnostics;
 
     PipelineRegistry pipelines;
-
-    GpuPipelineCounters pendingPipelineCounters {};
-
-    ZHLN::Optional<FS::FileSystemWatcher&> fileSystemWatcher;
-    FS::FileWatchHandle                    shaderDirectoryWatch = 0;
-    ShaderReloadRegistry                   shaderReloads;
 
     uint32_t nextMorphDeltaIndex = 0;
 
@@ -395,17 +389,18 @@ struct RenderContext::Impl : RenderFrameContext {
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
 
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
-        gpuDiagnostics.WriteCheckpoint(cmd, name);
+        diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
     void RegisterShader(const Vk::ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
-        gpuDiagnostics.RegisterShader(desc, fallbackEntry);
+        diagnostics.gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
     // RenderFrameContext's own constructor builds targets, textureManager,
     // geometry and reflectionPipeline; they depend on the device members the
     // base declares, which is why they cannot be initialized here.
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
-        presentationTarget(target), pipelines(ctx, pipelineBinaries, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher) {
+        presentationTarget(target), diagnostics(ctx, watcher),
+        pipelines(ctx, pipelineBinaries, sceneHeapMappings, diagnostics.gpuDiagnostics, deletionQueue) {
     }
 
     ~Impl() {
@@ -420,9 +415,7 @@ struct RenderContext::Impl : RenderFrameContext {
         submittedStaging.reset();
         DestroyDestinations();
         frameOpen = false;
-        if (fileSystemWatcher && shaderDirectoryWatch != 0) {
-            static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
-        }
+        diagnostics.StopShaderObservation();
 
         ClearEmitterBuffers();
         geometry.RetireAll();
@@ -514,9 +507,6 @@ struct RenderContext::Impl : RenderFrameContext {
     // RenderGraphBuilder.cpp; the compute frame lives in
     // pipelines/ComputeSimPipeline.cpp next to the queue it is submitted on.
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
-
-    void BeginShaderObservation();
-    void HandleShaderFileEvent(const FS::FileWatchEvent& event);
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 

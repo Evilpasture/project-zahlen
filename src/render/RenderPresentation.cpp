@@ -31,12 +31,12 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
         .Execute(cmd, [] {});
     image.layout = Vk::AttachmentLayout::ColorAttachment;
 
-    if (!warnedUnwrittenTarget) {
+    if (!diagnostics.warnedUnwrittenTarget) {
         ZHLN::Log(
             "[Render] Acquired window target (extent {}x{}) was not written this frame; presenting the background instead.",
             image.image.extent.width, image.image.extent.height
         );
-        warnedUnwrittenTarget = true;
+        diagnostics.warnedUnwrittenTarget = true;
     }
     return image.layout;
 }

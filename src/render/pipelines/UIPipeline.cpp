@@ -115,7 +115,7 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         });
         target.layout = Vk::AttachmentLayout::ColorAttachment;
         target.drawn = true;
-        impl.warnedUnwrittenTarget = false;
+        impl.diagnostics.warnedUnwrittenTarget = false;
         return std::nullopt;
     };
 

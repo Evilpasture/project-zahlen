@@ -368,16 +368,16 @@ uint32_t RenderContext::GetDeviceLostCount() const noexcept {
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
     if (auto* const cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
-        _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
+        _impl->diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 }
 
 PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
-    if (!_impl->gpuProfiler.PipelineStatsAvailable()) {
+    if (!_impl->diagnostics.gpuProfiler.PipelineStatsAvailable()) {
         return {};
     }
-    _impl->pendingPipelineCounters = {};
-    _impl->gpuProfiler.SetPipelineStatsEnabled(true);
+    _impl->diagnostics.pendingPipelineCounters = {};
+    _impl->diagnostics.gpuProfiler.SetPipelineStatsEnabled(true);
     return PipelineStatsCapture {_impl.get()};
 }
 
@@ -387,7 +387,7 @@ PipelineStatsCapture::PipelineStatsCapture(PipelineStatsCapture&& other) noexcep
 auto PipelineStatsCapture::operator=(PipelineStatsCapture&& other) noexcept -> PipelineStatsCapture& {
     if (this != &other) {
         if (_impl != nullptr) {
-            _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+            _impl->diagnostics.gpuProfiler.SetPipelineStatsEnabled(false);
         }
         _impl = std::exchange(other._impl, nullptr);
     }
@@ -396,7 +396,7 @@ auto PipelineStatsCapture::operator=(PipelineStatsCapture&& other) noexcept -> P
 
 PipelineStatsCapture::~PipelineStatsCapture() noexcept {
     if (_impl != nullptr) {
-        _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+        _impl->diagnostics.gpuProfiler.SetPipelineStatsEnabled(false);
     }
 }
 
@@ -404,7 +404,7 @@ GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
     if (_impl == nullptr) {
         return {};
     }
-    return std::exchange(_impl->pendingPipelineCounters, GpuPipelineCounters {});
+    return std::exchange(_impl->diagnostics.pendingPipelineCounters, GpuPipelineCounters {});
 }
 
 
@@ -581,7 +581,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     };
 }
 
-void RenderContext::Impl::BeginShaderObservation() {
+void RenderDiagnostics::BeginShaderObservation() {
     if constexpr (isDev) {
         if (fileSystemWatcher && shaderDirectoryWatch == 0) {
             shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
@@ -592,9 +592,17 @@ void RenderContext::Impl::BeginShaderObservation() {
     }
 }
 
-void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
+void RenderDiagnostics::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
         shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
+    }
+}
+
+void RenderDiagnostics::StopShaderObservation() noexcept {
+    if constexpr (isDev) {
+        if (fileSystemWatcher && shaderDirectoryWatch != 0) {
+            static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
+        }
     }
 }
 

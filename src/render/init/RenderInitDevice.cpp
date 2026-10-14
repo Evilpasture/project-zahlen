@@ -217,7 +217,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
                         .transform([&](auto&& context) -> auto {
                             impl->ctx         = std::forward<decltype(context)>(context);
                             const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
-                            impl->gpuDiagnostics.Create(
+                            impl->diagnostics.gpuDiagnostics.Create(
                                 vendor, impl->ctx.Device(), impl->ctx.Physical(), impl->ctx.Instance().AddressTracker(),
                                 Vk::DiagnosticConfig {.crashDumpPath = cfg.crashDumpPath}
                             );
@@ -238,7 +238,7 @@ auto RenderContext::Create(PresentationTarget& target, const RenderConfig& cfg, 
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> {
-            impl->BeginShaderObservation();
+            impl->diagnostics.BeginShaderObservation();
             return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));
         });
 }
@@ -252,7 +252,7 @@ void RenderContext::Destroy() noexcept {
 
     if (_impl->ctx.Device() != nullptr) {
         if (deviceLost) {
-            _impl->gpuDiagnostics.OnDeviceLost();
+            _impl->diagnostics.gpuDiagnostics.OnDeviceLost();
         } else {
             if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
                 ZHLN::LogError("Failed to wait for idle while destroying destinations ({})", idle.error());
@@ -265,7 +265,7 @@ void RenderContext::Destroy() noexcept {
                 HostBlit::Shutdown();
             }
         }
-        _impl->gpuDiagnostics.Shutdown();
+        _impl->diagnostics.gpuDiagnostics.Shutdown();
         _impl->submittedStaging.reset();
     }
 }
