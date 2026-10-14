@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Seeds the transmission target with the opaque HDR scene color, then builds
-// its mip chain for rough refraction in the forward pass. The graph enters in
-// transfer-dst layout; GenerateMipmaps leaves every level shader-readable.
 struct OpaqueSceneCopyPass: Vk::RenderPass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWriteThenShaderRead<Res_TransLighting>> {
     RenderFrameContext&   impl;
 

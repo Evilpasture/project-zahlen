@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include "PushDataLayout.hpp"
@@ -54,7 +53,6 @@ struct SpirvTypeLookup {
     bool     found     = false;
     bool     ambiguous = false;
 };
-
 
 class SpirvTypes {
   public:
@@ -245,7 +243,6 @@ class SpirvTypes {
     [[nodiscard]] constexpr auto NameMatches(const Type& type, std::string_view name) const noexcept -> bool;
     [[nodiscard]] constexpr auto FirstStructIndex(std::string_view name) const noexcept -> std::optional<uint32_t>;
 };
-
 
 [[nodiscard]] constexpr auto SpirvTypes::Parse(std::span<const uint8_t> module) noexcept -> SpirvTypes {
     SpirvTypes out {};

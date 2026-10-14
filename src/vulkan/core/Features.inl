@@ -1,12 +1,10 @@
-// src/vulkan/core/Features.inl
+
 #pragma once
 #include "Features.hpp"
 
 #include <cstring>
 
 namespace ZHLN::Vk {
-
-// GetStructureType Implementation
 
 template <typename T>
 [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType {
@@ -53,13 +51,11 @@ template <typename T>
     } else if constexpr (std::is_same_v<T, VkPhysicalDevicePresentId2FeaturesKHR>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR;
     } else {
-        // C++23: Safe compile-time error only if an unregistered Type is instantiated
+
         static_assert(sizeof(T) == 0, "Vulkan structure type mapping not registered for this Type in GetStructureType().");
         return VK_STRUCTURE_TYPE_MAX_ENUM;
     }
 }
-
-// FeatureChain Implementation
 
 template <typename T>
 [[nodiscard]] auto FindEnabledFeature(const EnabledFeatureSet& enabled) noexcept -> const T* {
@@ -102,9 +98,6 @@ template <typename T>
     return node.active ? &node.feature : nullptr;
 }
 
-// Vulkan feature structures have a header followed by VkBool32 fields, but
-// many have four bytes of *trailing padding*. Explicitly name the final field
-// so neither masking nor the "any enabled" check can mistake padding for a bit.
 template <typename T>
 [[nodiscard]] consteval auto FeaturePayloadEnd() noexcept -> size_t {
     if constexpr (std::is_same_v<T, VkPhysicalDeviceFeatures2>) {
@@ -176,8 +169,6 @@ inline void WriteFeatureBit(T& feature, size_t offset, VkBool32 bit) noexcept {
     std::memcpy(reinterpret_cast<char*>(&feature) + offset, &bit, sizeof(bit));
 }
 
-// A Features2 struct is the root of a vkGetPhysicalDeviceFeatures2 query,
-// never an element of its own pNext chain.
 template <typename T>
 [[nodiscard]] inline auto QueryFeatureSupport(VkPhysicalDevice physicalDevice) noexcept -> T {
     T features {};
@@ -274,8 +265,7 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot(const VkPhysicalDe
         },
         _features
     );
-    // A caller that supplied a tail already owns it. Report only nodes from
-    // this chain, so it can choose the tail when all optional nodes were off.
+
     return anyActive ? root : nullptr;
 }
 
@@ -284,8 +274,7 @@ template <typename... Ts>
     EnabledFeatureSet out;
     std::apply(
         [&out](const auto&... nodes) {
-            // One lambda call per node; the inactive ones contribute nothing, so
-            // the snapshot is exactly the set GetRoot() chained.
+
             (
                 [&] {
                     if (!nodes.active) {
@@ -299,10 +288,6 @@ template <typename... Ts>
                     entry.words.resize(kWords);
                     std::memcpy(entry.words.data(), &nodes.feature, sizeof(Feature));
 
-                    // The copy's pNext still points into this chain, which the
-                    // snapshot deliberately outlives. Nothing walks these as a
-                    // chain -- lookup is by sType -- so null it rather than let
-                    // a reader find a dangling pointer.
                     reinterpret_cast<Feature*>(entry.words.data())->pNext = nullptr;
 
                     out.push_back(std::move(entry));
@@ -315,8 +300,6 @@ template <typename... Ts>
     return out;
 }
 
-// FeatureChainBuilder Implementation
-
 template <typename T, typename Func>
 auto FeatureChainBuilder::Require(Func&& configure) {
     return FeatureChain<>(_physicalDevice, std::make_tuple()).template Require<T>(std::forward<Func>(configure));
@@ -327,8 +310,6 @@ auto FeatureChainBuilder::Optional(Func&& configure) {
     return FeatureChain<>(_physicalDevice, std::make_tuple()).template Optional<T>(std::forward<Func>(configure));
 }
 
-// FeatureFactory Implementation
-
 template <typename T>
 [[nodiscard]] constexpr auto FeatureFactory::Create(auto&& configure) noexcept -> T {
     T features {};
@@ -337,4 +318,4 @@ template <typename T>
     return features;
 }
 
-} // namespace ZHLN::Vk
+}

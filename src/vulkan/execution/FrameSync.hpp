@@ -94,7 +94,7 @@ class FrameSync {
         };
         return vkWaitSemaphores(_device, &info, UINT64_MAX);
     }
-    // We don't add [[nodiscard]].
+
     auto StepTimeline(uint32_t frameIndex) noexcept -> uint64_t {
         return ++_timelineValues[frameIndex % N];
     }

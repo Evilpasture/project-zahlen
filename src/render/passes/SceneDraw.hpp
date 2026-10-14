@@ -10,14 +10,9 @@
 
 namespace ZHLN::Passes {
 
-// Which of the two depth-only/main rasterization families a draw is being
-// tested against. `DrawFlags` lets a draw opt into one or both; a draw that
-// names neither is visible everywhere.
 enum class RenderPassType : uint8_t { Main, Shadow };
 
 [[nodiscard]] constexpr auto IsForwardOnly(uint32_t instanceFlags) noexcept -> bool {
-    // Low bits are the authored coverage mode, not the pipeline family.
-    // Bit 10 routes optically transmissive OPAQUE/MASK materials forward too.
     return (instanceFlags & 0xFFu) == 2u || (instanceFlags & (1u << 10)) != 0u;
 }
 
@@ -29,9 +24,6 @@ enum class RenderPassType : uint8_t { Main, Shadow };
     return (meshletCount + kMeshletsPerTaskGroup - 1) / kMeshletsPerTaskGroup;
 }
 
-// One draw, instanced from the CPU-side queue. The mesh path is taken when the
-// draw's material has a mesh pipeline and its geometry was meshlet-built;
-// otherwise this falls back to the indexed or non-indexed vertex draw.
 template <typename T>
 void SubmitDrawInstanced(
     Vk::CommandEncoder& encoder,
@@ -43,8 +35,6 @@ void SubmitDrawInstanced(
 ) noexcept {
     const auto* nativeMat = drawCmd.material;
 
-    // Cull mode is dynamic on typed material pipelines, so sidedness does not
-    // expand the shared pipeline cache. Bit 9 is the existing material flag.
     const bool doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
     encoder.SetCullMode(doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
 
@@ -75,24 +65,16 @@ void SubmitDrawInstanced(
     );
 }
 
-// Stencil-buffer constructive solid geometry: the cutters write the stencil,
-// then the eye mesh is drawn against it to cut or intersect.
 void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D extent) noexcept;
 
 void Draw3DParticles(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
 
 void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept;
 
-// The seven GBuffer color targets plus the depth target, as the attachments a
-// raster pass writes them as. Both GBuffer passes (and the viewmodel pass,
-// which writes the same targets from a separate projection) resolve the set the
-// same way, so the spelling lives here rather than in each pass.
 using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
 
 [[nodiscard]] auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets;
 
-// Collapses the draw queue into runs of consecutive draws that share a
-// pipeline and dynamic cull mode, the granularity of a GPU-culled indirect draw.
 [[nodiscard]] auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange>;
 
 }

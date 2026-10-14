@@ -6,8 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// One emitter: where its particles live, how many there are, the timestep, and
-// the emitter's own parameter block.
 struct alignas(16) ComputePushConstants {
     VkDeviceAddress       particleBufferAddr;
     uint32_t              particleCount;
@@ -25,7 +23,7 @@ void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     for (const auto& emitter: frame.queues.ParticleEmitters()) {
         if (!emitter.simulate) {
-            continue; // authored on the CPU this frame: render it, do not integrate it again
+            continue;
         }
         auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
         if (!buffer) {

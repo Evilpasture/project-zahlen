@@ -3,11 +3,6 @@
 
 #pragma once
 
-// The scene DAG declaration. Shared by RecordSceneFrame and GetRenderGraphDump
-// so the dump can live in its own TU: GraphVisualizer instantiation is heavy,
-// and keeping it out of RenderGraphBuilder.cpp means editing execute/record
-// no longer rebuilds the visualizer in the same object file.
-
 #include "RenderInternal.hpp"
 #include "graph/RenderGraph.hpp"
 #include "passes/aa/FXAAPass.hpp"
@@ -67,23 +62,11 @@ using ScenePushConstants = GeneratedGpu::ScenePassPushConstants;
     };
 }
 
-// The scene graph for one anti-aliasing configuration.
-//
-// The declaration order below is the order the passes run in, but the
-// dependencies between them come from their declared usages, not from this
-// list. The engine proves all of that at compile time and emits the barriers;
-// nothing here encodes a dependency twice.
 template <AAMode Mode, typename GetSwapchainImageT>
 [[nodiscard]] auto BuildFrameGraph(RenderContext::Impl& self, const ScenePushConstants& pc, GetSwapchainImageT&& getSwapchain) {
     using OpaqueReflectionPass      = Passes::ReflectionPass<Passes::OpaqueSurface, Res_HdrSceneColor, "Reflection">;
     using TranslucentReflectionPass = Passes::ReflectionPass<Passes::TranslucentSurface, Res_TransLighting, "TransReflection">;
 
-    // 1. Rasterization and deferred lighting DAG.
-    //
-    // The designators are load-bearing, not decoration. Every pass inherits
-    // `Vk::RenderPass<...>`, which is an aggregate with no data members, so a
-    // positional `{self}` would be read as an initializer for that base rather
-    // than for the pass's own `impl`.
     auto core = Vk::MakePassPack(
         Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self}, Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.impl = self},
@@ -97,10 +80,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.impl = self}
     );
 
-    // 2. Anti-aliasing tail. Which passes exist at all depends on the mode, so
-    //    every AA setting is a different graph -- and therefore a different
-    //    specialization of everything downstream, including which resource the
-    //    tonemapper reads.
     auto aa = [&] {
         if constexpr (Mode == AAMode::TAA) {
             return Vk::MakePassPack(Passes::TAAPass {.aa = self.antiAliasing, .frame = self});
@@ -115,7 +94,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
         }
     }();
 
-    // 3. Tone-mapping and the blit onto this frame's presentation image.
     auto blit = Vk::MakePassPack(
         Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {.post = self.post, .frame = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)}
     );
@@ -123,9 +101,6 @@ template <AAMode Mode, typename GetSwapchainImageT>
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
-// The graph type for one anti-aliasing configuration. The visualization is a
-// compile-time walk of the state table: no pass is constructed and no command
-// buffer is involved, which is why `decltype` on an unevaluated call is enough.
 template <AAMode Mode>
 using SceneGraphFor = decltype(BuildFrameGraph<Mode>(
     std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()

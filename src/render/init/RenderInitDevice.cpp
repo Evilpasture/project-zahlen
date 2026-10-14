@@ -31,9 +31,6 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
         .transform_error([](auto err) -> ErrorCode { return err; });
 }
 
-// All feature/extension/limit negotiation is owned by the Vulkan layer.
-// Required core bits stay required; drawIndirectCount, shaderInt64, and
-// pipelineStatisticsQuery are masked independently within their core structs.
 auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode validationMode) {
     constexpr VkSubgroupFeatureFlags kUsedSubgroupOps = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
 
@@ -52,12 +49,8 @@ auto ConfigureDevice(VkPhysicalDevice physical, bool present, ValidationMode val
             f.shaderDemoteToHelperInvocation = VK_TRUE;
         })
         .RequireExtension<VkPhysicalDeviceMaintenance5FeaturesKHR>(VK_KHR_MAINTENANCE_5_EXTENSION_NAME, [](auto& f) { f.maintenance5 = VK_TRUE; })
-        // Optional: pipeline binaries replace the VkPipelineCache object as
-        // the warm-start mechanism. Absent (e.g. MoltenVK), creation simply
-        // compiles from scratch -- there is no cache handle either way.
-        .OptionalExtension<VkPhysicalDevicePipelineBinaryFeaturesKHR>(
-            VK_KHR_PIPELINE_BINARY_EXTENSION_NAME, [](auto& f) { f.pipelineBinaries = VK_TRUE; }
-        )
+
+        .OptionalExtension<VkPhysicalDevicePipelineBinaryFeaturesKHR>(VK_KHR_PIPELINE_BINARY_EXTENSION_NAME, [](auto& f) { f.pipelineBinaries = VK_TRUE; })
         .RequireWithOptional<VkPhysicalDeviceVulkan12Features>(
             [validationMode](auto& f) {
                 f.descriptorIndexing                           = VK_TRUE;
@@ -118,7 +111,7 @@ auto SelectPresentationMode(const PresentationTarget& target) noexcept -> Presen
 
 } // namespace
 
-RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
+RenderContext::RenderContext(PrivateToken, std::unique_ptr<Impl> impl) noexcept: _impl(std::move(impl)) {
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

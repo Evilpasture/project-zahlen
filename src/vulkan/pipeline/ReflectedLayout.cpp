@@ -135,11 +135,10 @@ auto ReflectSpecializationConstantF32(const ShaderDesc& shader, uint32_t constan
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
-bool ReflectedLayout::Build(VkDevice /*unused*/, ShaderStagesView shaders) noexcept {
+bool ReflectedLayout::Build(VkDevice, ShaderStagesView shaders) noexcept {
     ReflectedLayoutBuilder builder;
     const auto* const      raw = shaders.Get();
-    // Reflect the same borrowed SPIR-V the inline module create infos will use.
-    // The caller keeps any disk-backed storage alive through this call.
+
     for (const ShaderStageData* shader: {&raw->vert, &raw->task, &raw->mesh, &raw->frag}) {
         if (shader->code != nullptr && shader->size > 0) {
             builder.AddStageUnsafe({.code = shader->code, .size = shader->size, .entry_point = shader->entryPoint}, shader->stage);
@@ -148,13 +147,13 @@ bool ReflectedLayout::Build(VkDevice /*unused*/, ShaderStagesView shaders) noexc
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice /*unused*/, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+bool ReflectedLayout::Build(VkDevice, const ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
     ReflectedLayoutBuilder builder;
     builder.AddStageUnsafe(shader, stage);
     return BuildInto(*this, builder);
 }
 
-bool ReflectedLayout::Build(VkDevice /*unused*/, std::span<const ReflectedStageInput> stages) noexcept {
+bool ReflectedLayout::Build(VkDevice, std::span<const ReflectedStageInput> stages) noexcept {
     ReflectedLayoutBuilder builder;
     for (const auto& s: stages) {
         builder.AddStageUnsafe(s.shader, s.stage);

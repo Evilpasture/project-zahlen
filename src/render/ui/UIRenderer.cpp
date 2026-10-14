@@ -113,9 +113,6 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         return std::unexpected(uiShaders.error());
     }
 
-    // A typed builder can produce a typed pipeline only from constant formats.
-    // Build just the offscreen variants and the active presentation format; an
-    // unusual native swapchain format retains a checked runtime fallback.
     impl.pipelines               = {};
     impl.fallbackPipeline        = {};
     impl.fallbackFormat          = VK_FORMAT_UNDEFINED;
@@ -298,8 +295,7 @@ void UIRenderer::Record(
     if (_impl == nullptr || !_impl->pipelines.Get<Format>().Valid() || uiData.Empty() || width == 0 || height == 0) {
         return;
     }
-    // DrawHeap only pushes constants and draws; it cannot rebind an unchecked
-    // VkPipeline over the format-checked binding supplied by DynamicPass.
+
     pass.Bind(encoder.cmd, _impl->pipelines.Get<Format>());
     RecordBatches(encoder, width, height, frameIndex, uiData, [](Vk::CommandEncoder& cmd, uint32_t count, const auto& constants) {
         cmd.DrawHeap<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(count, 1, constants);

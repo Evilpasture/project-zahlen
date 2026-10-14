@@ -119,4 +119,4 @@ inline auto CommandPools<N, QType>::Create(const VkDevice device, const Descript
     return pools;
 }
 
-} // namespace ZHLN::Vk
+}

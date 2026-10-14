@@ -3,21 +3,6 @@
 
 #pragma once
 
-// The pass payloads that have no single pass to live in.
-//
-// Every payload that belongs to exactly one pass is declared next to that pass
-// and asserted there -- see ParticleUpdatePass.cpp, MeshParticleUpdatePass.cpp
-// and ForwardPass.cpp. What is left here is the set more than one translation
-// unit fills: ObjectConstants is pushed by the gbuffer, forward, viewmodel,
-// translucent, decal and shadow paths alike, and the rest are filled from
-// wherever their pass happens to be recorded.
-//
-// These used to be nested in RenderContext::Impl, which made each of them a
-// member of the renderer's private state and made RenderInternal.hpp -- the
-// header 67 translation units include -- the only place they could be
-// declared. None of them is renderer state. They are the shader ABI, and they
-// are only typed by the code that fills a push block.
-
 #include "GpuAbi.hpp"
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
@@ -25,9 +10,6 @@
 
 namespace ZHLN {
 
-// The shared instance-draw prefix. Every scene draw pushes this in front of
-// the frame addresses: which instance to read, and whether this draw is the
-// shadow pass (which resolves the instance against the shadow instance table).
 struct ObjectConstants {
     uint32_t instanceId;
     uint32_t isShadowPass;
@@ -45,9 +27,6 @@ struct UIObjectConstants {
 static_assert(sizeof(UIObjectConstants) == 96);
 static_assert(offsetof(UIObjectConstants, surfaceAddress) == 72);
 
-// The second-pass culling constants: the GPU cull walks the first pass's
-// surviving candidates and re-tests them against the HiZ pyramid it just
-// built, so it needs the pyramid's size as well as the view-projection.
 struct CullingConstants {
     JPH::Mat44 viewProj;
     float      hizScreenSize[2];
@@ -89,12 +68,11 @@ static_assert(offsetof(MeshParticleRenderPush, indexCount) == 72);
 struct alignas(8) SkinningConstants {
     Vk::DeviceAddress<VertexPosition>     inPosAddr;
     Vk::DeviceAddress<VertexTangentFrame> inFrameAddr;
-    // The shader reads the skin stream as raw uint words (packed joint
-    // indices + weight bits); there is no CPU-side element struct.
+
     Vk::DeviceAddress<uint32_t>           inSkinAddr;
     Vk::DeviceAddress<VertexPosition>     outPosAddr;
     Vk::DeviceAddress<VertexTangentFrame> outFrameAddr;
-    Vk::DeviceAddress<JPH::Mat44>         jointsAddr; // shader GPUJoint: four float4 columns
+    Vk::DeviceAddress<JPH::Mat44>         jointsAddr;
     Vk::DeviceAddress<JPH::Float4>        morphDeltasAddr;
     uint32_t                              vertexCount;
     uint32_t                              jointOffset;
@@ -115,10 +93,6 @@ struct BakePush {
 
 using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
 
-// Every shared payload has to fit the push blob's prefix in front of the frame
-// addresses. A payload that outgrows it is a compile error here, in the one
-// place the shared ones are declared, rather than a silent truncation in
-// BindHeapsAndPushFrame.
 static_assert(
     (GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants> &&
      GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<SkinningConstants> &&

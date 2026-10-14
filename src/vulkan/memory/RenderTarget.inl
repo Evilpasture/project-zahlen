@@ -4,8 +4,6 @@
 
 namespace ZHLN::Vk {
 
-// RenderTarget Implementation
-
 template <VkFormat F>
 inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
     image(std::move(other.image)), attachmentView(std::move(other.attachmentView)), extent(other.extent) {
@@ -48,7 +46,7 @@ inline auto
         return std::unexpected(view_res.error());
     }
     rt.attachmentView = std::move(*view_res);
-    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
+    return std::move(rt);
 }
 
 template <VkFormat F>
@@ -79,10 +77,8 @@ inline auto
         return std::unexpected(view_res.error());
     }
     rt.attachmentView = std::move(*view_res);
-    return std::move(rt); // Move before the failure guard runs (NRVO would destroy the result).
+    return std::move(rt);
 }
-
-// Transition Helpers
 
 namespace TemplatedDetail {
 
@@ -105,16 +101,13 @@ struct ResourceTraits<RenderTarget<F>> {
     }
 };
 
-} // namespace TemplatedDetail
-
-// Transition Implementation
+}
 
 template <VkImageLayout TargetLayout, VkFormat F>
-[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> /*unused*/) noexcept {
+[[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> ) noexcept {
     return TransitionSingle<TargetLayout>(cmd, rt);
 }
 
-// Overrides the old loop-based TransitionBatch to issue a single grouped pipeline barrier
 template <VkImageLayout TargetLayout, typename... Resources>
 [[nodiscard]] constexpr auto TransitionBatch(VkCommandBuffer cmd, const Resources&... resources) noexcept {
     constexpr size_t count = sizeof...(Resources);
@@ -146,4 +139,4 @@ template <VkImageLayout TargetLayout, typename... Resources>
     }
 }
 
-} // namespace ZHLN::Vk
+}

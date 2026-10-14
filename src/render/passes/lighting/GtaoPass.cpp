@@ -6,9 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// Horizontal-horizon search parameters: the AO radius in world units, the
-// bias and power that shape the falloff, and the matrices the search
-// reconstructs view-space position with.
 struct GtaoPushConstants {
     uint32_t   halfRes[2];
     float      rcpFullRes[2];

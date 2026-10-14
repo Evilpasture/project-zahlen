@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -10,8 +9,6 @@
 
 namespace ZHLN::Vk {
 
-// An uploaded sampled texture: the image plus the plain view description
-// every heap write of it is built from. No VkImageView handle exists for it.
 struct TextureResource {
     Image                 image;
     VkImageViewCreateInfo viewInfo {};

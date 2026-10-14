@@ -6,9 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// A resolved G-buffer surface contains the live views needed by raster passes.
-// The resource tags stay on the archetype types below, where the render graph
-// can use them for dependency and barrier analysis.
 struct GBufferSurface {
     Vk::ImageSlice depth;
     Vk::ImageSlice normals;

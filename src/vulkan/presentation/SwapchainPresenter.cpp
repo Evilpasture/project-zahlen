@@ -137,7 +137,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
         return std::unexpected(ToError(waited));
     }
-    sync.MarkUnsubmitted(slot); // The prior submission finished; a skipped acquire does not need a fence.
+    sync.MarkUnsubmitted(slot);
     pools[slot].Reset();
 
     if (!swapchain.Valid()) {

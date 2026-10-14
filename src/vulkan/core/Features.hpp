@@ -27,8 +27,6 @@ template <typename T>
 template <typename T>
 [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType;
 
-// Feature payloads contain VkBool32 fields; the header and any trailing
-// alignment padding must never be treated as feature bits.
 template <typename T>
 [[nodiscard]] auto MaskFeatures(const T& requested, const T& supported) noexcept -> T;
 

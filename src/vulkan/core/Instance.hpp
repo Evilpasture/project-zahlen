@@ -33,9 +33,6 @@ enum class InstanceError : uint8_t {
     GlobalDispatchInUse ZHLN_ANNOTATION(ZHLN::Description<"Volk global dispatch is still in use by another Vulkan instance"> {}) = 2,
 };
 
-// Stable heap-owned callback state. Vulkan receives this directly through
-// pUserData; it has no back-pointer to a movable Instance and contains all
-// per-instance diagnostics/tracking state.
 struct InstanceDiagnostics {
     std::atomic<uint32_t>  localValidationErrors {0};
     std::atomic<uint32_t>  localDeviceLost {0};
@@ -48,9 +45,6 @@ struct InstanceDiagnostics {
 
 class Instance;
 
-// A non-owning view of a Vulkan instance. Wrapping a raw handle is deliberately
-// explicit; a view made from an Instance also carries its stable diagnostics
-// pointer, which remains valid across moves of the owning Instance.
 class InstanceView {
   public:
     constexpr InstanceView() noexcept = default;

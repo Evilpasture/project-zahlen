@@ -7,12 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Deferred lighting: evaluates the clustered light list against the GBuffer
-// and writes the shaded radiance the reflection pass composes on top of.
-//
-// It reads everything the GBuffer passes wrote plus the shadow maps, so it is
-// the pass that turns the graph's hazard analysis into real work: nine image
-// reads, each with its own barrier, before a single draw.
 struct ClusteredLightingPass: Vk::RenderPass<
                                   "Lighting", Vk::FragmentAndComputeRead<Res_SceneColor>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>,
                                   Vk::FragmentAndComputeRead<Res_Clearcoat>, Vk::FragmentAndComputeRead<Res_Sheen>, Vk::FragmentAndComputeRead<Res_Anisotropy>, Vk::FragmentAndComputeRead<Res_Depth>, Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>,

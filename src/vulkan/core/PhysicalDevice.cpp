@@ -78,7 +78,6 @@ namespace {
         families.resize(count);
     }
 
-    // Prefer transfer-only queues, then transfer queues without graphics.
     for (uint32_t i = 0; i < count; ++i) {
         const VkQueueFlags flags = families[i].queueFlags;
         if ((flags & VK_QUEUE_TRANSFER_BIT) != 0 && (flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) == 0) {
@@ -194,7 +193,6 @@ auto SelectPhysicalDevice(const VkInstance instance, const VkSurfaceKHR surface,
         return std::pair {info, device_score};
     };
 
-    // Find the device with the highest score.
     std::optional<PhysicalDeviceInfo> best_device = std::nullopt;
     int32_t                           best_score  = -1;
     for (const VkPhysicalDevice physical: devices) {
@@ -229,7 +227,6 @@ auto QueryMeshShaderLimits(const VkPhysicalDevice physical) noexcept -> MeshShad
     };
     vkGetPhysicalDeviceProperties2(physical, &properties);
 
-    // Returned atomically and immutably via designated initializers. We prefer this pattern more.
     return MeshShaderLimits {
         .maxMeshOutputVertices                = mesh_properties.maxMeshOutputVertices,
         .maxMeshOutputPrimitives              = mesh_properties.maxMeshOutputPrimitives,

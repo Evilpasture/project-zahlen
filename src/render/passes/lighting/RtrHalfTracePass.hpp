@@ -7,10 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Traces one reflection ray per half-resolution pixel against the TLAS. The
-// result is noisy and half-sized on purpose: the reflection pass up-samples
-// it and the A-Trous ladder denoises what survives, which is far cheaper than
-// tracing at full rate.
 struct RtrHalfTracePass: Vk::RenderPass<
                              "RtrHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>, Vk::ComputeRead<Res_Lighting>,
                              Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>, Vk::ComputeWrite<Res_RtrHalf>> {

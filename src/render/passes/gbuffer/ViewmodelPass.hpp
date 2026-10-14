@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// First-person geometry, drawn last over the resolved GBuffer with its own
-// narrow projection so a held object does not clip into the world. It is the
-// same attachment set as the GBuffer passes; only the matrices differ.
 struct ViewmodelPass: Vk::RenderPass<
                           "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
                           Vk::ColorWrite<Res_Emissive>, Vk::ColorWrite<Res_Clearcoat>, Vk::ColorWrite<Res_Anisotropy>, Vk::ColorWrite<Res_Sheen>, Vk::DepthStencilWrite<Res_Depth>> {

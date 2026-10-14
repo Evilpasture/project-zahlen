@@ -14,33 +14,14 @@ namespace ZHLN {
 
 namespace {
 
-// The near plane every atlas tile shares. A point/spot light's range is authored
-// in metres and reaches from a hand's width to a room, so a single small near
-// plane keeps the depth range usable at both ends; the far plane is the light's
-// own range, which is what `lighting.slang` compares against.
 constexpr float kAtlasNearPlane = 0.05f;
 
-// The six cube faces in Vulkan layer order, as the camera-space basis each one
-// needs. The basis is written out rather than derived from a look-at so the
-// mapping is exactly the one `lighting.slang` reconstructs: a world offset p
-// lands at (sc, tc, ma) with
-//
-//   x_cam = sc      y_cam = -tc      z_cam = -ma
-//
-// and `Math::CreatePerspective` turns that into x_ndc = sc/ma, y_ndc = tc/ma --
-// the hardware's cube UV table, which is the table the face selection below is
-// written against.
 struct FaceBasis {
     JPH::Vec3 x;
     JPH::Vec3 y;
     JPH::Vec3 z;
 };
 
-// Nine floats per face: the camera-space x, y and z axes. Plain floats rather
-// than JPH::Vec3 members so the table stays a constant expression -- Vec3's
-// constructor is not constexpr.
-//
-//                 +X   -Y    +Z
 constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
     {0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f, -1.0f, 0.0f, 0.0f},
     {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f},
@@ -59,9 +40,6 @@ constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
     };
 }
 
-// World to camera space for one basis. The basis is orthonormal, so its
-// transpose is the transform; the translation is that transpose applied to the
-// light's position, negated.
 [[nodiscard]] auto BasisToView(const FaceBasis& basis, const JPH::Vec3& origin) noexcept -> JPH::Mat44 {
     const JPH::Mat44 rotation {
         JPH::Vec4 {basis.x.GetX(), basis.y.GetX(), basis.z.GetX(), 0.0f},
@@ -75,9 +53,6 @@ constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
     return view;
 }
 
-// A spot light's basis: its own axis forward, any perpendicular pair around it.
-// Which pair does not matter -- the lighting pass reads the same matrix this
-// builds, so the atlas image and the reconstructed UV agree by construction.
 [[nodiscard]] auto ConeToView(const JPH::Vec3& direction, const JPH::Vec3& origin) noexcept -> JPH::Mat44 {
     const JPH::Vec3 forward = direction.LengthSq() > 1e-8f ? direction.Normalized() : JPH::Vec3 {0.0f, 0.0f, -1.0f};
     const JPH::Vec3 hint    = (std::abs(forward.GetY()) > 0.99f) ? JPH::Vec3::sAxisZ() : JPH::Vec3::sAxisY();
@@ -89,8 +64,6 @@ constexpr float kFaceAxes[ShadowAtlas::kPointFaces][9] = {
 } // namespace
 
 auto ShadowAtlas::FaceCount(bool isPoint, float outerConeRadians) noexcept -> uint32_t {
-    // A cone-less spot is lit as a full sphere by `lighting.slang`, so one tile
-    // would only ever shadow the front of it. It gets the cube treatment.
     return (isPoint || outerConeRadians <= 0.0f) ? kPointFaces : 1;
 }
 
@@ -101,8 +74,6 @@ auto ShadowAtlas::MakeFaceMatrices(
     const uint32_t faceCount = FaceCount(isPoint, outerConeRadians);
 
     if (faceCount == 1) {
-        // The authored half-angle, doubled into a full-angle FOV and clamped to
-        // something a square tile can hold.
         const float outer   = std::clamp(outerConeRadians, 0.01f, JPH::JPH_PI * 0.45f);
         const JPH::Mat44 projection = Math::CreatePerspective(outer * 2.0f, 1.0f, kAtlasNearPlane, farPlane);
         out[0]                        = projection * ConeToView(direction, position);
@@ -117,8 +88,6 @@ auto ShadowAtlas::MakeFaceMatrices(
 }
 
 auto ShadowAtlas::MakeLightKey(LightType type, const JPH::Vec3& position, float intensity, float range) noexcept -> uint64_t {
-    // Bit patterns, not values: the key only has to be stable for a light that
-    // has not moved, and distinct for two that are not the same light.
     const float    parts[] = {position.GetX(), position.GetY(), position.GetZ(), intensity, range};
     uint64_t       hash    = Hash64(reinterpret_cast<const char*>(parts), sizeof(parts));
     const uint32_t kind    = static_cast<uint32_t>(type);
@@ -127,10 +96,6 @@ auto ShadowAtlas::MakeLightKey(LightType type, const JPH::Vec3& position, float 
 }
 
 auto ShadowAtlas::TileForDistance(float distance) noexcept -> uint32_t {
-    // Texels per metre is what a shadow's edge costs, and it is the same
-    // budget at every distance only if the tile shrinks as the light recedes.
-    // The step-down is also what makes losing the ranking contest soft: a
-    // light that falls behind gets a smaller tile, not no shadows.
     if (distance < 8.0f) return kMaxTile;
     if (distance < 20.0f) return 512;
     if (distance < 60.0f) return 256;
@@ -138,8 +103,6 @@ auto ShadowAtlas::TileForDistance(float distance) noexcept -> uint32_t {
 }
 
 auto ShadowAtlas::TileRectOf(const ShadowTile& tile) noexcept -> TileRect {
-    // Exact: the atlas edge is a power of two and every tile is aligned to its
-    // own size, so both directions of the UV conversion are representable.
     const float   atlas = static_cast<float>(kSize);
     const uint32_t size = static_cast<uint32_t>(std::lround(static_cast<float>(tile.uvScale) * atlas));
     return TileRect {
@@ -159,8 +122,6 @@ void ShadowAtlas::BeginFrame() noexcept {
 }
 
 auto ShadowAtlas::Place(uint32_t faceCount, uint32_t tile, uint32_t& outX, uint32_t& outY) noexcept -> bool {
-    // One light's faces go in one row when a shelf has the room: they are drawn
-    // back to back, so sharing a row keeps them in the same tiles' neighbourhood.
     const uint32_t span = tile * faceCount;
     for (Shelf& shelf: _shelves) {
         if (shelf.tile == tile && shelf.cursor + span <= kSize) {
@@ -171,8 +132,6 @@ auto ShadowAtlas::Place(uint32_t faceCount, uint32_t tile, uint32_t& outX, uint3
         }
     }
 
-    // No row of this size has room. Open one below everything opened so far;
-    // shelves never overlap because a new one is always placed past the last.
     uint32_t y = 0;
     for (const Shelf& shelf: _shelves) {
         y = std::max(y, shelf.y + shelf.tile);
@@ -200,9 +159,6 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
         return Grant {};
     }
 
-    // The reuse test: same tiles, same size, same transforms. All three are
-    // what determines the texels, so when they agree the depth already in the
-    // atlas is the depth this frame would write.
     CacheEntry* cached = nullptr;
     for (CacheEntry& entry: _cache) {
         if (entry.key == req.key) {
@@ -249,10 +205,6 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
 }
 
 void ShadowAtlas::EndFrame() noexcept {
-    // A light that stopped asking for tiles this frame is dropped. There is no
-    // grace period to keep: a returning light re-acquires wherever the shelves
-    // put it and re-rasterizes once, which is the same cost a stale entry would
-    // have hidden behind.
     for (auto it = _cache.begin(); it != _cache.end();) {
         it = it->seen ? std::next(it) : _cache.erase(it);
     }

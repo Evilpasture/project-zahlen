@@ -14,9 +14,7 @@ namespace ZHLN::Vk {
 template <VkFormat F>
 struct RenderTarget {
     Image          image;
-    // The render target's one VkImageView handle, existing solely so the
-    // image can be bound as a dynamic-rendering attachment. Sampling it
-    // goes through image.ViewInfo() / AsSlice().ViewInfo(), never this.
+
     AttachmentView attachmentView;
     VkExtent2D     extent {};
 
@@ -100,9 +98,7 @@ struct RenderTarget3D {
 template <VkFormat F>
 struct MipmappedRenderTarget {
     Image                       image;
-    // Attachment views only (full chain and one per mip, for targets that
-    // are rendered into at a single mip). Per-mip descriptor views are not
-    // stored: image.ViewInfo(aspect, mip, 1) describes them on demand.
+
     AttachmentView              attachmentView;
     std::vector<AttachmentView> mipAttachmentViews;
     VkExtent2D                  extent {};
@@ -154,7 +150,7 @@ struct MipmappedRenderTarget {
             }
             target.mipAttachmentViews.push_back(std::move(*mip_res));
         }
-        return std::move(target); // Move before the failure guard runs.
+        return std::move(target);
     }
 
     void Destroy(Allocator& allocator) noexcept {
@@ -265,7 +261,7 @@ struct RenderTargetBundle {
                     result = std::unexpected(created.error());
                     return;
                 }
-                t.Destroy(alloc); // Caller must have waited for GPU use.
+                t.Destroy(alloc);
                 t = std::move(*created);
             }(), ...);
         }, targets);

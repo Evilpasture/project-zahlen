@@ -1,15 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/diagnostics/GpuProfiler.inl
-
 #pragma once
 #include "GpuProfiler.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {
-
-// GpuProfiler Implementation
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
@@ -72,23 +68,20 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
     _recordedMasks = {};
     _enabled       = false;
 
-    // 1. Query physical device limits to verify timestamp support
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(physicalDevice, &props);
     if (props.limits.timestampPeriod == 0) {
-        // Timestamp queries not supported by hardware limits. Success with the
-        // profiler left disabled: this is absent capability, not a failure.
+
         return {};
     }
 
-    // 2. Query queue family properties to verify valid bits
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queue_family_count, nullptr);
     std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queue_family_count, queue_families.data());
 
     if (queueFamilyIndex >= queue_family_count || queue_families[queueFamilyIndex].timestampValidBits == 0) {
-        return {}; // Queue family does not support timestamps
+        return {};
     }
 
     VkQueryPoolCreateInfo info = {
@@ -102,39 +95,23 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
 
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         if (vkCreateQueryPool(device, &info, nullptr, &_pools[i]) != VK_SUCCESS) {
-            // pQueryPool is undefined on failure; restore the null invariant so
-            // Teardown() does not destroy a garbage handle.
+
             _pools[i] = VK_NULL_HANDLE;
             Teardown();
             return std::unexpected(GpuProfilerError::QueryPoolCreationFailed);
         }
-        // Returns void: host query reset cannot fail, so there is nothing here
-        // to report.
+
         vkResetQueryPool(device, _pools[i], 0, kQueryCount);
     }
 
-    // Only now: previously this was set before the pools existed, so a failed
-    // creation left the profiler "enabled" with null pools and Reset() went on
-    // to call vkResetQueryPool on VK_NULL_HANDLE.
     _enabled = true;
 
-    // 3. Pipeline statistics pools: opt-in counters (see header). Absent
-    // support is not an error -- same policy as timestamps above. The feature
-    // bit itself is enabled at device creation (RenderInitDevice) when the
-    // physical device advertises it, which is exactly the condition probed
-    // here, so a supported device arrives with the feature on.
     VkPhysicalDeviceFeatures deviceFeatures {};
     vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
     if (deviceFeatures.pipelineStatisticsQuery != VK_TRUE) {
-        return {}; // Statistics queries unavailable; timestamps keep working.
+        return {};
     }
 
-    // The nine core statistic bits are valid on any device with the
-    // feature. The task/mesh bits are what measure meshlet culling, but they
-    // are legal only when the device has meshShaderQueries ENABLED
-    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069) -- enablement, not
-    // physical-device support, is what the VUID checks, so the caller passes
-    // the device-creation state instead of us probing here.
     _statsBits = VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
@@ -150,14 +127,13 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
         .pNext              = nullptr,
         .flags              = 0,
         .queryType          = VK_QUERY_TYPE_PIPELINE_STATISTICS,
-        .queryCount         = kStageCount, // one query per stage: it spans the Begin/End pair
+        .queryCount         = kStageCount,
         .pipelineStatistics = _statsBits
     };
 
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         if (vkCreateQueryPool(device, &statsInfo, nullptr, &_statsPools[i]) != VK_SUCCESS) {
-            // Same invariant as the timestamp pools: never leave a pool the
-            // creation refused in a slot Teardown() would destroy.
+
             _statsPools[i] = VK_NULL_HANDLE;
             Teardown();
             return std::unexpected(GpuProfilerError::StatsQueryPoolCreationFailed);
@@ -182,8 +158,7 @@ inline void GpuProfiler<EnumT>::Reset(uint32_t frameIndex) noexcept {
     if (_statsSupported) {
         vkResetQueryPool(_device, _statsPools[slot], 0, kStageCount);
     }
-    // Masks reset unconditionally: a toggle-off must not leave stale bits
-    // that a later toggle-on would misread as recorded scopes.
+
     _statsBeginMasks[slot] = 0;
     _statsEndMasks[slot]   = 0;
 }
@@ -201,10 +176,6 @@ void GpuProfiler<EnumT>::WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, En
     _recordedMasks[slot] |= (uint64_t {1} << stage_idx);
     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_NONE, _pools[slot], query_idx);
 
-    // Scope placement: the render graph records these calls OUTSIDE any
-    // render-pass instance (the timestamps require it), which also satisfies
-    // the pipeline-statistics rule that one query's Begin and End must not
-    // straddle a render pass.
     if (_statsEnabled) {
         vkCmdBeginQuery(cmd, _statsPools[slot], stage_idx, 0);
         _statsBeginMasks[slot] |= (uint64_t {1} << stage_idx);
@@ -222,9 +193,6 @@ void GpuProfiler<EnumT>::WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, Enum
 
     const uint32_t slot = Vk::FrameSlot(frameIndex);
 
-    // Close whatever Begin opened, regardless of the CURRENT toggle state: an
-    // active query left unterminated is a validation error, so a toggle-off
-    // mid-frame must not strand the scopes already begun.
     if (_statsSupported && (_statsBeginMasks[slot] & (uint64_t {1} << stage_idx)) != 0) {
         vkCmdEndQuery(cmd, _statsPools[slot], stage_idx);
         _statsEndMasks[slot] |= (uint64_t {1} << stage_idx);
@@ -279,8 +247,7 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
         return;
     }
     const uint32_t slot = Vk::FrameSlot(frameIndex);
-    // Only complete Begin/End pairs carry defined results; an enabling toggle
-    // mid-frame leaves begun-but-unterminated scopes out of this mask.
+
     const uint64_t completed = _statsBeginMasks[slot] & _statsEndMasks[slot];
     if (completed == 0) {
         return;
@@ -294,9 +261,7 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
             continue;
         }
 
-        // One uint64 per queried statistic bit, densely packed in ascending
-        // bit order (Vulkan result layout for pipeline statistics queries).
-        std::array<uint64_t, 11> results {}; // 9 core statistic bits + 2 VK_EXT_mesh_shader bits
+        std::array<uint64_t, 11> results {};
         const VkResult           res =
             vkGetQueryPoolResults(_device, pool, i, 1, results.size() * sizeof(uint64_t), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
         if (res != VK_SUCCESS) {
@@ -329,8 +294,6 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
     _statsEndMasks[slot]   = 0;
 }
 
-// ScopedGpuProfile Implementation
-
 template <typename EnumT>
 inline ScopedGpuProfile<EnumT>::ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const GpuProfiler<EnumT>& profiler, EnumT stage) noexcept:
     _cmd(cmd), _frameIndex(frameIndex), _profiler(profiler), _stage(stage) {
@@ -342,4 +305,4 @@ inline ScopedGpuProfile<EnumT>::~ScopedGpuProfile() noexcept {
     _profiler.WriteEnd(_cmd, _frameIndex, _stage);
 }
 
-} // namespace ZHLN::Profiler
+}

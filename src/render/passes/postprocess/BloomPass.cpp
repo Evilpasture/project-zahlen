@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// One Kawase tap. Mode 0 is the downsample, mode 1 the upsample that adds the
-// next-coarser level; the reciprocal dimensions turn a thread id into a UV.
 struct KawasePushConstants {
     int   mode;
     float rcpWidth;
@@ -17,10 +15,6 @@ struct KawasePushConstants {
 };
 static_assert(GpuAbi::ScenePassPayload<KawasePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
-// The threshold pass additionally needs the camera exposure: it reads the
-// raw, pre-exposure HDR scene and must convert luma to display units before
-// applying the bloom knee. The Kawase taps below stay on the 16-byte struct
-// so their pipeline layouts are untouched.
 struct ThresholdPushConstants {
     int   mode;
     float rcpWidth;

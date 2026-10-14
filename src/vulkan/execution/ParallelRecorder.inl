@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/execution/ParallelRecorder.inl
 #pragma once
 
 #include "ParallelRecorder.hpp"
@@ -13,9 +12,7 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice 
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);
-        // AllocateSecondary internally EnsureValid()s the pool, so this both
-        // reports PoolNotReady and CommandBufferAllocationFailed as domain
-        // errors instead of leaking raw VkResult.
+
         auto alloc = _pools[i].AllocateSecondary(8);
         if (!alloc) [[unlikely]] {
             return std::unexpected(alloc.error());
@@ -49,7 +46,7 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Record(Schedul
 template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
 template <typename SchedulerPolicy, size_t... Is, typename... Callables>
 auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
-    SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables
+    SchedulerPolicy&& scheduler, std::index_sequence<Is...> , Callables&&... callables
 ) -> std::expected<void, ErrorCode> {
     const uint32_t groupIdx = (_pools[0].Size() > 0 && _nextGroup < _pools[0].Size()) ? _nextGroup++ : 0u;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
@@ -57,16 +54,12 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
     }
 
     auto task_tuple = std::forward_as_tuple(std::forward<Callables>(callables)...);
-    // Each worker only writes its own error slot; Dispatch joins before we read.
+
     std::array<ErrorCode, ConcurrentSlots> errors {};
 
-    // Expand the lambda pack and dispatch them to the scheduler at compile-time.
-    // Each lambda bakes the constant 'Is' directly into its generated class structure.
     std::forward<SchedulerPolicy>(scheduler).Dispatch([this, &task_tuple, &errors]() {
         RecordingSlot slot {.cmd = _cmds[Is], .slotIndex = static_cast<uint32_t>(Is)};
 
-        // VK_EXT_descriptor_heap: inherit the primary's heap bindings (binding
-        // our own would invalidate the primary's heap state after execution).
         VkCommandBufferInheritanceInfo                        inherit_info = NullInheritanceInfo;
         const VkCommandBufferInheritanceDescriptorHeapInfoEXT heap_inherit = {
             .sType                 = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT,
@@ -78,15 +71,12 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
             inherit_info.pNext = &heap_inherit;
         }
 
-        // Do not set CONTINUE_BIT: these secondary buffers begin their own passes.
         auto recording = CommandRecorder::Begin(slot.cmd, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, &inherit_info);
         if (!recording) {
             errors[Is] = recording.error();
             return;
         }
 
-        // Push data does not carry over from the primary: re-push the
-        // per-frame device-address block in every secondary.
         if (_frameAddressCount > 0) {
             PushHeapFrameAddresses(
                 slot.cmd, std::span<const uint32_t> {_frameAddressOffsets.data(), _frameAddressCount},
@@ -106,4 +96,4 @@ auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(
     return {};
 }
 
-} // namespace ZHLN::Vk
+}

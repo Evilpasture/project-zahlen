@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "DrawCommands.hpp"
 
@@ -18,7 +17,6 @@ class DrawQueueManager {
     auto operator=(const DrawQueueManager&) -> DrawQueueManager& = default;
     DrawQueueManager(DrawQueueManager&&) noexcept            = default;
     auto operator=(DrawQueueManager&&) noexcept -> DrawQueueManager& = default;
-
 
     [[nodiscard]] auto Draws() noexcept -> ZHLN::Array<DrawCommand>& { return _queues.drawQueue; }
     [[nodiscard]] auto Draws() const noexcept -> std::span<const DrawCommand> { return _queues.drawQueue; }

@@ -17,9 +17,6 @@
 
 namespace ZHLN::Vk {
 
-// Material values such as albedo, roughness, metallic factor, and texture
-// indices are bindless/push data. This compact bitmask covers only bounded
-// raster, blend, and depth state; sidedness is emitted as dynamic cull state.
 enum class MaterialFlags : uint8_t {
     None             = 0,
     Opaque           = None,
@@ -48,10 +45,6 @@ constexpr auto operator|=(MaterialFlags& left, MaterialFlags right) noexcept -> 
 
 inline constexpr size_t k_material_flag_variant_count = 5;
 
-// Cull mode is dynamic, so sidedness does not multiply the cached native
-// pipelines. The five bounded blend/depth variants are opaque, translucent,
-// translucent with depth writes (transmission), additive, and additive with
-// depth writes.
 [[nodiscard]] constexpr auto MaterialFlagVariantIndex(MaterialFlags flags) noexcept -> size_t {
     constexpr uint8_t k_known_mask = static_cast<uint8_t>(MaterialFlags::DoubleSided) | static_cast<uint8_t>(MaterialFlags::TranslucentBlend) |
                                      static_cast<uint8_t>(MaterialFlags::AdditiveBlend) | static_cast<uint8_t>(MaterialFlags::DepthWrite);
@@ -77,8 +70,6 @@ inline constexpr size_t k_material_flag_variant_count = 5;
 }
 
 struct PipelineCreateBindings {
-    // Descriptor-heap mapping tables are device/runtime objects, so they remain
-    // explicit creation inputs rather than template parameters.
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* vertexMapping   = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* fragmentMapping = nullptr;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* computeMapping  = nullptr;
@@ -112,12 +103,12 @@ template <typename Usage>
 }
 
 template <typename UsageList, size_t... Index>
-[[nodiscard]] consteval auto CountColorAttachments(std::index_sequence<Index...> /*unused*/) noexcept -> size_t {
+[[nodiscard]] consteval auto CountColorAttachments(std::index_sequence<Index...>) noexcept -> size_t {
     return (static_cast<size_t>(IsColorAttachmentUsage<typename UsageList::template type<Index>>()) + ... + 0U);
 }
 
 template <typename UsageList, size_t... Index>
-[[nodiscard]] consteval auto CountDepthAttachments(std::index_sequence<Index...> /*unused*/) noexcept -> size_t {
+[[nodiscard]] consteval auto CountDepthAttachments(std::index_sequence<Index...>) noexcept -> size_t {
     return (static_cast<size_t>(IsDepthAttachmentUsage<typename UsageList::template type<Index>>()) + ... + 0U);
 }
 
@@ -131,7 +122,7 @@ consteval void AppendColorFormat(std::array<VkFormat, N>& formats, size_t& outIn
 }
 
 template <typename UsageList, size_t... Index>
-[[nodiscard]] consteval auto MakeColorFormats(std::index_sequence<Index...> /*unused*/) noexcept {
+[[nodiscard]] consteval auto MakeColorFormats(std::index_sequence<Index...>) noexcept {
     constexpr size_t            count = CountColorAttachments<UsageList>(std::index_sequence<Index...> {});
     std::array<VkFormat, count> formats {};
     size_t                      out_index = 0;
@@ -140,7 +131,7 @@ template <typename UsageList, size_t... Index>
 }
 
 template <typename UsageList, size_t... Index>
-[[nodiscard]] consteval auto FindDepthFormat(std::index_sequence<Index...> /*unused*/) noexcept -> VkFormat {
+[[nodiscard]] consteval auto FindDepthFormat(std::index_sequence<Index...>) noexcept -> VkFormat {
     VkFormat format = VK_FORMAT_UNDEFINED;
     (
         [&] {
@@ -271,10 +262,6 @@ struct GraphicsShaderModules<Vertex, Fragment> {
     static_assert(StageOf<Vertex>() == VK_SHADER_STAGE_VERTEX_BIT, "GraphicsShaderModules<VS, PS> requires a vertex shader first.");
     static_assert(StageOf<Fragment>() == VK_SHADER_STAGE_FRAGMENT_BIT, "GraphicsShaderModules<VS, PS> requires a fragment shader second.");
 
-    // zshader keeps SPIR-V byte spans out of this header. Its generated
-    // ShaderBytecode.cpp performs the constexpr ModuleMatchesBytes assertion
-    // against each emitted byte array; this group checks stages and push layout.
-
     template <typename Push>
     [[nodiscard]] static consteval auto PushLayoutMatches() noexcept -> bool {
         constexpr bool declares_push = DeclaresPushBlock<Vertex> || DeclaresPushBlock<Fragment>;
@@ -308,10 +295,6 @@ struct GraphicsShaderModules<Task, Mesh, Fragment> {
     static_assert(StageOf<Task>() == VK_SHADER_STAGE_TASK_BIT_EXT, "GraphicsShaderModules<TS, MS, PS> requires a task shader first.");
     static_assert(StageOf<Mesh>() == VK_SHADER_STAGE_MESH_BIT_EXT, "GraphicsShaderModules<TS, MS, PS> requires a mesh shader second.");
     static_assert(StageOf<Fragment>() == VK_SHADER_STAGE_FRAGMENT_BIT, "GraphicsShaderModules<TS, MS, PS> requires a fragment shader third.");
-
-    // zshader keeps SPIR-V byte spans out of this header. Its generated
-    // ShaderBytecode.cpp performs the constexpr ModuleMatchesBytes assertion
-    // against each emitted byte array; this group checks stages and push layout.
 
     template <typename Push>
     [[nodiscard]] static consteval auto PushLayoutMatches() noexcept -> bool {
@@ -348,9 +331,7 @@ concept GraphicsShaderModule = requires {
 template <ShaderProgram ShaderModule, typename PushConstants = void>
 struct ComputePipeline {
     static_assert(StageOf<ShaderModule>() == VK_SHADER_STAGE_COMPUTE_BIT, "ComputePipeline requires a compute ShaderProgram.");
-    // zshader's generated ShaderBytecode.cpp statically validates the emitted
-    // SPIR-V bytes against this module's resource and sampler reflection. The
-    // generated Bytes() accessor is intentionally out-of-line and not constexpr.
+
     static_assert(
         [] {
             constexpr bool declares_push = DeclaresPushBlock<ShaderModule>;
@@ -376,9 +357,6 @@ struct ComputePipeline {
         return Create(device, PipelineCreateBindings {}, binaries);
     }
 
-    // Runtime shader bytes remain available for reloadable passes. The type
-    // parameter validates stage and push layout; zshader's generated bytecode
-    // translation unit validates SPIR-V reflection, including heap mappings.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto
         Create(VkDevice device, const ShaderDesc& shader, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
@@ -420,9 +398,6 @@ struct GraphicsPipeline {
         return Create(device, *stages, bindings, binaries);
     }
 
-    // The short form supports contracts that derive their bindings from the device;
-    // otherwise callers with device-owned heap mappings use the overload
-    // above.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(VkDevice device, PipelineBinaryStore* binaries = nullptr) noexcept -> std::expected<Pipeline, ErrorCode> {
         if constexpr (requires {
@@ -434,9 +409,6 @@ struct GraphicsPipeline {
         }
     }
 
-    // This overload lets hot-reload owners supply freshly loaded bytes while
-    // retaining compile-time stage/push checks and zshader's generated
-    // translation-unit reflection assertions.
     [[nodiscard("Pipeline creation may fail; verify validity before use")]]
     static auto Create(VkDevice device, ShaderStagesView stages, const PipelineCreateBindings& bindings, PipelineBinaryStore* binaries = nullptr) noexcept
         -> std::expected<Pipeline, ErrorCode> {

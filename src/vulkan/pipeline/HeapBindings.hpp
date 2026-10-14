@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -273,10 +272,6 @@ template <typename T>
     }
 }
 
-// Descriptor writes consume exactly one thing: a VkImageViewCreateInfo, by
-// value. Every image-like source knows how to produce one -- an Image or
-// ImageSlice via ViewInfo(), an ImageWrite carries one, and a raw
-// VkImageViewCreateInfo is already one. VkImageView handles play no part.
 template <typename T>
 [[nodiscard]] auto ViewInfoOf(const T& resource) noexcept -> VkImageViewCreateInfo {
     if constexpr (std::is_same_v<T, ImageWrite>) {
@@ -356,9 +351,6 @@ template <typename Arg>
         } else {
             const VkImageViewCreateInfo viewInfo = ViewInfoOf(arg);
             if (viewInfo.image == VK_NULL_HANDLE) {
-                // An empty write is only meaningful as "no image": a typed
-                // or sliced source must actually be empty, and an ImageWrite
-                // with no image is the explicit empty descriptor.
                 if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageSlice>) {
                     return BorrowedSliceOf(arg).image == VK_NULL_HANDLE;
                 }
@@ -399,8 +391,7 @@ template <typename Arg>
             if (!slice.Valid() || slice.Size() == 0) {
                 return true;
             }
-            // Resolve a base address only when the slice did not carry one;
-            // Address() adds its relative offset exactly once.
+
             if (!slice.address) {
                 slice.address = DeviceAddress<> {heap.BufferAddress(slice.buffer)};
             }

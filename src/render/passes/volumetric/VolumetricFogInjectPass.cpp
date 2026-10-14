@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// One fog volume's media parameters. The four float3 colors plus their
-// trailing scalar keep this at 80 bytes, which is what the shader declares.
 struct alignas(16) VolumetricFogPushConstants {
     float density;
     float heightFalloff;

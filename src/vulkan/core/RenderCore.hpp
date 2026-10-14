@@ -101,8 +101,6 @@ inline void CopyBufferToImage(
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
-// Single-region convenience overload: most uploads copy exactly one region, and
-// spelling out <1> plus a one-element array for that is pure noise.
 inline void CopyBufferToImage(
     VkCommandBuffer cmd,
     VkBuffer srcBuffer,

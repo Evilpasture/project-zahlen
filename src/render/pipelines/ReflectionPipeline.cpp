@@ -19,25 +19,16 @@ void ReflectionPipeline::Dispatch(
     const Passes::ReflectionInputs inputs = Passes::GatherReflectionInputs(impl);
 
     const Vk::HeapBlockBase block = pass.WriteHeapParameters<Shaders::Reflection>(
-        impl.heapManager,
-        Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)),
-        Vk::Slot<"texDepth">(surface.depth),
-        Vk::Slot<"texNormalRoughness">(surface.normals),
-        Vk::Slot<"texEnvMap">(inputs.prefiltered),
-        Vk::Slot<"texSkyEquirect">(inputs.visualSky),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"brdfLUT">(inputs.brdfLut),
-        // Reflection's screen-color and direct ray-hit fallbacks should include
-        // the diffuse-GI composite, unlike RtrHalfTrace's raw prefilter.
+        impl.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)), Vk::Slot<"texDepth">(surface.depth),
+        Vk::Slot<"texNormalRoughness">(surface.normals), Vk::Slot<"texEnvMap">(inputs.prefiltered), Vk::Slot<"texSkyEquirect">(inputs.visualSky),
+        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]), Vk::Slot<"brdfLUT">(inputs.brdfLut),
+
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_LightingGI>>(impl.graphResources.lightingGI)),
         Vk::Slot<"texVoxelIntegrated">(Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
-        Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
-        Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
+        Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]), Vk::Slot<"blueNoiseTex">(inputs.blueNoise),
         Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(impl.graphResources.rtrHalf)),
-        Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)),
-        Vk::Slot<"texSheen">(surface.sheen),
-        Vk::Slot<"texAnisotropy">(surface.anisotropy),
-        Vk::Slot<"tlas">(inputs.tlas),
+        Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(impl.graphResources.clearcoatBuffer)), Vk::Slot<"texSheen">(surface.sheen),
+        Vk::Slot<"texAnisotropy">(surface.anisotropy), Vk::Slot<"tlas">(inputs.tlas),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ShaderRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ShaderRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );

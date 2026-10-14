@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// In-scattering strength, ambient floor, the Henyey-Greenstein anisotropy of
-// the phase function, and whether the cascade map is consulted at all.
 struct alignas(16) VolumetricLightInjectPushConstants {
     float    scatteringIntensity;
     float    ambientIntensity;

@@ -27,11 +27,7 @@ void RenderContext::SetFrameData(
     _impl->unjittered_view_proj = frame.unjitteredViewProj;
     _impl->currentUniforms      = GpuPack::PackFrameData(frame);
     _impl->currentDt            = std::clamp(dt, 0.0001f, 0.1f);
-    // kMaxSceneLights, not 128: see RenderInternal.hpp. The truncation stays --
-    // it is what keeps the memcpy below inside the buffer -- but LightingSystem
-    // now publishes the list in ranked order, so if a map ever does exceed the
-    // budget the lights that survive are the nearest and brightest rather than
-    // the first ones the entity lump happened to list.
+
     _impl->submittedLights.assign(lights.begin(), lights.first(std::min(lights.size(), size_t {kMaxSceneLights})).end());
     _impl->UploadSubmittedLights(cam);
 
@@ -59,8 +55,6 @@ void RenderContext::SetFrameData(
     std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Float4) * 9);
     gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
-    // The sun's direction and intensity ride lightDir's lanes, which is the
-    // shader's own layout: read them where the shader reads them.
     JPH::Vec3  sunDir    = frame.sunDirection;
     if (sunDir.LengthSq() > 1e-6f) sunDir = sunDir.Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
@@ -131,13 +125,6 @@ void RenderContext::SetGISettings(const GISettings& settings) noexcept {
     _impl->settings.post = settings;
 }
 
-// Hands out this frame's shadow tiles.
-//
-// The lights arrive already ranked -- pinned first, then nearest-and-brightest
-// (LightingSystem) -- so the atlas fills in that order and the lights that lose
-// are the ones furthest away and least worth the texels. What a loser loses is
-// tile *size*, not shadows: `TileForDistance` steps a light down as it recedes
-// long before the atlas is full enough to refuse it.
 void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept {
     shadowAtlas.BeginFrame();
 
@@ -165,12 +152,9 @@ void RenderContext::Impl::AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept
         lightTileBases.push_back(shadowAtlas.Acquire(req).tileBase);
     }
 
-    // Drops the lights that stopped asking, so the cache cannot grow with a
-    // scene's history.
     shadowAtlas.EndFrame();
 }
 
-// Packed from SetFrameData once the view matrix and light list exist.
 void RenderContext::Impl::UploadSubmittedLights(const Camera& cam) noexcept {
     if (submittedLights.empty()) {
         mappedLights.clear();
@@ -201,9 +185,6 @@ void RenderContext::Impl::UploadSubmittedLights(const Camera& cam) noexcept {
     mappedLights.assign(gpuLights.begin(), gpuLights.end());
     packedLightCount = static_cast<uint32_t>(gpuLights.size());
 
-    // The tiles go up with the lights: the lighting pass reconstructs a
-    // shadow-atlas tile from the same matrices the shadow pass is about to
-    // rasterize with, so the two are written in the same place in the frame.
     if (const auto tiles = frames.shadowTileBuffers[presenter.frameIndex].Map(allocator); tiles && shadowAtlas.TileCount() > 0) {
         std::memcpy(tiles->Data(), shadowAtlas.Tiles().data(), shadowAtlas.TileCount() * sizeof(ShadowTile));
     }

@@ -1,10 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Compile-time walk of the scene graph for `--print-graph`. Isolated from
-// RenderGraphBuilder.cpp so GraphVisualizer's five specializations do not
-// rebuild whenever execute/record changes, and vice versa.
-
 #include "RenderGraphBuild.hpp"
 #include <Zahlen/GraphicsSettings.hpp>
 #include <string_view>

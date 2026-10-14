@@ -34,9 +34,6 @@ enum class DestinationError : uint8_t {
     UnsupportedColorFormat ZHLN_ANNOTATION(ZHLN::Description<"No UI pipeline was built for this target's color format">{}),
 };
 
-// Window presenters persist; their acquired images, layout and written state do
-// not. A frame target names one acquisition, not a slot in a reusable table of
-// presentation images. Offscreen textures have their own persistent ownership.
 class FrameDestinations {
   public:
     struct Acquired {
@@ -61,9 +58,6 @@ class FrameDestinations {
         }
     };
 
-    // List nodes are constructed once and never assigned or moved while a
-    // window's command buffer is recording. Window metadata remains separately
-    // movable so removing a presenter cannot overwrite another recording.
     struct Recording {
         uint64_t windowId;
         Vk::CommandRecorder recorder;

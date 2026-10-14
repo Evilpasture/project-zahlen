@@ -32,11 +32,7 @@ struct StencilState {
     VkStencilOpState back {};
 };
 
-// Every pipeline created by this backend uses descriptor-heap mode; the required
-// null layout is supplied internally and is not part of this configuration.
 struct PipelineConfig {
-    // Keep stage metadata by value across typed builder transitions; Vulkan's
-    // create structures borrow the backing data only during synchronous creation.
     std::optional<ShaderStagesView> stages;
     PipelineBinaryStore*             binaries = nullptr;
 
@@ -71,15 +67,10 @@ struct PipelineConfig {
     bool                        colorWriteEnable = true;
 };
 
-// Assembly helpers shared by the builders' Assemble() methods.
 [[nodiscard]] auto FormatHasStencil(VkFormat format) noexcept -> bool;
 [[nodiscard]] auto ValidShader(const ShaderDesc& shader) noexcept -> bool;
 [[nodiscard]] auto ResolveComputeEntryPoint(const ShaderDesc& shader, std::span<char, 64> name) noexcept -> const char*;
 
-// Pure Vulkan wrappers: create one pipeline from a fully assembled create
-// info, optionally consuming pipeline binaries. VK_NULL_HANDLE is passed as
-// the pipeline cache, unconditionally -- VK_KHR_pipeline_binary (orchestrated
-// by the builders, fed through `binaries`) is the only caching mechanism.
 [[nodiscard]] auto CreateGraphicsPipeline(VkDevice device, const VkGraphicsPipelineCreateInfo& createInfo,
                                           std::span<const VkPipelineBinaryKHR> binaries) noexcept -> std::expected<VkPipeline, ErrorCode>;
 [[nodiscard]] auto CreateComputePipeline(VkDevice device, const VkComputePipelineCreateInfo& createInfo,
@@ -226,10 +217,6 @@ class PipelineBuilder {
         return PipelineBuilder {std::move(cfg)};
     }
 
-    // Fills every Vulkan struct for this builder's configuration and hands
-    // the assembled create info to the callback; all backing storage lives
-    // for the duration of the call. This is where pipeline state becomes a
-    // VkGraphicsPipelineCreateInfo -- creation itself is CreateGraphicsPipeline.
     template <typename Func>
     [[nodiscard]] auto Assemble(Func&& callback) const& noexcept -> std::invoke_result_t<Func, const VkGraphicsPipelineCreateInfo&> {
         const PipelineConfig& config = _cfg;
@@ -473,9 +460,6 @@ class PipelineBuilder {
         return std::move(*this).ColorFormats(std::span<const VkFormat, N> {formats});
     }
 
-    // Unlike a runtime array, these values are part of the resulting pipeline
-    // type. A typed Build must subsequently specify the depth format or call
-    // NoDepth() so the entire rendering signature is known.
     template <VkFormat... Colors>
     [[nodiscard]] auto ColorFormats() && noexcept -> PipelineBuilder<sizeof...(Colors), HasDepth, AttachmentFormats<VK_FORMAT_UNDEFINED, Colors...>> {
         static_assert(((Colors != VK_FORMAT_UNDEFINED) && ...), "Color attachments need concrete formats.");
@@ -504,9 +488,6 @@ class PipelineBuilder {
     explicit PipelineBuilder(PipelineConfig cfg) noexcept: _cfg(std::move(cfg)) {
     }
 
-    // The one place pipeline-binary orchestration lives for graphics:
-    // derive the key from the assembled create info, replay or capture
-    // through the session, retry plainly if a replayed binary is rejected.
     [[nodiscard]] auto CreatePipeline(VkDevice device) const noexcept -> std::expected<VkPipeline, ErrorCode> {
         if (device == VK_NULL_HANDLE) {
             return std::unexpected(ToError(VK_ERROR_INITIALIZATION_FAILED));
@@ -557,9 +538,6 @@ class ComputePipelineBuilder {
 
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
 
-    // Fills every Vulkan struct for this builder's configuration and hands
-    // the assembled create info to the callback; all backing storage lives
-    // for the duration of the call.
     template <typename Func>
     [[nodiscard]] auto Assemble(Func&& callback) const noexcept -> std::invoke_result_t<Func, const VkComputePipelineCreateInfo&> {
         if (!ValidShader(_shader)) {
@@ -598,9 +576,6 @@ class ComputePipelineBuilder {
         return callback(pipeline_info);
     }
 
-    // The one place pipeline-binary orchestration lives for compute:
-    // derive the key from the assembled create info, replay or capture
-    // through the session, retry plainly if a replayed binary is rejected.
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Pipeline, ErrorCode> {
         if (auto valid = Validate(); !valid) {
             return std::unexpected(valid.error());

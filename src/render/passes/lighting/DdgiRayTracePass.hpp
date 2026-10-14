@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Casts stratified spherical Fibonacci rays from each world-space DDGI probe
-// into the TLAS and evaluates direct sun + previous-frame multi-bounce DDGI
-// irradiance into Res_DdgiRays.
 struct DdgiRayTracePass: Vk::RenderPass<
                              "DdgiRayTrace", Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>, Vk::ComputeWrite<Res_DdgiRays>> {
     RenderFrameContext&   impl;

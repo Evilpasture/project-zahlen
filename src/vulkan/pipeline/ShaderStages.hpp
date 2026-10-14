@@ -52,9 +52,6 @@ template <typename T, size_t Extent>
     return {.code = std::bit_cast<const uint32_t*>(codeSpan.data()), .size = codeSpan.size_bytes(), .entry_point = entry};
 }
 
-// A stage source names the module one pipeline stage is built from: where the
-// cooked bytes live for a hot reload, the generated fallback that stands in for
-// them, and the entry point the module declares.
 template <VkShaderStageFlagBits Stage>
 struct ShaderStageSource {
     static constexpr VkShaderStageFlagBits stage = Stage;

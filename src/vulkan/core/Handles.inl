@@ -4,8 +4,6 @@
 
 namespace ZHLN::Vk {
 
-// DeviceHandle Implementation
-
 template <typename T, auto DeleterFn>
 inline DeviceHandle<T, DeleterFn>::DeviceHandle(const VkDevice device, const T raw) noexcept
 	: _device(device), _raw(raw) {}
@@ -53,4 +51,4 @@ constexpr auto DeviceHandle<T, DeleterFn>::Release() noexcept -> T {
 	return std::exchange(_raw, VK_NULL_HANDLE);
 }
 
-} // namespace ZHLN::Vk
+}

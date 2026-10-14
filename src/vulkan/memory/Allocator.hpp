@@ -10,9 +10,6 @@
 #include <Zahlen/Threading/Mutex.hpp>
 #include <span>
 
-// VMA forward declarations. <vk_mem_alloc.h> is pulled in only by
-// Allocator.cpp and VmaImplementation.cpp; every other TU sees VMA as opaque
-// pointer handles, so VMA headers never leak out of src/vulkan/memory/.
 struct VmaAllocator_T;
 struct VmaAllocation_T;
 using VmaAllocator  = struct VmaAllocator_T*;
@@ -53,27 +50,23 @@ class DeletionQueue {
     void Init(Allocator& allocator) noexcept {
         _allocator = &allocator;
     }
-    // Consumes the handle. The caller must retire associated views before an
-    // image, or acceleration structures before their backing buffers.
+
     void Enqueue(Buffer&& buffer) noexcept;
     void Enqueue(Image&& image) noexcept;
-    // For attachment views that must outlive in-flight rendering (e.g. a
-    // render texture's view whose image is being retired at the same time);
-    // destroyed with the frame slot's fence wait, like the rest.
+
     void EnqueueAttachmentView(VkDevice device, AttachmentView&& view) noexcept;
     void EnqueueAccelerationStructure(VkDevice device, AccelerationStructure&& handle) noexcept;
     void EnqueuePipeline(VkDevice device, VkPipeline pipeline) noexcept;
-    // Called only after the frame slot's GPU fence has been waited on.
+
     void BeginFrame(uint32_t frameIndex) noexcept;
-    // The caller must wait for the GPU to be idle before flushing every slot.
+
     void Drain() noexcept;
 
   private:
     void CleanupQueue(std::span<const DeferredDeletionEntry> queue) noexcept;
 
-    Allocator* _allocator = nullptr; // Must outlive the queue and its final drain.
-    // Mutex is trivially default-constructible in release builds: a cold
-    // renderer can enqueue during teardown without ever calling BeginFrame.
+    Allocator* _allocator = nullptr;
+
     ZHLN::Mutex                                                     _mutex {};
     std::array<std::vector<DeferredDeletionEntry>, kFramesInFlight> _queues {};
     uint32_t                                                        _currentFrameIndex = 0;
@@ -93,9 +86,6 @@ class Allocator {
     [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ErrorCode>;
 
-    // Synchronous destruction: only use once GPU use has finished. Explicitly
-    // consumes and invalidates the handle; neither Buffer nor Image has a
-    // destructor that consults ambient state.
     void DestroyBuffer(Buffer& buffer) const noexcept;
     void DestroyImage(Image& image) const noexcept;
 
@@ -107,8 +97,6 @@ class Allocator {
     }
 
   private:
-    // Only resource implementations may reach the raw VMA handle. Public APIs
-    // accept Allocator& so callers in src/render never see VmaAllocator.
     friend class Buffer;
     friend class Image;
     friend class StagingRingBuffer;
@@ -118,7 +106,6 @@ class Allocator {
         return _handle;
     }
 
-    // Friend-only statics used by the cleanup paths.
     static void DestroyBuffer(VmaAllocator allocator, Buffer& buffer) noexcept;
     static void DestroyImage(VmaAllocator allocator, Image& image) noexcept;
 
@@ -126,10 +113,6 @@ class Allocator {
     GPUAddressTracker* _addressTracker = nullptr;
 };
 
-// Engine-owned memory classification. Values are mapped to the underlying
-// allocator's memory-usage enum via an exhaustive switch inside Allocator.cpp
-// (the only TU that includes vk_mem_alloc.h). Adding an enumerator here forces
-// a compile error there until it is handled.
 enum class MemoryUsage : uint8_t {
     GPUOnly,
     CPUOnly,
@@ -171,8 +154,6 @@ enum class ImageDimension : uint8_t {
     Texture3D,
 };
 
-// Describes immutable image properties and capabilities. It deliberately has
-// no layout field: render-graph uses and transfer operations own transitions.
 struct ImageConfig {
     ImageDimension          dimension = ImageDimension::Texture2D;
     VkFormat                format = VK_FORMAT_UNDEFINED;
@@ -263,7 +244,7 @@ constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
 class Buffer {
   public:
     Buffer()           = default;
-    ~Buffer() noexcept = default; // Non-destroying: owner must choose DestroyBuffer or Enqueue.
+    ~Buffer() noexcept = default;
 
     Buffer(const Buffer&)                    = delete;
     auto operator=(const Buffer&) -> Buffer& = delete;
@@ -288,16 +269,6 @@ class Buffer {
 
     void Flush(Allocator& allocator, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
-    // A window onto host-visible buffer memory. CPU-writable buffers are created with
-    // VMA_ALLOCATION_CREATE_MAPPED_BIT, so VMA maps them once and holds that mapping for
-    // the allocation's lifetime: this type never needs vmaMapMemory() or vmaUnmapMemory(),
-    // it only flushes what was written when it leaves scope, which is all non-coherent
-    // memory asks for.
-    //
-    // The default-constructed region is empty -- "nothing mapped" -- which is what the
-    // long-lived holders reset to. A region handed to a caller by Map() is never empty: a
-    // buffer with no persistent mapping is reported as an ErrorCode instead, so Data() is
-    // never null where a caller uses it.
     struct MappedRegion {
         MappedRegion() = default;
         ~MappedRegion() noexcept;
@@ -311,7 +282,7 @@ class Buffer {
         [[nodiscard]] auto Data() const noexcept -> void* {
             return _ptr;
         }
-        // The size the buffer was created with, in bytes: what AsSpan() clamps to.
+
         [[nodiscard]] auto Size() const noexcept -> size_t {
             return _size;
         }
@@ -319,7 +290,7 @@ class Buffer {
         [[nodiscard]] auto As() const noexcept -> T* {
             return static_cast<T*>(_ptr);
         }
-        // count == 0 means "all of it".
+
         template <typename T>
         [[nodiscard]] auto AsSpan(size_t count = 0) const noexcept -> std::span<T> {
             const size_t available = _size / sizeof(T);
@@ -336,10 +307,6 @@ class Buffer {
         VmaAllocation _allocation = nullptr;
     };
 
-    // A buffer only has memory to map once Create() succeeded, and only host-visible
-    // memory carries a persistent mapping: those are the two ways Map() fails. Both
-    // travel as an ErrorCode instead of a null pointer a caller could take for a valid
-    // empty read.
     [[nodiscard]] auto Map(Allocator& allocator) noexcept -> std::expected<MappedRegion, ErrorCode>;
     [[nodiscard]] auto Handle() const noexcept -> VkBuffer {
         return _handle;
@@ -354,27 +321,24 @@ class Buffer {
         return Valid();
     }
 
-    // Transfers the VMA allocation pair out, leaving this handle empty.
     [[nodiscard]] auto Release() noexcept -> std::pair<VkBuffer, VmaAllocation>;
 
   private:
     VkBuffer      _handle        = VK_NULL_HANDLE;
     VmaAllocation _allocation    = nullptr;
-    void*         _mappedData    = nullptr; // pre-mapped pointer for CPU-visible allocations
+    void*         _mappedData    = nullptr;
     VkDeviceSize  _requestedSize = 0;
 };
 
 inline BufferSlice::BufferSlice(const Buffer& b, VkDeviceAddress base) noexcept: BufferSlice(b.Handle(), base, 0, static_cast<VkDeviceSize>(b.Size())) {
 }
 
-// Caller owns the returned staging buffer and must DestroyBuffer it after the
-// recorded copy has completed (or enqueue it in the frame deletion queue).
 [[nodiscard]] auto UploadToBuffer(Allocator& allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
 class Image {
   public:
     Image()                                = default;
-    ~Image() noexcept                      = default; // Non-destroying.
+    ~Image() noexcept                      = default;
     Image(const Image&)                    = delete;
     auto operator=(const Image&) -> Image& = delete;
     Image(Image&& other) noexcept;
@@ -382,15 +346,6 @@ class Image {
 
     [[nodiscard]] static auto Create(Allocator& allocator, const ImageConfig& config) noexcept -> std::expected<Image, ErrorCode>;
 
-    // The descriptor description of (a subrange of) this image, as the plain
-    // Vulkan struct: this is what descriptor-heap writes consume
-    // (VkImageDescriptorInfoEXT::pView), and it is all a sampled or storage
-    // image ever needs -- no VkImageView handle is created. The view type is
-    // derived from the image's own config and the requested layer count
-    // (3D, cube, cube-array, 2D-array, 2D); pass `viewType` explicitly for
-    // the rare descriptor that must reinterpret the layers, e.g. writing
-    // cube faces through a 2D-array storage view. Out-of-range subranges are
-    // clamped to what the image actually has.
     [[nodiscard]] constexpr auto ViewInfo(
         VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,
         uint32_t           baseMip = 0,
@@ -404,11 +359,6 @@ class Image {
         const uint32_t levels          = mipCount == VK_REMAINING_MIP_LEVELS ? mipsAvailable : (mipCount < mipsAvailable ? mipCount : mipsAvailable);
         const uint32_t layers          = layerCount == VK_REMAINING_ARRAY_LAYERS ? layersAvailable : (layerCount < layersAvailable ? layerCount : layersAvailable);
 
-        // A descriptor image view must select exactly one of depth/stencil:
-        // for combined depth-stencil formats the format aspect contains both,
-        // which is legal for attachments but never for sampling/storage.
-        // Descriptors default to depth; pass VK_IMAGE_ASPECT_STENCIL_BIT
-        // explicitly to sample the stencil aspect instead.
         VkImageAspectFlags effectiveAspect = aspect != VK_IMAGE_ASPECT_NONE ? aspect : GetFormatAspect(_config.format);
         if ((effectiveAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
             (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
@@ -454,10 +404,6 @@ class Image {
         };
     }
 
-    // Creates a real VkImageView handle. Attachments only: call this solely
-    // for views that will be bound through VkRenderingAttachmentInfo. The
-    // arguments mirror ViewInfo()'s; invalid subranges are rejected instead
-    // of clamped.
     [[nodiscard]] auto CreateAttachmentView(
         VkDevice           device,
         VkImageAspectFlags aspect = VK_IMAGE_ASPECT_NONE,

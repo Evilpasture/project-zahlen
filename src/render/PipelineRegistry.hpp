@@ -45,9 +45,6 @@ class PipelineRegistry {
     PipelineRegistry(PipelineRegistry&&) noexcept                    = delete;
     auto operator=(PipelineRegistry&&) noexcept -> PipelineRegistry& = delete;
 
-    // Shader groups, pass attachments, and blend/depth variants are compile-time
-    // inputs. Cull mode is recorded dynamically per draw, so sidedness does not
-    // multiply the shared pipeline cache.
     template <
         MaterialPipelineFamily   Family,
         Vk::GraphicsShaderModule VertexShaderModule,
@@ -88,10 +85,8 @@ class PipelineRegistry {
         }
     }
 
-    // Invalidates one material handle; its shared pipeline variant remains cached.
     void Destroy(PipelineHandle handle);
-    // Retires all shared pipeline variants and invalidates registry handles.
-    // At shutdown the owner drains the queue only after waiting for GPU idle.
+
     void RetireAll() noexcept;
 
     [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* {
@@ -101,7 +96,7 @@ class PipelineRegistry {
   private:
     static constexpr size_t kFamilyCount       = 2;
     static constexpr size_t kGeometryPathCount = 2;
-    // Deferred/forward x vertex/mesh x five blend/depth variants; sidedness is dynamic.
+
     static constexpr size_t kPipelineVariantCount = kFamilyCount * kGeometryPathCount * Vk::k_material_flag_variant_count;
     static_assert(kPipelineVariantCount == 20);
 
@@ -209,11 +204,6 @@ class PipelineRegistry {
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;
 };
 
-// Pins the return type where a caller can see it break. Resolve is on the
-// per-draw path -- every mesh in the frame goes through it -- and used to
-// answer with a std::expected that twenty-odd call sites immediately reduced
-// to a pointer with .value_or(nullptr). A nullptr is the answer now, and this
-// is what stops it drifting back into a wrapper type nobody reads.
 static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineHandle>())), NativeMaterial*>);
 
 } // namespace ZHLN

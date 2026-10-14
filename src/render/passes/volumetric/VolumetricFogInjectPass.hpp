@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Fills the voxel grid with participating media: each fog volume's density,
-// height falloff, scattering and emission, modulated by the tiling 3D noise
-// `VolumetricFogSystem` uploaded at startup.
 struct VolumetricFogInjectPass: Vk::RenderPass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>> {
     RenderFrameContext&   impl;
 

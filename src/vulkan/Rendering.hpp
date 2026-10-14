@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #define ZHLN_RENDERING_HPP_INCLUDED
@@ -32,7 +31,6 @@
 #include <variant>
 #include <vector>
 #include <atomic>
-
 
 #include "core/FrameConfig.hpp"
 #include "core/FrameStorage.hpp"

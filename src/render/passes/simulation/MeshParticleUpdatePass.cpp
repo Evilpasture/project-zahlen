@@ -6,8 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// One mesh-particle emitter: the same shape as the billboard payload, with the
-// emitter parameter block that goes with instanced geometry.
 struct alignas(16) MeshParticleComputePush {
     VkDeviceAddress           particleBufferAddr;
     uint32_t                  particleCount;

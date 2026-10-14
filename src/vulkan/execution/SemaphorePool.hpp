@@ -5,7 +5,6 @@
 
 namespace ZHLN::Vk {
 
-
 class alignas(64) SemaphorePool {
   public:
     SemaphorePool() noexcept = default;

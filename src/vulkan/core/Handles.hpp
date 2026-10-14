@@ -11,8 +11,6 @@
 
 namespace ZHLN::Vk {
 
-// These stateless deleter declarations are needed by DeviceHandle's template;
-// keep the Vulkan calls themselves out of the header in Handles.cpp.
 struct DestroyPipeline {
     void operator()(VkDevice device, VkPipeline handle) const noexcept;
 };
@@ -67,8 +65,6 @@ class DeviceHandle {
         return Valid();
     }
 
-    // Relinquish ownership to the caller. Vulkan handles do not encode their
-    // parent device, so clear it together with the raw handle.
     [[nodiscard]] auto Release() noexcept -> T {
         _device = VK_NULL_HANDLE;
         return std::exchange(_raw, VK_NULL_HANDLE);

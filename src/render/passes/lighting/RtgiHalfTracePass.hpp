@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// One diffuse bounce sample per half-resolution pixel. It reads the direct-lit
-// lighting target and emits noisy incoming radiance; a separate bilateral
-// composite resolves it into LightingGI without making the trace feed itself.
 struct RtgiHalfTracePass: Vk::RenderPass<
                               "RtgiHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>,
                               Vk::ComputeRead<Res_Lighting>, Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>,

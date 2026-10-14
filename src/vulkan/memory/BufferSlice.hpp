@@ -14,9 +14,6 @@ namespace ZHLN::Vk {
 
 class Buffer;
 
-// A non-owning region of a buffer. `address` is always the base device
-// address of `buffer` (or zero when it has not yet been looked up); `offset`
-// is relative to that base. Never add offset to Address() a second time.
 struct BufferSlice {
     VkBuffer          buffer  = VK_NULL_HANDLE;
     DeviceAddress<>   address = nullptr;
@@ -27,7 +24,7 @@ struct BufferSlice {
     constexpr BufferSlice(VkBuffer b, VkDeviceAddress base, VkDeviceSize off, VkDeviceSize bytes) noexcept:
         buffer(b), address(base), offset(off), size(bytes) {
     }
-    // A base address may be supplied now, or resolved by the descriptor writer.
+
     BufferSlice(const Buffer& b, VkDeviceAddress base = 0) noexcept;
 
     [[nodiscard]] constexpr auto Address() const noexcept -> DeviceAddress<> {

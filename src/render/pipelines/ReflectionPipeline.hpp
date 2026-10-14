@@ -21,8 +21,6 @@ public:
         _ctx{ctx} {
     }
 
-    // Both graph passes use the same shader, variants, attachment format, and
-    // descriptor declarations, so they share one fullscreen pipeline/binding set.
     Vk::FullscreenPass<Vk::ReflectedLayout> pass;
 
     void Dispatch(

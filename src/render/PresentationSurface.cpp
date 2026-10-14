@@ -1,14 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "PresentationSurface.hpp"
 #include "NativeSurfaceInternal.hpp"
 #include "Rendering.hpp"
 #include <Zahlen/Log.hpp>
 
 namespace {
-
 
 struct Win32SurfaceCreateInfo {
     VkStructureType sType;

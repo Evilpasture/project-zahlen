@@ -9,8 +9,6 @@ namespace ZHLN::Passes {
 
 namespace {
 
-// Reciprocal and absolute viewport size in one payload: the technique is
-// resolution-independent but its LUT lookups are expressed in pixels.
 struct SmaaPushConstants {
     float rtMetrics[4];
 };

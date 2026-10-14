@@ -9,7 +9,6 @@
 #include "../VkError.hpp"
 namespace ZHLN::Vk {
 
-
 struct DrawState {
     VkPipeline       pipeline      = VK_NULL_HANDLE;
     uint32_t         vertexCount   = 0;
@@ -65,7 +64,6 @@ using MeshTaskIndirectState         = IndirectDrawState<VkDrawMeshTasksIndirectC
 using DrawIndirectCountState        = IndirectCountDrawState<VkDrawIndirectCommand>;
 using DrawIndexedIndirectCountState = IndirectCountDrawState<VkDrawIndexedIndirectCommand>;
 using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndirectCommandEXT>;
-
 
 enum class CommandRingError : uint8_t {
     FenceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Synchronization fence creation failed for a command ring slot">{}) = 1,
@@ -228,7 +226,6 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
 }
 
-
 class CommandEncoder {
   public:
     VkCommandBuffer cmd          = VK_NULL_HANDLE;
@@ -247,7 +244,6 @@ class CommandEncoder {
         }
     }
 
-    // Vulkan 1.3 core dynamic cull state; redundant updates are skipped per encoder.
     void SetCullMode(VkCullModeFlags mode) noexcept {
         if (!hasCullMode || lastCullMode != mode) {
             vkCmdSetCullMode(cmd, mode);
@@ -309,7 +305,6 @@ class CommandEncoder {
         BindDraw<Modules...>(state, pushConstants);
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
-
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants) noexcept {

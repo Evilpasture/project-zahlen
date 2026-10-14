@@ -29,8 +29,6 @@ class Allocator;
 class Buffer;
 class StagingContext;
 
-// Owns everything a submitted upload needs until its fence has signaled.
-// Destroying this object waits before freeing staging buffers or the pool.
 class SubmittedStagingWork {
   public:
     SubmittedStagingWork() = delete;
@@ -55,9 +53,6 @@ class SubmittedStagingWork {
     VkFence                         _fence = VK_NULL_HANDLE;
 };
 
-// A single recording batch: Begin constructs its recorder exactly once, and
-// ExecuteAsync consumes it into SubmittedStagingWork. There is no reusable
-// empty recorder slot or API that can overwrite an active recording.
 class StagingContext {
   public:
     StagingContext() = delete;

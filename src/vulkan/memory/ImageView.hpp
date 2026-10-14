@@ -28,12 +28,6 @@ enum class AttachmentViewCreationError : uint8_t {
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 
-// The only owning VkImageView wrapper in the engine, and it exists for
-// exactly one purpose: dynamic-rendering attachments
-// (VkRenderingAttachmentInfo::imageView). Descriptor-heap writes never take
-// one of these -- they take the plain VkImageViewCreateInfo produced by
-// Image::ViewInfo() / ImageSlice::ViewInfo() instead. If a view is only ever
-// sampled or written from a shader, do not create an AttachmentView for it.
 class AttachmentView {
   public:
     AttachmentView() noexcept = default;
@@ -53,9 +47,7 @@ class AttachmentView {
     }
 
     [[nodiscard]] auto Get() const noexcept -> VkImageView { return _handle.Get(); }
-    // The create-info this handle was built from; used to describe the same
-    // subresources when building an ImageSlice. Never a descriptor input by
-    // itself -- slice/descriptor code goes through VkImageViewCreateInfo.
+
     [[nodiscard]] constexpr auto CreateInfo() const noexcept -> const VkImageViewCreateInfo& { return _info; }
     [[nodiscard]] constexpr auto Format() const noexcept -> VkFormat { return _info.format; }
     [[nodiscard]] constexpr auto AspectFlags() const noexcept -> VkImageAspectFlags { return _info.subresourceRange.aspectMask; }

@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Reciprocal frame dimensions to turn a pixel into a UV, then the sub-pixel
-// blend amount and the two edge-detection thresholds.
 struct FXAAPushConstants {
     float rcpFrameX;
     float rcpFrameY;

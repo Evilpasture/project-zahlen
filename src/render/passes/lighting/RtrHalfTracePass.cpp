@@ -6,8 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// The trace writes a half-resolution target, so the shader needs the output
-// size in pixels to map a thread back to a full-resolution one.
 struct RtrHalfPushConstants {
     uint32_t halfRes[2];
     uint32_t _pad[2];
@@ -26,18 +24,14 @@ void RtrHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .address = impl.frames.tlasAddresses[fIdx].Get()
     };
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::RtrHalf>(
-        impl.postProcess.RtrHalfHeapBindings(),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
+        impl.postProcess.RtrHalfHeapBindings(), Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
-        // Keep the half-resolution reflection prefilter based on raw lighting;
-        // the full Reflection pass consumes the GI composite separately.
+
         Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
+        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]), Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
         Vk::Slot<"blueNoiseTex">(impl.textureManager.ViewInfo(impl.blueNoiseTexIdx)),
-        Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtrHalf)),
-        Vk::Slot<"tlas">(tlas),
+        Vk::Slot<"outImage">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtrHalf)), Vk::Slot<"tlas">(tlas),
         Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );

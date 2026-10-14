@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Reciprocal frame dimensions, the luma difference that counts as an edge, and
-// how far along an edge the search for its endpoints may walk.
 struct MLAAPushConstants {
     float    rcpFrameX;
     float    rcpFrameY;

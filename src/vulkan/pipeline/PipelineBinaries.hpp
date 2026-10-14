@@ -17,18 +17,8 @@
 
 namespace ZHLN::Vk {
 
-// Application-owned replacement for the VkPipelineCache object, built on
-// VK_KHR_pipeline_binary. The renderer owns no cache handle: pipeline
-// binaries are data -- bytes the host loads before startup and takes back
-// at shutdown -- and VkPipelineBinary objects exist only inside a single
-// pipeline creation (see PipelineBinarySession). Binaries are keyed by the
-// driver-computed pipeline key (vkGetPipelineKeyKHR), so any change to a
-// pipeline's creation parameters simply misses and recompiles.
 class PipelineBinaryStore {
   public:
-    // enabled tracks whether VK_KHR_pipeline_binary is live on this device.
-    // Initial bytes from a previous run are validated against the device's
-    // global pipeline key; foreign or torn data parses to an empty store.
     void Init(VkDevice device, bool enabled, std::span<const uint8_t> initialData) noexcept;
 
     [[nodiscard]] bool Enabled() const noexcept {
@@ -53,13 +43,6 @@ class PipelineBinaryStore {
     mutable std::mutex   _mutex;
 };
 
-// The binary side of one pipeline creation. Begin() derives the pipeline
-// key from the create info, then either replays the stored binary for that
-// key or has the driver compile fresh binaries; Binaries() is the span the
-// caller hands to pipeline creation. Commit()
-// after a successful creation extracts key+data from freshly compiled
-// binaries into the store. All VkPipelineBinary objects die with the
-// session -- nothing outlives the creation that used them.
 class PipelineBinarySession {
   public:
     PipelineBinarySession() = default;
@@ -71,8 +54,6 @@ class PipelineBinarySession {
 
     [[nodiscard]] static auto Begin(VkDevice device, PipelineBinaryStore* store, const VkPipelineCreateInfoKHR& createInfo) noexcept -> PipelineBinarySession;
 
-    // Accepts either pipeline create info directly and wraps it in the
-    // VkPipelineCreateInfoKHR the key derivation expects.
     template <typename CreateInfo>
         requires std::same_as<std::remove_cvref_t<CreateInfo>, VkGraphicsPipelineCreateInfo> ||
                  std::same_as<std::remove_cvref_t<CreateInfo>, VkComputePipelineCreateInfo>
@@ -84,8 +65,6 @@ class PipelineBinarySession {
         return Begin(device, store, wrapper);
     }
 
-    // The binaries to hand to pipeline creation; empty when the store is
-    // disabled or produced none.
     [[nodiscard]] auto Binaries() const noexcept -> std::span<const VkPipelineBinaryKHR> {
         return _raw;
     }
@@ -95,8 +74,7 @@ class PipelineBinarySession {
     }
 
     void Commit() noexcept;
-    // Drop the store entry this session replayed (it failed creation), so
-    // the next attempt takes the miss path and recaptures.
+
     void Invalidate() noexcept;
 
   private:

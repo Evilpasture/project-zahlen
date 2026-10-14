@@ -7,10 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Advances every billboard particle emitter by one step. It touches only
-// storage buffers, so it declares no image usage; what it does declare is a
-// dependency-free compute slot in the simulation graph, which is where the
-// ordering against the volumetric passes comes from.
 struct ParticleUpdatePass: Vk::RenderPass<"ParticleUpdate"> {
     const ParticleUpdateResources& particles;
     RenderFrameContext&            frame;

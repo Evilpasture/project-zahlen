@@ -7,7 +7,6 @@
 
 namespace ZHLN::Vk {
 
-// Enable bitwise OR operations on the scoped enums
 constexpr auto operator|(BarrierStage a, BarrierStage b) noexcept -> BarrierStage {
     return static_cast<BarrierStage>(static_cast<std::underlying_type_t<BarrierStage>>(a) | static_cast<std::underlying_type_t<BarrierStage>>(b));
 }
@@ -88,4 +87,4 @@ constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
     }
 }
 
-} // namespace ZHLN::Vk
+}

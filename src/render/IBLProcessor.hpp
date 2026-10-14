@@ -21,7 +21,6 @@
 
 namespace ZHLN::Vk {
 
-// GPU bake budget for caller-supplied linear environment pixels.
 inline constexpr uint32_t kMaxEnvironmentRadianceExtent = 8192;
 
 enum class EnvironmentBakeError : uint8_t {
@@ -33,8 +32,6 @@ enum class EnvironmentBakeError : uint8_t {
 class IBLProcessor {
   public:
     struct RadianceSource {
-        // Conditioned pixels drive both GPU bake paths. visualRgba is the
-        // original only when it differs from the lighting panorama.
         const float*                          rgba;
         const float*                          visualRgba;
         std::span<const std::array<float, 3>> diffuseSH;
@@ -82,8 +79,6 @@ class IBLProcessor {
         const JPH::Vec4 skyHorizon = toVec4(sky.skyHorizon);
         const JPH::Vec4 skyGround  = toVec4(sky.skyGround);
 
-        // These pipeline wrappers are RAII Vulkan objects. The VMA resources
-        // below are not; their lexical guard covers every early return.
         for (const auto shader: {brdfShader, specShader, shShader}) {
             if (auto checked = requireShader(shader); !checked) {
                 return std::unexpected(checked.error());
@@ -166,9 +161,6 @@ class IBLProcessor {
         std::array<float, 4> dummy {};
         const float*         pixels = hasRadiance ? radiance.rgba : dummy.data();
 
-        // FP32 keeps HDR light energy intact. Linear blits are optional for
-        // this format on Vulkan: use the fast image blit when available, and
-        // otherwise stage a CPU-built chain instead of issuing invalid blits.
         bool gpuSourceMips = false;
         if (hasRadiance) {
             VkFormatProperties props {};
@@ -250,8 +242,6 @@ class IBLProcessor {
 
         const VkImageViewCreateInfo radianceWriteInfo = radianceImage->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceMipLevels);
 
-        // Per-mip cube-face writes go through 2D-array storage views; that is
-        // a descriptor reinterpretation, so it stays an explicit view type.
         std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
         std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
@@ -285,8 +275,7 @@ class IBLProcessor {
             };
             CopyBufferToImage(cmd, staging->Handle(), radianceImage->Handle(), region);
             if (gpuSourceMips) {
-                // The shared helper transitions each generated mip for shader
-                // reads. This bake consumes them in COMPUTE, not FRAGMENT.
+
                 GenerateMipmaps(cmd, radianceImage->Handle(), uploadWidth, uploadHeight, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             } else {
                 if (cpuSourceMips) {
@@ -347,9 +336,7 @@ class IBLProcessor {
             for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                 const uint32_t mipSize   = kBaseSize >> mip;
                 const float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-                // Source mips filter high-frequency HDR lights according to
-                // each GGX ray's PDF. Keep enough samples for broad lobes;
-                // the mirror mip reads the source at LOD 0 without filtering.
+
                 const uint32_t sampleCount = mip == 0 ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
                 for (uint32_t face = 0; face < 6; ++face) {
                     const IBLBakePush push {
@@ -384,9 +371,6 @@ class IBLProcessor {
             }
             std::memcpy(state.payload.shCoeffs.data(), mappedSH->Data(), kSHBytes);
         } else {
-            // The conditioned map has no tiny emitter for either bake path.
-            // Preserve the cooker's exact SH integration of the smooth sky;
-            // GPU's 16k-sample estimate can differ at bright subpixel texels.
             for (size_t c = 0; c < state.payload.shCoeffs.size(); ++c) {
                 const auto& rgb           = radiance.diffuseSH[c];
                 state.payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
@@ -402,9 +386,6 @@ class IBLProcessor {
     }
 
   private:
-    // Fallback when RGBA32F lacks linear image blits. Integrate the area of
-    // each source texel (including the shorter polar rows) into the next mip;
-    // unlike a fixed 2x2 average, this also preserves the edge of odd extents.
     static void DownsampleEquirect(const float* src, float* dst, uint32_t srcW, uint32_t srcH, uint32_t dstW, uint32_t dstH) noexcept {
         constexpr float pi = std::numbers::pi_v<float>;
         for (uint32_t y = 0; y < dstH; ++y) {

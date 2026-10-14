@@ -5,8 +5,6 @@
 
 namespace ZHLN::Vk {
 
-// Centralized Layout State Translation Engine
-
 template <VkImageLayout Layout>
 struct LayoutTraits {
   private:
@@ -61,9 +59,7 @@ struct LayoutTraits {
                 return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT, .name = "TRANSFER_SRC_OPTIMAL"};
 
             case VK_IMAGE_LAYOUT_GENERAL:
-                // GENERAL backs storage images: shaders both read and write it, so the
-                // source and destination access masks are the same set of bits and the
-                // direction makes no difference here.
+
                 return {
                     .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -134,8 +130,7 @@ inline void TransitionLayout(
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 inline void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept {
-    // MakeImageBarrier's ordinary form covers all layers from zero. A partial
-    // clear needs both transitions to match the exact range passed to Vulkan.
+
     VkImageMemoryBarrier2 barrier = MakeImageBarrier(
         MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, range.aspectMask, range.baseMipLevel, range.levelCount)
     );
@@ -188,7 +183,7 @@ inline void ClearColorAndTransition(VkCommandBuffer cmd, const Color& color, con
 }
 
 static_assert(ColorClearTarget<VkImage> && ColorClearTarget<ImageSlice> && !ColorClearTarget<Color4>);
-// 32-bit Vulkan headers may typedef all non-dispatchable handles to uint64_t.
+
 static_assert(std::same_as<VkImage, VkImageView> || !ColorClearTarget<VkImageView>);
 static_assert(std::same_as<VkImage, VkBuffer> || !ColorClearTarget<VkBuffer>);
 static_assert(ToVkClearColor(Color4 {0.25f, 0.5f, 0.75f, 1.0f}).float32[2] == 0.75f);
@@ -196,8 +191,7 @@ static_assert(ToVkClearColor(1.0f).float32[3] == 1.0f);
 static_assert(ToVkClearColor(VkClearColorValue {.float32 = {0.1f, 0.2f, 0.3f, 0.4f}}).float32[1] == 0.2f);
 
 inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
-    // Retain the legacy mip-0/color-attachment contract; both barriers now
-    // cover exactly the layers being cleared, not unrelated array layers.
+
     const VkImageSubresourceRange range {
         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
         .baseMipLevel   = 0,
@@ -207,8 +201,6 @@ inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, cons
     };
     ClearColorAndTransition<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image, color, range);
 }
-
-// Scoped RAII Layout Transition Implementations
 
 template <typename SrcState, typename DstState>
 ScopedBarrierGuard<SrcState, DstState>::ScopedBarrierGuard(
@@ -296,11 +288,9 @@ inline auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>&
 }
 
 template <VkImageLayout TargetLayout, VkImageLayout OldLayout, VkFormat Format>
-constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout> /*unused*/) noexcept {
+constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, Tag<TargetLayout> ) noexcept {
     return Transition<TargetLayout>(cmd, img);
 }
-
-// DynamicPass Implementation
 
 template <size_t ColorCount, bool HasDepth, typename Formats>
 template <VkImageLayout Layout, VkFormat Format>
@@ -379,7 +369,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::AddDepth(
     float                             clearVal
 ) && noexcept -> DynamicPass<ColorCount, true, typename SetAttachmentDepth<Formats, Format>::type> {
     static_assert(!HasDepth, "ZHLN Execution Error: Depth target already bound.");
-    // Allow both depth-only and combined depth-stencil layouts
+
     static_assert(
         Layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL || Layout == VK_IMAGE_LAYOUT_GENERAL
     );
@@ -417,7 +407,7 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritan
     std::span<const VkFormat> colors;
     VkFormat depth = VK_FORMAT_UNDEFINED;
     if constexpr (std::same_as<Formats, RuntimeAttachmentFormats>) {
-        // AssumeLayout yields runtime-format images even for a RenderTarget<F>.
+
         colors = std::span<const VkFormat> {_colorFormats.data(), ColorCount};
         if constexpr (HasDepth) {
             depth = _depthFormat;
@@ -431,8 +421,6 @@ constexpr auto DynamicPass<ColorCount, HasDepth, Formats>::GetSecondaryInheritan
         }
     }
 
-    // Execute binds stencil only when AddDepth marked it active; use that
-    // same decision rather than assuming a combined view always binds it.
     const VkFormat stencil = (HasDepth && _hasStencil) ? StencilFormatForDepth(depth) : VK_FORMAT_UNDEFINED;
     return SecondaryInheritance {colors, depth, stencil, _viewMask, samplerHeap, resourceHeap, pushOffsets, pushAddresses, EffectiveViewport()};
 }
@@ -530,9 +518,6 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
     }
 }
 
-// Attachment Clear Helpers (wraps vkCmdClearAttachments for in-pass clears)
-
-// Clears one attachment region inside the current render pass instance.
 inline void ClearAttachment(
     VkCommandBuffer     cmd,
     VkImageAspectFlags  aspectMask,
@@ -554,9 +539,8 @@ inline void ClearAttachment(
     vkCmdClearAttachments(cmd, 1, &attachment, 1, &rect);
 }
 
-// Clears the stencil aspect of the bound depth/stencil attachment (CSG passes).
 inline void ClearStencilAttachment(VkCommandBuffer cmd, VkExtent2D extent, uint32_t stencil = 0) noexcept {
     ClearAttachment(cmd, VK_IMAGE_ASPECT_STENCIL_BIT, extent, {.depthStencil = {.depth = 1.0f, .stencil = stencil}});
 }
 
-} // namespace ZHLN::Vk
+}

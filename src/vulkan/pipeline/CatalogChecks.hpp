@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "ShaderProgram.hpp"
 
@@ -19,7 +18,6 @@ constexpr auto BindingList<Slots...>::Spells(
 ) noexcept -> bool {
     return ((Slots::set == set && candidate.IsNamed(declarations.Bytes(), Slots::name)) || ...);
 }
-
 
 [[nodiscard]] consteval auto ExecutionModelOf(VkShaderStageFlagBits stage) noexcept -> uint32_t {
     switch (stage) {

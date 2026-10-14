@@ -17,12 +17,6 @@ struct ParticleRenderPushConstants {
 };
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
-// Debug lines carry everything they need in the push block: the view-projection
-// and the device address of their interleaved vertex buffer. No instance index,
-// because a line is not an entry in the instance table -- debug_line.slang
-// declares no descriptor set at all. The block is 80 bytes: 64 of matrix, 8 of
-// address, padded to the matrix's 16-byte alignment, which is how
-// UIObjectConstants already matches its shader half.
 struct LinePushConstants {
     JPH::Mat44      viewProj;
     VkDeviceAddress vertexBufferAddress;

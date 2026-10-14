@@ -23,8 +23,6 @@ enum class DeviceConfigurationError : uint8_t {
     MissingRequiredFeature ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan device feature is not supported">{}) = 1,
 };
 
-// Properties (unlike feature bits) live on the VkPhysicalDeviceProperties2
-// chain. Call these only after the corresponding extension has been found.
 [[nodiscard]] bool MeshShaderLimitsSufficient(VkPhysicalDevice physical) noexcept;
 void ReportSubgroupSupport(VkPhysicalDevice physical, VkSubgroupFeatureFlags requiredOps) noexcept;
 
@@ -34,9 +32,6 @@ struct ConfiguredDevice {
     FeatureChain<Ts...> features;
 };
 
-// Resolves each optional feature and its extension(s) together. The result
-// owns both extension names and the feature chain until vkCreateDevice has
-// consumed them; ContextBuilder copies the enabled-feature snapshot.
 template <typename... Ts>
 class DeviceConfigurator {
   public:

@@ -116,8 +116,7 @@ inline void ParallelDrawDispatch(
         ZHLN::Log("[Vk] Secondary command recording failed; skipping parallel draw batch.");
         return;
     }
-    // Some schedulers coalesce chunks, so execute only the buffers actually
-    // recorded (their indices are contiguous from zero).
+
     if (const uint32_t count = recordedCount.load(std::memory_order_relaxed); count > 0) {
         Vk::ExecuteCommands(primaryCmd, std::span<const VkCommandBuffer> {secondaries.data(), count});
     }

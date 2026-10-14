@@ -14,8 +14,6 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// Owns a VkFence until it is released. SubmittedStagingWork takes over a fence
-// whose submission succeeded; every failure path lets the guard destroy it.
 class FenceGuard {
   public:
     FenceGuard(VkDevice device, VkFence fence) noexcept: _device(device), _fence(fence) {
@@ -62,7 +60,6 @@ SubmittedStagingWork::~SubmittedStagingWork() noexcept {
     if (_fence != nullptr) {
         vkDestroyFence(_ctx->Device(), _fence, nullptr);
     }
-    // _cmdPool is destroyed after this body, when its GPU work has completed.
 }
 
 void SubmittedStagingWork::Wait() const noexcept {
@@ -192,16 +189,12 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
     VkFence                 fence = nullptr;
     const VkFenceCreateInfo fence_info {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     if (vkCreateFence(_ctx->Device(), &fence_info, nullptr, &fence) != VK_SUCCESS) {
-        // Never submit untracked work whose staging buffers could be freed.
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-    // The guard owns the fence until the submission succeeds and hands it to
-    // SubmittedStagingWork; every early return below destroys it.
+
     FenceGuard fence_guard {_ctx->Device(), fence};
 
     if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, fence); !result) {
-        // If a submission failed partway through, keep the pool and buffers
-        // alive until the queue is idle, before the recording batch is freed.
         const auto idle = Vk::WaitIdle(_ctx->GraphicsQueue());
         if (!idle) {
             return std::unexpected(idle.error());

@@ -151,4 +151,4 @@ inline void GenerateMipmaps(
     });
 }
 
-} // namespace ZHLN::Vk
+}

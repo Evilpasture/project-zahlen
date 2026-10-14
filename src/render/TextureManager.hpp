@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "Rendering.hpp"
 
@@ -46,12 +45,10 @@ class TextureManager {
     TextureManager(TextureManager&&)                         = delete;
     auto operator=(TextureManager&&) -> TextureManager&      = delete;
 
-
     [[nodiscard]] auto     ReserveBindlessRegion() -> std::expected<void, ErrorCode>;
     [[nodiscard]] uint32_t BindlessBaseSlot() const noexcept {
         return _bindlessBaseSlot;
     }
-
 
     [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
         -> std::expected<TextureHandle, ErrorCode>;
@@ -60,18 +57,14 @@ class TextureManager {
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
         -> std::expected<TextureHandle, ErrorCode>;
-    // Renderer-internal: draw submission translating handles into descriptor
-    // indices at pack time. Not reachable from the public API -- outside code
-    // holds TextureHandles, period.
+
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     void Unload(TextureHandle handle);
     void Clear();
-    // Only after an idle wait (e.g. ClearGPUCaches): reclaim every retired slot.
+
     void RetireAll() noexcept;
     void Reset();
 
-
-    // Raw slots are only for internal fallback, render-target and LUT setup.
     [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
@@ -80,9 +73,7 @@ class TextureManager {
     [[nodiscard]] auto                 SlotCount() const noexcept -> size_t { return _slotImages.size(); }
     [[nodiscard]] const Vk::Image&             Image(uint32_t slot) const noexcept { return _slotImages[slot]; }
     [[nodiscard]] const VkImageViewCreateInfo& ViewInfo(uint32_t slot) const noexcept { return _slotInfos[slot]; }
-    // A slice borrows the exact view description, including cube/array/3D
-    // shape and mip/layer range. Appending slots cannot relocate a deque
-    // element; slot release, Reset, or manager destruction ends the borrow.
+
     [[nodiscard]] auto Slice(uint32_t slot, VkExtent2D extent) const noexcept -> Vk::ImageSlice {
         return Vk::ImageSlice {_slotInfos[slot], {extent.width, extent.height, 1}};
     }
@@ -106,7 +97,6 @@ class TextureManager {
         VkImageViewCreateInfo viewInfo {};
     };
 
-    // Assign an opaque, never-reused handle to a newly adopted GPU slot.
     [[nodiscard]] TextureHandle RegisterAnonymous(uint32_t bindlessIndex, VkFormat format, uint32_t width, uint32_t height);
     void WriteSlotToHeap(uint32_t bindlessIndex, const VkImageViewCreateInfo& viewInfo) noexcept;
     void RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept;
@@ -122,15 +112,14 @@ class TextureManager {
     uint32_t _frameIndex = 0;
 
     ZHLN::Array<Vk::Image> _slotImages;
-    // Plain view descriptions, not handles. A deque because heap writes
-    // borrow element addresses through VkImageDescriptorInfoEXT::pView.
+
     std::deque<VkImageViewCreateInfo> _slotInfos;
     uint32_t _nextSlotIndex = 0;
     ZHLN::Array<uint32_t> _freeSlots;
     std::array<ZHLN::Array<ReleasedSlot>, Vk::kFramesInFlight> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;
-    // Kept across Clear() so unnamed uploads do not recycle old IDs.
+
     uint64_t                         _nextAnonymousHandle = 1ull << 63;
     mutable Mutex                    _mutex {};
     mutable uint32_t                 _missingHandleWarningCount = 0;

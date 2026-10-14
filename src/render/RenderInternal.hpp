@@ -121,11 +121,6 @@ struct SceneResources {
 namespace Resource {
 }
 
-// Everything not listed here is on RenderFrameContext; see FrameContext.hpp.
-// The base is what a pass sees, and RenderContext::Impl is what owns the rest
-// of it: initialization, presentation internals, diagnostics, the host-side
-// resource registries, and the pipelines that still belong to a pass rather
-// than to the frame.
 struct RenderContext::Impl : RenderFrameContext {
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
@@ -225,8 +220,7 @@ struct RenderContext::Impl : RenderFrameContext {
 
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
-    // The debug-line vertex buffers: one interleaved LineVertex stream per
-    // frame, read by debug_line.slang through its device address.
+
     std::expected<void, ErrorCode> AllocateLineVertexBuffers(
         size_t                     maxVertices,
         PerFrame<Vk::Buffer>&      bufs,
@@ -251,11 +245,6 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::Image ltcMatImage;
     Vk::Image ltcAmpImage;
 
-    // Billboards: renderer-owned storage, one slot per (texture, blend, facing, call) --
-    // a host that draws the same texture twice in a frame gets two slots rather than one
-    // overwritten buffer, and the serial restarts when the emitter queue empties, which
-    // is the frame boundary. Slots are reused frame after frame, so a steady host
-    // allocates nothing after its first frame.
     struct BillboardSlot {
         uint32_t     textureIndex = 0;
         uint32_t     blendMode    = 0;
@@ -268,20 +257,10 @@ struct RenderContext::Impl : RenderFrameContext {
     ZHLN::Array<Particle>      billboardStaging;
     uint32_t                   billboardSerial = 0;
 
-    // The shadow atlas's answer to this frame's lights: one tile base per
-    // submitted light, in submitted order, -1 for the lights that asked and did
-    // not fit (and the ones that never asked). `UploadSubmittedLights` fills it
-    // before it packs, so the packed lights carry the atlas's decision.
     ZHLN::Array<int32_t> lightTileBases;
 
-    // SetLights takes descriptions; this holds the packed structs for the frame
-    // a pass is about to upload, so the conversion happens once per frame
-    // instead of per consumer.
     ZHLN::Array<Light> gpuLights;
-    // What SetLights was handed this frame, in the engine's own terms: the pack
-    // needs the frame's view matrix (a light's positionView), and the frame is
-    // handed over after the systems that submit lights have run. So the pack --
-    // with the upload it feeds -- happens in SetFrameData.
+
     ZHLN::Array<LightDesc> submittedLights;
 
     uint32_t packedLightCount = 0;
@@ -290,16 +269,13 @@ struct RenderContext::Impl : RenderFrameContext {
 
     struct RenderTexture {
         Vk::ImageSlice       image {};
-        // Owns the attachment handle `image` borrows; the descriptor side of
-        // this texture needs no handle (TextureManager stores a create-info).
+
         Vk::AttachmentView   attachmentView;
         Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
         bool                 drawn         = false;
     };
     std::unordered_map<TextureHandle, RenderTexture> renderTextures;
 
-    // A process-wide renderer ID prevents stale frame capabilities from
-    // aliasing a new renderer after device-loss recovery.
     static inline std::atomic<uint64_t> nextRendererId {1};
     uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
     uint64_t                            frameSerial = 0;
@@ -352,17 +328,12 @@ struct RenderContext::Impl : RenderFrameContext {
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
-    // Non-owning view while a scene graph is executing. Never cached across
-    // a frame or used as an alternate path around ResolveTarget.
     std::optional<Vk::ImageSlice> sceneTarget;
 
     void ApplySceneView(const SceneView& view) noexcept;
 
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
-    // Step 4 of the decomposition: the profiler, the diagnostic layer, the
-    // shader-reload registry and the warning throttles, as one sub-object. Nothing
-    // a pass can see lives in here.
     RenderDiagnostics diagnostics;
 
     PipelineRegistry pipelines;
@@ -383,18 +354,12 @@ struct RenderContext::Impl : RenderFrameContext {
         diagnostics.gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    // RenderFrameContext's own constructor builds targets, textureManager,
-    // geometry and reflectionPipeline; they depend on the device members the
-    // base declares, which is why they cannot be initialized here.
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
         presentationTarget(target), diagnostics(ctx, watcher),
         pipelines(ctx, pipelineBinaries, sceneHeapMappings, diagnostics.gpuDiagnostics, deletionQueue) {
     }
 
     ~Impl() {
-        // Also runs when initialization fails partway through, before a
-        // RenderContext has been constructed. All explicit VMA destruction
-        // below precedes the allocator member's destructor.
         if (ctx.Device() != VK_NULL_HANDLE) {
             if (auto waited = Vk::WaitIdle(ctx.Device()); !waited) {
                 ZHLN::LogError("[Render] device idle wait during teardown failed: {}", waited.error());
@@ -407,8 +372,7 @@ struct RenderContext::Impl : RenderFrameContext {
 
         ClearEmitterBuffers();
         geometry.RetireAll();
-        // The registry destructor runs after this body; enqueue its pipelines
-        // now, before the explicit deletion-queue drain below.
+
         pipelines.RetireAll();
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);
@@ -425,9 +389,6 @@ struct RenderContext::Impl : RenderFrameContext {
         }
         presenter.Cleanup();
 
-        // Every per-frame allocation, released in the order the driver needs:
-        // acceleration structures first, then their backing VMA buffers, then
-        // the rest. The list lives in FrameResources, next to the members.
         frames.Destroy(allocator);
         allocator.DestroyBuffer(clusterBoundsBuffer);
         allocator.DestroyBuffer(morphDeltasBuffer);
@@ -443,19 +404,13 @@ struct RenderContext::Impl : RenderFrameContext {
     [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();
     [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
 
-    // Packs the submitted lights, and answers their shadow asks first: the
-    // atlas allocation has to exist before the pack, because a light's tile
-    // base is one of the fields the shader reads.
     void UploadSubmittedLights(const Camera& cam) noexcept;
     void AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept;
 
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    // Skins every queued skinned draw, then rebuilds each scratch buffer's
-    // BLAS. The returned entries are the only channel from the rebuild to
-    // BuildTLAS: a scratch buffer whose rebuild failed is simply absent
-    // (and the failure is handed back alongside, never swallowed).
+
     struct SkinnedBlasOutcome {
         ZHLN::Array<SkinnedBlasEntry> addresses;
         std::optional<ErrorCode>      failure;
@@ -491,9 +446,6 @@ struct RenderContext::Impl : RenderFrameContext {
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
 
-    // The scene frame is assembled by the graph builder in
-    // RenderGraphBuilder.cpp; the compute frame lives in
-    // pipelines/ComputeSimPipeline.cpp next to the queue it is submitted on.
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
@@ -527,8 +479,6 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     });
 }
 
-// Pass-local encoder and renderer state for the draw helpers. The encoder
-// holds the sole command-buffer handle; the frame slot comes from ctx.presenter.
 struct PassContext {
     Vk::CommandEncoder   encoder;
     RenderFrameContext&  ctx;
@@ -561,8 +511,7 @@ inline std::vector<uint32_t> LoadShaderSpv(std::string_view path) noexcept {
         return {};
     }
     const auto fileSize = static_cast<std::streamoff>(file.tellg());
-    // A partial word would make read() overrun the uint32_t buffer and cannot
-    // be passed to VkShaderModuleCreateInfo in any case.
+
     if (fileSize <= 0 || fileSize % sizeof(uint32_t) != 0) {
         return {};
     }
@@ -574,8 +523,6 @@ inline std::vector<uint32_t> LoadShaderSpv(std::string_view path) noexcept {
     return buffer;
 }
 
-// Embedded shaders are byte arrays, not uint32_t objects. ShaderBytecode
-// keeps a byte span until CreateShaderDesc crosses the C ABI boundary.
 template <VkShaderStageFlagBits Stage>
 [[nodiscard]] inline auto LoadShaderData(const Vk::ShaderStageSource<Stage>& src) -> Vk::ShaderBytecode {
     if constexpr (isDev) {
@@ -589,8 +536,7 @@ template <VkShaderStageFlagBits Stage>
     if (bytes.empty() || bytes.size() % sizeof(uint32_t) != 0) {
         return {};
     }
-    // Generated fallbacks are word-aligned. A caller-supplied byte span need
-    // not be: copy only that case before the C ABI reads uint32_t words.
+
     if (reinterpret_cast<std::uintptr_t>(bytes.data()) % alignof(uint32_t) != 0) {
         std::vector<uint32_t> aligned(bytes.size() / sizeof(uint32_t));
         std::ranges::copy(bytes, std::as_writable_bytes(std::span {aligned}).begin());

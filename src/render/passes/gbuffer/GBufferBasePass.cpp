@@ -12,9 +12,6 @@ namespace ZHLN::Passes {
 
 namespace {
 
-// GBufferSceneTargets uses runtime-format TypedImages (AssumeLayout), so a
-// secondary must inherit the formats AddColor/AddDepth actually recorded.
-// Exercise both a combined stencil attachment and a depth-only attachment.
 static_assert(
     [] {
         constexpr auto colorA =
@@ -53,10 +50,6 @@ struct TaskSystemSchedulerAdapter {
     }
 };
 
-// GPU culling: one dispatch fills the indirect command buffer, then the
-// pipeline-sorted runs are drawn from it. The HiZ pyramid is the rejection
-// test, so this is also the point where the second-pass candidate list is
-// produced for the resolve pass to pick up.
 void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd        = passCtx.Cmd();
     auto&           ctx        = passCtx.ctx;
@@ -129,9 +122,6 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
         });
 }
 
-// CPU culling: no indirect buffer, so the draw queue is replayed in parallel
-// across worker secondaries inside one render pass begun with the
-// secondary-command-buffer flag.
 void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd        = passCtx.Cmd();
     auto&           ctx        = passCtx.ctx;
@@ -189,8 +179,6 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
     if (drawCount == 0) {
-        // Nothing to draw, but the GBuffer still has to be in a defined state:
-        // clear it rather than leave last frame's contents in the targets.
         const GBufferTargets in = GBufferSceneTargets(frame);
         Vk::DynamicPass(in.sceneColor.Extent())
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)

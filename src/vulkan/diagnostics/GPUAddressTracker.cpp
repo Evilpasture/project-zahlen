@@ -107,8 +107,6 @@ auto GPUAddressTracker::Resolve(VkDeviceAddress address) const noexcept -> std::
         return matches;
     }
 
-    // Overlapping address ranges are legal (for example, aliased resources),
-    // so retain every containing range instead of stopping at the nearest base.
     const auto stop = std::upper_bound(_entries.begin(), _entries.end(), address, [](VkDeviceAddress value, const GpuAllocationSymbol& entry) {
         return value < entry.baseAddress;
     });
@@ -195,8 +193,6 @@ void GPUAddressTracker::UnbindLocked(
             continue;
         }
 
-        // Unbind reports can split a previously reported range. Subtract the
-        // unbound portion while preserving any still-live prefix/suffix.
         if (entry.baseAddress < binding.baseAddress) {
             GpuAllocationSymbol prefix = entry;
             prefix.size = binding.baseAddress - entry.baseAddress;

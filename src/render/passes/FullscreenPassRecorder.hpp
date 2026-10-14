@@ -11,8 +11,6 @@
 
 namespace ZHLN::Passes {
 
-// The algorithm-specific part of a fullscreen draw: its push payload and its
-// named descriptor slots. The recorder owns the common valid/bind/draw path.
 template <typename Push, typename... Slots>
 struct FullscreenPassArgs {
     Push                 push;
@@ -43,8 +41,6 @@ struct FullscreenPassRecorder {
         );
     }
 
-    // Use when the fullscreen draw needs an outer recording scope, e.g. the
-    // final blit into the current swapchain image's dynamic-rendering scope.
     template <typename LayoutT, typename Prepare, typename Draw>
     static void RecordCustom(
         RenderFrameContext&                  impl,

@@ -13,9 +13,6 @@
 namespace ZHLN {
 
 auto ShadowRenderer::InitResources(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    // Slot 0 for the cascades, one slot per shadow-casting light after it. See
-    // kAtlasInstancesPerLight for why the slots are per light rather than per
-    // tile.
     constexpr VkDeviceSize kCommands =
         sizeof(VkDrawIndirectCommand) * (RenderContext::Impl::kGpuCullingMaxInstances + ShadowAtlas::kMaxLights * kAtlasInstancesPerLight);
     return CreatePerFrame(impl.allocator, kCommands, Vk::BufferUsage::Indirect, Vk::MemoryUsage::CPUToGPU)

@@ -10,9 +10,6 @@ namespace ZHLN::Passes {
 
 namespace {
 
-// Second GPU-culling dispatch: `passIndex = 1` makes the shader read the
-// candidate list the base pass's dispatch produced instead of testing every
-// instance again, and the draw reads the second indirect buffer.
 void RecordGpuCulled(
     PassContext& passCtx, CullingResources& cull, const CsgResources& csg, const MeshParticlePipelines& particles,
     std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in
@@ -87,8 +84,6 @@ void RecordGpuCulled(
         });
 }
 
-// CPU path: no second culling dispatch to replay, so this is only the work
-// that could not run until the GBuffer's depth buffer was complete.
 void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshParticlePipelines& particles, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;

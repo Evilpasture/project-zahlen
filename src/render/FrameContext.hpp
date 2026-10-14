@@ -3,26 +3,6 @@
 
 #pragma once
 
-// What a pass is allowed to see.
-//
-// RenderContext::Impl is ~160 data members and ~80 member functions covering
-// five unrelated lifetimes: device, swapchain, frame, init, and host-side
-// resource registries. RenderFrameContext is the slice of it that a recording
-// pass legitimately needs -- the device, the descriptor heap, the render
-// targets, the per-frame GPU buffers, and the shared subsystems (shadows, fog,
-// post-process, textures, geometry) whose passes read state rather than own it.
-//
-// RenderContext::Impl derives from this, so `Impl&` still binds to
-// `RenderFrameContext&` and every `Passes::XPass {.impl = self}` in
-// RenderGraphBuild.hpp keeps working unchanged. That is what lets the passes
-// migrate one at a time: a pass whose member is declared `RenderFrameContext&`
-// physically cannot reach the renderer's init functions, its presentation
-// internals, its diagnostics, or another pass's pipelines, and the compiler
-// proves it.
-//
-// Not named FrameContext: ZHLN::FrameContext already exists in
-// <Zahlen/FrameScheduler.hpp> and is the engine's per-frame scheduler struct.
-
 #include "DrawQueueManager.hpp"
 #include "FrameDestinations.hpp"
 #include "FrameResources.hpp"
@@ -49,14 +29,11 @@
 namespace ZHLN::Vk {
 
 struct IBLPayload {
-    // Baked textures keep no VkImageView handles at all: only the plain view
-    // descriptions their heap writes are built from.
     Image                 brdfLutImage;
     VkImageViewCreateInfo brdfLutInfo {};
     Image                 prefilteredImage;
     VkImageViewCreateInfo prefilteredInfo {};
-    // Original RGBA32F sky, only retained when the lighting cube was cooked
-    // from a different (sunless) panorama and the skybox is visible.
+
     Image                    visualSkyImage;
     VkImageViewCreateInfo    visualSkyInfo {};
     std::array<JPH::Vec4, 9> shCoeffs {};
@@ -86,30 +63,17 @@ struct WorkerCmdContext {
 struct RenderFrameContext {
     using GraphResources = TargetManager::GraphResources;
 
-    // ---------------------------------------------------------------------
-    // Device. Declared first: everything below is built from it.
-    // ---------------------------------------------------------------------
     Vk::Context   ctx;
     Vk::Allocator allocator;
 
-    // Command rings, staging and deferred destruction. These are here rather
-    // than in Impl because targets, textureManager and geometry are
-    // constructed from them, and a base class is initialized before any
-    // derived member exists.
     mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     Vk::StagingRingBuffer                               stagingRingBuffer;
     mutable Vk::StagingRingBuffer                       transferRingBuffer;
     Vk::DeletionQueue                                   deletionQueue;
 
-    // ---------------------------------------------------------------------
-    // Descriptor heap.
-    // ---------------------------------------------------------------------
     Vk::HeapManager heapManager;
 
-    // ---------------------------------------------------------------------
-    // Render targets and the per-frame GPU buffers.
-    // ---------------------------------------------------------------------
     TargetManager   targets;
     GraphResources& graphResources = targets.Graph();
 
@@ -118,24 +82,12 @@ struct RenderFrameContext {
     Vk::Buffer                                                clusterBoundsBuffer;
     Vk::Buffer                                                morphDeltasBuffer;
 
-    // ---------------------------------------------------------------------
-    // Presentation. `destinations` is here because ActivePresentation() has
-    // to consult it; the aux-window machinery itself stays on Impl.
-    // ---------------------------------------------------------------------
     Vk::SwapchainPresenter presenter;
     FrameDestinations      destinations;
 
-    // ---------------------------------------------------------------------
-    // This frame's inputs.
-    // ---------------------------------------------------------------------
     DrawQueueManager queues;
     GraphicsSettings settings {};
 
-    // ---------------------------------------------------------------------
-    // Shared multi-pass subsystems. Each owns the pipelines and scratch
-    // assets its passes need, so a pass is a description of recording work
-    // rather than a holder of GPU state.
-    // ---------------------------------------------------------------------
     TextureManager      textureManager;
     GeometryManager     geometry;
     ShadowRenderer      shadows;
@@ -144,9 +96,6 @@ struct RenderFrameContext {
     PostProcessFeature  postProcess;
     ReflectionPipeline  reflectionPipeline;
 
-    // ---------------------------------------------------------------------
-    // Per-frame scalars and host-side frame state.
-    // ---------------------------------------------------------------------
     uint32_t viewportX = 0;
     uint32_t viewportY = 0;
     uint32_t viewportW = 0;
@@ -154,8 +103,7 @@ struct RenderFrameContext {
 
     JPH::Mat44 current_view_proj    = JPH::Mat44::sIdentity();
     JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
-    // Kept for the pack boundary: light packing needs a world-to-view matrix, and
-    // nothing else in the renderer holds one separately from the projection.
+
     JPH::Mat44    view_matrix    = JPH::Mat44::sIdentity();
     JPH::Mat44    shadowProjView = JPH::Mat44::sIdentity();
     FrameUniforms currentUniforms {};
@@ -167,7 +115,7 @@ struct RenderFrameContext {
 
     uint32_t activeLineVertexCount = 0;
 
-    static constexpr size_t       kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
+    static constexpr size_t       kParallelRecordingSlots = 2;
     ZHLN::Array<WorkerCmdContext> workerCmds;
 
     ZHLN::Array<Light> mappedLights;
@@ -192,7 +140,6 @@ struct RenderFrameContext {
     FrameTransientState frameState;
 
     Vk::IBLPayload iblPayload;
-
 
     RenderFrameContext() noexcept:
         targets(ctx, allocator, graphicsCmdRing),
@@ -234,13 +181,10 @@ struct RenderFrameContext {
         return ctx.BufferAddress(buffer);
     }
 
-    // The six frame addresses the scene pushes ahead of every pass payload.
     [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
 
     void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
-    // The presenter the frame is being recorded for: the active aux window's,
-    // if the frame is rendering into one, otherwise the swapchain's.
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
         if (const auto active = destinations.Active()) {
             return active->Presenter();

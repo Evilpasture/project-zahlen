@@ -26,8 +26,6 @@ static constexpr VkCommandBufferInheritanceInfo NullInheritanceInfo = {
     .pipelineStatistics   = 0
 };
 
-// The runtime-format form stays constructible from any slice. The known-format
-// specialization below can only be created by ImageSlice::MatchFormat.
 template <VkImageLayout Layout, VkFormat Format = VK_FORMAT_UNDEFINED>
 struct TypedImage {
     static constexpr VkImageLayout layout       = Layout;
@@ -41,8 +39,7 @@ struct TypedImage {
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return slice.image;
     }
-    // Only meaningful when the slice carries an attachment view; descriptor
-    // writes use Raw().ViewInfo() and never look at this.
+
     [[nodiscard]] constexpr auto AttachmentView() const noexcept -> VkImageView {
         return slice.attachmentView;
     }
@@ -72,8 +69,6 @@ struct TypedImage {
     }
 };
 
-// Preserve the checked-format invariant: a caller cannot manufacture a
-// TypedImage<Layout, Format> by claiming that an arbitrary slice has Format.
 template <VkImageLayout Layout, VkFormat Format>
     requires (Format != VK_FORMAT_UNDEFINED)
 struct TypedImage<Layout, Format> {
@@ -93,8 +88,7 @@ struct TypedImage<Layout, Format> {
     [[nodiscard]] constexpr auto Handle() const noexcept -> VkImage {
         return slice.image;
     }
-    // Only meaningful when the slice carries an attachment view; descriptor
-    // writes use Raw().ViewInfo() and never look at this.
+
     [[nodiscard]] constexpr auto AttachmentView() const noexcept -> VkImageView {
         return slice.attachmentView;
     }
@@ -200,7 +194,6 @@ static_assert(
     "presentable: the presenter decides that from the swapchain, not from what a pass knows about its target."
 );
 
-
 struct UndefinedState {};
 struct ColorAttachmentState {};
 struct DepthAttachmentState {};
@@ -256,14 +249,9 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
-// Unlike the aspect/mip overload, transitions precisely the requested layers
-// as well. A subresource clear must not change the layout of other layers.
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 void TransitionLayout(VkCommandBuffer cmd, VkImage image, const VkImageSubresourceRange& range) noexcept;
 
-// Borrow an image handle. Owning targets expose image.Handle(); slices and
-// bare images expose Handle() or the raw image member. Constrain wrapper
-// handles to VkImage rather than accepting a buffer or image view by accident.
 template <typename T>
 concept ColorClearTarget =
     std::same_as<std::remove_cvref_t<T>, VkImage> ||
@@ -291,25 +279,18 @@ inline constexpr VkImageSubresourceRange kAllColorSubresources = {
     .layerCount     = VK_REMAINING_ARRAY_LAYERS,
 };
 
-// Transfer clear only: every image must have VK_IMAGE_USAGE_TRANSFER_DST_BIT.
-// The color aspect of the requested mips/layers must be in InitialLayout (or
-// newly created with UNDEFINED); after the clear it is in FinalLayout. A null
-// image records nothing. Presentation images need an attachment load-op clear.
 template <VkImageLayout InitialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
           VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
           ColorClearTarget Target, ClearColorSource Color>
 void ClearColorAndTransition(VkCommandBuffer cmd, const Target& target, const Color& color,
                              const VkImageSubresourceRange& range = kAllColorSubresources) noexcept;
 
-// The shared color/layouts expand to ordered, independent image clears.
 template <VkImageLayout InitialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
           VkImageLayout FinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
           ClearColorSource Color, ColorClearTarget... Targets>
     requires (sizeof...(Targets) > 1)
 void ClearColorAndTransition(VkCommandBuffer cmd, const Color& color, const Targets&... targets) noexcept;
 
-// Transfer clear only: image must have VK_IMAGE_USAGE_TRANSFER_DST_BIT.
-// For presentation images, clear through a color attachment load op instead.
 void ClearColorImage(
     VkCommandBuffer     cmd,
     VkImage             image,
@@ -323,7 +304,6 @@ auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags asp
 template <VkImageLayout NewLayout, VkImageLayout OldLayout, VkFormat Format>
 [[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout, Format>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
     -> TypedImage<NewLayout, Format>;
-
 
 template <typename SrcState, typename DstState>
 class ScopedBarrierGuard {
@@ -346,7 +326,6 @@ class ScopedBarrierGuard {
 template <typename SrcState, typename DstState, typename T>
 [[nodiscard]] auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) noexcept;
 
-
 template <typename SrcState, typename DstState>
 struct ScopedBarrierTrans {
     template <typename T>
@@ -361,12 +340,8 @@ using ColorToReadTrans = ScopedBarrierTrans<Vk::ColorAttachmentState, Vk::Shader
 inline constexpr ReadToColorTrans ReadToColor {};
 inline constexpr ColorToReadTrans ColorToRead {};
 
-
 static constexpr size_t kMaxColorAttachments = 8;
 
-// DynamicPass binds the stencil attachment only for these combined formats.
-// Secondary command buffers must inherit the same format (or UNDEFINED when
-// the primary has no stencil attachment).
 [[nodiscard]] constexpr auto StencilFormatForDepth(VkFormat depthFormat) noexcept -> VkFormat {
     return (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT) ? depthFormat : VK_FORMAT_UNDEFINED;
 }
@@ -374,9 +349,6 @@ static constexpr size_t kMaxColorAttachments = 8;
 template <size_t ColorCount, bool HasDepth, typename Formats>
 class DynamicPass;
 
-// A snapshot of one DynamicPass's attachment formats and view state. Its
-// color formats are owned, not borrowed from a temporary pass. Only the pass
-// can construct it; the recording caller cannot supply or change formats.
 class SecondaryInheritance {
     template <size_t, bool, typename>
     friend class DynamicPass;
@@ -500,9 +472,6 @@ class DynamicPass {
 
     constexpr auto Flags(VkRenderingFlags flags) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 
-    // For a pass begun with VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT.
-    // Uses checked formats when available, otherwise the formats recorded by
-    // AddColor/AddDepth for runtime-format attachments.
     [[nodiscard]] constexpr auto GetSecondaryInheritance(
         const VkBindHeapInfoEXT* samplerHeap = nullptr, const VkBindHeapInfoEXT* resourceHeap = nullptr,
         std::span<const uint32_t> pushOffsets = {}, std::span<const VkDeviceAddress> pushAddresses = {}
@@ -513,8 +482,6 @@ class DynamicPass {
 
     constexpr auto ViewMask(uint32_t mask) && noexcept -> DynamicPass<ColorCount, HasDepth, Formats>&&;
 
-    // No raw VkPipeline overload: a checked pass can bind only a pipeline
-    // constructed with precisely these attachment formats (and this order).
     void Bind(VkCommandBuffer cmd, const TypedPipeline<ColorCount, HasDepth, Formats>& pipeline) const noexcept
         requires (!std::same_as<Formats, RuntimeAttachmentFormats>) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
@@ -529,7 +496,6 @@ class DynamicPass {
     template <size_t C, bool D, typename F>
     friend class DynamicPass;
 
-    // Only AddColor/AddDepth/AddColorGroup may change the pass's format type.
     template <size_t InsideCount, bool InsideDepth, typename InsideFormats>
     constexpr explicit DynamicPass(DynamicPass<InsideCount, InsideDepth, InsideFormats>&& other) noexcept:
         _extent(other._extent), _flags(other._flags), _colors(std::move(other)._colors), _colorFormats(other._colorFormats),
@@ -555,7 +521,6 @@ class DynamicPass {
 };
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
-
 
 struct PassResource {
     ImageBarrierDesc barrier;

@@ -42,8 +42,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>()
     )
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
-            // The descriptors' entry-point pointers refer to this view's
-            // inline names; keep it alive through layout reflection.
+
             const auto basicView     = basicStages.View();
             const auto reflectInputs = std::to_array<Vk::ReflectedStageInput>({
                 {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
@@ -65,8 +64,6 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 .WithLodRange(0.0F, 0.0F);
             clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
-            // No VkSampler objects: InitSceneHeaps writes these configs
-            // straight into the sampler heap via vkWriteSamplerDescriptorsEXT.
             return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> { return InitBakeHeapBindings(); })
@@ -212,8 +209,7 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
     if (!graphResources.transLightingTarget.Valid() || !transLightingSlot.Valid()) {
         return;
     }
-    // Sampled with the complete mip chain; the attachment view is only
-    // the graph's mip-0 color attachment.
+
     heapManager.WriteImage(transLightingSlot, graphResources.transLightingTarget.image.ViewInfo(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
@@ -245,8 +241,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     Vk::InitHeapPassSamplers<Shaders::SmaaWeight>(heapManager, antiAliasing.smaaWeight.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::SmaaBlend>(heapManager, antiAliasing.smaaBlend.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::Blit>(heapManager, post.blit.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
-    // The passes below own their own pipelines and heap bindings, so they
-    // write the sampler descriptors those bindings declare.
+
     postProcess.InitSamplers(*this);
     fog.InitSamplers(*this);
 }
@@ -349,8 +344,6 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
         allocator.DestroyImage(*ampImg);
     });
 
-    // Abort abandoned commands before the images and staging buffer they
-    // reference are destroyed. Earlier failures still abort in staging's dtor.
     defer _([&] { std::move(staging).Abort(); });
     staging.UploadImage2DBuffer(matImg->Handle(), 64, 64, 1, ltcStaging.Handle(), 0);
     staging.UploadImage2DBuffer(ampImg->Handle(), 64, 64, 1, ltcStaging.Handle(), matRawSize);
@@ -425,14 +418,10 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         mode = !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3);
     }
     if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyInfo.image != VK_NULL_HANDLE)) {
-        // Mode-only changes do not need a new IBL bake, EXCEPT when enabling
-        // the original sky for a cooked map whose hidden mode never uploaded it.
         impl->iblPayload.environmentMode = mode;
         return {};
     }
 
-    // RenderSystem already translated the ECS settings into GraphicsSettings.
-    // Keep that boundary here instead of reconstructing an ECS component.
     const auto& sky = impl->settings.environment;
 
     Vk::IBLProcessor::RadianceSource source {};
@@ -444,8 +433,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         source.height       = desc.extent.height;
         source.renderSkybox = desc.renderSkybox ? 1 : 0;
     }
-    // Environment changes are rare; wait rather than retiring the old cube
-    // and LUT while previous frames can still read their descriptors/views.
+
     if (auto waited = Vk::WaitIdle(impl->ctx.Device()); !waited) {
         return std::unexpected(waited.error());
     }
@@ -454,7 +442,7 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
         return std::unexpected(baked.error());
     }
     baked->contentHash = hash;
-    // Swap keeps each view with its image; old resources are now in `baked`.
+
     std::swap(impl->iblPayload, *baked);
     impl->WriteSceneStaticImageDescriptors();
     baked->Destroy(impl->allocator);

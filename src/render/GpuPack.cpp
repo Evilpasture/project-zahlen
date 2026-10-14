@@ -3,12 +3,6 @@
 
 #include "GpuPack.hpp"
 
-// Field-for-field, in the shader's order and the shader's lane types. Jolt's own
-// StoreFloat3/StoreFloat4 do the SIMD-to-pod crossing, so nothing here is a memcpy
-// and nothing here can be a surprising shape: a field named on the left is a field
-// named on the right, and a missing one is a compile error rather than a zero the
-// shader reads.
-
 namespace ZHLN::GpuPack {
 
 namespace {
@@ -44,7 +38,7 @@ auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex,
     packed.endSize   = desc.endSize;
 
     packed.spinSpeed = desc.spinSpeed;
-    // Renderer-owned fields: the author names a texture and a blend, not an index.
+
     packed.textureIndex = textureIndex;
     packed.alignment    = desc.alignment;
     packed.blendMode    = blendMode;
@@ -96,10 +90,6 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
     desc.direction.StoreFloat3(&packed.direction);
     desc.color.StoreFloat3(&packed.color);
 
-    // Spot cone cosines. Lights without an authored cone pack -1/-1, which
-    // lighting.slang reads as "no cone" (full sphere) -- packing cos(0) = 1
-    // instead would collapse the cone to zero angle and make untagged spots
-    // invisible.
     if (desc.type == LightType::Spot && desc.outerConeRadians > 0.0f) {
         const float outer   = std::min(desc.outerConeRadians, JPH::JPH_PI * 0.5f);
         const float inner   = JPH::Clamp(desc.innerConeRadians, 0.0f, outer);
@@ -110,13 +100,9 @@ auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t sha
         packed.outerConeCos = -1.0f;
     }
 
-    // The shader reads a light's position in view space (w = 1, which the shader
-    // ignores but costs nothing to define). The engine has the world position; the
-    // view matrix is the renderer's, so this is the one place the two meet.
     JPH::Vec4(worldToView * desc.position, 1.0f).StoreFloat4(&packed.positionView);
 
     if (desc.type == LightType::Area) {
-        // Four 16-byte lanes in the shader, one column of the quad per lane.
         for (uint32_t column = 0; column < 4; ++column) {
             desc.points.GetColumn4(column).StoreFloat4(&packed.points[column]);
         }
@@ -133,9 +119,6 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.prevUnjitteredViewProj = frame.prevUnjitteredViewProj;
     packed.invViewProj            = frame.invViewProj;
 
-    // Named fields become lanes here and nowhere else: the clock rides camPos.w,
-    // the sun's intensity rides lightDir.w, the probe flag rides probeMin.w. That
-    // is the shader's layout, and this is the boundary it belongs to.
     packed.camPos      = JPH::Float4 {frame.camPosition.GetX(), frame.camPosition.GetY(), frame.camPosition.GetZ(), frame.frameClock};
     packed.lightDir    = JPH::Float4 {frame.sunDirection.GetX(), frame.sunDirection.GetY(), frame.sunDirection.GetZ(), frame.sunIntensity};
     packed.sunRadiance = JPH::Float4 {frame.sunRadiance.GetX(), frame.sunRadiance.GetY(), frame.sunRadiance.GetZ(), 0.0f};
@@ -158,8 +141,6 @@ auto PackFrameData(const FrameData& frame) noexcept -> FrameUniforms {
     packed.skyHorizon = ToFloat4(frame.skyHorizon);
     packed.skyGround  = ToFloat4(frame.skyGround);
 
-    // Everything else in the shader's struct is the renderer's, and is filled by
-    // RenderContext::SetFrameData after this returns.
     return packed;
 }
 

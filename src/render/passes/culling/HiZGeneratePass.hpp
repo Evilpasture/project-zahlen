@@ -7,10 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Builds the hierarchical depth pyramid the GPU culling shader rejects
-// instances against: mip 0 reduces the scene depth buffer, and every later mip
-// reduces the one before it, so the whole ladder is `kMaxGeneratedHiZMips`
-// dispatches separated by write-to-read barriers.
 struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
     CullingResources&    cull;
     RenderFrameContext& frame;

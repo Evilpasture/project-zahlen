@@ -1,16 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
-// The GPU ABI checks, in one TU.
-//
-// This is the only translation unit that embeds the cooked gpu_abi module and
-// walks it with the independent consteval parser. Everything here used to live
-// in GpuAbi.hpp, which RenderInternal.hpp includes, so every render TU paid the
-// embed plus the walk (52 TUs in a default build, ~2 s each) to answer
-// questions only the checks ask. The constants the TUs do consume are in the
-// header; this file proves the module agrees with them.
-
 #include "GpuAbi.hpp"
 #include "pipeline/SpirvLayout.hpp"
 #include <optional>
@@ -66,8 +56,6 @@ static_assert(
 );
 static_assert(kReflectedScenePushLayout.Valid(), "the reflected DescriptorHeapPushData is not a layout the engine can write");
 
-// The header's constant, checked against the reflection: the addresses moved
-// into the scene-pass payload if this fails, and the push would overwrite them.
 static_assert(
     kReflectedScenePushLayout.addressCount == kFrameAddressCount,
     "DescriptorHeapPushData no longer declares the six frame addresses the scene pushes {frame, lights, instances, joints, prevJoints, morphDeltas}"
@@ -78,8 +66,6 @@ static_assert(
     "DescriptorHeapPushData moved the frame addresses into the scene-pass payload: the push would overwrite the addresses every heap pass reads"
 );
 
-// The value the render TUs read. A copy of the reflected layout, statically
-// initialized: the checks above are what make it trustworthy.
 const Vk::HeapPushDataLayout kScenePushLayout = kReflectedScenePushLayout;
 
 }

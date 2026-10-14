@@ -112,7 +112,7 @@ auto RenderContext::Impl::AllocateLineVertexBuffers(
         created[i]          = std::move(*res);
         createdAddresses[i] = ctx.BufferAddress(created[i].Handle());
     }
-    // This helper is used at initialization; a reinit must be done after idle.
+
     for (auto& buffer: bufs) {
         allocator.DestroyBuffer(buffer);
     }
@@ -128,9 +128,7 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DebugLineVS>(), Vk::MakeStageSource<Shaders::Modules::DebugLinePS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-            // No HeapMappings: debug_line.slang declares no descriptor set. The
-            // vertex shader reads the interleaved buffer through the device
-            // address in its push block, and the fragment shader is a passthrough.
+
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -149,8 +147,6 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    // shadowSamplerConfig is consumed directly by the heap sampler writes
-    // (e.g. VolumetricFogSystem's "shadowSampler" slot); no VkSampler object.
     return targets.InitShadows()
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
@@ -223,8 +219,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         return std::unexpected(shaders.error());
     }
 
-    // One owner outlives all three synchronous builds; the view only carries
-    // pointers into its current SPIR-V buffers.
     const auto stages = shaders->View();
     return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
         .Shaders(stages)

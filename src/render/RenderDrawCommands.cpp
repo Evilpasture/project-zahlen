@@ -14,8 +14,6 @@ namespace ZHLN {
 
 namespace {
 
-// common.slang reads eight four-bit sampler codes per uint, in material slot
-// order. The sampler bank is laid out as S * 3 + T (invalid modes use Repeat).
 [[nodiscard]] constexpr auto EncodeMaterialSamplerWord(const MaterialSamplerAddresses& addresses, size_t first) noexcept -> uint32_t {
     uint32_t packed = 0;
     for (size_t i = 0; i < 8 && first + i < addresses.size(); ++i) {
@@ -28,7 +26,7 @@ namespace {
 }
 
 static_assert(static_cast<size_t>(MaterialTextureSlot::Count) <= 16);
-// Pin the shader encoding here, not in the public Material representation.
+
 constexpr MaterialSamplerAddresses kAllAddressModes = [] {
     MaterialSamplerAddresses modes {};
     for (uint32_t i = 0; i < kMaterialSamplerVariantCount; ++i) {
@@ -54,9 +52,7 @@ struct ResolvedMeshMaterial {
     NativeMesh*     indexMesh       = nullptr;
     NativeMaterial* material        = nullptr;
     NativeMaterial* prePassMaterial = nullptr;
-    // Addresses gain their element type here, where the stream each one
-    // feeds is known. Offsets below are then checked arithmetic, not bytes
-    // counted by hand against the wrong struct.
+
     Vk::DeviceAddress<VertexPosition>     posAddr;
     Vk::DeviceAddress<VertexTangentFrame> frameAddr;
     Vk::DeviceAddress<VertexSurface>      surfaceAddr;
@@ -96,11 +92,6 @@ constexpr uint32_t kNoFilmTexture = 0xFFFFu;
         .emissive = (material.emissiveMap != TextureHandle::Invalid) ? impl->textureManager.GetBindlessIndex(material.emissiveMap) : 1
     };
 }
-
-// MaterialDesc and DrawParams spell a colour or a weight set the same way the
-// ABI member does -- JPH::Float4 -- so there is nothing to convert: the
-// crossings below assign one. The Lane() overloads that used to bridge the two
-// spellings are gone with the second spelling.
 
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
@@ -174,8 +165,7 @@ struct InstanceDataDesc {
     const uint32_t doubleSided     = desc.doubleSided ? 1u : 0u;
     const uint32_t hasTransmission = !desc.unlit && desc.transmissionFactor > 0.0f ? 1u : 0u;
     const uint32_t isUnlit         = desc.unlit ? 1u : 0u;
-    // Winding is a property of the current draw, not of the cached mesh or
-    // material: the same primitive can be instanced under either parity.
+
     const uint32_t isMirrored = desc.world.GetDeterminant3x3() < 0.0f ? 1u : 0u;
 
     JPH::Float4 emissive       = desc.emissiveFactor;
@@ -194,11 +184,6 @@ struct InstanceDataDesc {
         }
     }
 
-    // glTF UVs have a top-left origin (V increases down the image). A positive
-    // KHR_texture_transform rotation moves +U toward -V, not +V. In particular,
-    // TextureTransformMultiTest's 90-degree transform must land on the same
-    // atlas checkmark as its untransformed Sample column, not the centre slash.
-    // Keep the rows per texture reference, even when several slots share an image.
     std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow0;
     std::array<JPH::Float4, static_cast<size_t>(MaterialTextureSlot::Count)> uvRow1;
     for (size_t slot = 0; slot < uvRow0.size(); ++slot) {
@@ -225,9 +210,7 @@ struct InstanceDataDesc {
         .metallicFactor      = desc.metallicFactor,
         .roughnessFactor     = desc.roughnessFactor,
         .alphaCutoff         = desc.alphaCutoff,
-        // Bit 9 keeps double-sided meshlets; bit 10 routes transmission forward
-        // without changing alphaMode; bit 11 marks unlit surfaces. Bit 12
-        // reverses raster triangle winding for a negative world determinant.
+
         .flags                = (isViewmodel << 16) | (isMirrored << 12) | (isUnlit << 11) | (hasTransmission << 10) | (doubleSided << 9) | (isSkinned << 8) |
                                 (desc.alphaMode & 0xFFu),
         .jointOffset          = desc.jointOffset,
@@ -294,8 +277,7 @@ struct InstanceDataDesc {
     res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
 
     res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer) : res.posMesh;
-    // A non-invalid scratch handle can still be stale or undersized. Never
-    // enqueue a draw that could read uninitialized positions or tangent frames.
+
     if (res.finalPosMesh == nullptr) [[unlikely]] {
         return std::nullopt;
     }
@@ -323,17 +305,10 @@ struct InstanceDataDesc {
         }
     }
 
-    // Persistently mapped debug triangles store positions then surfaces in
-    // one buffer. Skinned geometry stores positions then animated frames in
-    // scratch; its UVs/color continue to use the original surface buffer.
     if (res.posMesh == res.surfaceMesh) {
-        // Debug triangles pack positions, then surfaces, in one buffer:
-        // walk kMaxDebugVertices positions forward from the position stream.
         res.surfaceAddr = Vk::DeviceAddress<VertexSurface>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(RenderContext::Impl::kMaxDebugVertices));
     }
     if (skinnedVertexBuffer != Invalid) {
-        // Skinned scratch stores positions, then animated tangent frames:
-        // the frame stream begins one position array past the base.
         res.frameAddr = Vk::DeviceAddress<VertexTangentFrame>::Cast(res.posAddr + static_cast<std::ptrdiff_t>(res.finalPosMesh->vertexCount));
     }
 
@@ -353,9 +328,6 @@ struct DrawAddressPack {
     Vk::DeviceAddress<uint32_t>           skinDataAddress;
 };
 
-// Everything a DrawCommand keeps from the resolved source meshes: the BLAS
-// address for the TLAS, and the three skinning input streams (from the
-// source meshes, not the animated scratch the outputs land in).
 [[nodiscard]] DrawAddressPack AddressesOf(const ResolvedMeshMaterial& res) noexcept {
     return {
         .blasAddress      = res.posMesh->blasAddress,
@@ -553,7 +525,7 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
             cutter.material, cutter.mesh, cutter.transform, cutter.prevTransform, cutter.cullRadius, cutter.jointOffset, cutter.skinnedVertexBuffer,
             cutter.flags
         );
-        // Missing geometry invalidates the whole boolean, not just this cutter.
+
         if (!cutCmd) [[unlikely]] {
             return;
         }

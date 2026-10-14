@@ -11,15 +11,9 @@
 
 namespace ZHLN::Passes {
 
-// Which target feeds the tonemapper: the anti-aliased accumulation buffer when
-// an AA pass ran, the raw HDR scene color when none did. It is a property of
-// the AA mode the graph was compiled for, so it is resolved here at compile
-// time rather than carried as a runtime flag.
 template <AAMode Mode>
 using BlitInputRes = std::conditional_t<Mode != AAMode::None, Res_AccumCurrent, Res_HdrSceneColor>;
 
-// The whole display transform, in one payload. It has to mirror blit.slang
-// field for field, which the two static_asserts below hold it to.
 struct BlitPushConstants {
     float vignetteIntensity;
     float vignettePower;
@@ -38,21 +32,10 @@ static_assert(
     "BlitPushConstants field offsets must exactly mirror blit.slang"
 );
 
-// Final display pass: exposure, bloom, tonemap, vignette and color grading in
-// one fullscreen draw onto the presentation image.
-//
-// It is templated on the AA mode -- which resource it reads depends on it --
-// and on the callable that vends this frame's swapchain image, since the
-// destination is not a graph resource the binder owns but whatever the
-// destination registry resolved this frame. That callable is a lambda declared
-// where the graph is composed, so its type exists in no other translation
-// unit: the body has to be here, at the point of instantiation, rather than in
-// a .cpp of its own.
 template <AAMode Mode, typename GetSwapchainImageT>
 struct TonemapBlitPass: Vk::RenderPass<
                             "Blit", Vk::ShaderRead<BlitInputRes<Mode>>, Vk::ShaderRead<Res_BloomFinal>, Vk::ShaderRead<Res_Depth>,
                             Vk::ColorWrite<Res_Swapchain>> {
-    // Non-const: RecordCustom takes the pass by mutable reference.
     PostProcessResources& post;
     RenderFrameContext&   frame;
     GetSwapchainImageT    getSwapchainImage;

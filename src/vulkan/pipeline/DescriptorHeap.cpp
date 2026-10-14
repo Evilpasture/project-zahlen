@@ -250,8 +250,6 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
 }
 
 struct ResourceWriteBatch::Impl {
-    // pView points into this payload, which lives at a fixed address in the
-    // batch arena until the synchronous vkWriteResourceDescriptorsEXT call.
     struct ImagePayload {
         VkImageViewCreateInfo    viewInfo {};
         VkImageDescriptorInfoEXT descriptor {};
@@ -275,10 +273,6 @@ struct ResourceWriteBatch::Impl {
     std::vector<Write>                  writes;
 
     void AddImage(uint32_t slot, VkDescriptorType type, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) {
-        // The create-info is used verbatim as the descriptor's pView. Its
-        // aspect is already descriptor-legal by construction: Image::ViewInfo
-        // and ImageSlice::ViewInfo normalize a combined depth-stencil aspect
-        // to depth only, since that selection is legal solely for attachments.
         std::pmr::polymorphic_allocator<ImagePayload> alloc {&arena};
         auto*                                         image = alloc.new_object<ImagePayload>(viewInfo, layout);
 
@@ -355,8 +349,6 @@ void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize st
         return;
     }
 
-    // Only the API's two flat arrays are assembled here. Every nested pointer
-    // already targets stable arena storage, regardless of writes vector growth.
     std::vector<VkResourceDescriptorInfoEXT> resource_infos;
     std::vector<VkHostAddressRangeEXT>       ranges;
     resource_infos.reserve(total_count);

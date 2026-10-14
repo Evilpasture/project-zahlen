@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/FullscreenPass.inl
 #pragma once
 
 #include "FullscreenPass.hpp"
@@ -19,7 +18,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     bool                            additive,
     PipelineBinaryStore*              binaries
 ) noexcept {
-    // Reflection only: the binding structure drives the mapping table.
+
     if (!layoutInstance.Build(device, shaders)) {
         return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
@@ -59,8 +58,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     bool                                  additive,
     PipelineBinaryStore*                    binaries
 ) noexcept {
-    // Specialization does not change the descriptor interface, so one mapping
-    // table covers every variant.
+
     if (!layoutInstance.Build(device, shaders)) {
         return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
@@ -117,8 +115,7 @@ void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, const T& pushData
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(cmd, 0, pushData);
-    // The mapping is slot-independent: what travels here is the block's base
-    // slot, not an ordinal.
+
     PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
@@ -142,8 +139,7 @@ void FullscreenPass<LayoutT>::ExecuteVariantHeap(
     ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid fullscreen pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
     PushData(cmd, 0, pushData);
-    // The mapping is slot-independent: what travels here is the block's base
-    // slot, not an ordinal.
+
     PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
@@ -158,4 +154,4 @@ void FullscreenPass<LayoutT>::ExecuteHeap(VkCommandBuffer cmd, HeapBlockBase blo
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
-} // namespace ZHLN::Vk
+}

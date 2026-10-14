@@ -15,11 +15,10 @@ namespace {
     FrameDestinations& destinations, uint64_t& nextAcquisitionSerial, FrameDestinations::Window& dest, Vk::InstanceView instance
 ) noexcept
     -> std::expected<ZHLN::Optional<FrameDestinations::Acquired&>, ErrorCode> {
-    // 1. Already acquired earlier this frame? Return the active reference.
     if (dest.acquired.has_value()) {
         return *dest.acquired;
     }
-    // 2. Headless or detached window? Benign skip.
+
     if (dest.target == nullptr) {
         return std::nullopt;
     }
@@ -28,7 +27,6 @@ namespace {
     const Extent2D          size          = dest.target->GetFramebufferExtent();
     auto                    acquired      = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, !dest.IsPrimary());
 
-    // 3. Hard error (Device lost, fatal Vulkan error)
     if (!acquired) {
         if (Vk::IsDeviceLost(acquired.error())) {
             instance.IncrementDeviceLost();
@@ -38,7 +36,6 @@ namespace {
         return std::unexpected(AsFrameError(acquired.error()));
     }
 
-    // 4. Benign skip (Minimized window 0x0, out-of-date swapchain rebuilt)
     if (!acquired->has_value()) {
         destinations.AbortRecording(dest.id);
         dest.cachedGeneration = destPresenter.resourceGeneration;
@@ -51,7 +48,6 @@ namespace {
     }
     dest.cachedGeneration = image.generation;
 
-    // 5. Emplace and return the borrowed reference directly
     return dest.acquired.emplace(
         FrameDestinations::Acquired {
             .image      = image.image,
@@ -140,16 +136,14 @@ auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept 
         ZHLN::Log("[Render] Window presenter created for {:p} (primary={}).", static_cast<const void*>(dest.target), dest.IsPrimary() ? 1 : 0);
     }
 
-    // Call the free function. We don't want to bloat Impl with a helper.
     const auto acquired = AcquireDestinationImage(destinations, nextAcquisition, dest, ctx.Instance());
     if (!acquired) {
         return std::unexpected(acquired.error());
     }
     if (!acquired->has_value()) {
-        return std::nullopt; // Frame skipped
+        return std::nullopt;
     }
 
-    // Check existing command recorder or begin a new one...
     if (const auto existing = destinations.FindRecording(dest.id)) {
         if (!existing->recorder.IsRecording()) {
             return std::unexpected(DestinationError::ExpiredFrameTarget);

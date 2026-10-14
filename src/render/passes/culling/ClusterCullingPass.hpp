@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Assigns lights to the view's froxel grid. It reads and writes only storage
-// buffers, so it declares no image usage: the graph still gives it a hazard
-// slot and a dispatch point, it just has no barriers to emit.
 struct ClusterCullingPass: Vk::RenderPass<"ClusterCulling"> {
     CullingResources&    cull;
     RenderFrameContext& frame;

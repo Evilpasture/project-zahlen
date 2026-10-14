@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -16,7 +15,6 @@ enum class GpuProfilerError : uint8_t {
     QueryPoolCreationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Timestamp query pool creation failed"> {})           = 1,
     StatsQueryPoolCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline statistics query pool creation failed"> {}) = 2,
 };
-
 
 struct PipelineStats {
     uint64_t iaVertices           = 0;
@@ -35,7 +33,6 @@ struct PipelineStats {
         return (clipperInvocations > 0) ? 1.0 - static_cast<double>(clipperPrimitivesOut) / static_cast<double>(clipperInvocations) : 0.0;
     }
 };
-
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
@@ -65,13 +62,11 @@ class GpuProfiler {
 
     void Reset(uint32_t frameIndex) noexcept;
 
-
     void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
     void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
 
     template <typename Func>
     void RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept;
-
 
     [[nodiscard]] auto PipelineStatsAvailable() const noexcept -> bool {
         return _statsSupported;
@@ -103,7 +98,6 @@ class GpuProfiler {
     bool _statsSupported = false;
     bool _statsEnabled = false;
 };
-
 
 template <typename EnumT>
 class ScopedGpuProfile {

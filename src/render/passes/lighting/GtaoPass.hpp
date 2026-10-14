@@ -7,10 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Half-resolution ground-truth ambient occlusion, and the diffuse GI estimate
-// the same dispatch produces. It runs only when the selected GI mode is one of
-// the two that need an AO term, and it is a compute pass: it reads depth and
-// normal/roughness and writes the AO target directly.
 struct GtaoPass: Vk::RenderPass<"GtaoAo", Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>> {
     RenderFrameContext&                            impl;
     GeneratedGpu::ScenePassPushConstants          pc {};

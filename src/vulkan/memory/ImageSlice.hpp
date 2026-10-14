@@ -16,11 +16,6 @@ namespace ZHLN::Vk {
 template <VkImageLayout Layout, VkFormat Format>
 struct TypedImage;
 
-// A borrowed subresource range of an image: plain data, no ownership and no
-// pointers back to an owning view object. `attachmentView` is the only
-// VkImageView handle a slice may carry, and it is set only when the slice
-// can be bound as a dynamic-rendering attachment; descriptor-heap writes
-// ignore it entirely and use ViewInfo() below.
 struct ImageSlice {
     VkImage            image = VK_NULL_HANDLE;
     VkImageView        attachmentView = VK_NULL_HANDLE;
@@ -46,9 +41,6 @@ struct ImageSlice {
         image(img), attachmentView(attachment), extent(ext), format(fmt), aspect(asp) {
     }
 
-    // Copy of the descriptor description only; discards attachment
-    // capability. Used when a sampled/storage view of the same image is
-    // needed and no handle exists (or must not be created).
     constexpr explicit ImageSlice(const VkImageViewCreateInfo& info, VkExtent3D ext) noexcept:
         image(info.image), extent(ext), format(info.format), aspect(info.subresourceRange.aspectMask),
         baseMip(info.subresourceRange.baseMipLevel), mipCount(info.subresourceRange.levelCount),
@@ -56,11 +48,6 @@ struct ImageSlice {
         viewType(info.viewType) {
     }
 
-    // Slice of an image that owns an attachment view: carries the handle for
-    // attachment use and copies the view's subresource range and type, so
-    // ViewInfo() below describes exactly the same subresources. The aspect
-    // defaults to the view's own; pass one to narrow it (e.g. sampling the
-    // depth aspect of a depth-stencil target).
     ImageSlice(
         VkImage img, const AttachmentView& owner, VkExtent3D ext, VkFormat fmt, VkImageAspectFlags asp = VK_IMAGE_ASPECT_NONE
     ) noexcept:
@@ -74,12 +61,7 @@ struct ImageSlice {
     ) noexcept:
         ImageSlice(img, owner, VkExtent3D {ext.width, ext.height, 1}, fmt, asp) {
     }
-    // Everything a descriptor-heap write needs, as the plain Vulkan struct:
-    // this becomes VkImageDescriptorInfoEXT::pView. Valid even when
-    // attachmentView is VK_NULL_HANDLE. Like Image::ViewInfo(), a combined
-    // depth-stencil aspect (which a slice may carry for barrier/attachment
-    // purposes) is normalized to depth only here; the stored `aspect` field
-    // itself is left alone for barriers and attachments.
+
     [[nodiscard]] constexpr auto ViewInfo() const noexcept -> VkImageViewCreateInfo {
         VkImageAspectFlags descriptorAspect = aspect;
         if ((descriptorAspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ==
@@ -132,7 +114,6 @@ struct ImageSlice {
     template <VkImageLayout Layout>
     [[nodiscard]] constexpr auto Assume() const noexcept -> TypedImage<Layout, VK_FORMAT_UNDEFINED>;
 
-    // Only a matching runtime view format may acquire a compile-time format.
     template <VkFormat Format, VkImageLayout Layout>
     [[nodiscard]] constexpr auto MatchFormat(VkImageAspectFlags imageAspect) const noexcept -> std::optional<TypedImage<Layout, Format>>;
     template <VkFormat Format, VkImageLayout Layout>

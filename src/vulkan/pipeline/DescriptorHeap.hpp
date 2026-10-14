@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "memory/Allocator.hpp"
 
@@ -85,7 +84,6 @@ static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
 static_assert(std::is_standard_layout_v<TextureHandle>);
 static_assert(std::is_trivially_copyable_v<TextureHandle>);
 
-
 template <DescriptorHeapType Type>
 class DescriptorHeap {
   public:
@@ -157,7 +155,6 @@ class DescriptorHeap {
     VkBindHeapInfoEXT    _bindInfo  = {};
 };
 
-
 class ResourceWriteBatch {
   public:
     ResourceWriteBatch() noexcept;
@@ -169,9 +166,6 @@ class ResourceWriteBatch {
     ResourceWriteBatch(ResourceWriteBatch&& other) noexcept;
     auto operator=(ResourceWriteBatch&& other) noexcept -> ResourceWriteBatch&;
 
-    // Descriptor-heap writes take only the view description: it becomes
-    // VkImageDescriptorInfoEXT::pView verbatim. Whether a VkImageView handle
-    // exists for the image is the attachment system's business, not this one's.
     void AddImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void AddStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void AddBuffer(StorageBufferHandle handle, BufferSlice slice) noexcept;
@@ -182,7 +176,7 @@ class ResourceWriteBatch {
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
     [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
-    // The slot ids live alongside their payloads, not in a parallel vector.
+
     [[nodiscard]] auto SlotBounds() const noexcept -> std::pair<uint32_t, uint32_t>;
 
   private:
@@ -214,7 +208,6 @@ class SamplerWriteBatch {
     std::unique_ptr<Impl> _impl;
 };
 
-
 class SlotAllocator {
   public:
     SlotAllocator() noexcept;
@@ -237,7 +230,6 @@ class SlotAllocator {
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };
-
 
 class HeapManager {
   public:

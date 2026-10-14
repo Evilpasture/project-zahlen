@@ -7,7 +7,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-
 #include <array>
 #include <cstddef>
 #include <cstdint>

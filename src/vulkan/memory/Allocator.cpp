@@ -69,9 +69,6 @@ void SetGeneratedImageName(VmaAllocator allocator, GPUAddressTracker* tracker, V
     Debug::SetObjectName(*tracker, allocatorInfo.device, objectHandle, VK_OBJECT_TYPE_IMAGE, name);
 }
 
-// Engine-owned MemoryUsage -> VMA. Exhaustive switch so adding an enumerator
-// to MemoryUsage forces a compiler error here; we never hard-code VMA numeric
-// values in headers.
 [[nodiscard]] auto ToVmaUsage(MemoryUsage usage) noexcept -> VmaMemoryUsage {
     switch (usage) {
         case MemoryUsage::GPUOnly:
@@ -335,9 +332,6 @@ Buffer::MappedRegion::~MappedRegion() noexcept {
     Cleanup();
 }
 
-// The mapping itself belongs to the allocation (it was created with
-// VMA_ALLOCATION_CREATE_MAPPED_BIT) and lives until the buffer is destroyed, so only
-// the write-back is ours to do here.
 void Buffer::MappedRegion::Cleanup() noexcept {
     if (_allocator != nullptr && _allocation != nullptr) {
         vmaFlushAllocation(_allocator, _allocation, 0, VK_WHOLE_SIZE);
@@ -393,7 +387,7 @@ auto UploadToBuffer(Allocator& allocatorRef, VkCommandBuffer cmd, Buffer& dst, c
             return {};
         }
         std::memcpy(mapped->Data(), data, size);
-    } // `mapped` destructs here, flushing the staging writes before the copy is recorded
+    }
 
     CopyBuffer(cmd, staging, dst, static_cast<VkDeviceSize>(size));
     return staging;
@@ -532,10 +526,7 @@ auto Image::CreateAttachmentView(
     if ((viewType == VK_IMAGE_VIEW_TYPE_CUBE || viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) && !_config.cubeCompatible) {
         return std::unexpected(InvalidConfiguration);
     }
-    // ViewInfo() produces the descriptor description, which normalizes a
-    // combined depth-stencil aspect down to depth only. An attachment view
-    // is the one place both aspects may (and for a depth-stencil target,
-    // must) be selected together, so restore the validated aspect.
+
     VkImageViewCreateInfo info = ViewInfo(aspect, baseMip, mipCount, baseLayer, layerCount, viewType);
     info.subresourceRange.aspectMask = effectiveAspect;
     return AttachmentView::Create(device, info);

@@ -7,7 +7,6 @@
 
 namespace ZHLN::Vk {
 
-
 SemaphorePool::~SemaphorePool() noexcept {
     Cleanup();
 }

@@ -22,8 +22,6 @@ enum class CommandRecordingError : uint8_t {
     NotExecutable ZHLN_ANNOTATION(ZHLN::Description<"Command buffer has not been ended">{}),
 };
 
-// A non-owning proof that vkEndCommandBuffer succeeded. The command pool still
-// owns the buffer and must outlive this token and any GPU work submitted with it.
 class ExecutableCommands {
   public:
     ExecutableCommands() = delete;
@@ -43,10 +41,6 @@ class ExecutableCommands {
     VkCommandBuffer _cmd = VK_NULL_HANDLE;
 };
 
-// The Recording -> Executable transition is explicit; dropping a recorder does
-// not end or reset a Vulkan command buffer. Abort() resets it to Initial and
-// requires a pool created with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
-// (all CommandPool instances in this renderer have that flag).
 class CommandRecorder {
   public:
     CommandRecorder() = delete;
@@ -54,8 +48,7 @@ class CommandRecorder {
     CommandRecorder(const CommandRecorder&) = delete;
     auto operator=(const CommandRecorder&) -> CommandRecorder& = delete;
     CommandRecorder(CommandRecorder&& other) noexcept: _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)) {}
-    // A recording can be transferred to a new owner, never replaced in place.
-    // There is no "only when empty" precondition hidden in a move assignment.
+
     auto operator=(CommandRecorder&&) -> CommandRecorder& = delete;
 
     [[nodiscard]] static auto Begin(

@@ -1,15 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The frame pipeline, as a declaration.
-//
-// Nothing is recorded here. Each pass is a struct that knows which resources it
-// touches and how to record itself, so this file's whole job is to list them in
-// the right order and let the graph engine work out the hazards, the barriers
-// and which ones can be replayed concurrently. A pass that needs frame state
-// reads it from the `RenderContext::Impl&` it is handed at construction; a pass
-// that needs per-frame tuning values carries them as members.
-
 #include "RenderGraphBuild.hpp"
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
@@ -38,8 +29,7 @@ template <>
 struct ResourceResolver<Res_TransLighting> {
     [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> ImageSlice {
         const auto& target = impl.graphResources.transLightingTarget;
-        // The graph uses mip 0 as a color attachment; the scene descriptor
-        // separately samples the full mip chain (WriteTransLightingToHeap).
+
         return ImageSlice {target.image.Handle(), target.mipAttachmentViews[0], target.extent, Res_TransLighting::format};
     }
 };
@@ -81,9 +71,6 @@ void ExecuteSceneGraph(
         self, RenderGraphDetail::AssembleScenePushConstants(self, view, settings), std::forward<GetSwapchainImageT>(getSwapchain)
     );
 
-    // Every resource a pass named is resolved once: explicit resolvers cover
-    // non-bundle resources (swapchain and history) and the transmission
-    // attachment's mip-0 view; the rest use reflected target metadata.
     typename decltype(graph)::Binder binder;
     binder.AutoBind(self);
 

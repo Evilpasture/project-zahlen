@@ -19,10 +19,6 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// Volk is configured with process-global function tables in this build. Keep
-// the previous single-instance limit while diagnostics and ownership move to
-// explicit per-instance state; the full per-device dispatch tables are a
-// separate follow-up.
 std::atomic_flag g_globalVolkDispatchInUse = ATOMIC_FLAG_INIT;
 
 class GlobalVolkDispatchLease {
@@ -349,7 +345,7 @@ auto Instance::Create(
         }
 
         if (vkCreateDebugUtilsMessengerEXT != nullptr &&
-            // Is VK_EXT_device_address_binding_report enabled?
+
             std::ranges::contains(enabled_extensions, std::string_view(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME))) {
             const VkDebugUtilsMessengerCreateInfoEXT address_binding_info {
                 .sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,

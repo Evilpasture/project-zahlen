@@ -15,8 +15,6 @@
 namespace ZHLN::Vk {
 
 Context::~Context() noexcept {
-    // Keep the address tracker enabled through device destruction so that the
-    // driver's final unbind notifications can retire their ranges.
     _device.Reset();
     if (_addressBindingReportEnabled) {
         if (auto* const tracker = _instance.AddressTracker(); tracker != nullptr) {
@@ -73,8 +71,6 @@ namespace {
         return std::unexpected(ContextError::LoaderInitializationFailed);
     }
 
-    // Volk uses a process-global dispatch table in this build. Point it at the
-    // borrowed or owned instance before issuing any instance-level calls.
     volkLoadInstance(instance.Handle());
     return {};
 }
@@ -84,9 +80,6 @@ namespace {
 }
 
 [[nodiscard]] auto FeatureBitEnabled(const VkPhysicalDeviceFeatures2* root, const VkStructureType sType, const size_t bitOffset) noexcept -> bool {
-    // Chain elements are different Vulkan struct types; reading them through
-    // an unrelated C++ struct pointer violates strict aliasing. The common
-    // sType/pNext header and target VkBool32 field are inspected as bytes.
     for (const void* cursor = root; cursor != nullptr;) {
         VkStructureType type = VK_STRUCTURE_TYPE_MAX_ENUM;
         const void*     next = nullptr;

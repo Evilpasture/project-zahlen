@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// How much of the resolved history survives into this frame. Low values track
-// motion better and shimmer more; high values smear.
 struct TAAPushConstants {
     float feedback;
 };

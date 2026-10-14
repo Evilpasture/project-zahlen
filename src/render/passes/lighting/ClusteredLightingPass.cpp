@@ -9,9 +9,6 @@ namespace ZHLN::Passes {
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     const uint32_t fIdx = frame.presenter.frameIndex;
 
-    // The pipeline has a ray-traced variant that reads the denoised RT shadow
-    // mask; which specialization the graph runs is this frame's setting,
-    // resolved here rather than being baked in.
     const bool rtrActive =
         (frame.settings.rayTracing.enableReflections || frame.settings.rayTracing.enableShadows || frame.settings.rayTracing.enableDiffuseGI) &&
         frame.ctx.RayTracingSupported();

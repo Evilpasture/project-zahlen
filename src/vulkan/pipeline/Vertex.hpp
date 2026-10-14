@@ -11,7 +11,6 @@
 
 namespace ZHLN::Vk {
 
-
 template <typename T>
 struct FormatOf;
 
@@ -69,7 +68,6 @@ template <typename T>
 [[nodiscard]] consteval auto DefaultBinding(uint32_t binding = 0) noexcept -> VkVertexInputBindingDescription {
     return {.binding = binding, .stride = sizeof(T), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
 }
-
 
 template <typename T>
 struct AutoReflectAttributes {

@@ -50,8 +50,7 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
                                  rt.mipLevels;
                                  rt.mipAttachmentViews;
                              }) {
-            // HiZ is compute-writable; transmission is a color attachment at
-            // mip 0, with the complete chain sampled by the forward shader.
+
             Vk::ImageUsage usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst;
             if constexpr (std::is_same_v<Tag, Res_HiZ>) {
                 usage |= Vk::ImageUsage::Storage;
@@ -111,7 +110,7 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
     if (!sm_res) {
         return std::unexpected(sm_res.error());
     }
-    // Retire supplemental views before replacing their backing images.
+
     _shadowCascadeViews.clear();
     _graph.shadowMap.Destroy(_allocator);
     _graph.shadowMap = std::move(*sm_res);
@@ -142,9 +141,6 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         }
     }
 
-    // A plain 2D depth image: no layers, no cube compatibility. Every
-    // shadow tile -- a spot's single tile or a point's six faces -- is a
-    // viewport into this one attachment.
     auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
         _allocator, _ctx.Device(), atlasExt, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled}
     );
@@ -198,7 +194,6 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             return std::unexpected(smp_res.error());
         }
 
-        // Additional per-cascade views must die before their old images.
         _shadowCascadeViews.clear();
         _shadowCascadeViewsPrev.clear();
         _graph.shadowMap.Destroy(_allocator);
@@ -290,7 +285,6 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
         cmd, _graph.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
     );
 
-    // Every Hi-Z mip begins at far depth and ends shader-readable.
     Vk::ClearColorAndTransition(cmd, _graph.hizMap, 1.0f);
 }
 
@@ -299,7 +293,7 @@ void TargetManager::Clear() noexcept {
     _shadowCascadeViewsPrev.clear();
     _shadowAtlasView = {};
     Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(_graph, [&]<typename Tag>(auto& target) { target.Destroy(_allocator); });
-    // These targets are not part of the render graph's reflected resources.
+
     _graph.shadowMap.Destroy(_allocator);
     _graph.bloomBlurTarget.Destroy(_allocator);
     _shadowMapPrev.Destroy(_allocator);

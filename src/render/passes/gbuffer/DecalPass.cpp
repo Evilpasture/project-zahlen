@@ -6,9 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// One decal instance: its transform, the clip-to-local matrix that
-// reconstructs the object-space position from the depth buffer, and the
-// material overrides it stamps.
 struct DecalPushConstants {
     JPH::Mat44 worldMatrix;
     JPH::Mat44 clipToLocal;

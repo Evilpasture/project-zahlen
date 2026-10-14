@@ -7,20 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Subpixel morphological anti-aliasing, in the three sub-passes the original
-// technique splits into:
-//
-//   1. `SmaaEdgePass`   -- edge detection, writing a two-channel edge texture;
-//   2. `SmaaWeightPass` -- blending weights, looked up in the area and search
-//                          LUTs that `PostProcessFeature` baked at startup;
-//   3. `SmaaBlendPass`  -- the neighborhood blend that mixes the color buffer
-//                          by those weights.
-//
-// They are three graph passes rather than one because the second depends on
-// every texel of the first and the third on every texel of the second: the
-// graph has to barrier between them, and it can only do that if they are
-// separate nodes. They still fork nowhere and run strictly in this order.
-
 struct SmaaEdgePass: Vk::RenderPass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_SmaaEdge>> {
     AntiAliasingResources& aa;
     RenderFrameContext&    frame;

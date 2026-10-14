@@ -13,20 +13,6 @@
 
 namespace ZHLN::Vk {
 
-// A buffer device address with the element type it points at carried in the
-// type system. The renderer submits geometry exclusively through buffer
-// device addresses (GPUBuffer<T> in the shaders), never vkCmdBindVertexBuffers,
-// so addresses -- not buffer handles -- are what draw code actually works
-// with. Typing them makes a whole class of mistakes unrepresentable:
-// assigning a VertexPosition address to a VertexSurface field, or offsetting
-// a stream by a byte count meant for a different element, no longer compiles
-// without an explicit Cast<> saying the reinterpretation is intended.
-//
-// Layout is exactly VkDeviceAddress (one uint64_t, standard layout, trivially
-// copyable), so DeviceAddress<T> fields can sit in push-constant structs and
-// any other GPU-ABI payload without changing a single byte. Raw VkDeviceAddress
-// remains the spelling only where a Vulkan struct or a generated Slang type
-// demands the primitive: call .Get() there.
 template <typename T = void>
 class DeviceAddress {
   public:
@@ -38,15 +24,11 @@ class DeviceAddress {
     constexpr explicit DeviceAddress(VkDeviceAddress addr) noexcept: _address(addr) {
     }
 
-    // Type erasure: any typed address converts implicitly to DeviceAddress<void>.
     template <typename U>
         requires(!std::is_void_v<U> && std::is_void_v<T>)
     constexpr DeviceAddress(const DeviceAddress<U>& other) noexcept: _address(other.Get()) {
     }
 
-    // The only way between two different element types, and deliberately
-    // spelled out at the call site: reinterpreting a stream's address is a
-    // decision, not an accident of both fields being uint64_t.
     template <typename U>
         requires(!std::is_same_v<T, U> && !std::is_void_v<T>)
     [[nodiscard]] constexpr static auto Cast(DeviceAddress<U> other) noexcept -> DeviceAddress<T> {
@@ -56,9 +38,7 @@ class DeviceAddress {
     [[nodiscard]] constexpr auto Get() const noexcept -> VkDeviceAddress {
         return _address;
     }
-    // One null-spelling throughout: 0 / nullptr is the sentinel, operator bool
-    // and ==/!= nullptr ask the question. No .Valid() -- an address is not a
-    // handle, and no .IsNull() either.
+
     [[nodiscard]] constexpr explicit operator bool() const noexcept {
         return _address != 0;
     }
@@ -66,13 +46,10 @@ class DeviceAddress {
         _address = 0;
     }
 
-    // Byte-level offsetting: the one arithmetic that is meaningful for every
-    // element type, including void. Returns the same typed address.
     [[nodiscard]] constexpr auto ByteOffset(VkDeviceSize bytes) const noexcept -> DeviceAddress<T> {
         return DeviceAddress<T>(_address + bytes);
     }
 
-    // Element arithmetic, only where an element type exists to measure in.
     template <typename U = T>
         requires(!std::is_void_v<U>)
     [[nodiscard]] constexpr auto operator+(std::ptrdiff_t count) const noexcept -> DeviceAddress<T> {
@@ -99,7 +76,6 @@ class DeviceAddress {
         return *this;
     }
 
-    // Element distance between two addresses into the same stream.
     template <typename U = T>
         requires(!std::is_void_v<U>)
     [[nodiscard]] constexpr auto operator-(DeviceAddress<T> other) const noexcept -> std::ptrdiff_t {
@@ -117,8 +93,7 @@ class DeviceAddress {
     }
 
     constexpr auto operator<=>(const DeviceAddress&) const = default;
-    // Not synthesized from <=>: address-to-address equality needs its own
-    // defaulted declaration alongside the nullptr one below.
+
     constexpr bool operator==(const DeviceAddress&) const = default;
     constexpr bool operator==(std::nullptr_t) const noexcept {
         return _address == 0;

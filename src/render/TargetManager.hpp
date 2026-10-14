@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include "Rendering.hpp"
 #include "graph/RenderGraph.hpp"
@@ -26,7 +25,7 @@ using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, 
 using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Clearcoat     = Vk::GraphImage<"Clearcoat", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Sheen         = Vk::GraphImage<"Sheen", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-// B stores lit strength in codes 0..254; code 255 marks an unlit G-buffer pixel.
+
 using Res_Anisotropy    = Vk::GraphImage<"Anisotropy", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
@@ -81,8 +80,6 @@ struct ClearColorOf<Res_TransLighting> {
 
 using Res_AccumPrevious = Vk::GraphImage<"AccumPrevious", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
 using Res_AccumCurrent = Vk::GraphImage<"AccumCurrent", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-
-
 
 template <VkFormat F>
 [[nodiscard]] auto CreateColorTarget(Vk::Allocator& allocator, VkDevice device, VkExtent2D ext, Vk::ImageUsage extra = Vk::ImageUsage::None)
@@ -196,10 +193,7 @@ class TargetManager {
     };
     static constexpr uint32_t kShadowResolution = 2048;
     static constexpr uint32_t kCascades         = 4;
-    // One 2D depth image every shadow-casting light sub-allocates
-    // square tiles out of; `ShadowAtlas` owns the packing and mirrors this
-    // edge. 64 MB of D32 buys 1024 tiles at 128 or 64 at 512, which is the
-    // budget that replaced four hard-wired cube maps.
+
     static constexpr uint32_t kShadowAtlasSize  = 4096;
 
     TargetManager(Vk::Context& ctx, Vk::Allocator& allocator, Vk::CommandRing<Vk::QueueType::Graphics, 8>& ring) noexcept
@@ -211,7 +205,6 @@ class TargetManager {
     TargetManager(TargetManager&&) noexcept            = delete;
     auto operator=(TargetManager&&) noexcept -> TargetManager& = delete;
 
-
     [[nodiscard]] auto Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto InitShadows() -> std::expected<void, ErrorCode>;
@@ -221,9 +214,8 @@ class TargetManager {
     void RecordInitialLayouts(VkCommandBuffer cmd) const noexcept;
 
     void NameGraphTargets() const noexcept;
-    // Only after the device is idle; release extra views before their images.
-    void Clear() noexcept;
 
+    void Clear() noexcept;
 
     [[nodiscard]] auto Graph() noexcept -> GraphResources& { return _graph; }
     [[nodiscard]] auto Graph() const noexcept -> const GraphResources& { return _graph; }
@@ -235,10 +227,6 @@ class TargetManager {
     [[nodiscard]] auto CascadeViewsPrev() const noexcept -> std::span<const Vk::AttachmentView> { return _shadowCascadeViewsPrev; }
     void               SwapCascadeViews() noexcept { std::swap(_shadowCascadeViews, _shadowCascadeViewsPrev); }
 
-    // The one view of the whole atlas: every tile is a viewport into it, so
-    // there is nothing per-light to hand out any more.
-        // Attachment role only; sampling the atlas goes through the image's
-    // ViewInfo() at the call site.
     [[nodiscard]] auto AtlasView() noexcept -> Vk::AttachmentView& { return _shadowAtlasView; }
     [[nodiscard]] auto AtlasView() const noexcept -> const Vk::AttachmentView& { return _shadowAtlasView; }
 

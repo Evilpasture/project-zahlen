@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Advances every mesh-particle emitter. Split from the billboard pass because
-// the two have different parameter blocks and different pipelines, and because
-// the graph can then fork them -- they touch disjoint buffers.
 struct MeshParticleUpdatePass: Vk::RenderPass<"MeshParticleUpdate"> {
     const ParticleUpdateResources& particles;
     RenderFrameContext&            frame;

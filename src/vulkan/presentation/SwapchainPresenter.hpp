@@ -35,10 +35,6 @@ struct SwapchainTarget {
     bool       presentable = false;
 };
 
-// Fixed by contract, not by oversight: the headless destination's color target
-// bakes its format into RenderTarget<kHeadlessColorFormat>, and the host-blit
-// present path consumes that target in exactly this format. An 8-bit sRGB
-// target is what both sides agree on, so it stays hardcoded.
 inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
 class SwapchainPresenter {
@@ -69,12 +65,11 @@ class SwapchainPresenter {
         -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
-    // Destruction requires all submitted frames to have completed.
+
     void Cleanup() noexcept;
 
     [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> PresentationOutcome<SwapchainTarget>;
 
-    // The swapchain transition must be recorded BEFORE the recorder is ended.
     void PreparePresent(CommandRecorder& recorder, uint32_t imageIndex, VkImageLayout currentLayout) const noexcept;
 
     [[nodiscard]] auto Present(

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -11,7 +10,6 @@
 #include <Zahlen/Core/Defer.hpp>
 
 namespace ZHLN::Vk {
-
 
 struct Upload2DDesc {
     const void*      data;
@@ -37,7 +35,6 @@ struct UploadCubeDesc {
     VkFormat                        format;
     std::string_view                debugName = {};
 };
-
 
 class TextureUploader {
   public:

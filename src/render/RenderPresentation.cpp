@@ -21,9 +21,6 @@ auto RenderContext::Impl::ReconcileDestination(FrameDestinations::Window& dest, 
         return image.layout;
     }
 
-    // Swapchain images are COLOR_ATTACHMENT-only (and headless presentation
-    // targets need not support TRANSFER_DST either). Clear via attachment load
-    // op rather than vkCmdClearColorImage, which requires TRANSFER_DST usage.
     const VkCommandBuffer cmd = recorder.Handle();
     Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image.image.Handle());
     Vk::DynamicPass(image.image.Extent2D())
@@ -73,8 +70,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
-        // Simulations signal the primary presenter's timeline, regardless of
-        // which window consumes their results.
+
         const uint64_t computeValue = presenter.sync.GetTimelineValue(presenter.frameIndex);
         const VkSemaphore computeTimeline = presenter.sync.ComputeTimeline(presenter.frameIndex);
         if (computeTimeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
@@ -133,14 +129,12 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
                     ZHLN::Log("[Render] Window rebuild after present failed; retrying next frame.");
                 }
             }
-            // A rebuild retires the borrowed ImageSlice immediately; even
-            // headless screenshots must not inspect it after this point.
+
             dest.acquired.reset();
             dest.cachedGeneration = destPresenter.resourceGeneration;
             result = PresentSuboptimal {};
         }
-        // For headless captures, keep the last successfully presented image
-        // and its drawn bit until the next BeginFrame discards that frame state.
+
         destPresenter.AdvanceFrame();
     }
 

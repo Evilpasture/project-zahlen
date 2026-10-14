@@ -6,8 +6,6 @@
 
 namespace ZHLN::Vk {
 
-// Compile-Time Metaprogramming & Simulation Definitions
-
 namespace TemplatedDetail {
 
 template <typename UsagesList, typename TargetResource>
@@ -103,9 +101,6 @@ struct ExtractResources<TypeList<Usages...>> {
     using type = TypeList<typename Usages::Resource...>;
 };
 
-// One resource per usage appended to one accumulator, in first-seen order: a single
-// fold carrying the list, rather than a recursion that rebuilds the tail list at
-// every level on the way back up.
 template <typename Accumulated, typename... Usages>
 struct UniqueResourcesFold {
     using type = Accumulated;
@@ -142,7 +137,7 @@ struct CollectAllResources {
 };
 
 template <typename Target, typename... Ts>
-consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t {
+consteval auto GetResourceIndexImpl(TypeList<Ts...> ) -> size_t {
     size_t                idx   = 0;
     [[maybe_unused]] bool found = ((std::is_same_v<Target, Ts> ? true : (++idx, false)) || ...);
     return idx;
@@ -151,7 +146,7 @@ consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t {
 template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t {
     if constexpr (std::is_same_v<Target, detail::DummyResource>) {
-        return 0; // Dummy resources bypass index lookup safely
+        return 0;
     } else {
         constexpr size_t idx = GetResourceIndexImpl<Target>(ResourceList {});
 
@@ -196,20 +191,18 @@ consteval auto ComputeStateTable() {
     std::array<std::array<ResourceState, num_resources>, num_passes> table {};
     std::array<ResourceState, num_resources>                         current_states {};
 
-    // Warm up simulation state
     [&]<size_t... Is>(std::index_sequence<Is...>) {
         (
             [&]<size_t I>() {
                 using R = typename ResourceList::template type<I>;
 
-                // Determine if the resource is ever written in this graph
                 constexpr bool is_written = []() consteval {
                     bool written    = false;
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
                             if constexpr (sizeof...(Js) == 0) {
-                                return false; // Short-circuit passes with no image usages
+                                return false;
                             } else {
                                 return (
                                     (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
@@ -224,8 +217,7 @@ consteval auto ComputeStateTable() {
                 }();
 
                 if constexpr (!is_written) {
-                    // It is an external read-only input.
-                    // Initialize its state to its first usage's layout and stage.
+
                     constexpr auto first_usage_info = []() consteval {
                         VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                         VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -261,7 +253,7 @@ consteval auto ComputeStateTable() {
 
                     current_states[I] = first_usage_info;
                 } else {
-                    // Standard initialization for resources written inside this graph
+
                     current_states[I] = ResourceState {
                         .layout            = VK_IMAGE_LAYOUT_UNDEFINED,
                         .stage             = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
@@ -293,9 +285,6 @@ consteval auto ComputeStateTable() {
 
                             constexpr bool is_write = (U::access & WriteMask) != 0;
 
-                            // The incoming barrier uses U::layout/stage/access;
-                            // track the state in which the pass actually leaves
-                            // the image for the next pass (and the next frame).
                             current_states[r_idx] = ResourceState {
                                 .layout            = U::final_layout,
                                 .stage             = U::final_stage,
@@ -321,14 +310,13 @@ consteval auto ComputeStateTable() {
             [&]<size_t I>() {
                 using R = typename ResourceList::template type<I>;
 
-                // Determine if the resource is ever written in this graph
                 constexpr bool is_written = []() consteval {
                     bool written    = false;
                     auto check_pass = [&]<typename Pass>() {
                         using Usages = typename Pass::Usages;
                         written |= []<size_t... Js>(std::index_sequence<Js...>) {
                             if constexpr (sizeof...(Js) == 0) {
-                                return false; // Short-circuit passes with no image usages
+                                return false;
                             } else {
                                 return (
                                     (std::is_same_v<typename Usages::template type<Js>::Resource, R> &&
@@ -355,7 +343,7 @@ consteval auto ComputeStateTable() {
                         .layout = VK_IMAGE_LAYOUT_UNDEFINED, .stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .lastWritePass = 999999, .fromPreviousFrame = false
                     };
                 } else if constexpr (!is_written) {
-                    // Keep the external read-only input state intact
+
                 } else {
                     if (current_states[I].lastWritePass < 999999) {
                         current_states[I].fromPreviousFrame = true;
@@ -373,13 +361,11 @@ consteval auto ComputeStateTable() {
 template <typename T>
 [[nodiscard]] constexpr VkExtent3D ToExtent3D(const T& extent) noexcept {
     if constexpr (requires { extent.depth; }) {
-        return extent; // Already 3D
+        return extent;
     } else {
-        return {extent.width, extent.height, 1}; // Promote 2D -> 3D
+        return {extent.width, extent.height, 1};
     }
 }
-
-// ---- Automatic fork partition definitions
 
 template <typename Resources, typename C>
 struct AllDisjointFrom<Resources, TypeList<>, C> {
@@ -391,8 +377,6 @@ struct AllDisjointFrom<Resources, TypeList<Head, Tail...>, C> {
     static constexpr bool value = ArePassesDisjoint<Resources, Head, C>::value && AllDisjointFrom<Resources, TypeList<Tail...>, C>::value;
 };
 
-// `Acc` is the run built so far and is always non-empty at every call site: a
-// run starts from the first pass of the list and only grows.
 template <typename Resources, typename Acc>
 struct FirstRun<Resources, Acc, TypeList<>> {
     using type = Acc;
@@ -401,20 +385,12 @@ struct FirstRun<Resources, Acc, TypeList<>> {
 template <typename Resources, typename... AccT, typename Head, typename... Tail>
 struct FirstRun<Resources, TypeList<AccT...>, TypeList<Head, Tail...>> {
     using Acc = TypeList<AccT...>;
-    // A candidate joins only while every current member and the candidate
-    // itself can run as a fork body (plain `Passieren`-style passes) and the
-    // candidate is hazard-free against the run. Groups and render-pass-
-    // context passes fail the forkability test, so they run alone.
+
     static constexpr bool can_join =
         (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Resources, Acc, Head>::value;
     using type = std::conditional_t<can_join, typename FirstRun<Resources, TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 
-// Drop the first `N` elements in a single expansion: C++26 pack indexing
-// walks the pack from the offset to the end (`Ts...[Is + N]...`). `N == 0`
-// falls out of the `Is + 0` offset and `N == size` yields the empty index
-// sequence, hence the empty list -- no recursion, no tag dispatch, and no
-// discarded branch whose type would still be instantiated.
 template <typename List, size_t N>
 struct DropFront;
 
@@ -432,8 +408,7 @@ struct AutoForkRuns<Resources, TypeList<>> {
 template <typename Resources, typename Head, typename... Tail>
 struct AutoForkRuns<Resources, TypeList<Head, Tail...>> {
     using First = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
-    // The run includes `Head`, which is not part of `Tail`: drop the run's
-    // other members (size - 1) off the tail, not the whole run.
+
     using Rest     = typename DropFront<TypeList<Tail...>, First::size - 1>::type;
     using RestRuns = typename AutoForkRuns<Resources, Rest>::type;
     using type     = typename AppendLists<TypeList<typename WrapRun<First>::type>, RestRuns>::type;
@@ -449,9 +424,6 @@ struct FirstRunOfList<Resources, TypeList<Head, Tail...>> {
     using type = typename FirstRun<Resources, TypeList<Head>, TypeList<Tail...>>::type;
 };
 
-// Split a tuple into (first `N` elements, the rest), preserving exact
-// element types. C++26 value pack indexing selects the elements directly --
-// no `std::get` lookup to route each one through.
 template <size_t N, typename... Ts>
 constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
     return std::apply(
@@ -467,8 +439,6 @@ constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
     );
 }
 
-// Wrap one peeled run: a single pass stays as-is, a run of two or more
-// becomes the `ParallelPass` over exactly those types.
 template <typename... P, typename Tuple>
 constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
     if constexpr (sizeof...(P) == 1) {
@@ -483,9 +453,6 @@ constexpr auto WrapRunTuple(Tuple front) noexcept {
     return [&front]<typename... P>(TypeList<P...>) { return WrapRunTupleImpl<P...>(std::move(front)); }(Run {});
 }
 
-// The runtime walk behind `AutoForkPasses`: peel the next run off the front,
-// wrap it, recurse on the remainder. `Run` is the next run's pass types and
-// `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
 template <typename Resources, typename Run, typename RestTypes, typename Tuple>
 constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
     auto [front, rest] = SplitFront<Run::size>(std::move(t));
@@ -499,17 +466,10 @@ constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
     }
 }
 
-} // namespace TemplatedDetail
-
-// ResourceBinder Definition
+}
 
 namespace TemplatedDetail {
 
-// The name of the member of `GraphResT` whose reflected metadata entry has
-// type `Tag` (`{}` when no such member exists). The two cannot be compared
-// directly: reflection is keyed by *member names*, while tags carry their
-// own resource names ("SceneColor" vs `sceneColor`), so the metadata is the
-// only compile-time link between the two namings.
 template <typename Tag, typename GraphResT>
 consteval auto ReflectedMemberName() -> std::string_view {
     constexpr auto names = Reflect::FieldNames<GraphResT>();
@@ -521,7 +481,7 @@ consteval auto ReflectedMemberName() -> std::string_view {
     return {};
 }
 
-} // namespace TemplatedDetail
+}
 
 template <typename ResourceList>
 template <typename Image>
@@ -539,16 +499,12 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
         (
             [&]() noexcept {
                 using Tag = Tags;
-                // 1. An explicit resolver supplies tags the reflected bundle
-                //    does not own, or a different view of an owned image (e.g.
-                //    mip 0 for an attachment whose sampled view spans all mips).
+
                 if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
                     auto ref = ResourceResolver<Tag>::Resolve(impl);
                     this->template Bind<Tag>(ref);
                 } else {
-                    // 2. Otherwise the tag is a member of the reflected
-                    //    GraphResources bundle: locate it through the metadata and
-                    //    bind the live member.
+
                     constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
                     Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
                         auto ref = MakeRef<Tag>(image);
@@ -570,8 +526,6 @@ constexpr auto PassPack<Passes...>::BuildGraph() && {
     auto forked = AutoForkPasses<ResourcesOf<Passes...>>(std::move(passes));
     return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
 }
-
-// CompileTimeFrameGraph Definitions
 
 template <typename... Passes>
 constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... passes): _passes(std::move(passes)...) {
@@ -646,8 +600,6 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
 ) const {
     constexpr std::string_view pass_name = PassType::name.string_view();
 
-    // Every backend sees the exact name already carried by the graph's pass type.
-    // No per-pass breadcrumb calls are needed in client recording lambdas.
     if constexpr (!std::is_void_v<DiagnosticsT>) {
         static_assert(
             requires(DiagnosticsT& backend) { backend.WriteCheckpoint(cmd, pass_name); },
@@ -658,14 +610,8 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         }
     }
 
-    // Profiler stage enums are deliberately resolved by name rather than by pass
-    // index: graph composition can reorder or omit passes without corrupting query
-    // slots. An enum may be a subset of the graph; unmatched passes cost nothing.
     if constexpr (requires { PassType::is_fork; }) {
-        // A forked group's own name ("ParallelPassGroup") is not a profiler
-        // stage; each sub-pass contributes its own scope instead, so the
-        // shadow/deferred work keeps its existing timings even though it is
-        // replayed through secondaries.
+
         std::apply(
             [&](const auto&... sub) { (WriteScopeStart(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
         );
@@ -711,12 +657,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     }
 
     if constexpr (requires { PassType::is_fork; }) {
-        // Every barrier the group needs is already recorded above: Usages is the
-        // union of the sub-pass usage lists, so this is a normal graph pass that
-        // happens to record its body on worker threads. The executor's type is
-        // the caller's template argument, so this is a direct call -- no
-        // vtable, and an executor that is `SequentialFork` (or absent) records
-        // the same bodies in declaration order straight into `cmd`.
+
         static_assert(ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkCall>) noexcept.");
 
         const auto                     bodyStorage = pass.Bodies();
@@ -734,11 +675,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
             [&](const auto&... sub) { (WriteScopeEnd(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
         );
     } else {
-        // A leaf pass is a callable: the graph dispatches straight to
-        // `operator()`. There is no record member to look up, and the branch
-        // structure below is chosen entirely from the pass's own signature --
-        // no lambda-introspection, and no separate factory for graphics and
-        // compute passes.
+
         static_assert(
             FrameGraphPass<PassType>,
             "a graph pass must either be a Vk::Fork group (static constexpr is_fork) or satisfy Vk::FrameGraphPass by inheriting Vk::RenderPass<\"Name\", Usages...>"
@@ -752,16 +689,11 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         if constexpr (is_raster) {
             using AutoCtx = RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...>;
 
-            // Automatic render-pass wrapper: the executor opens the dynamic
-            // render pass over the pass's color and depth writes, hands the
-            // pass a context, and closes it when the pass returns.
             if constexpr (std::is_invocable_v<PassType, AutoCtx&>) {
                 AutoCtx ctx(cmd, bindings);
                 pass(ctx);
             }
-            // Manual render-pass control: the pass builds its own
-            // `Vk::DynamicPass`, which is what a pass that records through
-            // secondary command buffers (the GBuffer passes) has to do.
+
             else if constexpr (std::is_invocable_v<PassType, VkCommandBuffer>) {
                 pass(cmd);
             } else {
@@ -771,8 +703,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                 );
             }
         } else {
-            // Compute and transfer passes always record onto the raw command
-            // buffer: there is no attachment set to wrap.
+
             static_assert(std::is_invocable_v<PassType, VkCommandBuffer>, "compute/transfer pass must implement operator()(VkCommandBuffer)");
 
             if constexpr (std::is_invocable_v<PassType, VkCommandBuffer>) {
@@ -783,8 +714,6 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
     }
 }
-
-// RasterPassContextBase Definitions
 
 inline VkCommandBuffer RasterPassContextBase::Cmd() const noexcept {
     return m_cmd;
@@ -797,8 +726,6 @@ inline VkExtent2D RasterPassContextBase::Extent() const noexcept {
 inline void RasterPassContextBase::SetExtent(VkExtent2D extent) noexcept {
     m_extent = extent;
 }
-
-// RasterPassContext Definitions
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
@@ -846,14 +773,14 @@ template <typename ResourceList, typename ColorWrites, typename DepthWrites, siz
 template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
     std::span<const ImageSlice, ResourceList::size> bindings,
-    TypeList<Imgs...> /*unused*/,
-    TypeList<DImgs...> /*unused*/
+    TypeList<Imgs...> ,
+    TypeList<DImgs...>
 ) noexcept {
     (([&]() {
          if (Extent().width == 0) {
              using Img       = Imgs;
              const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
-             // Explicitly truncate the 3D extent down to 2D for attachment rendering
+
              SetExtent({ext.width, ext.height});
          }
      }()),
@@ -864,7 +791,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
              if (Extent().width == 0) {
                  using Img       = DImgs;
                  const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
-                 // Explicitly truncate the 3D extent down to 2D for attachment rendering
+
                  SetExtent({ext.width, ext.height});
              }
          }()),
@@ -875,7 +802,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(std::span<const ImageSlice, ResourceList::size> bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
+    BuildColorAttachments(std::span<const ImageSlice, ResourceList::size> bindings, uint32_t& colorCount, TypeList<Imgs...> ) noexcept {
     (([&]() {
          using Img              = Imgs;
          constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
@@ -907,13 +834,12 @@ template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
     std::span<const ImageSlice, ResourceList::size> bindings,
     VkRenderingAttachmentInfo&                           outDepth,
-    TypeList<DImgs...> /*unused*/
+    TypeList<DImgs...>
 ) noexcept {
     if constexpr (DepthWrites::size == 0) {
         return false;
     } else {
-        // C++26 pack indexing: the head of the list. The discarded branch
-        // above is what keeps `DImgs...[0]` well-formed for an empty list.
+
         using Img              = DImgs...[0];
         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
@@ -937,7 +863,6 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     }
 }
 
-// Factory Helper Definitions: graph references are plain borrowed slices.
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept -> ImageSlice {
     if constexpr (requires { resource.AsSlice(); }) {
@@ -977,26 +902,22 @@ constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
     }
 }
 
-} // namespace ZHLN::Vk
-
-// Debug Tools & Compile-Time Inspection Implementations
+}
 
 namespace ZHLN::Vk::Debug {
 
-// Compile-time trait to check if a resource is referenced in a pass's usages
 namespace {
 template <typename UsagesList, typename Target>
 struct IsResourceInUsages {
     static constexpr bool value = false;
 };
-} // namespace
+}
 
 template <typename... Us, typename Target>
 struct IsResourceInUsages<TypeList<Us...>, Target> {
     static constexpr bool value = (std::is_same_v<typename Us::Resource, Target> || ...);
 };
 
-// 1. Standalone compile-time helper to print a single resource state
 template <typename GraphT, size_t PassIdx, size_t ResIdx, typename Pass, typename Res, typename VisualizerStringT>
 constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
     using UsageType          = typename TemplatedDetail::FindResourceUsage<typename Pass::Usages, Res>::type;
@@ -1013,12 +934,9 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
         constexpr bool layout_changed = (prev_state.layout != UsageType::layout);
 
-        // Decouple read vs write access types using the compiler's WriteMask
         constexpr bool is_prev_write = (prev_state.access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
         constexpr bool is_curr_write = (UsageType::access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
 
-        // WAW (Write-After-Write) or RAW (Read-After-Write) hazards require active synchronization.
-        // Pure RAR (Read-After-Read) stage changes do not.
         constexpr bool write_hazard = (is_curr_write && (prev_state.fromPreviousFrame || (prev_state.lastWritePass < PassIdx))) ||
                                       (is_prev_write && !is_curr_write && (prev_state.lastWritePass < PassIdx));
 
@@ -1054,15 +972,13 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
     }
 }
 
-// 2. Standalone helper to fold over resource index sequence
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
-constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> /*unused*/) noexcept {
+constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> ) noexcept {
     [&]<typename... R>(TypeList<R...>) { (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...); }(Resources {});
 }
 
-// 3. Standalone helper to print a single pass state
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT>
-constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*unused*/) noexcept {
+constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> ) noexcept {
     msg.append("  ● Pass [");
     msg.append_int(PassIdx);
     msg.append("]: \"");
@@ -1072,17 +988,15 @@ constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*u
     PrintResources<GraphT, PassIdx, Pass, Resources, NumResources>(msg, std::make_index_sequence<NumResources> {});
 }
 
-// 4. Standalone helper to fold over pass index sequence
 template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
-constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
+constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> ) noexcept {
     [&]<typename... P>(std::type_identity<std::tuple<P...>>) {
         ((PrintPassState<GraphT, PassIdxs, P...[PassIdxs], Resources, NumResources>(msg, std::make_index_sequence<1> {}), msg.append("\n")), ...);
     }(std::type_identity<PassesTuple> {});
 }
 
-// 5. Standalone helper to print registered resource list
 template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
-constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> /*unused*/) noexcept {
+constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> ) noexcept {
     [&]<typename... R>(TypeList<R...>) {
         ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is] ::name.value.data())), msg.append("\""),
           msg.append(R...[Is] ::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
@@ -1090,9 +1004,7 @@ constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is
     }(Resources {});
 }
 
-} // namespace ZHLN::Vk::Debug
-
-// Main Visualize Entry Point
+}
 
 template <typename... Passes>
 consteval auto ZHLN::Vk::Debug::GraphVisualizer<ZHLN::Vk::CompileTimeFrameGraph<Passes...>>::Visualize() {

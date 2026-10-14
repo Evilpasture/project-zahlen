@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// How much history survives, how hard the neighbourhood clamp bites, and a
-// reset flag for the first frame after a resize or a target recreation.
 struct alignas(16) VolumetricTemporalPushConstants {
     float    temporalWeight;
     float    clampStrength;

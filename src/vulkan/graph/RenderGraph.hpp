@@ -15,7 +15,6 @@
 
 namespace ZHLN::Vk {
 
-
 template <size_t N>
 struct ResourceName {
     std::array<char, N> value {};
@@ -85,10 +84,6 @@ struct GraphImage {
     static constexpr bool               is_3d         = Is3D;
 };
 
-// The entry state drives the graph's barrier into a pass. Most passes leave an
-// image in that state; a pass that transitions it internally (e.g. generating
-// mips after a transfer copy) also declares its exit state so the next pass
-// does not issue a barrier from a layout the image no longer has.
 template <
     typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access,
     VkImageLayout FinalLayout = Layout, VkPipelineStageFlags2 FinalStage = Stage, VkAccessFlags2 FinalAccess = Access>
@@ -146,8 +141,6 @@ using TransferSrcRead = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PI
 template <typename Image>
 using TransferDstWrite = Usage<Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT>;
 
-// The pass copies into mip 0, blits down the chain and transitions every mip
-// to fragment-readable layout before it returns.
 template <typename Image>
 using TransferDstWriteThenShaderRead = Usage<
     Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -156,23 +149,6 @@ using TransferDstWriteThenShaderRead = Usage<
 template <typename Image>
 using ShaderReadGeneral = Usage<Image, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT>;
 
-// ---------------------------------------------------------------------------
-// Direct pass protocol
-// ---------------------------------------------------------------------------
-// A pass is a self-describing struct, not a closure handed to a factory. The
-// graph engine never asks a pass for a record function: it calls the pass.
-//
-// Two things are therefore required of a pass type, and the concept below is
-// exactly that contract:
-//
-//   * `name`  -- a compile-time `ResourceName`, what the profiler and the
-//                diagnostic checkpoints resolve their stage enums against;
-//   * `Usages` -- a `TypeList` of the resource usages that drive hazard
-//                 analysis and barrier generation.
-//
-// `RenderPass<Name, Usages...>` is the base that supplies both. Inheriting it
-// is a static, zero-cost declaration: no members, no vtable, and the pass type
-// stays trivially copyable so the graph can hold it by value.
 template <typename T>
 concept FrameGraphPass = requires {
     { T::name.string_view() } -> std::convertible_to<std::string_view>;
@@ -202,10 +178,6 @@ inline constexpr bool DependentFalse = false;
 
 }
 
-
-// Only borrowed during ExecuteFork; the graph owns the const-callable passes
-// and keeps them alive until recording completes. No pass-specific trampoline
-// or const_cast is needed.
 using ForkCall = ZHLN::FunctionRef<void(VkCommandBuffer) const>;
 
 template <typename Executor>
@@ -363,16 +335,6 @@ struct HasIntersection: std::false_type {};
 template <typename... As, typename... Bs>
 struct HasIntersection<TypeList<As...>, TypeList<Bs...>>: std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
 
-// A pass's read and write footprint as bitmasks over the graph's resource list: bit
-// N is the resource at index N of that list, the same index a binding and a barrier
-// already use. `ArePassesDisjoint` asks its three hazard questions for every pair of
-// passes in the graph, so two integers turn each pair into three ANDs instead of
-// nested walks of two usage lists, and the type-list machinery those walks
-// instantiated is what the fork partition used to cost.
-//
-// The classification is `IsAnyWrite`/`IsAnyRead` exactly: a usage is a write when its
-// access has a write bit, and every other usage -- including one that names a
-// resource with no access at all -- counts as a read.
 template <typename Resources, typename Pass>
 struct PassFootprint {
     static constexpr size_t kMaxResources = 64;
@@ -394,7 +356,6 @@ struct PassFootprint {
         return accumulated;
     }
 
-    // [0] is what the pass writes, [1] is what it reads.
     static constexpr std::array<uint64_t, 2> masks = Build<typename Pass::Usages>(std::make_index_sequence<Pass::Usages::size> {});
 };
 
@@ -411,13 +372,6 @@ struct NeedsBarrier {
 template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
-
-// Whether a pass may be recorded by a fork worker on a secondary command
-// buffer. A compute or transfer pass always can. A raster pass can only if it
-// manages its own render pass -- that is, if it is callable with a bare
-// `VkCommandBuffer`. A raster pass that takes `RasterPassContext&` is asking
-// the executor to open the render pass for it, and that wrapper has to run on
-// the command buffer it is handed, so such a pass runs alone.
 template <typename P>
 struct IsForkablePass {
     using Usages      = typename P::Usages;
@@ -487,10 +441,6 @@ struct FirstRunOfList;
 
 }
 
-
-// The graph's resource list, as one canonical type. The fork partition and the graph
-// itself both work from this list, so a mask's bit N names the same resource in both
-// -- which is the whole reason the masks are bitmasks and not sets of types.
 template <typename... Passes>
 using ResourcesOf = typename TemplatedDetail::CollectAllResources<Passes...>::type;
 
@@ -501,7 +451,6 @@ struct ArePassesDisjoint {
     static constexpr auto writes_b = TemplatedDetail::PassFootprint<Resources, PassB>::masks[0];
     static constexpr auto reads_b  = TemplatedDetail::PassFootprint<Resources, PassB>::masks[1];
 
-    // Write/write, write/read and read/write, in one expression.
     static constexpr bool value = ((writes_a & (writes_b | reads_b)) == 0) && ((reads_a & writes_b) == 0);
 };
 
@@ -536,11 +485,6 @@ struct PassPack {
     constexpr auto BuildGraph() &&;
 };
 
-// A pass pack is the only composition primitive the graph still offers: a
-// tuple of pass structs in declaration order, concatenated with `+` and
-// compiled with `BuildGraph()`. Each pass is written as a struct that inherits
-// `RenderPass<...>` and implements `operator()`, so there is nothing here that
-// wraps a closure -- the pack stores the passes themselves.
 template <typename... Passes>
 constexpr auto MakePassPack(Passes&&... passes) {
     return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
@@ -564,17 +508,6 @@ class ResourceBinder {
     std::array<ImageSlice, ResourceList::size> _resources {};
 };
 
-// The part of a rendered pass's context that does not depend on which
-// attachments the graph collected for it.
-//
-// The concrete `RasterPassContext` is templated on the resource list, the pass's
-// color and depth writes, and the pass index -- none of which a pass type can
-// name, because they are only known once the whole graph is compiled. A pass
-// that wants the automatic render-pass wrapper therefore declares
-// `operator()(Vk::RasterPassContextBase&)` and gets the derived context passed
-// to it by reference. That is what lets the body live in a translation unit
-// instead of being a template instantiated (and re-instantiated) at every graph
-// composition.
 class RasterPassContextBase {
   public:
     explicit RasterPassContextBase(VkCommandBuffer cmd) noexcept: m_cmd(cmd) {
@@ -629,11 +562,6 @@ class CompileTimeFrameGraph {
     ) const;
 
   private:
-    // The barriers one pass needs, deduced in a single walk of its usage list: which
-    // usages need a barrier and where each of them sits in that list are two answers
-    // to the same question, so they are computed together instead of by walking the
-    // list twice -- the same resource index, the same state lookup, the same
-    // `NeedsBarrier`, once.
     template <size_t PassIndex, typename PassType>
     struct BarrierPlan {
         using Usages                     = typename PassType::Usages;
@@ -680,7 +608,6 @@ class CompileTimeFrameGraph {
 
     std::tuple<Passes...> _passes;
 };
-
 
 template <typename Tag>
 struct ClearColorOf {
@@ -729,7 +656,6 @@ template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent, VkFormat format = Tag::format) noexcept;
 
 }
-
 
 namespace ZHLN::Vk::Debug {
 

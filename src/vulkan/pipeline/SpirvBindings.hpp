@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
@@ -16,7 +15,6 @@
 
 namespace ZHLN::Vk {
 
-
 inline constexpr uint32_t kSpirvMagic             = 0x07230203;
 inline constexpr size_t   kSpirvHeaderWords       = 5;
 inline constexpr uint16_t kSpirvOpEntryPoint    = 15;
@@ -30,7 +28,6 @@ inline constexpr uint16_t kSpirvOpVariable        = 59;
 inline constexpr uint16_t kSpirvOpDecorate        = 71;
 inline constexpr uint16_t kSpirvDecorationBinding = 33;
 inline constexpr uint16_t kSpirvDecorationSet     = 34;
-
 
 struct SpirvBinding {
     uint32_t binding    = 0;
@@ -128,7 +125,6 @@ class SpirvBindings {
     uint32_t _entryOffset    = 0;
     uint32_t _entryLength    = 0;
 };
-
 
 [[nodiscard]] constexpr auto SpirvBindings::Parse(std::span<const uint8_t> module, uint32_t set) noexcept -> SpirvBindings {
     struct Candidate {
@@ -367,10 +363,7 @@ class SpirvBindings {
                 }
             }
         }
-        // An OpVariable for SamplerState[9] points to OpTypeArray, not
-        // OpTypeSampler. Follow fixed/runtime array element types (also nested
-        // arrays) before choosing the sampler or resource half of the catalog.
-        // The bound prevents a malformed type cycle from hanging consteval.
+
         for (uint32_t depth = 0; depth < arrayCount; ++depth) {
             uint32_t element = 0;
             for (uint32_t a = 0; a < arrayCount; ++a) {

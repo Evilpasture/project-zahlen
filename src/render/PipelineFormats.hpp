@@ -7,8 +7,6 @@
 
 namespace ZHLN {
 
-// Compile-time output signature used by the deferred G-buffer pass and the
-// remaining runtime-built scene pipelines during migration.
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>,
     Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,

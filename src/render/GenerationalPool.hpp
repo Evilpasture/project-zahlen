@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -11,7 +10,6 @@
 #include <utility>
 
 namespace ZHLN {
-
 
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
@@ -64,8 +62,6 @@ class GenerationalPool {
         }
     }
 
-    // Drop every live slot and invalidate its handle. Callers that own external
-    // resources must retire those resources before clearing the pool.
     void Clear() noexcept {
         for (size_t index = 0; index < MaxObjects; ++index) {
             if (_pointers[index] != nullptr) {
@@ -92,23 +88,6 @@ class GenerationalPool {
         _freeIndices.push_back(index);
     }
 
-    // Null for every way a handle can fail to name a live object: zero,
-    // out of range, stale generation, or a slot that was destroyed and has
-    // not been refilled.
-    //
-    // This returned a std::expected<T*, Error> once, with four ways to fail:
-    // InvalidHandle, StaleHandle, OutOfBoundsIndex, NullResource. Every call
-    // site but one asked only "is there an object" -- twenty-three of them
-    // wrote `.value_or(nullptr)` and then tested the pointer -- which a null
-    // pointer answers without making them name a vocabulary they do not use.
-    //
-    // The exception is BuildMeshBLAS, whose failure MeshBuilder and the glTF
-    // importer log as a warning. It gets a code of its own at the point of
-    // use -- RenderFeatureError::UnresolvedMeshHandle -- so the log line
-    // survives. Worth stating plainly: the four-way distinction is gone, so a
-    // stale handle and an out-of-range one now read the same. If a bug ever
-    // needs telling apart, that is the argument for bringing the error back,
-    // and it is a better one than "somebody might want it".
     [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> T* {
         const auto rawHandle = static_cast<uint64_t>(handle);
         if (rawHandle == 0) [[unlikely]] {

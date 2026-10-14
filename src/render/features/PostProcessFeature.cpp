@@ -119,8 +119,6 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
         );
 }
 
-// GCC 16 sees a spurious uninitialized value in libstdc++'s
-// expected::transform<void> when inlining this checked monadic chain.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"

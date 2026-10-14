@@ -6,7 +6,6 @@
 
 namespace ZHLN::Vk {
 
-// Number of CPU/GPU frame slots (not the number of swapchain images or parallel recording workers).
 inline constexpr uint32_t kFramesInFlight = 2;
 static_assert(kFramesInFlight >= 2 && kFramesInFlight <= 8, "the render frame ring needs at least two slots; frame sync supports at most eight");
 

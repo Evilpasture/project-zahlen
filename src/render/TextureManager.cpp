@@ -104,7 +104,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         if (!existing->named || existing->identifier != identifier) {
             return ExistingTexture::Collision;
         }
-        // After device loss the record still exists but points to white, not its old image.
+
         if (existing->gpuBindlessIndex > kFallbackNormalTextureIndex && existing->format == format && existing->width == width && existing->height == height &&
             existing->pixelHash == pixelHash) {
             return ExistingTexture::Duplicate;
@@ -124,9 +124,6 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         return std::unexpected(uploaded.error());
     }
 
-    // The upload can fail without disturbing an existing texture. Recheck the
-    // registry before inserting: another caller may have uploaded this name,
-    // or an anonymous handle may have claimed its hash while the GPU worked.
     std::optional<uint32_t> oldSlot;
     const auto              committedState = Lock(_mutex, [&] {
         const auto previous = _textures.Find(id);
@@ -282,7 +279,7 @@ auto TextureManager::Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> s
     } else {
         if (_nextSlotIndex >= kGlobalTextureSlots) [[unlikely]] {
             ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
-            // A consuming sink also owns its rejected argument.
+
             viewInfo = {};
             _allocator.DestroyImage(image);
             return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
@@ -313,7 +310,7 @@ void TextureManager::RetireBatch(ZHLN::Array<ReleasedSlot>& pending) noexcept {
 
 void TextureManager::BeginFrame(uint32_t frameIndex) noexcept {
     _frameIndex = Vk::FrameSlot(frameIndex);
-    // The frame slot's fence was waited on before this call.
+
     RetireBatch(_pendingFrees[_frameIndex]);
 }
 

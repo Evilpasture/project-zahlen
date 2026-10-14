@@ -241,8 +241,6 @@ void RenderContext::SubmitParticleEmitter(
         return;
     }
 
-    // The manager answers the default for an unregistered texture with its
-    // white slot, so hosts may leave this handle invalid.
     const uint32_t textureIndex = _impl->textureManager.GetBindlessIndex(texture);
     _impl->queues.ParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = GpuPack::PackParticleEmitter(desc, textureIndex, additive ? 1u : 0u)}
@@ -286,8 +284,7 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             JPH::Vec4(quad.position, 1.0f).StoreFloat4(&packed.position);
             JPH::Vec4(quad.facing == ParticleAlignment::VelocityStretched ? quad.velocity : JPH::Vec3::sZero(), 0.0f).StoreFloat4(&packed.velocity);
             quad.color.StoreFloat4(&packed.color);
-            // The render vertex shader reads a quad's size and rotation out of params.z
-            // and params.w. This is the one place that fact is written down for billboards.
+
             JPH::Vec4(0.0f, 0.0f, quad.size, quad.rotation).StoreFloat4(&packed.params);
             _impl->billboardStaging.push_back(packed);
         }
@@ -407,8 +404,6 @@ GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
     return std::exchange(_impl->diagnostics.pendingPipelineCounters, GpuPipelineCounters {});
 }
 
-
-
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto&        props      = _impl->ctx.PhysicalInfo().properties.properties;
     PhysicalDeviceType deviceType = PhysicalDeviceType::Other;
@@ -484,8 +479,6 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
     return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
-
-
 void RenderContext::DestroyBuffer(BufferHandle handle) {
     _impl->geometry.Destroy(handle);
 }
@@ -534,7 +527,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     }
     auto basicMat = *mat_res;
 
-    // Material constructed immutably, pulling from both the base pipeline state and the descriptor
     return Material {
         .pipeline                 = basicMat.pipeline,
         .prePassPipeline          = basicMat.prePassPipeline,
@@ -694,8 +686,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 
     Vk::Debug::SetImageName(ctx, image.Handle(), "BlueNoise.LDR_RGBA_0");
 
-    // Retained only as a config: InitPassSamplerDescriptors writes it into
-    // the sampler heap (e.g. Reflection's "blueNoiseSampler" slot).
     blueNoiseSamplerConfig = Vk::SamplerConfig::NearestRepeat().WithLodRange(0.0F, 0.0F);
     auto blueNoiseIdx      = textureManager.Adopt(std::move(image), viewInfo);
     if (!blueNoiseIdx) {
@@ -759,8 +749,6 @@ auto RebuildSkinnedBLAS(
     auto scratchBufOpt =
         Vk::Buffer::Create(allocator, sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly);
     if (!scratchBufOpt) {
-        // No build was recorded: do not leave an uninitialized AS for the
-        // next frame to treat as an existing, updateable BLAS.
         if (creatingBlas) {
             scratchMesh.blas = {};
             allocator.DestroyBuffer(scratchMesh.blasBuffer);
@@ -770,7 +758,7 @@ auto RebuildSkinnedBLAS(
     }
     Vk::Buffer scratchBuf = std::move(*scratchBufOpt);
     Vk::BuildBLAS(cmd, geom, scratchMesh.blas.Get(), Vk::BufferSlice {scratchBuf, ctx.BufferAddress(scratchBuf.Handle())}, primitiveCount);
-    deletionQueue.Enqueue(std::move(scratchBuf)); // Build is recorded into the in-flight frame.
+    deletionQueue.Enqueue(std::move(scratchBuf));
     return scratchMesh.blasAddress;
 }
 
@@ -907,7 +895,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
     if (!impl.ctx.RayTracingSupported()) {
         return std::unexpected(RenderFeatureError::FeatureNotSupported);
     }
-    // MeshBuilder and the glTF importer report this specific resolution error.
+
     auto* posMesh = impl.geometry.Resolve(mesh.posBuffer);
     if (posMesh == nullptr) {
         return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
@@ -976,7 +964,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         return std::unexpected(submitted.error());
     }
 
-    // The old BLAS may still be referenced by another in-flight frame.
     impl.deletionQueue.EnqueueAccelerationStructure(impl.ctx.Device(), std::move(posMesh->blas));
     impl.deletionQueue.Enqueue(std::move(posMesh->blasBuffer));
     posMesh->blasAddress = Vk::DeviceAddress<> {Vk::GetAccelerationStructureAddress(impl.ctx.Device(), blas.Get())};
@@ -1015,9 +1002,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     if (!impl->presenter.swapchain.Valid()) {
         const auto dest = impl->destinations.Find(impl->presentationTarget);
         if (impl->frameOpen || !dest || !dest->acquired || !dest->acquired->drawn) {
-            // A headless target starts UNDEFINED. If rendering failed before
-            // acquisition, treating it as COLOR_ATTACHMENT here makes the
-            // readback barrier invalid and writes a black success image.
             ZHLN::LogWarning("[Test Capture] No completed headless frame was drawn; capture refused.");
             return std::unexpected(ScreenshotError::DestinationNotRecorded);
         }
@@ -1124,9 +1108,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
         const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
         const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
-        // Debug-level: a suite captures dozens of frames, and at Info this line
-        // alone drowns the test output. Tests capture at Verbose and print
-        // these statistics only when the test fails.
+
         ZHLN::LogDebug(
             "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB "
             "({:.2f},{:.2f},{:.2f}); "

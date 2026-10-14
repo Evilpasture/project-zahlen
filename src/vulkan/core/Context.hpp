@@ -145,7 +145,7 @@ class ContextBuilder {
         _validationMode = mode;
         return *this;
     }
-    // Views and lvalue owners are borrowed; only an rvalue owner is adopted.
+
     auto Instance(InstanceView instance) noexcept -> ContextBuilder& {
         _ownedInstance.reset();
         _instance = instance;

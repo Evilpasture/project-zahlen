@@ -15,12 +15,6 @@ namespace ZHLN::Vk {
 
 namespace {
 
-// Serialized store layout (all integers little-endian, host-native):
-//   char     magic[4]   "ZPB1"
-//   uint32   version    1
-//   uint32   globalKeySize, then the device global pipeline key bytes
-//   uint32   entryCount
-//   per entry: uint32 keySize, uint32 dataSize, key bytes, data bytes
 constexpr std::array<uint8_t, 4> kMagic {'Z', 'P', 'B', '1'};
 constexpr uint32_t               kFormatVersion = 1;
 
@@ -180,9 +174,6 @@ auto PipelineBinarySession::Begin(const VkDevice device, PipelineBinaryStore* st
 
     const auto stored = store->Find(session._key);
 
-    // On a hit the stored bytes populate the binaries; on a miss the driver
-    // compiles them. A rejected stored blob falls back to compiling, and
-    // Commit() then overwrites the entry with the fresh binary.
     for (int attempt = 0; attempt < 2; ++attempt) {
         const bool replay = stored.has_value() && attempt == 0;
 
@@ -214,8 +205,6 @@ auto PipelineBinarySession::Begin(const VkDevice device, PipelineBinaryStore* st
     }
 
     if (session._raw.empty()) {
-        // No binaries either way: creation proceeds without them, and a
-        // stored entry that led here has proven itself useless.
         if (stored.has_value()) {
             store->Erase(session._key);
         }

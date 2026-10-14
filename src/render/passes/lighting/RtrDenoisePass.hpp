@@ -7,9 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// Filters the half-resolution glossy reflection trace (Res_RtrHalf) with
-// temporal reprojection and an edge-stopping A-Trous wavelet before
-// ReflectionPass modulates it by Fresnel and composites it onto the scene.
 struct RtrDenoisePass: Vk::RenderPass<
                            "RtrDenoise", Vk::ComputeWrite<Res_RtrHalf>, Vk::ComputeWrite<Res_RtgiDenoiseA>, Vk::ComputeWrite<Res_RtgiDenoiseB>,
                            Vk::ComputeRead<Res_RtrHistory>, Vk::ComputeRead<Res_Velocity>, Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>> {

@@ -19,8 +19,7 @@ auto DeviceConfigurator<Ts...>::RequireWithOptional(Required&& required, Optiona
     if (!IsSubsetOf(requiredBits, supported)) {
         _unsupported.push_back(GetStructureType<T>());
     }
-    // Keep required bits in the same Vulkan struct as the individually
-    // negotiated optional bits. A second Features2/Vulkan12 node is invalid.
+
     return std::move(*this).Add(FeatureNode<T> {.feature = MaskFeatures(requested, supported), .active = true});
 }
 
@@ -36,8 +35,7 @@ auto DeviceConfigurator<Ts...>::RequireExtension(std::string_view name, Func&& c
     const bool offered = _extensions.Supports(name);
     _extensions.Require(name);
     if (!offered) {
-        // Do not query a feature struct belonging to an absent extension.
-        // Build reports the missing required extension before device creation.
+
         return std::move(*this).Add(FeatureNode<T> {.feature = T {}, .active = false});
     }
     return std::move(*this).template Require<T>(std::forward<Func>(configure));
@@ -107,7 +105,7 @@ auto DeviceConfigurator<Ts...>::OptionalMeshShaders() && {
 
 template <typename... Ts>
 auto DeviceConfigurator<Ts...>::OptionalRayTracing() && {
-    // Both feature bits and all three extensions are a single capability.
+
     return std::move(*this).template OptionalGroup<VkPhysicalDeviceAccelerationStructureFeaturesKHR, VkPhysicalDeviceRayQueryFeaturesKHR>(
         {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
         [](auto& f) { f.accelerationStructure = VK_TRUE; },
@@ -169,4 +167,4 @@ auto DeviceConfigurator<Ts...>::Build() && -> std::expected<ConfiguredDevice<Ts.
     return ConfiguredDevice<Ts...> {std::move(*extensions), std::move(_features)};
 }
 
-} // namespace ZHLN::Vk
+}

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "UIPipeline.hpp"
 #include <span>
 
@@ -9,9 +8,6 @@ namespace ZHLN::Pipelines {
 
 namespace {
 
-// Compile-time regression checks for the typed UI path: a verified image
-// produces a format-aware pass, and only a matching builder-created pipeline
-// can be bound to it (including color order and depth presence).
 using LdrImage = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_FORMAT_R8G8B8A8_UNORM>;
 static_assert(std::same_as<decltype(std::declval<Vk::ImageSlice>().MatchFormat<VK_FORMAT_R8G8B8A8_UNORM,
                                                                                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>()),
@@ -129,8 +125,6 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         });
     };
 
-    // VkFormat is supplied by Vulkan, not a reflected engine enum. Switch only
-    // over the formats whose pipelines were built with compile-time signatures.
     switch (target.image.format) {
         case VK_FORMAT_B8G8R8A8_SRGB:       return DrawTyped.template operator()<VK_FORMAT_B8G8R8A8_SRGB>();
         case VK_FORMAT_B8G8R8A8_UNORM:      return DrawTyped.template operator()<VK_FORMAT_B8G8R8A8_UNORM>();
@@ -138,9 +132,7 @@ auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         case VK_FORMAT_R8G8B8A8_UNORM:      return DrawTyped.template operator()<VK_FORMAT_R8G8B8A8_UNORM>();
         case VK_FORMAT_R16G16B16A16_SFLOAT: return DrawTyped.template operator()<VK_FORMAT_R16G16B16A16_SFLOAT>();
         default:
-            // Preserve presentation on surfaces with an uncommon VkFormat;
-            // SupportsFormat admitted only the pipeline built for this exact
-            // format, so the untyped fallback cannot bind a different one.
+
             return Draw(target.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(),
                         [&](const auto&, Vk::CommandEncoder& encoder) {
                             impl.uiRenderer.RecordFallback(encoder, extent.width, extent.height, view.frameIndex, target.image.format, uiData);

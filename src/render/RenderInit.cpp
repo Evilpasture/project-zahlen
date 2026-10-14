@@ -56,9 +56,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
             );
         })
         .and_then([&]() {
-            // The atlas shares basic.slang's alpha-tested shadow fragment stage
-            // with the cascades: masked foliage should punch the same holes in
-            // a light's atlas tile that it punches in a sun cascade.
+
             return shadows.CompileAtlasPipeline(
                 *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
             );

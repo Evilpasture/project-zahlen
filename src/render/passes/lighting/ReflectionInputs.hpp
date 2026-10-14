@@ -6,10 +6,6 @@
 
 namespace ZHLN::Passes {
 
-// Inputs shared by the opaque and translucent reflection graph passes: the
-// prefiltered environment map, original visible sky, split-sum BRDF lookup,
-// blue-noise tile, and top-level acceleration structure. Their surface reads
-// and output targets differ; these engine inputs do not.
 struct ReflectionInputs {
     Vk::ImageWrite    prefiltered;
     Vk::ImageWrite    visualSky;
@@ -20,9 +16,6 @@ struct ReflectionInputs {
 
 [[nodiscard]] auto GatherReflectionInputs(RenderFrameContext& impl) noexcept -> ReflectionInputs;
 
-// Which specialization of the reflection pipeline this frame runs: bit 0 adds
-// screen-space reflection, bit 1 the ray-traced one. Resolved from the frame's
-// settings so a pass does not have to be told.
 [[nodiscard]] auto ReflectionVariant(RenderFrameContext& impl) noexcept -> uint32_t;
 
 }

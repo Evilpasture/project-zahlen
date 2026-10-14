@@ -1,14 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-/* PREAMBLE
- * ErrorCode lives in Zahlen/Core and is the error channel of every layer,
- * src/vulkan included. VkResult is a foreign code (it has a 0 enumerator,
- * which ErrorCode forbids), so raw VkResults convert through ToError at the
- * point of the Vulkan call; a device-lost result is reported as
- * DeviceFault::Lost. The render layer maps that to FrameResult::DeviceLost.
- */
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED

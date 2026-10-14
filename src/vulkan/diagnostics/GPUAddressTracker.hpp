@@ -17,9 +17,6 @@
 
 namespace ZHLN::Vk {
 
-// One live device-address binding reported by VK_EXT_device_address_binding_report.
-// The associated object comes from VkDebugUtilsMessengerCallbackDataEXT::pObjects;
-// it is deliberately kept as diagnostic data only and is never passed back to Vulkan.
 struct GpuAllocationSymbol {
     VkDeviceAddress                  baseAddress      = 0;
     VkDeviceSize                     size             = 0;
@@ -30,16 +27,10 @@ struct GpuAllocationSymbol {
     std::string                      name;
 };
 
-// Thread-safe, fault-time address resolver. Address-binding callbacks are
-// synchronous with Vulkan calls and may arrive concurrently from multiple
-// application threads, so the tracker does not use the engine's fiber mutex.
-// Owned per Instance; there is no process-wide singleton.
 class GPUAddressTracker {
   public:
     GPUAddressTracker() noexcept = default;
 
-    // Starts a fresh device lifetime when enabled; disabling clears all ranges
-    // after vkDestroyDevice has delivered its final unbind events.
     void SetEnabled(bool enabled) noexcept;
     [[nodiscard]] auto Enabled() const noexcept -> bool;
 
@@ -48,13 +39,8 @@ class GPUAddressTracker {
         const VkDebugUtilsMessengerCallbackDataEXT* callbackData
     ) noexcept;
 
-    // Keep debug-utils object names in sync with currently live address ranges.
-    // Names set after a bind update already-recorded symbols immediately; names
-    // present on callback pObjects are copied when the bind event arrives.
     void SetObjectName(VkObjectType type, uint64_t handle, std::string_view name) noexcept;
 
-    // An address can be shared by aliased resources, so Resolve returns every
-    // matching live object rather than choosing an arbitrary overlapping range.
     [[nodiscard]] auto Resolve(VkDeviceAddress address) const noexcept -> std::vector<GpuAllocationSymbol>;
     [[nodiscard]] auto LiveBindingCount() const noexcept -> std::size_t;
 

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -156,7 +155,6 @@ template <typename CppPush, ShaderProgram... Modules>
     return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
 }
 
-
 namespace TemplatedDetail {
 
 template <typename Set, typename Half, ZHLN::StringLiteral Name>
@@ -230,7 +228,6 @@ template <typename Set, typename Half, ShaderProgram Program, typename... Slots>
     RequireSpelledBindings<Set, Half, Program, Slots...>(std::make_index_sequence<declared> {});
     return true;
 }
-
 
 template <typename Check, typename DeclaredSlot, typename WriteSlot>
 [[nodiscard]] consteval auto DeclaredSlotHoldsCheck() noexcept -> bool {
@@ -338,7 +335,6 @@ template <typename Set, typename Half, typename Check, typename... Slots>
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
     return Set::template DeclarationsHold<Half, Check, Slots...>();
 }
-
 
 template <ShaderProgram Program>
 [[nodiscard]] auto CreateShaderDesc() noexcept -> ShaderDesc {

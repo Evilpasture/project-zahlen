@@ -11,11 +11,6 @@
 
 namespace ZHLN::Vk {
 
-// A descriptor-heap image write: the plain VkImageViewCreateInfo is the
-// whole payload (it becomes VkImageDescriptorInfoEXT::pView), plus the
-// layout to write it with. There is deliberately no way to construct one
-// from an AttachmentView -- descriptor writes never consume VkImageView
-// handles, so sources provide ViewInfo() (Image / ImageSlice) instead.
 struct ImageWrite {
     VkImageViewCreateInfo viewInfo {};
     VkImageLayout         layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

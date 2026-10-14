@@ -11,9 +11,6 @@ namespace ZHLN {
 
 namespace {
 
-// The ways a BufferSource can contradict itself, all rejected before anything
-// reaches Vulkan. Kept next to its only caller for the same reason
-// BufferCreationError and BufferMapError are: nothing outside this TU names it.
 enum class BufferSourceError : uint8_t {
     EmptySource     ZHLN_ANNOTATION(ZHLN::Description<"Buffer source has neither bytes nor an allocation size"> {}) = 1,
     ZeroStride      ZHLN_ANNOTATION(ZHLN::Description<"Buffer source declares a zero-sized element"> {}),
@@ -21,9 +18,6 @@ enum class BufferSourceError : uint8_t {
     RaggedElements  ZHLN_ANNOTATION(ZHLN::Description<"Buffer source byte count is not a whole number of its elements"> {}),
 };
 
-// The order is deliberate: a source carrying no payload at all is reported as such
-// before its stride is blamed, and a size stated twice is reported before its
-// divisibility is judged.
 [[nodiscard]] auto SourceError(const GeometryManager::BufferSource& source) noexcept -> std::optional<BufferSourceError> {
     if (source.bytes.empty() && source.allocationSize == 0) {
         return BufferSourceError::EmptySource;
@@ -40,12 +34,6 @@ enum class BufferSourceError : uint8_t {
     return std::nullopt;
 }
 
-// TODO(some random AI i forgot when): The ring reports "no room for this upload" by handing back an allocation whose
-// mapped pointer is null, which every caller then has to re-test. Fold that into the
-// error channel once. It lives in this TU rather than in StagingRingBuffer because
-// the ring's other consumers (RenderResources.cpp, TextureUploader.hpp) still read
-// Allocation::mappedData; the follow-up step moves it to the source and deletes this
-// helper.
 [[nodiscard]] auto AllocateStaging(Vk::StagingRingBuffer& ring, size_t size) noexcept -> std::expected<Vk::StagingRingBuffer::Allocation, ErrorCode> {
     auto allocation = ring.Allocate(size);
     if (allocation.mappedData == nullptr) {
@@ -108,8 +96,8 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
 auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle {
     const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
     if (handle == BufferHandle::Invalid) {
-        _allocator.DestroyBuffer(buffer); // Pool full: Create did not take the buffer, so this frame's copy is all there is. The caller's
-                                          // buffer was moved-from on the way in (Buffer is move-only), so its own DestroyBuffer is a no-op.
+        _allocator.DestroyBuffer(buffer);
+
     } else if (NativeMesh* mesh = _buffers.Resolve(handle)) {
         Vk::Debug::SetBufferName(_ctx, mesh->buffer.Handle(), std::format("GeometryBuffer#{}", static_cast<uint64_t>(handle)));
     }
@@ -137,8 +125,6 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
 }
 
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-    // Deform only positions and the tangent frame. UV/color data stays in
-    // the immutable VertexSurface buffer owned by the source mesh.
     const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexTangentFrame));
 
     Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
@@ -155,8 +141,6 @@ auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> Buffer
 }
 
 void GeometryManager::Retire(NativeMesh& mesh) noexcept {
-    // The AS is a GPU object too. Retire it ahead of its backing allocation,
-    // then the mesh allocation, in the same frame-delayed batch.
     _deletionQueue.EnqueueAccelerationStructure(_ctx.Device(), std::move(mesh.blas));
     _deletionQueue.Enqueue(std::move(mesh.blasBuffer));
     _deletionQueue.Enqueue(std::move(mesh.buffer));

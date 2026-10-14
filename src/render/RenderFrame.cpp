@@ -91,8 +91,6 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
                 continue;
             }
 
-            // Only position and tangent-frame streams are animated; the
-            // immutable surface stream is read directly by the draw shader.
             const Vk::BufferSlice output {scratchMesh->buffer, scratchMesh->vboAddress.Get()};
             const VkDeviceSize    posBytes   = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexPosition);
             const VkDeviceSize    frameBytes = static_cast<VkDeviceSize>(scratchMesh->vertexCount) * sizeof(VertexTangentFrame);
@@ -132,8 +130,7 @@ auto RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) -> Skinned
             if (drawCmd.skinnedVertexBuffer == BufferHandle::Invalid) {
                 continue;
             }
-            // Several draws can share one scratch buffer; one rebuild
-            // covers them all.
+
             const bool alreadyRebuilt =
                 std::ranges::any_of(outcome.addresses, [&](const SkinnedBlasEntry& entry) { return entry.scratch == drawCmd.skinnedVertexBuffer; });
             if (alreadyRebuilt) {
@@ -174,10 +171,6 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
 
         Vk::DeviceAddress<> blasAddress = drawCmd.blasAddress;
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            // The scratch BLAS was rebuilt earlier in this frame prep; its
-            // address arrives through the outcome list, not by re-resolving
-            // the record. A scratch buffer missing from the list failed its
-            // rebuild and contributes no instance.
             blasAddress = nullptr;
             for (const auto& entry: skinnedBlas) {
                 if (entry.scratch == drawCmd.skinnedVertexBuffer) {
@@ -267,10 +260,6 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
     ApplySceneView(view);
 
-    // The hand-off is data now: BuildTLAS below consumes exactly the BLAS
-    // addresses this stage rebuilt, in this order, because the call takes
-    // them as an argument -- not because two Impl methods happen to be
-    // called in the right sequence.
     const SkinnedBlasOutcome skinnedBlas = DispatchSkinningPasses(cmd);
     if (skinnedBlas.failure.has_value() && diagnostics.invalidDrawWarningCount.fetch_add(1, std::memory_order::relaxed) < 5) {
         ZHLN::LogWarning("PrepareSceneFrame: skinned BLAS rebuild failed: {}", skinnedBlas.failure.value());
@@ -280,11 +269,6 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
         queues.Draws().resize(kGpuCullingMaxInstances);
     }
 
-    // Debug lines are not scene meshes and never enter the instance table.
-    // They get their own interleaved buffer, uploaded here, which is what
-    // keeps them out of the slot range the CSG cutters index below: the flush
-    // used to write an InstanceData at queues.Draws().size(), which is exactly
-    // where csgOffset starts.
     if (pendingLines.empty()) {
         activeLineVertexCount = 0;
     } else {
@@ -350,8 +334,6 @@ namespace {
 template <typename Recorder, typename Scheduler, size_t... Is>
 auto RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkCall> bodies, std::index_sequence<Is...>) noexcept
     -> std::expected<void, ErrorCode> {
-    // Record() waits for its workers before returning. These references cannot
-    // outlive the graph's pass objects or the local array of callable views.
     return rec.Record(scheduler, ([&body = bodies[Is]](Vk::RecordingSlot slot) noexcept { body(slot.cmd); })...);
 }
 
@@ -413,21 +395,14 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 }
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
-    // The two-state accumulation, shadow-map and voxel histories can be reused
-    // only after the preceding GPU frame finishes. N-slot CPU/GPU buffers are
-    // independently indexed, but increasing N alone does not permit additional
-    // overlapping GPU frames while these history targets remain shared.
     auto&          primarySync = _impl->presenter.sync;
     const uint32_t slot        = _impl->presenter.frameIndex;
-    // The previous frame protects shared two-state histories. The current
-    // slot's older submission must also finish before its pools are reset, even
-    // if the previous frame acquired no image and never submitted graphics.
+
     for (const uint32_t frameSlot: {Vk::PreviousFrameSlot(slot), slot}) {
         if (const VkResult waited = primarySync.Wait(frameSlot); waited != VK_SUCCESS) {
             return std::unexpected(Vk::ToError(waited));
         }
-        // Compute can be submitted without a graphics frame (minimized or
-        // skipped acquisition), so its timeline must be waited independently.
+
         if (const VkResult waited = primarySync.WaitCompute(frameSlot); waited != VK_SUCCESS) {
             return std::unexpected(Vk::ToError(waited));
         }
@@ -491,10 +466,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
     _impl->destinations.BeginFrame();
     ++_impl->frameSerial;
     _impl->EvictInactiveEmitters();
-    // This frame's billboard batches start again from their first slot. The serial
-    // tells same-key submissions apart within one frame, so it is frame state and is
-    // reset here, with frameSerial -- the emitter queue it counts into is shared with
-    // the particle submits and cleared at EndFrame, so it cannot signal a frame.
+
     _impl->billboardSerial = 0;
     _impl->frameState.Reset();
     _impl->sceneTarget.reset();
@@ -552,8 +524,6 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
     _impl->accumulationHistory.Swap();
 
-    // These histories remain named graph resources, so exchange their roles
-    // explicitly. BeginFrame's preceding-frame waits protect their reuse.
     std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
     _impl->targets.SwapCascadeViews();
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);

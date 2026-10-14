@@ -15,7 +15,6 @@
 
 namespace ZHLN::Vk {
 
-// Tri-state presentation result: value, benign skip (empty optional), or ErrorCode.
 template <typename T>
 using PresentationOutcome = std::expected<std::optional<T>, ErrorCode>;
 

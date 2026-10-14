@@ -1,14 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The compute frame.
-//
-// Simulation is a separate queue submission from the scene, so it is a separate
-// graph: the light-cluster culling that the deferred lighting pass will read,
-// the volumetric fog ladder, and the particle updates. It is compiled and bound
-// here rather than in RenderGraphBuilder.cpp because this is where the command
-// buffer it records into is acquired, reset and submitted.
-
 #include "ComputeSimPipeline.hpp"
 #include "../passes/culling/ClusterCullingPass.hpp"
 #include "../passes/simulation/MeshParticleUpdatePass.hpp"
@@ -25,8 +17,6 @@ namespace ZHLN::Pipelines {
 
 namespace {
 
-// The cluster volume's froxel bounds only change when the projection does, so
-// the bounds pass runs on demand rather than every frame.
 void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32_t fIdx) noexcept {
     if (!impl.frameState.clusterBoundsDirty || !impl.culling.clusterBoundsPass.Valid() || !impl.culling.clusterBoundsPass.HasFixedDispatchDomain()) {
         return;
@@ -40,9 +30,6 @@ void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32
     impl.frameState.clusterBoundsDirty = false;
 }
 
-// Binds a resource the reflected target bundle does not own. Guarded by a
-// membership test on the graph's resource list so the binder is never asked
-// about a tag it has no slot for.
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {
@@ -51,17 +38,11 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     }
 }
 
-// Record into the active Vulkan recorder; its End() transition happens in
-// Submit, before the executable token is handed to the compute queue.
 void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt) noexcept {
     const uint32_t fIdx = impl.presenter.frameIndex;
     impl.BindHeapsAndPushFrame(cmd);
     RebuildClusterBounds(impl, cmd, fIdx);
 
-    // The simulation passes themselves. Every one of them is a struct that
-    // names its own resources, so the graph decides what can overlap: the
-    // volumetric ladder is strictly ordered through the voxel grid, while the
-    // two particle updates touch disjoint buffers and are free to fork.
     auto computeGraph = Vk::MakePassPack(
                             Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
                             Passes::VolumetricFogInjectPass {.impl = impl},
@@ -78,9 +59,6 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
 
     compBinder.AutoBind(impl);
 
-    // The light injection pass shadows against last frame's cascade map: the
-    // current one is being written by the scene graph on the graphics queue,
-    // and the two are swapped at `EndFrame`.
     BindExternalReflected<ComputeResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(impl.targets.ShadowMapPrev()); });
 
     auto* diagnostics = impl.diagnostics.gpuDiagnostics.IsActive() ? &impl.diagnostics.gpuDiagnostics : nullptr;

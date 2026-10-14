@@ -25,15 +25,6 @@ using RtgiCompositeCSLayout  = Vk::ReflectedLayout;
 using DdgiTraceCSLayout      = Vk::ReflectedLayout;
 using DdgiUpdateCSLayout     = Vk::ReflectedLayout;
 
-// The image-space effects that are not a lighting model.
-//
-// Bloom, the HDR and pre-albedo RTGI A-Trous denoisers, GTAO, the half-resolution
-// reflection and RTGI traces, and the diffuse-GI composite are full-screen
-// compute passes. The SMAA lookup tables are baked once and then only read.
-// These passes share a build path -- reflect a compute layout, allocate
-// frame-lifetime heap bindings, build a pipeline -- and nothing outside their
-// own passes touches them, so they are collected here rather than left as
-// loose pipeline handles on `RenderContext::Impl`.
 class PostProcessFeature {
   public:
     PostProcessFeature()                                             = default;
@@ -43,20 +34,11 @@ class PostProcessFeature {
     PostProcessFeature(PostProcessFeature&&) noexcept                = delete;
     auto operator=(PostProcessFeature&&) noexcept -> PostProcessFeature& = delete;
 
-    // --- setup --------------------------------------------------------------
-
-    // Builds every compute pipeline below that this device can run: the
-    // half-resolution reflection and RTGI traces need ray tracing; their
-    // absence on other devices does not prevent the remaining pipelines.
     [[nodiscard]] auto Build(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
 
-    // Bakes the SMAA area and search lookup tables on the GPU.
     [[nodiscard]] auto BakeSMAALUTs(RenderContext::Impl& impl) -> std::expected<void, ErrorCode>;
 
-    // Writes the pass-local sampler descriptors for the passes owned here.
     void InitSamplers(RenderContext::Impl& impl) noexcept;
-
-    // --- what the passes need ----------------------------------------------
 
     [[nodiscard]] auto BloomThreshold() noexcept -> Vk::DynamicComputePass&;
     [[nodiscard]] auto BloomDown() noexcept -> Vk::DynamicComputePass&;
@@ -86,8 +68,6 @@ class PostProcessFeature {
     [[nodiscard]] auto DdgiTraceHeapBindings() noexcept -> Vk::HeapPassBindings&;
     [[nodiscard]] auto DdgiUpdateHeapBindings() noexcept -> Vk::HeapPassBindings&;
 
-    // Bindless slots of the baked SMAA lookup tables; `SmaaWeightPass` reads
-    // both while computing blending weights.
     [[nodiscard]] auto SmaaAreaTexture() const noexcept -> uint32_t;
     [[nodiscard]] auto SmaaSearchTexture() const noexcept -> uint32_t;
 

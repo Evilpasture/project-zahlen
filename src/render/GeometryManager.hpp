@@ -37,32 +37,20 @@ class GeometryManager {
     GeometryManager(GeometryManager&&) noexcept                    = delete;
     auto operator=(GeometryManager&&) noexcept -> GeometryManager& = delete;
 
-    // A buffer's payload, named instead of spread over positional arguments.
-    // Describes either the bytes to upload or an allocation to zero-fill, and binds
-    // the element size to the byte count so the two cannot disagree: a source whose
-    // bytes are not a whole number of its elements is rejected rather than counted
-    // wrong.
     struct BufferSource {
         std::span<const std::byte> bytes          = {};
-        size_t                     allocationSize = 0; // read when `bytes` is empty
-        uint32_t                   stride         = 1; // bytes per element
+        size_t                     allocationSize = 0;
+        uint32_t                   stride         = 1;
 
         [[nodiscard]] auto TotalSize() const noexcept -> size_t {
             return bytes.empty() ? allocationSize : bytes.size();
         }
-        // Zero for an allocation-only source: nothing has been uploaded, so there are
-        // no elements to count yet. That is what this pool recorded for its
-        // allocation-only storage buffers before (Adopt(..., 0, ...)), unchanged.
+
         [[nodiscard]] auto ElementCount() const noexcept -> uint32_t {
             return (bytes.empty() || stride == 0) ? 0U : static_cast<uint32_t>(bytes.size() / stride);
         }
     };
 
-    // Create, upload and adopt in one step. The named creators this replaces differed
-    // only in the usage bits and in what they divided the byte count by, and both now
-    // ride on the arguments: the usage as a flag, the element size as the source's
-    // stride. A source that contradicts itself is reported as an ErrorCode (see
-    // BufferSourceError in GeometryManager.cpp) instead of reaching Vulkan.
     [[nodiscard]] auto CreateBuffer(const BufferSource& source, Vk::BufferUsage usage) -> std::expected<BufferHandle, ErrorCode>;
 
     [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle;
@@ -75,7 +63,6 @@ class GeometryManager {
         return _buffers.Resolve(handle);
     }
 
-    // AssetID lookup only: the creator of the buffers owns their lifetime.
     void RegisterMesh(AssetID id, Mesh mesh) {
         _meshes.Insert(id, mesh);
     }
@@ -105,7 +92,7 @@ class GeometryManager {
     }
 
     [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
-    // After GPU idle the renderer drains the queue before releasing the allocator.
+
     void RetireAll() noexcept;
 
   private:
@@ -117,9 +104,6 @@ class GeometryManager {
     Vk::CommandRing<Vk::QueueType::Transfer, 8>& _transferCmdRing;
     Vk::DeletionQueue&                           _deletionQueue;
 
-    // The geometry throughput scene holds 1,600 distinct boxes, each with
-    // position, tangent-frame, surface, and three meshlet buffers: 9,600 live
-    // handles before other scene resources. Keep headroom for other streams.
     GenerationalPool<NativeMesh, 16384, BufferHandle> _buffers;
 
     ZHLN::HashMap<AssetID, Mesh>        _meshes;

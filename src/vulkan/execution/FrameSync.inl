@@ -101,4 +101,4 @@ inline void FrameSync<N>::Reset() noexcept {
     _submitted = {};
 }
 
-} // namespace ZHLN::Vk
+}

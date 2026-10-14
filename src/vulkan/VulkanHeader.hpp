@@ -7,8 +7,6 @@
 
 #include <volk.h>
 
-
-
 #ifdef None
 #undef None
 #endif

@@ -7,8 +7,6 @@
 
 namespace ZHLN::Passes {
 
-// The reduce reads a 2x2 footprint of the source mip and writes one texel of
-// the destination, so it needs both mips' sizes and nothing else.
 struct HiZPushConstants {
     float    rcpSrcWidth;
     float    rcpSrcHeight;

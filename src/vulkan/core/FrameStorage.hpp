@@ -9,8 +9,6 @@
 
 namespace ZHLN {
 
-// Physical resources owned by an in-flight GPU frame. Selection is explicit;
-// there is no temporal "previous" state or implicit frame counter here.
 template <typename T, uint32_t N = Vk::kFramesInFlight>
 class PerFrame {
   public:
@@ -41,10 +39,6 @@ class PerFrame {
     std::array<T, N> _data {};
 };
 
-// Two temporal states irrespective of the number of frames in flight: Current
-// is written this frame, Previous is the result of the last frame. Logical
-// roles do not imply physical safety: the owner must synchronize GPU readers
-// before reusing either state.
 template <typename T>
 class PingPong {
   public:
