@@ -111,7 +111,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
         Light light = lights[lIdx];
 
-        if (light.type == 0 || light.type == 4)
+        if (light.type == LightType::Directional || light.type == LightType::Sun)
             continue;
 
         float3 L_unnorm = light.position - worldPos;

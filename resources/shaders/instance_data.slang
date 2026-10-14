@@ -4,7 +4,6 @@
 module instance_data;
 
 import vertex_format;
-import cxx_abi;
 import gpu_buffer;
 
 public struct InstanceData {

@@ -294,7 +294,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             continue;
 
         Light light = lights[l];
-        if (light.type == 3) {
+        if (light.type == LightType::Area) {
             float2 uv      = float2(roughness, sqrt(1.0f - NdotV));
             float4 t1      = ltc_mat.SampleLevel(clampSampler, uv, 0.0f);
             float3x3 Minv  = float3x3(float3(t1.x, 0.0f, t1.y), float3(0.0f, 1.0f, 0.0f), float3(t1.z, 0.0f, t1.w));
@@ -315,7 +315,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             directPunctual += (((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * areaAtt + sheenArea) *
                               coatAtt * light.color * light.intensity * shadowVisibility;
         } else {
-            if (light.type == 0 || light.type == 4)
+            if (light.type == LightType::Directional || light.type == LightType::Sun)
                 continue;
             float3 L_unnorm = light.position - worldPos;
             float range     = max(light.range, 0.001f);
@@ -334,7 +334,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             // Spotlight cone falloff: lerp between the outer and inner cone
             // cosines. Lights without an authored cone pack -1/-1 (see
             // PackLight), which skips this branch and keeps the full sphere.
-            if (light.type == 2 && light.outerConeCos > -0.5f) {
+            if (light.type == LightType::Spot && light.outerConeCos > -0.5f) {
                 float3 spotDir   = normalize(light.direction);
                 float  cosAngle  = dot(-L_p, spotDir);
                 float  spotAtten = saturate((cosAngle - light.outerConeCos) / max(light.innerConeCos - light.outerConeCos, 1e-4f));
@@ -355,7 +355,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     // single tile and always takes face 0. The face order here
                     // is the order `ShadowAtlas` writes the matrices in.
                     uint face = 0u;
-                    if (light.type == 1) {
+                    if (light.type == LightType::Point) {
                         float3 r  = worldPos - light.position;
                         float3 ar = abs(r);
                         if (ar.x >= ar.y && ar.x >= ar.z) {

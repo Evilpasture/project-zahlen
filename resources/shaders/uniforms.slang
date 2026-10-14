@@ -1,6 +1,19 @@
 module uniforms;
 
-import cxx_abi;
+public enum LightType : uint {
+    Directional = 0,
+    Point = 1,
+    Spot = 2,
+    Area = 3,
+    Sun = 4,
+};
+
+// Shared by the particle emitter ABI and its render push constants.
+public enum ParticleAlignment : uint {
+    CameraBillboard = 0,
+    VelocityStretched = 1,
+    GroundFlat = 2,
+};
 
 public struct FrameUniforms {
     public float4x4 viewProj;
@@ -90,8 +103,7 @@ public struct ShadowTile {
 
 public struct Light {
     public float3 position;
-    [CxxEnum("::ZHLN::LightType")]
-    public uint type;
+    public LightType type;
     public float3 color;
     public float intensity;
     public float3 direction;

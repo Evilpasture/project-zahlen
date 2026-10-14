@@ -14,7 +14,7 @@ struct ClusteredLightingPass: Vk::RenderPass<
                                   Vk::FragmentAndComputeRead<Res_DdgiDistance>, Vk::ColorWrite<Res_Lighting>> {
     const PostProcessResources&          post;
     RenderFrameContext&                  frame;
-    GeneratedGpu::ScenePassPushConstants pc {};
+    Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };

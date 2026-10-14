@@ -9,7 +9,7 @@ namespace ZHLN::Passes {
 
 struct GtaoPass: Vk::RenderPass<"GtaoAo", Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>> {
     RenderFrameContext&                            impl;
-    GeneratedGpu::ScenePassPushConstants          pc {};
+    Slang::ScenePassPushConstants          pc {};
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

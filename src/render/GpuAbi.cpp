@@ -32,7 +32,7 @@ template <typename T>
 template <typename T>
 [[nodiscard]] consteval auto CheckOne() noexcept -> bool {
     static_assert(
-        Matches<T>(GeneratedGpu::SlangName<T>::value),
+        Matches<T>(Slang::SlangName<T>::value),
         "a GPU type does not have the size its .slang declaration compiles to: the struct and the shader have drifted, and every buffer, push "
         "blob or descriptor write through it would land misaligned"
     );
@@ -46,7 +46,7 @@ template <typename... Ts>
 
 static_assert(kTypes.Complete(), "the GPU ABI module did not parse: the checks below would prove nothing");
 
-static_assert(CheckAll(static_cast<GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete");
+static_assert(CheckAll(static_cast<Slang::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete");
 
 constexpr Vk::HeapPushDataLayout kReflectedScenePushLayout = kTypes.HeapPushData(ZHLN::Vk::kDescriptorHeapPushDataTypeName).value_or(Vk::HeapPushDataLayout {});
 static_assert(

@@ -5,6 +5,18 @@
 
 namespace ZHLN::GpuPack {
 
+static_assert(
+    static_cast<uint32_t>(LightType::Directional) == static_cast<uint32_t>(Slang::LightType::Directional)
+    && static_cast<uint32_t>(LightType::Point) == static_cast<uint32_t>(Slang::LightType::Point)
+    && static_cast<uint32_t>(LightType::Spot) == static_cast<uint32_t>(Slang::LightType::Spot)
+    && static_cast<uint32_t>(LightType::Area) == static_cast<uint32_t>(Slang::LightType::Area)
+    && static_cast<uint32_t>(LightType::Sun) == static_cast<uint32_t>(Slang::LightType::Sun)
+    && static_cast<uint32_t>(ParticleAlignment::CameraBillboard) == static_cast<uint32_t>(Slang::ParticleAlignment::CameraBillboard)
+    && static_cast<uint32_t>(ParticleAlignment::VelocityStretched) == static_cast<uint32_t>(Slang::ParticleAlignment::VelocityStretched)
+    && static_cast<uint32_t>(ParticleAlignment::GroundFlat) == static_cast<uint32_t>(Slang::ParticleAlignment::GroundFlat),
+    "the generated Slang GPU enums must preserve the host enums' wire values"
+);
+
 namespace {
 
 [[nodiscard]] auto ToFloat4(const JPH::Vec4& v) noexcept -> JPH::Float4 {
@@ -40,7 +52,7 @@ auto PackParticleEmitter(const ParticleEmitterDesc& desc, uint32_t textureIndex,
     packed.spinSpeed = desc.spinSpeed;
 
     packed.textureIndex = textureIndex;
-    packed.alignment    = desc.alignment;
+    packed.alignment    = static_cast<Slang::ParticleAlignment>(static_cast<uint32_t>(desc.alignment));
     packed.blendMode    = blendMode;
 
     return packed;
@@ -79,7 +91,7 @@ auto PackMeshParticleEmitter(const MeshParticleEmitterDesc& desc) noexcept -> Me
 auto PackLight(const LightDesc& desc, const JPH::Mat44& worldToView, int32_t shadowTileBase) noexcept -> Light {
     Light packed {};
 
-    packed.type           = desc.type;
+    packed.type           = static_cast<Slang::LightType>(static_cast<uint32_t>(desc.type));
     packed.intensity      = desc.intensity;
     packed.radius         = desc.radius;
     packed.twoSided       = desc.twoSided;

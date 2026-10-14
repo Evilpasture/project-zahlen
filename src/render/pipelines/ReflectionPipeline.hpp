@@ -26,7 +26,7 @@ public:
     void Dispatch(
         Vk::RasterPassContextBase& ctx,
         const Passes::GBufferSurface& surface,
-        const GeneratedGpu::ScenePassPushConstants& pc
+        const Slang::ScenePassPushConstants& pc
     ) const noexcept;
 
 private:

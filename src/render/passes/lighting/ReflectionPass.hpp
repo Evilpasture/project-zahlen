@@ -26,7 +26,7 @@ struct ReflectionPass: Vk::RenderPass<
                           Vk::ShaderRead<Res_DdgiDistance>,
                           Vk::ColorWrite<OutputTag>> {
     RenderFrameContext&                   impl;
-    GeneratedGpu::ScenePassPushConstants pc {};
+    Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
         impl.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(impl), pc);

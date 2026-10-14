@@ -7,17 +7,17 @@
 
 namespace ZHLN {
 
-using GeneratedGpu::ClusterBounds;
-using GeneratedGpu::ClusterVolume;
-using GeneratedGpu::GPUMeshlet;
-using GeneratedGpu::InstanceData;
-using GeneratedGpu::Particle3D;
+using Slang::ClusterBounds;
+using Slang::ClusterVolume;
+using Slang::GPUMeshlet;
+using Slang::InstanceData;
+using Slang::Particle3D;
 
-using GeneratedGpu::FrameUniforms;
-using GeneratedGpu::Light;
-using GeneratedGpu::ShadowTile;
-using GeneratedGpu::MeshParticleEmitterParams;
-using GeneratedGpu::Particle;
-using GeneratedGpu::ParticleEmitterParams;
+using Slang::FrameUniforms;
+using Slang::Light;
+using Slang::ShadowTile;
+using Slang::MeshParticleEmitterParams;
+using Slang::Particle;
+using Slang::ParticleEmitterParams;
 
 } // namespace ZHLN

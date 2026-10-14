@@ -56,7 +56,7 @@ void CSMain(uint3 id: SV_DispatchThreadID, uint3 gId: SV_GroupThreadID) {
     uint list[Cluster.MaxLights];
 
     for (uint i = 0; i < frame.lightCount && count < Cluster.MaxLights; ++i) {
-        if (lights[i].type == 0 || lights[i].type == 4) {
+        if (lights[i].type == LightType::Directional || lights[i].type == LightType::Sun) {
             continue;
         }
 

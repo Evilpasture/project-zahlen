@@ -10,10 +10,9 @@
 // offsets, sizes, strides and alignments come from the compiler's own model.
 // The Slang type decides the C++ spelling by itself -- float2/float3/float4
 // to JPH::Float2/Float3/Float4, float4x4 to JPH::Mat44, a fixed array to
-// std::array of its element -- with [CxxEnum] the one annotation left, naming
-// the engine enum behind an int/uint scalar. There is no table in this file
-// restating either half, so a Slang edit carries its spelling with it and
-// nothing here can skew a layout behind the shader's back.
+// std::array of its element, and enum declarations to generated C++ enum types.
+// There is no table here restating either half, so a Slang edit carries its
+// spelling with it and nothing can skew a layout behind the shader's back.
 //
 // Every struct is emitted here, including the five the engine and the shaders
 // both have a word for -- Particle, ParticleEmitterParams,
@@ -50,8 +49,8 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <memory>
-#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -68,15 +67,9 @@ constexpr std::string_view kAbiGlobal  = "abi";
 constexpr std::string_view kAbiWrapper = "GpuAbiTypes";
 constexpr std::string_view kEntryPoint = "CSMain";
 
-// The cxx_abi.slang vocabulary this walk answers to. Unknown names fail in
-// ReadMemberAttributes/RejectStructAttributes, so a vocabulary edit lands here
-// loudly. [CxxArray], [CxxCArray], [CxxQuat], [CxxDefault] and [CxxSkip] used to
-// live here: the first four existed only to respell a type the Slang kind
-// already names, the last one skipped a struct the module no longer wraps, and
-// the host structs now carry their own defaults, so every one of them is gone.
-// The struct vocabulary is empty.
-constexpr std::string_view kAttrEnum = "CxxEnum";
-
+// GPU enums are declared with an explicit uint underlying type in Slang. The
+// walk accepts their reflected four-byte layouts and uint32_t-valued cases only;
+// it does not translate or rename case lists by hand.
 // The storage spellings: Jolt's pod lane types, one per Slang float vector
 // width. JPH::Vec3/Vec4 are the *compute* types (16 bytes, 16-aligned, three
 // live lanes in a Vec3) and are never a storage destination.
@@ -130,6 +123,9 @@ auto KindName(slang::TypeReflection::Kind kind) -> std::string_view {
     }
     if (kind == Kind::Struct) {
         return "struct";
+    }
+    if (kind == Kind::Enum) {
+        return "enum";
     }
     return "resource";
 }
@@ -195,58 +191,15 @@ struct StructBuildResult {
     std::vector<StructDef> nested;
 };
 
-// What the member asked for. One annotation is left: [CxxEnum], which names
-// the engine enum a uint/int scalar is. Every name outside the vocabulary
-// fails here, so a misspelled or future annotation is loud rather than
-// silently defaulted.
-struct MemberSpelling {
-    std::optional<std::string> enumName {};
+struct EnumValue {
+    std::string name {};
+    uint32_t    value = 0;
 };
 
-auto ReadStringArg(
-    slang::UserAttribute* attr, std::string_view structName, std::string_view memberName, std::string_view attrName
-) -> std::string {
-    const uint32_t args = static_cast<uint32_t>(attr->getArgumentCount());
-    if (args != 1) {
-        Fail("gpu types: {}.{} carries [{}] with {} arguments; it takes exactly one", structName, memberName, attrName, args);
-    }
-    size_t      size = 0;
-    const char* text = attr->getArgumentValueString(0, &size);
-    if (text == nullptr) {
-        Fail("gpu types: {}.{} carries [{}] with a non-string argument", structName, memberName, attrName);
-    }
-    return std::string {text, size};
-}
-
-auto ReadMemberAttributes(slang::VariableReflection* var, std::string_view structName, std::string_view memberName) -> MemberSpelling {
-    MemberSpelling spelling;
-    for (unsigned i: std::views::iota(0u, var->getUserAttributeCount())) {
-        slang::UserAttribute* attr = var->getUserAttributeByIndex(i);
-        const char*             raw  = attr->getName();
-        if (raw == nullptr) {
-            Fail("gpu types: {}.{} carries an unnamed annotation", structName, memberName);
-        }
-        const std::string_view name = raw;
-        if (name == kAttrEnum) {
-            spelling.enumName = ReadStringArg(attr, structName, memberName, name);
-        } else {
-            Fail("gpu types: {}.{} carries [{}], which is not a cxx_abi annotation", structName, memberName, name);
-        }
-    }
-    return spelling;
-}
-
-// The struct vocabulary is empty (see above), so any annotation on a walked
-// struct fails rather than being silently ignored.
-auto RejectStructAttributes(std::string_view structName, slang::TypeReflection* type) -> void {
-    for (unsigned i: std::views::iota(0u, type->getUserAttributeCount())) {
-        const char* raw = type->getUserAttributeByIndex(i)->getName();
-        if (raw == nullptr) {
-            Fail("gpu types: {} carries an unnamed annotation", structName);
-        }
-        Fail("gpu types: {} carries [{}], which is not a cxx_abi struct annotation", structName, raw);
-    }
-}
+struct EnumDef {
+    std::string          name {};
+    std::vector<EnumValue> values {};
+};
 
 // The member's alignment as Slang seats it: every alignas in the header
 // answers to this number, so a non-positive one fails rather than emitting
@@ -259,24 +212,103 @@ auto ReadAlignment(std::string_view structName, std::string_view memberName, sla
     return static_cast<uint32_t>(align);
 }
 
-// The Slang-kind-to-C++ mapping for one member, which is now the whole
-// story: a float vector is its Jolt pod lane type, a float4x4 is JPH::Mat44,
-// a fixed array is std::array of its element, and the scalars are stdint. No
-// arm holds the result against anything but the size Slang reported, so the
-// shader stays the measure of every size.
+// Reflects one Slang enum case list into a type-safe C++ enum. The GPU ABI
+// currently uses only four-byte uint enums; rejecting other layouts here keeps
+// the generated type and the shader's storage representation explicit.
+auto ReflectEnum(
+    std::string_view structName,
+    std::string_view memberName,
+    slang::TypeReflection* type,
+    slang::TypeLayoutReflection* layout
+) -> EnumDef {
+    const char*            rawName = type->getName();
+    if (rawName == nullptr || rawName[0] == '\0') {
+        Fail("gpu types: {}.{} has an unnamed enum type", structName, memberName);
+    }
+    const std::string_view enumName = rawName;
+    if (!IsIdentifier(enumName)) {
+        Fail("gpu types: {}.{} enum '{}' is not a C++ identifier", structName, memberName, enumName);
+    }
+
+    const size_t  size  = layout->getSize(kUniform);
+    const int32_t align = layout->getAlignment(kUniform);
+    if (size != sizeof(uint32_t) || align != alignof(uint32_t)) {
+        Fail(
+            "gpu types: {}.{} enum '{}' occupies {} bytes with alignment {}; generated enums require uint32_t storage",
+            structName,
+            memberName,
+            enumName,
+            size,
+            align
+        );
+    }
+    if (type->getFieldCount() == 0) {
+        Fail("gpu types: {}.{} enum '{}' has no cases", structName, memberName, enumName);
+    }
+
+    EnumDef result {.name = std::string {enumName}};
+    result.values.reserve(type->getFieldCount());
+    for (unsigned i: std::views::iota(0u, type->getFieldCount())) {
+        slang::VariableReflection* value = type->getFieldByIndex(i);
+        const char*               name  = value->getName();
+        if (name == nullptr || name[0] == '\0' || !IsIdentifier(name)) {
+            Fail("gpu types: {}.{} enum '{}' has a case that is not a C++ identifier", structName, memberName, enumName);
+        }
+        int64_t integer = 0;
+        if (SLANG_FAILED(value->getDefaultValueInt(&integer))) {
+            Fail("gpu types: {}.{} enum '{}.{}' has no reflected integer value", structName, memberName, enumName, name);
+        }
+        if (integer < 0 || static_cast<uint64_t>(integer) > std::numeric_limits<uint32_t>::max()) {
+            Fail("gpu types: {}.{} enum '{}.{}' value {} does not fit uint32_t", structName, memberName, enumName, name, integer);
+        }
+        result.values.push_back(EnumValue {.name = name, .value = static_cast<uint32_t>(integer)});
+    }
+    return result;
+}
+
+auto SameEnum(const EnumDef& lhs, const EnumDef& rhs) -> bool {
+    if (lhs.name != rhs.name || lhs.values.size() != rhs.values.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < lhs.values.size(); ++i) {
+        if (lhs.values[i].name != rhs.values[i].name || lhs.values[i].value != rhs.values[i].value) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The Slang-kind-to-C++ mapping for one member: a float vector is its Jolt pod
+// lane type, a float4x4 is JPH::Mat44, a fixed array is std::array of its
+// element, scalar kinds map to stdint, and a Slang enum gets a generated enum.
 auto MapMember(
-    std::string_view structName, std::string_view memberName, slang::TypeLayoutReflection* layout, const MemberSpelling& spelling
+    std::string_view structName,
+    std::string_view memberName,
+    slang::TypeReflection* type,
+    slang::TypeLayoutReflection* layout,
+    std::vector<EnumDef>& enums
 ) -> CxxType {
     using Kind = slang::TypeReflection::Kind;
-    slang::TypeReflection* type   = layout->getType();
-    const Kind               kind   = type->getKind();
-    const auto               scalar = type->getScalarType();
-    const bool               isFloat32 = scalar == slang::TypeReflection::ScalarType::Float32;
+    const Kind             kind = type->getKind();
+    const auto             scalar = type->getScalarType();
+    const bool             isFloat32 = scalar == slang::TypeReflection::ScalarType::Float32;
 
-    if (kind == Kind::Struct) {
-        if (spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is a struct; [CxxEnum] applies to int and uint scalars", structName, memberName);
+    if (kind == Kind::Enum) {
+        EnumDef definition = ReflectEnum(structName, memberName, type, layout);
+        const auto existing = std::ranges::find_if(enums, [&definition](const EnumDef& candidate) { return candidate.name == definition.name; });
+        if (existing == enums.end()) {
+            enums.push_back(std::move(definition));
+        } else if (!SameEnum(*existing, definition)) {
+            Fail("gpu types: enum '{}' is reflected with conflicting case lists", definition.name);
         }
+        return {
+            .form = CxxForm::Enum,
+            .spelling = std::format("::ZHLN::Slang::{}", type->getName()),
+            .size = sizeof(uint32_t),
+            .cxxAlign = alignof(uint32_t),
+        };
+    }
+    if (kind == Kind::Struct) {
         // Named by the caller: the member's own type, resolved through the
         // nested walk rather than any registry.
         return {.form = CxxForm::Struct};
@@ -290,14 +322,12 @@ auto MapMember(
         if (layout->getMatrixLayoutMode() != SLANG_MATRIX_LAYOUT_COLUMN_MAJOR) {
             Fail("gpu types: {}.{} is not column-major; the host Mat44 assumes column-major", structName, memberName);
         }
-        if (spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is a matrix; [CxxEnum] applies to int and uint scalars", structName, memberName);
-        }
         return {.form = CxxForm::Mat, .spelling = std::string {kMat4}, .size = 64, .cxxAlign = 16};
     }
     if (kind == Kind::Array) {
+        slang::TypeReflection*      elementType   = type->getElementType();
         slang::TypeLayoutReflection* elementLayout = layout->getElementTypeLayout();
-        const Kind                     elementKind   = elementLayout->getType()->getKind();
+        const Kind                  elementKind   = elementType->getKind();
         if (elementKind == Kind::Array) {
             Fail("gpu types: {}.{} is multi-dimensional; only one-dimensional fixed arrays map", structName, memberName);
         }
@@ -315,12 +345,9 @@ auto MapMember(
         if (count == 0) {
             Fail("gpu types: {}.{} is unsized; only fixed arrays map", structName, memberName);
         }
-        if (spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is an array; [CxxEnum] applies to int and uint scalars", structName, memberName);
-        }
         // The element maps by the same table, so a repeat of a float4 is a
         // std::array of the pod lane type -- no second spelling for repeats.
-        CxxType element = MapMember(structName, memberName, elementLayout, MemberSpelling {});
+        CxxType element = MapMember(structName, memberName, elementType, elementLayout, enums);
         if (stride != element.size) {
             Fail(
                 "gpu types: {}.{} strides {} but its element occupies {}; padded elements have no C++ spelling here",
@@ -343,9 +370,6 @@ auto MapMember(
         if (components < 2 || components > 4) {
             Fail("gpu types: {}.{} has {} vector components; only 2, 3 and 4 map", structName, memberName, components);
         }
-        if (spelling.enumName.has_value()) {
-            Fail("gpu types: {}.{} is a vector; [CxxEnum] applies to int and uint scalars", structName, memberName);
-        }
         // The pod lane type: same lanes as the shader, layout 4-byte aligned
         // and 4/8/12/16 bytes wide, which is what the reflected offsets were
         // measured with. A float4 landing mid-16-byte-boundary is the shader's
@@ -355,12 +379,6 @@ auto MapMember(
     }
     if (kind == Kind::Scalar) {
         using Scalar = slang::TypeReflection::ScalarType;
-        if (spelling.enumName.has_value()) {
-            if (scalar != Scalar::Int32 && scalar != Scalar::UInt32) {
-                Fail("gpu types: {}.{} carries [CxxEnum] but is not an int or uint scalar", structName, memberName);
-            }
-            return {.form = CxxForm::Enum, .spelling = *spelling.enumName, .size = 4, .cxxAlign = 4};
-        }
         if (scalar == Scalar::Float32) {
             return {.form = CxxForm::Scalar, .spelling = "float", .size = 4, .cxxAlign = 4};
         }
@@ -389,7 +407,7 @@ auto MapMember(
 // member extent up to the widest member alignment. Nested structs recurse --
 // Slang rejects infinitely-sized types at compile time, so the walk
 // terminates by construction.
-auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layout) -> StructBuildResult {
+auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layout, std::vector<EnumDef>& enums) -> StructBuildResult {
     std::vector<slang::VariableLayoutReflection*> members;
     for (unsigned i: std::views::iota(0u, layout->getFieldCount())) {
         members.push_back(layout->getFieldByIndex(i));
@@ -428,13 +446,19 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
         }
 
         slang::TypeLayoutReflection* memberLayout = member->getTypeLayout();
-        slang::VariableReflection*   var           = member->getVariable();
-        if (var == nullptr) {
-            Fail("gpu types: {}.{} has no variable reflection; its annotations are unreadable", structName, memberName);
+        // Keep the declared type separate from its layout: Slang can lower an
+        // enum field to its underlying scalar for storage, while VariableReflection
+        // retains the enum kind and its named cases.
+        slang::VariableReflection* variable = member->getVariable();
+        if (variable == nullptr) {
+            Fail("gpu types: {}.{} has no reflected variable", structName, memberName);
         }
-        const MemberSpelling spelling    = ReadMemberAttributes(var, structName, memberName);
+        slang::TypeReflection* memberType = variable->getType();
+        if (memberType == nullptr) {
+            Fail("gpu types: {}.{} has no reflected variable type", structName, memberName);
+        }
         const uint32_t         slangAlign = ReadAlignment(structName, memberName, memberLayout);
-        CxxType                mapped     = MapMember(structName, memberName, memberLayout, spelling);
+        CxxType                mapped     = MapMember(structName, memberName, memberType, memberLayout, enums);
 
         // A nested struct recurses through the same builder; anything else
         // takes its mapped spelling, held against the member size Slang
@@ -445,8 +469,7 @@ auto BuildStruct(std::string_view structName, slang::TypeLayoutReflection* layou
             if (nestedName == nullptr || nestedName[0] == '\0') {
                 Fail("gpu types: {}.{} is an unnamed struct; a nested type has nothing to be checked by", structName, memberName);
             }
-            RejectStructAttributes(nestedName, memberLayout->getType());
-            StructBuildResult inner = BuildStruct(nestedName, memberLayout);
+            StructBuildResult inner = BuildStruct(nestedName, memberLayout, enums);
             mapped.spelling = inner.definition.name;
             mapped.size     = inner.definition.size;
             mapped.cxxAlign = inner.definition.align;
@@ -507,8 +530,9 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 //
 // Nothing under include/ names what is in here. The engine authors its own
 // terms (Zahlen/ParticleEmitterDesc.hpp, Zahlen/Render/FrameData.hpp) and
-// src/render/GpuPack.cpp packs them into these structs, which is what lets
-// zahlen_engine build with no shader tool having run.
+// src/render/GpuPack.cpp packs them into these structs. The enum declarations
+// here are the GPU-side, Slang-derived wire types; packing converts the engine's
+// domain enums explicitly at that boundary.
 
 #pragma once
 
@@ -517,14 +541,13 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 #include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Mat44.h>
-#include <Zahlen/Render/GpuEnums.hpp> // the [CxxEnum] spellings
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <tuple>
 
-namespace ZHLN::GeneratedGpu {
+namespace ZHLN::Slang {
 
 )ZHLN";
 
@@ -565,16 +588,32 @@ auto EmitInventory(std::string& out, std::span<const StructDef> defs) -> void {
         std::format_to(std::back_inserter(out), "{}{}", first ? "" : ", ", def.name);
         first = false;
     }
-    std::format_to(std::back_inserter(out), ">;\n\n}} // namespace ZHLN::GeneratedGpu\n");
+    std::format_to(std::back_inserter(out), ">;\n\n}} // namespace ZHLN::Slang\n");
 }
 
 // One definition per struct, and it is the definition: the members at the
 // offsets Slang seated them, the _padN between them, the alignment each lane
 // carries. The asserts that follow are the contract with the reflection this
 // emission came from -- and with the host compiler that has to reproduce it.
-auto EmitStructsHeader(std::span<const StructDef> defs) -> std::string {
+auto EmitEnum(std::string& out, const EnumDef& def) -> void {
+    std::format_to(std::back_inserter(out), "// Reflected from Slang; do not define a parallel GPU enum.\nenum class {} : uint32_t {{\n", def.name);
+    for (const EnumValue& value: def.values) {
+        std::format_to(std::back_inserter(out), "    {} = {}u,\n", value.name, value.value);
+    }
+    std::format_to(
+        std::back_inserter(out),
+        "}};\nstatic_assert(sizeof({}) == sizeof(uint32_t), \"Slang::{} must retain its Slang uint storage width\");\n\n",
+        def.name,
+        def.name
+    );
+}
+
+auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef> enums) -> std::string {
     std::string text {kStructsPreamble};
-    bool        first = true;
+    for (const EnumDef& def: enums) {
+        EmitEnum(text, def);
+    }
+    bool first = true;
     for (const StructDef& def: defs) {
         std::format_to(std::back_inserter(text), "{}struct alignas({}) {} {{\n", first ? "" : "\n", def.align, def.name);
         for (const Field& field: def.fields) {
@@ -584,7 +623,7 @@ auto EmitStructsHeader(std::span<const StructDef> defs) -> std::string {
         first = false;
         std::format_to(
             std::back_inserter(text),
-            "static_assert(sizeof({}) == {}, \"GeneratedGpu::{} does not occupy what Slang reported; the host compiler packs "
+            "static_assert(sizeof({}) == {}, \"Slang::{} does not occupy what Slang reported; the host compiler packs "
             "differently\");\n",
             def.name,
             def.size,
@@ -596,7 +635,7 @@ auto EmitStructsHeader(std::span<const StructDef> defs) -> std::string {
             }
             std::format_to(
                 std::back_inserter(text),
-                "static_assert(offsetof({}, {}) == {}, \"GeneratedGpu::{}::{} sits where Slang did not put it\");\n",
+                "static_assert(offsetof({}, {}) == {}, \"Slang::{}::{} sits where Slang did not put it\");\n",
                 def.name,
                 field.name,
                 field.offset,
@@ -692,6 +731,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         );
     }
 
+    std::vector<EnumDef>   enums;
     std::vector<StructDef> nested;
     std::vector<StructDef> structs;
     for (unsigned i: std::views::iota(0u, wrapperLayout->getFieldCount())) {
@@ -713,8 +753,7 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         if (typeName == nullptr || typeName[0] == '\0') {
             Fail("gpu types: '{}.{}' is an unnamed struct; a struct has nothing to be checked by", options.module, name);
         }
-        RejectStructAttributes(typeName, memberLayout->getType());
-        StructBuildResult built = BuildStruct(typeName, memberLayout);
+        StructBuildResult built = BuildStruct(typeName, memberLayout, enums);
         std::ranges::move(built.nested, std::back_inserter(nested));
         structs.push_back(std::move(built.definition));
     }
@@ -723,9 +762,9 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
     defs.reserve(nested.size() + structs.size());
     std::ranges::move(nested, std::back_inserter(defs));
     std::ranges::move(structs, std::back_inserter(defs));
-    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs));
+    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs, enums));
     WriteFileIfChanged(options.outSpv, spvBytes);
-    std::println("zshader: gpu types: {} struct(s) from {}", defs.size(), options.module);
+    std::println("zshader: gpu types: {} struct(s), {} enum(s) from {}", defs.size(), enums.size(), options.module);
 }
 
 } // namespace ZHLN::ZShader

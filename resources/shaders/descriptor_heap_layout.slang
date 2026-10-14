@@ -3,8 +3,6 @@
 
 module descriptor_heap_layout;
 
-import cxx_abi;
-
 public struct ScenePassPushConstants {
     public float4x4 invViewProj;
     public float4x4 viewProj;

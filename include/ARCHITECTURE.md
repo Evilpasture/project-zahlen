@@ -252,7 +252,7 @@ enforced rather than documented.
 The generated GPU types are not part of this closure at all. `GeneratedGpuTypes.hpp`
 (shader tool output) is named in exactly one header, `src/render/GpuLayout.hpp`,
 which is renderer implementation: nothing under `include/` includes it, names a
-`GeneratedGpu::` type, or needs the shader tool to have run.
+`Slang::` type, or needs the shader tool to have run.
 
 The structs the engine and the shaders share are *generated*, from the same
 reflection that decides their layout: `tools/zshader` emits every GPU-visible

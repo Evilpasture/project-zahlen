@@ -40,7 +40,7 @@
 namespace ZHLN::RenderGraphDetail {
 
 using SwapchainImage     = Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>;
-using ScenePushConstants = GeneratedGpu::ScenePassPushConstants;
+using ScenePushConstants = Slang::ScenePassPushConstants;
 
 [[nodiscard]] inline auto
     AssembleScenePushConstants(const RenderContext::Impl& impl, const SceneView& view, const GraphicsSettings& settings) noexcept -> ScenePushConstants {

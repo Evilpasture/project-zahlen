@@ -1172,7 +1172,6 @@ add_custom_command(
         "${SHADER_SRC_DIR}/gpu_abi.slang"
         "${SHADER_SRC_DIR}/cluster_grid.slang"
         "${SHADER_SRC_DIR}/cluster_math.slang"
-        "${SHADER_SRC_DIR}/cxx_abi.slang"
         "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
         "${SHADER_SRC_DIR}/instance_data.slang"
         "${SHADER_SRC_DIR}/particles.slang"

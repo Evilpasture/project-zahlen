@@ -91,7 +91,7 @@ struct BakePush {
     float    distortion;
 };
 
-using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
+using ScenePassPushConstants = Slang::ScenePassPushConstants;
 
 static_assert(
     (GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants> &&

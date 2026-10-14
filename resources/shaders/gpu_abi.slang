@@ -37,7 +37,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.frame.ddgiOriginSpacing.x);
     acc += asuint(abi.frame.ddgiGridCounts.x);
     acc += asuint(abi.frame.ddgiParams.x);
-    acc += abi.light.type;
+    acc += uint(abi.light.type);
     acc += abi.light.shadowTileBase;
     acc += asuint(abi.shadowTile.uvOrigin.x);
     acc += asuint(abi.shadowTile.uvScale);

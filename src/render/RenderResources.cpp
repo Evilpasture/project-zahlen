@@ -324,7 +324,7 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
         _impl->queues.ParticleEmitters().push_back(
             {.gpuBuffer    = group->buffer,
              .maxParticles = count,
-             .params       = {.textureIndex = textureIndex, .alignment = static_cast<ParticleAlignment>(alignment), .blendMode = blendMode},
+             .params       = {.textureIndex = textureIndex, .alignment = static_cast<Slang::ParticleAlignment>(alignment), .blendMode = blendMode},
              .simulate     = false}
         );
     }

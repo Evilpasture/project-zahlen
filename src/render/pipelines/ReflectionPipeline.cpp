@@ -12,7 +12,7 @@ namespace ZHLN {
 void ReflectionPipeline::Dispatch(
     Vk::RasterPassContextBase& ctx,
     const Passes::GBufferSurface& surface,
-    const GeneratedGpu::ScenePassPushConstants& pc
+    const Slang::ScenePassPushConstants& pc
 ) const noexcept {
     RenderFrameContext& impl = _ctx;
     const uint32_t fIdx = impl.presenter.frameIndex;

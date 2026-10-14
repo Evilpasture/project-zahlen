@@ -4,7 +4,7 @@
 module particles;
 
 __exported import hash;
-import cxx_abi;
+import uniforms;
 
 public struct Particle {
     public float4 position;
@@ -41,8 +41,7 @@ public struct ParticleEmitterParams {
     public float2 endSize;
     public float spinSpeed;
     public uint textureIndex;
-    [CxxEnum("::ZHLN::ParticleAlignment")]
-    public uint alignment;
+    public ParticleAlignment alignment;
     public uint blendMode;
 };
 

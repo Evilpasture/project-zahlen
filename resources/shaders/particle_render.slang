@@ -12,7 +12,7 @@ struct Particle {
 
 struct RenderPushConstants {
     uint64_t particleBufferAddr;
-    uint alignment;
+    ParticleAlignment alignment;
     uint textureIndex;
 };
 [vk::push_constant]
@@ -43,13 +43,13 @@ ParticleVSOutput VSMain(uint vertexID: SV_VertexID, uint instanceID: SV_Instance
 
     float3 worldPos = p.position.xyz;
 
-    if (pc.alignment == 0) {
+    if (pc.alignment == ParticleAlignment::CameraBillboard) {
         float3 camDir   = normalize(scene.frame.camPos.xyz - p.position.xyz);
         float3 camRight = normalize(cross(float3(0.0f, 1.0f, 0.0f), camDir));
         float3 camUp    = normalize(cross(camDir, camRight));
 
         worldPos += camRight * rotatedOffset.x + camUp * rotatedOffset.y;
-    } else if (pc.alignment == 1) {
+    } else if (pc.alignment == ParticleAlignment::VelocityStretched) {
         float speed   = length(p.velocity.xyz);
         float3 velDir = (speed > 0.001f) ? (p.velocity.xyz / speed) : float3(0, 1, 0);
         float3 camDir = normalize(scene.frame.camPos.xyz - p.position.xyz);

@@ -3,6 +3,7 @@
 
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/SceneDraw.hpp"
+#include <GeneratedGpuTypes.hpp>
 #include <ShaderBindings.hpp>
 #include <cstddef>
 
@@ -12,7 +13,7 @@ namespace {
 
 struct ParticleRenderPushConstants {
     VkDeviceAddress particleBufferAddr;
-    uint32_t        alignment;
+    Slang::ParticleAlignment alignment;
     uint32_t        textureIndex;
 };
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
@@ -67,7 +68,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
                     const ParticleRenderPushConstants pc = {
                         .particleBufferAddr = ctx.BufferAddress(buffer->buffer.Handle()),
-                        .alignment          = static_cast<uint32_t>(emitter.params.alignment),
+                        .alignment          = emitter.params.alignment,
                         .textureIndex       = emitter.params.textureIndex
                     };
 

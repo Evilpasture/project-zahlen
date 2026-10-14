@@ -6,7 +6,8 @@
 
 namespace ZHLN {
 
-
+// Engine-facing enums. Their GPU ABI counterparts are generated in
+// ZHLN::Slang from the declarations in resources/shaders/uniforms.slang.
 enum class LightType : uint32_t {
     Directional,
     Point,

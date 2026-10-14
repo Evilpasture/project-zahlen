@@ -11,7 +11,7 @@ namespace ZHLN::GpuAbi {
 
 inline constexpr uint32_t kFrameAddressCount = 6;
 
-inline constexpr uint32_t kScenePassPayloadBytes = sizeof(ZHLN::GeneratedGpu::ScenePassPushConstants);
+inline constexpr uint32_t kScenePassPayloadBytes = sizeof(ZHLN::Slang::ScenePassPushConstants);
 
 extern const ZHLN::Vk::HeapPushDataLayout kScenePushLayout;
 
