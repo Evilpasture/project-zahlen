@@ -504,6 +504,11 @@ struct ProceduralLocomotionTracksComponent {
 
     float movementThreshold        = 0.08f;
     float runSpeedThreshold        = 3.20f;
+    // Hysteresis state for the walk/run switch (see SynchronizeLocomotionTrack):
+    // once running, speed must drop below the threshold minus the dead band to
+    // fall back to walk, so holding Shift on the boundary cannot flap the state
+    // -- and its gait-blend log line -- every frame.
+    bool  gaitMode                 = false;
     float synchronizedPhase        = 0.0f;
     float synchronizedTime         = 0.0f;
     float passWeight               = 0.0f;

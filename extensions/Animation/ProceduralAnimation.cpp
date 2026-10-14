@@ -588,8 +588,23 @@ void SynchronizeLocomotionTrack(
     float                                speed,
     float                                dt
 ) noexcept {
+    // Speed hovers around the run threshold whenever the player holds Shift, so
+    // the walk/run state itself is what needs hysteresis before any of the
+    // switch-and-log work below runs. `tracks.gaitMode` is the state.
+    constexpr float kGaitHysteresis = 0.35f; // m/s, the dead band on either side of runSpeedThreshold
+    const float     runSpeed        = std::max(tracks.runSpeedThreshold, 0.0f);
+    const float     sprintSpeed     = movement != nullptr ? movement->speed * movement->sprintMultiplier : 0.0f;
+    const float     hysteresis      = std::clamp(std::min(kGaitHysteresis, runSpeed * 0.25f), 0.05f, kGaitHysteresis);
+    const bool      wantsRun        = movement != nullptr && movement->isSprinting;
+    const bool      aboveExit       = speed >= runSpeed + hysteresis;
+    const bool      belowEnter      = speed < runSpeed - hysteresis;
+    // Sprinting far enough past the boundary latches; the sprint key alone does
+    // not, because the controller reports it for the whole hold.
+    const bool enterRun = wantsRun && (speed >= runSpeed + hysteresis || sprintSpeed >= runSpeed + hysteresis);
+    const bool running  = tracks.gaitMode ? !belowEnter : enterRun;
+    tracks.gaitMode     = running;
+
     const bool moving  = speed > std::max(tracks.movementThreshold, 0.0f);
-    const bool running = moving && ((movement != nullptr && movement->isSprinting) || speed >= std::max(tracks.runSpeedThreshold, 0.0f));
 
     int32_t desiredTrack = tracks.idleTrack;
     if (moving) {
@@ -647,11 +662,12 @@ void SynchronizeLocomotionTrack(
             };
             gait.targetPreset    = desiredPreset;
             gait.gaitBlendWeight = 0.0f;
-            ZHLN::Log(
-                "[ProceduralAnimation] Gait blend started: {} -> {} (stride {:.2f} -> {:.2f}, step {:.2f} -> {:.2f})",
-                running ? "walk" : "run", running ? "run" : "walk",
-                gait.currentPreset.strideLength, gait.targetPreset.strideLength,
-                gait.currentPreset.stepHeight, gait.targetPreset.stepHeight
+            // Playback noise, not startup information: two of these fire per
+            // walk/run edge, so they only print under --verbose.
+            ZHLN::LogDebug(
+                "[ProceduralAnimation] Gait blend started: {} -> {} (stride {:.2f} -> {:.2f}, step {:.2f} -> {:.2f})", running ? "walk" : "run",
+                running ? "run" : "walk", gait.currentPreset.strideLength, gait.targetPreset.strideLength, gait.currentPreset.stepHeight,
+                gait.targetPreset.stepHeight
             );
         }
     }
