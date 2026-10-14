@@ -160,7 +160,7 @@ class IBLProcessor {
                              Vk::HeapBlockBase {};
 
         // 5. Execute Bake Dispatches
-        ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
+        if (auto immediate = ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
             impl.heapManager.BindHeaps(cmd);
 
             stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
@@ -194,7 +194,9 @@ class IBLProcessor {
 
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
-        });
+        }); !immediate) [[unlikely]] {
+            return std::unexpected(immediate.error());
+        }
 
         // 6. Finalize & Read Back SH
         if (!hasPreparedSH) {

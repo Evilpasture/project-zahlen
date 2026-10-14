@@ -405,7 +405,7 @@ struct RenderContext::Impl : RenderFrameContext {
     void UploadSubmittedLights(const Camera& cam) noexcept;
     void AllocateShadowTiles(const JPH::Vec3& viewPos) noexcept;
 
-    void ProvokeDeviceLostInternal() const;
+    [[nodiscard]] auto ProvokeDeviceLostInternal() const -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
 
@@ -467,12 +467,14 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         heapManager.BeginImmediate();
         const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(viewInfo));
 
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
+        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
             heapManager.BindHeaps(cmd);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
             pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-        });
+        }); !immediate) [[unlikely]] {
+            return std::unexpected(immediate.error());
+        }
         return textureManager.Adopt(std::move(image), viewInfo);
     });
 }

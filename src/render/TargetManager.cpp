@@ -161,13 +161,15 @@ auto TargetManager::InitShadows() -> std::expected<void, ErrorCode> {
         return std::unexpected(Vk::AttachmentViewCreationError::CreationFailed);
     }
 
-    Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
+    if (auto immediate = Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
         const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle(), _graph.shadowAtlas.image.Handle()};
         for (const auto img: shadows) {
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
         }
-    });
+    }); !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
 
     return {};
 }
@@ -212,13 +214,15 @@ auto TargetManager::ResizeShadows(uint32_t resolution) noexcept -> std::expected
             _shadowCascadeViewsPrev = std::move(*r);
         }
 
-        Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
+        if (auto immediate = Vk::ExecuteImmediate(_ctx, _ring, [&](VkCommandBuffer cmd) -> void {
             const std::array shadows = {_graph.shadowMap.image.Handle(), _shadowMapPrev.image.Handle()};
             for (const auto img: shadows) {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_DEPTH_BIT);
             }
-        });
+        }); !immediate) [[unlikely]] {
+            return std::unexpected(immediate.error());
+        }
 
         ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
         return {};

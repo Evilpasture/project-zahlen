@@ -55,7 +55,7 @@ class GeometryManager {
 
     [[nodiscard]] auto Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceAddress<> address) -> BufferHandle;
 
-    void Update(BufferHandle handle, const void* data, size_t size) noexcept;
+    [[nodiscard]] auto Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode>;
 
     void Destroy(BufferHandle handle);
 

@@ -90,9 +90,11 @@ auto GeometryManager::CreateBuffer(const BufferSource& source, Vk::BufferUsage u
                 std::memcpy(staging->mappedData, bytes.data(), size);
             }
 
-            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
+            if (auto immediate = Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
                 Vk::CopyRingBuffer(cmd, *staging, gpu_buf);
-            });
+            }); !immediate) [[unlikely]] {
+                return std::unexpected(immediate.error());
+            }
 
             const Vk::DeviceAddress<> address {_ctx.BufferAddress(gpu_buf.Handle())};
             return Adopt(std::move(gpu_buf), elementCount, address);
@@ -110,24 +112,28 @@ auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceA
     return handle;
 }
 
-void GeometryManager::Update(BufferHandle handle, const void* data, size_t size) noexcept {
+auto GeometryManager::Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode> {
     if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
-        return;
+        return {};
     }
     auto* nativeMesh = _buffers.Resolve(handle);
     if (nativeMesh == nullptr) {
-        return;
+        return {};
     }
 
     auto staging = AllocateStaging(_transferRing, size);
     if (!staging) {
-        return;
+        return std::unexpected(staging.error());
     }
     std::memcpy(staging->mappedData, data, size);
 
-    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, *staging, nativeMesh->buffer);
-    });
+    if (auto immediate = Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
+            Vk::CopyRingBuffer(cmd, *staging, nativeMesh->buffer);
+        });
+        !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
+    return {};
 }
 
 auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {

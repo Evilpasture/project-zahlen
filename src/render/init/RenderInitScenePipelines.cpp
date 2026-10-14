@@ -424,14 +424,18 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
                     return createClusterPerFrame(sizeof(uint32_t), kGlobalCounterUsage);
                 })
-                .transform([&](auto&& gcb) {
+                .and_then([&](auto&& gcb) -> std::expected<void, ErrorCode> {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-                        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-                            Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
-                            Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
-                        });
+                        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+                                Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
+                                Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
+                            });
+                            !immediate) [[unlikely]] {
+                            return std::unexpected(immediate.error());
+                        }
                     }
+                    return {};
                 });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

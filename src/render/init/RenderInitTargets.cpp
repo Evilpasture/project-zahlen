@@ -60,7 +60,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     }
     rtHistoryValid = false;
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
+    if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
         targets.RecordInitialLayouts(cmd);
 
         Vk::ClearColorAndTransition(cmd, Color4 {}, accumulationHistory.Current(), accumulationHistory.Previous());
@@ -75,7 +75,9 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, presenter.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
-    });
+    }); !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
 
     WriteTransLightingToHeap();
 

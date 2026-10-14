@@ -61,7 +61,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             heapManager.BeginImmediate();
             const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeInfo));
 
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
+            if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
@@ -74,7 +74,9 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 compute.proceduralBake.DispatchThreads(cmd, width, height, 1);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-            });
+            }); !immediate) [[unlikely]] {
+                return std::unexpected(immediate.error());
+            }
 
             return textureManager.AdoptTexture(std::forward<decltype(gpuImage)>(gpuImage), writeInfo, width, height);
         });

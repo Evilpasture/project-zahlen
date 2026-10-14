@@ -700,27 +700,30 @@ auto FrameScope::End() && noexcept -> FrameOutcome<PresentSuboptimal> {
     return _rc->EndFrame();
 }
 
-void RenderContext::Impl::ProvokeDeviceLostInternal() const {
+auto RenderContext::Impl::ProvokeDeviceLostInternal() const -> std::expected<void, ErrorCode> {
     if (!compute.hangGpu.pipeline.Valid()) {
-        return;
+        return {};
     }
 
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
         ZHLN::Log(
             "[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName
         );
-        return;
+        return {};
     }
 
     if (const VkCommandBuffer cmd = FrameCommand(); cmd != VK_NULL_HANDLE) {
         compute.hangGpu.Bind(cmd);
         compute.hangGpu.DispatchGroups(cmd, 1, 1, 1);
     } else {
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto immediateCmd) -> auto {
+        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto immediateCmd) -> auto {
             compute.hangGpu.Bind(immediateCmd);
             compute.hangGpu.DispatchGroups(immediateCmd, 1, 1, 1);
-        });
+        }); !immediate) [[unlikely]] {
+            return std::unexpected(immediate.error());
+        }
     }
+    return {};
 }
 
 } // namespace ZHLN

@@ -320,7 +320,10 @@ void RenderContext::DrawBillboards(TextureHandle texture, std::span<const Billbo
             continue;
         }
 
-        UpdateBuffer(group->buffer, std::as_bytes(std::span {_impl->billboardStaging}));
+        if (auto updated = UpdateBuffer(group->buffer, std::as_bytes(std::span {_impl->billboardStaging})); !updated) [[unlikely]] {
+            ZHLN::Log("Particle buffer update failed.");
+            continue;
+        }
         _impl->queues.ParticleEmitters().push_back(
             {.gpuBuffer    = group->buffer,
              .maxParticles = count,
@@ -483,8 +486,8 @@ void RenderContext::DestroyBuffer(BufferHandle handle) {
     _impl->geometry.Destroy(handle);
 }
 
-void RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept {
-    _impl->geometry.Update(handle, bytes.data(), bytes.size());
+auto RenderContext::UpdateBuffer(BufferHandle handle, std::span<const std::byte> bytes) noexcept -> std::expected<void, ErrorCode> {
+    return _impl->geometry.Update(handle, bytes.data(), bytes.size());
 }
 
 static_assert(Vk::PassAttachmentFormats<Passes::GBufferBasePass>::color_formats == ActiveGBuffer::array);
@@ -670,7 +673,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     }
     std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
+    if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle());
 
         const VkBufferImageCopy2 region = {
@@ -685,7 +688,9 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
         };
         Vk::CopyBufferToImage(cmd, staging.slice.buffer, image.Handle(), region);
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-    });
+    }); !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
 
     const VkImageViewCreateInfo viewInfo = image.ViewInfo();
 
@@ -1024,7 +1029,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto  stagingBuffer = std::move(*stagingRes);
         defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-        Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
             const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
                 .image      = source,
                 .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -1054,7 +1059,9 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                 .mip_count  = VK_REMAINING_MIP_LEVELS,
             });
             Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
-        });
+        }); !immediate) [[unlikely]] {
+            return std::unexpected(immediate.error());
+        }
 
         auto mapped = stagingBuffer.Map(impl->allocator);
         if (!mapped) {
@@ -1135,13 +1142,15 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto  stagingBuffer = std::move(*stagingRes);
     defer _([&] { impl->allocator.DestroyBuffer(stagingBuffer); });
 
-    Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+    if (auto immediate = Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
         auto* const targetImg = impl->graphResources.hdrSceneColor.image.Handle();
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
         Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, targetImg);
-    });
+    }); !immediate) [[unlikely]] {
+        return std::unexpected(immediate.error());
+    }
 
     auto mapped = stagingBuffer.Map(impl->allocator);
     if (!mapped) {
@@ -1209,7 +1218,9 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 }
 
 void RenderContext::ProvokeDeviceLost() {
-    _impl->ProvokeDeviceLostInternal();
+    if (auto provoked = _impl->ProvokeDeviceLostInternal(); !provoked) [[unlikely]] {
+        ZHLN::Log("Failed to submit the device-loss dispatch.");
+    }
 }
 
 } // namespace ZHLN
