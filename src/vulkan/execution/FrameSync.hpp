@@ -12,10 +12,10 @@
 namespace ZHLN::Vk {
 
 struct FrameSyncSlot {
-    VkSemaphore imageAvailable = VK_NULL_HANDLE;
-    VkSemaphore renderFinished = VK_NULL_HANDLE;
+    VkSemaphore imageAvailable  = VK_NULL_HANDLE;
+    VkSemaphore renderFinished  = VK_NULL_HANDLE;
     VkSemaphore computeTimeline = VK_NULL_HANDLE;
-    VkFence     inFlight = VK_NULL_HANDLE;
+    VkFence     inFlight        = VK_NULL_HANDLE;
 };
 
 template <uint32_t N>
@@ -80,21 +80,22 @@ class FrameSync {
         _computeValuesSubmitted[frameIndex % N] = _timelineValues[frameIndex % N];
     }
     [[nodiscard]] auto WaitCompute(uint32_t frameIndex) const noexcept -> VkResult {
-        const uint32_t slot = frameIndex % N;
+        const uint32_t slot  = frameIndex % N;
         const uint64_t value = _computeValuesSubmitted[slot];
         if (value == 0) {
             return VK_SUCCESS;
         }
-        const VkSemaphore semaphore = _frames[slot].computeTimeline;
+        const VkSemaphore         semaphore = _frames[slot].computeTimeline;
         const VkSemaphoreWaitInfo info {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+            .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
             .semaphoreCount = 1,
-            .pSemaphores = &semaphore,
-            .pValues = &value,
+            .pSemaphores    = &semaphore,
+            .pValues        = &value,
         };
         return vkWaitSemaphores(_device, &info, UINT64_MAX);
     }
-    [[nodiscard]] auto StepTimeline(uint32_t frameIndex) noexcept -> uint64_t {
+    // We don't add [[nodiscard]].
+    auto StepTimeline(uint32_t frameIndex) noexcept -> uint64_t {
         return ++_timelineValues[frameIndex % N];
     }
     [[nodiscard]] auto GetTimelineValue(uint32_t frameIndex) const noexcept -> uint64_t {
@@ -104,7 +105,7 @@ class FrameSync {
   private:
     void Reset() noexcept;
 
-    VkDevice                _device = VK_NULL_HANDLE;
+    VkDevice                     _device = VK_NULL_HANDLE;
     std::array<FrameSyncSlot, N> _frames {};
     std::array<uint64_t, N>      _timelineValues {};
     std::array<uint64_t, N>      _computeValuesSubmitted {};

@@ -446,7 +446,7 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameScope> {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    (void) _impl->presenter.sync.StepTimeline(frame_index);
+    _impl->presenter.sync.StepTimeline(frame_index);
 
     _impl->diagnostics.gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
@@ -575,8 +575,8 @@ auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
     _impl->sceneTarget.reset();
-    resolved->layout             = Vk::AttachmentLayout::ColorAttachment;
-    resolved->drawn              = true;
+    resolved->layout                         = Vk::AttachmentLayout::ColorAttachment;
+    resolved->drawn                          = true;
     _impl->diagnostics.warnedUnwrittenTarget = false;
     return std::nullopt;
 }
