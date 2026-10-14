@@ -21,6 +21,8 @@ inline FrameSync<N>::FrameSync(FrameSync&& other) noexcept:
     _frames(std::exchange(other._frames, {})),
     _timelineValues(std::exchange(other._timelineValues, {})),
     _computeValuesSubmitted(std::exchange(other._computeValuesSubmitted, {})),
+    _graphicsTimelineValues(std::exchange(other._graphicsTimelineValues, {})),
+    _graphicsValuesSubmitted(std::exchange(other._graphicsValuesSubmitted, {})),
     _submitted(std::exchange(other._submitted, {})) {}
 
 template <uint32_t N>
@@ -32,6 +34,8 @@ inline auto FrameSync<N>::operator=(FrameSync&& other) noexcept -> FrameSync& {
         _frames                 = std::exchange(other._frames, {});
         _timelineValues         = std::exchange(other._timelineValues, {});
         _computeValuesSubmitted = std::exchange(other._computeValuesSubmitted, {});
+        _graphicsTimelineValues = std::exchange(other._graphicsTimelineValues, {});
+        _graphicsValuesSubmitted = std::exchange(other._graphicsValuesSubmitted, {});
         _submitted              = std::exchange(other._submitted, {});
     }
     return *this;
@@ -58,16 +62,13 @@ inline auto FrameSync<N>::Create(const VkDevice device) noexcept -> FrameSync {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         .pNext = &timelineTypeInfo,
     };
-    const VkFenceCreateInfo fenceInfo {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-    };
+
 
     for (FrameSyncSlot& frame: sync._frames) {
         if (vkCreateSemaphore(device, &binarySemaphoreInfo, nullptr, &frame.imageAvailable) != VK_SUCCESS ||
             vkCreateSemaphore(device, &binarySemaphoreInfo, nullptr, &frame.renderFinished) != VK_SUCCESS ||
             vkCreateSemaphore(device, &timelineSemaphoreInfo, nullptr, &frame.computeTimeline) != VK_SUCCESS ||
-            vkCreateFence(device, &fenceInfo, nullptr, &frame.inFlight) != VK_SUCCESS) {
+            vkCreateSemaphore(device, &timelineSemaphoreInfo, nullptr, &frame.graphicsTimeline) != VK_SUCCESS) {
             sync.Reset();
             return {};
         }
@@ -89,8 +90,8 @@ inline void FrameSync<N>::Reset() noexcept {
             if (frame.computeTimeline != VK_NULL_HANDLE) {
                 vkDestroySemaphore(_device, frame.computeTimeline, nullptr);
             }
-            if (frame.inFlight != VK_NULL_HANDLE) {
-                vkDestroyFence(_device, frame.inFlight, nullptr);
+            if (frame.graphicsTimeline != VK_NULL_HANDLE) {
+                vkDestroySemaphore(_device, frame.graphicsTimeline, nullptr);
             }
             frame = {};
         }
@@ -98,6 +99,8 @@ inline void FrameSync<N>::Reset() noexcept {
     _device = VK_NULL_HANDLE;
     _timelineValues = {};
     _computeValuesSubmitted = {};
+    _graphicsTimelineValues = {};
+    _graphicsValuesSubmitted = {};
     _submitted = {};
 }
 

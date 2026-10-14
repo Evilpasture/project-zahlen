@@ -43,14 +43,14 @@ class SubmittedStagingWork {
   private:
     friend class StagingContext;
     SubmittedStagingWork(
-        Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer> buffers, VkFence fence
+        Allocator& allocator, const Context& ctx, CommandPool<QueueType::Graphics>&& pool, std::vector<Buffer> buffers, VkSemaphore timeline
     ) noexcept;
 
     Allocator*                       _allocator;
     const Context*                   _ctx;
     CommandPool<QueueType::Graphics> _cmdPool;
     std::vector<Buffer>             _stagingBuffers;
-    VkFence                         _fence = VK_NULL_HANDLE;
+    VkSemaphore                     _timeline = VK_NULL_HANDLE;
 };
 
 class StagingContext {

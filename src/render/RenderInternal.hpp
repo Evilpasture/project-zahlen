@@ -394,8 +394,6 @@ struct RenderContext::Impl : RenderFrameContext {
         allocator.DestroyBuffer(morphDeltasBuffer);
 
         deletionQueue.Drain();
-        graphicsCmdRing.Cleanup();
-        transferCmdRing.Cleanup();
     }
 
     [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);

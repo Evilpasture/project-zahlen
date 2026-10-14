@@ -12,44 +12,19 @@
 
 namespace ZHLN::Vk {
 
-namespace {
-
-class FenceGuard {
-  public:
-    FenceGuard(VkDevice device, VkFence fence) noexcept: _device(device), _fence(fence) {
-    }
-    ~FenceGuard() noexcept {
-        if (_fence != VK_NULL_HANDLE) {
-            vkDestroyFence(_device, _fence, nullptr);
-        }
-    }
-
-    FenceGuard(const FenceGuard&)                    = delete;
-    auto operator=(const FenceGuard&) -> FenceGuard& = delete;
-
-    void Release() noexcept {
-        _fence = VK_NULL_HANDLE;
-    }
-
-  private:
-    VkDevice _device = VK_NULL_HANDLE;
-    VkFence  _fence  = VK_NULL_HANDLE;
-};
-
-} // namespace
 
 SubmittedStagingWork::SubmittedStagingWork(
     Allocator&                         allocator,
     const Context&                     ctx,
     CommandPool<QueueType::Graphics>&& pool,
     std::vector<Buffer>                buffers,
-    VkFence                            fence
-) noexcept: _allocator(&allocator), _ctx(&ctx), _cmdPool(std::move(pool)), _stagingBuffers(std::move(buffers)), _fence(fence) {
+    VkSemaphore                        timeline
+) noexcept: _allocator(&allocator), _ctx(&ctx), _cmdPool(std::move(pool)), _stagingBuffers(std::move(buffers)), _timeline(timeline) {
 }
 
 SubmittedStagingWork::SubmittedStagingWork(SubmittedStagingWork&& other) noexcept:
     _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)), _stagingBuffers(std::move(other._stagingBuffers)),
-    _fence(std::exchange(other._fence, nullptr)) {
+    _timeline(std::exchange(other._timeline, VK_NULL_HANDLE)) {
 }
 
 SubmittedStagingWork::~SubmittedStagingWork() noexcept {
@@ -57,14 +32,16 @@ SubmittedStagingWork::~SubmittedStagingWork() noexcept {
     for (auto& buffer: _stagingBuffers) {
         _allocator->DestroyBuffer(buffer);
     }
-    if (_fence != nullptr) {
-        vkDestroyFence(_ctx->Device(), _fence, nullptr);
+    if (_timeline != VK_NULL_HANDLE) {
+        vkDestroySemaphore(_ctx->Device(), _timeline, nullptr);
     }
 }
 
 void SubmittedStagingWork::Wait() const noexcept {
-    if (_fence != nullptr) {
-        vkWaitForFences(_ctx->Device(), 1, &_fence, VK_TRUE, UINT64_MAX);
+    if (_timeline != VK_NULL_HANDLE) {
+        constexpr uint64_t value = 1;
+        const VkSemaphoreWaitInfo wait {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,.semaphoreCount=1,.pSemaphores=&_timeline,.pValues=&value};
+        vkWaitSemaphores(_ctx->Device(), &wait, UINT64_MAX);
     }
 }
 
@@ -186,23 +163,22 @@ auto StagingContext::ExecuteAsync() && -> std::expected<SubmittedStagingWork, Er
         return std::unexpected(executable.error());
     }
 
-    VkFence                 fence = nullptr;
-    const VkFenceCreateInfo fence_info {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    if (vkCreateFence(_ctx->Device(), &fence_info, nullptr, &fence) != VK_SUCCESS) {
+    const VkSemaphoreTypeCreateInfo typeInfo {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,.semaphoreType=VK_SEMAPHORE_TYPE_TIMELINE,.initialValue=0};
+    const VkSemaphoreCreateInfo semaphoreInfo {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,.pNext=&typeInfo};
+    VkSemaphore timeline = VK_NULL_HANDLE;
+    if (vkCreateSemaphore(_ctx->Device(), &semaphoreInfo, nullptr, &timeline) != VK_SUCCESS) {
         return std::unexpected(VulkanCallError::VulkanCallFailed);
     }
-
-    FenceGuard fence_guard {_ctx->Device(), fence};
-
-    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, {}, fence); !result) {
+    const auto signal = MakeSemaphoreSubmitInfo(timeline, 1, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    if (auto result = QueueSubmit(_ctx->GraphicsQueue(), std::move(*executable), {}, std::span<const VkSemaphoreSubmitInfo>{&signal, 1}); !result) {
+        vkDestroySemaphore(_ctx->Device(), timeline, nullptr);
         const auto idle = Vk::WaitIdle(_ctx->GraphicsQueue());
         if (!idle) {
             return std::unexpected(idle.error());
         }
         return std::unexpected(result.error());
     }
-    fence_guard.Release();
-    return SubmittedStagingWork {*_allocator, *_ctx, std::move(_cmdPool), std::move(_stagingBuffers), fence};
+    return SubmittedStagingWork {*_allocator, *_ctx, std::move(_cmdPool), std::move(_stagingBuffers), timeline};
 }
 
 } // namespace ZHLN::Vk

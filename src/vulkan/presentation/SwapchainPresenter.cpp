@@ -223,20 +223,21 @@ auto SwapchainPresenter::Present(
         waits[wait_count++] = extra;
     }
 
-    const VkSemaphore           present_sem = PresentSemaphore(imageIndex);
-    const VkSemaphoreSubmitInfo signal      = Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-
-    if (const VkResult reset = sync.ResetFence(slot); reset != VK_SUCCESS) {
-        return std::unexpected(ToError(reset));
-    }
+    const VkSemaphore present_sem = PresentSemaphore(imageIndex);
+    const uint64_t graphicsValue = sync.StepGraphicsTimeline(slot);
+    std::array<VkSemaphoreSubmitInfo, 2> signals {
+        Vk::MakeSemaphoreSubmitInfo(sync.GraphicsTimeline(slot), graphicsValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT),
+        Vk::MakeSemaphoreSubmitInfo(present_sem, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT)
+    };
+    const uint32_t signalCount = presents ? 2u : 1u;
     auto submit_res = Vk::QueueSubmit(
         graphicsQueue, std::move(cmds), std::span<const VkSemaphoreSubmitInfo> {waits.data(), wait_count},
-        std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1U : 0U}, sync.InFlight(slot)
+        std::span<const VkSemaphoreSubmitInfo> {signals.data(), signalCount}
     );
     if (!submit_res) [[unlikely]] {
         return std::unexpected(submit_res.error());
     }
-    sync.MarkSubmitted(slot);
+    sync.MarkSubmitted(slot, graphicsValue);
 
     if (!presents) {
         return {};

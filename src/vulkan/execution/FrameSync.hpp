@@ -14,8 +14,8 @@ namespace ZHLN::Vk {
 struct FrameSyncSlot {
     VkSemaphore imageAvailable  = VK_NULL_HANDLE;
     VkSemaphore renderFinished  = VK_NULL_HANDLE;
-    VkSemaphore computeTimeline = VK_NULL_HANDLE;
-    VkFence     inFlight        = VK_NULL_HANDLE;
+    VkSemaphore computeTimeline  = VK_NULL_HANDLE;
+    VkSemaphore graphicsTimeline = VK_NULL_HANDLE;
 };
 
 template <uint32_t N>
@@ -46,9 +46,6 @@ class FrameSync {
     [[nodiscard]] constexpr auto RenderFinished(uint32_t frame) const noexcept -> VkSemaphore {
         return _frames[frame % N].renderFinished;
     }
-    [[nodiscard]] constexpr auto InFlight(uint32_t frame) const noexcept -> VkFence {
-        return _frames[frame % N].inFlight;
-    }
     [[nodiscard]] static constexpr auto Count() noexcept -> uint32_t {
         return N;
     }
@@ -60,20 +57,19 @@ class FrameSync {
     }
 
     [[nodiscard]] auto Wait(uint32_t frameIndex) const noexcept -> VkResult {
-        const uint32_t slot = frameIndex % N;
-        if (!_submitted[slot]) {
-            return VK_SUCCESS;
-        }
-        return vkWaitForFences(_device, 1, &_frames[slot].inFlight, VK_TRUE, UINT64_MAX);
+        const uint32_t slot = frameIndex % N; const uint64_t value = _graphicsValuesSubmitted[slot];
+        if (value == 0) return VK_SUCCESS;
+        const VkSemaphore semaphore = _frames[slot].graphicsTimeline;
+        const VkSemaphoreWaitInfo info {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,.semaphoreCount=1,.pSemaphores=&semaphore,.pValues=&value};
+        return vkWaitSemaphores(_device, &info, UINT64_MAX);
     }
-    [[nodiscard]] auto ResetFence(uint32_t frameIndex) const noexcept -> VkResult {
-        return vkResetFences(_device, 1, &_frames[frameIndex % N].inFlight);
-    }
+    [[nodiscard]] auto StepGraphicsTimeline(uint32_t frameIndex) noexcept -> uint64_t { return ++_graphicsTimelineValues[frameIndex % N]; }
+    [[nodiscard]] auto GraphicsTimeline(uint32_t frameIndex) const noexcept -> VkSemaphore { return _frames[frameIndex % N].graphicsTimeline; }
     void MarkUnsubmitted(uint32_t frameIndex) noexcept {
         _submitted[frameIndex % N] = false;
     }
-    void MarkSubmitted(uint32_t frameIndex) noexcept {
-        _submitted[frameIndex % N] = true;
+    void MarkSubmitted(uint32_t frameIndex, uint64_t value) noexcept {
+        const uint32_t slot = frameIndex % N; _submitted[slot] = true; _graphicsValuesSubmitted[slot] = value;
     }
 
     void MarkComputeSubmitted(uint32_t frameIndex) noexcept {
@@ -109,6 +105,8 @@ class FrameSync {
     std::array<FrameSyncSlot, N> _frames {};
     std::array<uint64_t, N>      _timelineValues {};
     std::array<uint64_t, N>      _computeValuesSubmitted {};
+    std::array<uint64_t, N>      _graphicsTimelineValues {};
+    std::array<uint64_t, N>      _graphicsValuesSubmitted {};
     std::array<bool, N>          _submitted {};
 };
 

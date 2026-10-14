@@ -10,29 +10,29 @@
 namespace ZHLN::Vk {
 
 struct DrawState {
-    VkPipeline       pipeline      = VK_NULL_HANDLE;
-    uint32_t         vertexCount   = 0;
-    uint32_t         indexCount    = 0;
-    uint32_t         instanceCount = 1;
-    uint32_t         firstVertex   = 0;
-    uint32_t         firstIndex    = 0;
-    uint32_t         firstInstance = 0;
+    VkPipeline pipeline      = VK_NULL_HANDLE;
+    uint32_t   vertexCount   = 0;
+    uint32_t   indexCount    = 0;
+    uint32_t   instanceCount = 1;
+    uint32_t   firstVertex   = 0;
+    uint32_t   firstIndex    = 0;
+    uint32_t   firstInstance = 0;
 };
 
 struct MeshTaskState {
-    VkPipeline       pipeline    = VK_NULL_HANDLE;
-    uint32_t         groupCountX = 1;
-    uint32_t         groupCountY = 1;
-    uint32_t         groupCountZ = 1;
+    VkPipeline pipeline    = VK_NULL_HANDLE;
+    uint32_t   groupCountX = 1;
+    uint32_t   groupCountY = 1;
+    uint32_t   groupCountZ = 1;
 };
 
 template <typename Command>
 struct IndirectDrawState {
-    VkPipeline       pipeline       = VK_NULL_HANDLE;
-    VkBuffer         argumentBuffer = VK_NULL_HANDLE;
-    VkDeviceSize     offset         = 0;
-    uint32_t         drawCount      = 0;
-    uint32_t         stride         = sizeof(Command);
+    VkPipeline   pipeline       = VK_NULL_HANDLE;
+    VkBuffer     argumentBuffer = VK_NULL_HANDLE;
+    VkDeviceSize offset         = 0;
+    uint32_t     drawCount      = 0;
+    uint32_t     stride         = sizeof(Command);
 
     static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(Command);
@@ -41,13 +41,13 @@ struct IndirectDrawState {
 
 template <typename Command>
 struct IndirectCountDrawState {
-    VkPipeline       pipeline          = VK_NULL_HANDLE;
-    VkBuffer         argumentBuffer    = VK_NULL_HANDLE;
-    VkDeviceSize     offset            = 0;
-    VkBuffer         countBuffer       = VK_NULL_HANDLE;
-    VkDeviceSize     countBufferOffset = 0;
-    uint32_t         maxDrawCount      = 0;
-    uint32_t         stride            = sizeof(Command);
+    VkPipeline   pipeline          = VK_NULL_HANDLE;
+    VkBuffer     argumentBuffer    = VK_NULL_HANDLE;
+    VkDeviceSize offset            = 0;
+    VkBuffer     countBuffer       = VK_NULL_HANDLE;
+    VkDeviceSize countBufferOffset = 0;
+    uint32_t     maxDrawCount      = 0;
+    uint32_t     stride            = sizeof(Command);
 
     static constexpr VkDeviceSize OffsetForIndex(uint32_t index) noexcept {
         return static_cast<VkDeviceSize>(index) * sizeof(Command);
@@ -66,164 +66,221 @@ using DrawIndexedIndirectCountState = IndirectCountDrawState<VkDrawIndexedIndire
 using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndirectCommandEXT>;
 
 enum class CommandRingError : uint8_t {
-    FenceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Synchronization fence creation failed for a command ring slot">{}) = 1,
+    TimelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Timeline semaphore creation failed for a command ring"> {}) = 1,
 };
 
 template <QueueType QType, size_t Capacity = 8>
 class CommandRing {
   public:
     CommandRing() = default;
-    ~CommandRing() {
-        Cleanup();
+    ~CommandRing() noexcept {
+        [[maybe_unused]] auto cleanup = Cleanup();
     }
-
-    CommandRing(const CommandRing&)            = delete;
-    CommandRing& operator=(const CommandRing&) = delete;
-
+    CommandRing(const CommandRing&)                    = delete;
+    auto operator=(const CommandRing&) -> CommandRing& = delete;
     CommandRing(CommandRing&& other) noexcept:
-        _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::move(other._pools)), _cmds(std::move(other._cmds)),
-        _fences(std::exchange(other._fences, {})), _pending(std::exchange(other._pending, {})),
-        _index(other._index.exchange(0, std::memory_order::relaxed)) {
+        _device(std::exchange(other._device, VK_NULL_HANDLE)), _timeline(std::exchange(other._timeline, VK_NULL_HANDLE)), _pools(std::move(other._pools)),
+        _cmds(std::move(other._cmds)), _completionValues(std::exchange(other._completionValues, {})), _nextValue(other._nextValue.exchange(0)),
+        _index(other._index.exchange(0)) {
     }
-
     auto operator=(CommandRing&& other) noexcept -> CommandRing& {
         if (this != &other) {
-            Cleanup();
-            _device = std::exchange(other._device, VK_NULL_HANDLE);
-            _pools  = std::move(other._pools);
-            _cmds   = std::move(other._cmds);
-            _fences = std::exchange(other._fences, {});
-            _pending = std::exchange(other._pending, {});
-            _index.store(other._index.exchange(0, std::memory_order::relaxed), std::memory_order::relaxed);
+            [[maybe_unused]] auto cleanup = Cleanup();
+            _device                       = std::exchange(other._device, VK_NULL_HANDLE);
+            _timeline                     = std::exchange(other._timeline, VK_NULL_HANDLE);
+            _pools                        = std::move(other._pools);
+            _cmds                         = std::move(other._cmds);
+            _completionValues             = std::exchange(other._completionValues, {});
+            _nextValue.store(other._nextValue.exchange(0));
+            _index.store(other._index.exchange(0));
         }
         return *this;
     }
-
     [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
         _device = device;
+        const VkSemaphoreTypeCreateInfo type {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE, .initialValue = 0
+        };
+        const VkSemaphoreCreateInfo info {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type};
+        if (vkCreateSemaphore(device, &info, nullptr, &_timeline) != VK_SUCCESS)
+            return std::unexpected(CommandRingError::TimelineCreationFailed);
         for (size_t i = 0; i < Capacity; ++i) {
-            _pools[i] = CommandPool<QType>(_device, queueFamily);
-            auto alloc = _pools[i].Allocate(1);
-            if (!alloc) [[unlikely]] {
-                Cleanup();
-                return std::unexpected(alloc.error());
+            _pools[i] = CommandPool<QType>(device, queueFamily);
+            auto a    = _pools[i].Allocate(1);
+            if (!a) {
+                if (auto cleanup = Cleanup(); !cleanup) {
+                    return std::unexpected(cleanup.error());
+                }
+                return std::unexpected(a.error());
             }
             _cmds[i] = _pools[i][0];
-
-            VkFenceCreateInfo fence_info = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .pNext = nullptr,
-                .flags = VK_FENCE_CREATE_SIGNALED_BIT
-            };
-            if (vkCreateFence(_device, &fence_info, nullptr, &_fences[i]) != VK_SUCCESS) [[unlikely]] {
-                _fences[i] = VK_NULL_HANDLE;
-                Cleanup();
-                return std::unexpected(CommandRingError::FenceCreationFailed);
-            }
         }
         return {};
     }
-
-    void Cleanup() noexcept {
-        if (_device != VK_NULL_HANDLE) {
-            for (size_t i = 0; i < Capacity; ++i) {
-                if (_fences[i] != VK_NULL_HANDLE) {
-                    if (_pending[i]) { vkWaitForFences(_device, 1, &_fences[i], VK_TRUE, UINT64_MAX); }
-                    vkDestroyFence(_device, _fences[i], nullptr);
-                    _fences[i] = VK_NULL_HANDLE;
-                    _pending[i] = false;
-                }
-                _pools[i] = {};
-                _cmds[i]  = {};
-            }
-            _device = VK_NULL_HANDLE;
+    [[nodiscard]] auto Cleanup() noexcept -> std::expected<void, ErrorCode> {
+        if (_device == VK_NULL_HANDLE) {
+            return {};
         }
-    }
 
+        uint64_t maxValue = 0;
+        for (const uint64_t value: _completionValues) {
+            maxValue = std::max(maxValue, value);
+        }
+        if (const VkResult waited = WaitValue(maxValue); waited != VK_SUCCESS) {
+            // Keep every object alive: destroying a pool or its timeline while
+            // submitted command buffers may still be executing is invalid.
+            // The owner can now propagate device loss instead of silently
+            // tearing down live Vulkan objects.
+            return std::unexpected(ToError(waited));
+        }
+
+        for (size_t i = 0; i < Capacity; ++i) {
+            _pools[i] = {};
+            _cmds[i]  = {};
+        }
+        if (_timeline != VK_NULL_HANDLE) {
+            vkDestroySemaphore(_device, _timeline, nullptr);
+        }
+        _device           = VK_NULL_HANDLE;
+        _timeline         = VK_NULL_HANDLE;
+        _completionValues = {};
+        return {};
+    }
     struct Slot {
         CommandBuffer<QType> cmd;
-        VkFence              fence;
         uint32_t             index;
+        uint64_t             completionValue;
     };
-
+    [[nodiscard]] auto WaitValue(uint64_t value) const noexcept -> VkResult {
+        if (value == 0)
+            return VK_SUCCESS;
+        const VkSemaphoreWaitInfo w {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &_timeline, .pValues = &value};
+        return vkWaitSemaphores(_device, &w, UINT64_MAX);
+    }
     [[nodiscard]] auto Acquire() noexcept -> std::expected<Slot, ErrorCode> {
-        const uint32_t slotIndex = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
-        if (_pending[slotIndex]) {
-            if (const VkResult waited = vkWaitForFences(_device, 1, &_fences[slotIndex], VK_TRUE, UINT64_MAX); waited != VK_SUCCESS) {
-                return std::unexpected(ToError(waited));
-            }
-            _pending[slotIndex] = false;
-        }
-        _pools[slotIndex].Reset();
-        return Slot {_cmds[slotIndex], _fences[slotIndex], slotIndex};
+        const uint32_t i = _index.fetch_add(1, std::memory_order_relaxed) % Capacity;
+        if (const VkResult r = WaitValue(_completionValues[i]); r != VK_SUCCESS)
+            return std::unexpected(ToError(r));
+        _pools[i].Reset();
+        return Slot {_cmds[i], i, _completionValues[i]};
     }
-
     [[nodiscard]] auto Submit(VkQueue queue, Slot slot, ExecutableCommands cmds) noexcept -> std::expected<void, ErrorCode> {
-        if (const VkResult reset = vkResetFences(_device, 1, &slot.fence); reset != VK_SUCCESS) {
-            return std::unexpected(ToError(reset));
-        }
-        auto submitted = QueueSubmit(queue, std::move(cmds), {}, {}, slot.fence);
-        if (submitted) { _pending[slot.index] = true; }
-        return submitted;
+        const uint64_t value  = _nextValue.fetch_add(1, std::memory_order_relaxed) + 1;
+        const auto     signal = MakeSemaphoreSubmitInfo(_timeline, value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        auto           result = QueueSubmit(queue, std::move(cmds), {}, std::span<const VkSemaphoreSubmitInfo> {&signal, 1});
+        if (result)
+            _completionValues[slot.index] = value;
+        return result;
     }
-
-    [[nodiscard]] auto Submit(StagingRingBuffer& ringBuffer, Slot slot, ExecutableCommands cmds) noexcept -> uint64_t {
-        if (vkResetFences(_device, 1, &slot.fence) != VK_SUCCESS) { return 0; }
-        const uint64_t value = ringBuffer.Submit(std::move(cmds), slot.fence);
-        if (value != 0) { _pending[slot.index] = true; }
-        return value;
+    [[nodiscard]] auto CompletionValue(uint32_t index) const noexcept -> uint64_t {
+        return _completionValues[index];
+    }
+    [[nodiscard]] auto Submit(StagingRingBuffer& ringBuffer, Slot slot, ExecutableCommands cmds) noexcept
+        -> std::expected<uint64_t, ErrorCode> {
+        auto submitted = ringBuffer.Submit(std::move(cmds));
+        if (!submitted) [[unlikely]] {
+            return std::unexpected(submitted.error());
+        }
+        _completionValues[slot.index] = 0;
+        return *submitted;
     }
 
   private:
-    VkDevice                                   _device = VK_NULL_HANDLE;
+    VkDevice                                   _device   = VK_NULL_HANDLE;
+    VkSemaphore                                _timeline = VK_NULL_HANDLE;
     std::array<CommandPool<QType>, Capacity>   _pools {};
     std::array<CommandBuffer<QType>, Capacity> _cmds {};
-    std::array<VkFence, Capacity>              _fences {};
-    std::array<bool, Capacity>                 _pending {};
+    std::array<uint64_t, Capacity>             _completionValues {};
+    std::atomic<uint64_t>                      _nextValue {0};
     std::atomic<uint32_t>                      _index {0};
 };
 
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
-void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, RecordFn&& record, bool blockCPU = true) {
+[[nodiscard]] auto ExecuteAsync(const Context& ctx, CommandRing<QType, Capacity>& ring, RecordFn&& record) -> std::expected<uint64_t, ErrorCode> {
     auto acquired = ring.Acquire();
-    if (!acquired) { return; }
+    if (!acquired) {
+        return std::unexpected(acquired.error());
+    }
     auto slot = *acquired;
+
     auto recording = CommandRecorder::Begin(slot.cmd);
-    if (!recording) { return; }
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+
     std::forward<RecordFn>(record)(recording->Handle());
+
     auto executable = std::move(*recording).End();
-    if (!executable) { return; }
-
-    if (auto res = ring.Submit(ResolveQueue<QType>(ctx), slot, std::move(*executable)); !res) [[unlikely]] {
-        return;
+    if (!executable) {
+        return std::unexpected(executable.error());
     }
 
-    if (blockCPU) {
-        vkWaitForFences(ctx.Device(), 1, &slot.fence, VK_TRUE, UINT64_MAX);
+    if (auto submitted = ring.Submit(ResolveQueue<QType>(ctx), slot, std::move(*executable)); !submitted) [[unlikely]] {
+        return std::unexpected(submitted.error());
     }
+
+    return ring.CompletionValue(slot.index);
 }
 
 template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
-void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record) {
-    auto acquired = ring.Acquire();
-    if (!acquired) { return; }
-    auto slot = *acquired;
-    auto recording = CommandRecorder::Begin(slot.cmd);
-    if (!recording) { return; }
-    std::forward<RecordFn>(record)(recording->Handle());
-    auto executable = std::move(*recording).End();
-    if (!executable) { return; }
+[[nodiscard]] auto ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, RecordFn&& record) -> std::expected<void, ErrorCode> {
+    auto submitted = ExecuteAsync(ctx, ring, std::forward<RecordFn>(record));
 
-    const uint64_t submit_val = ring.Submit(ringBuffer, slot, std::move(*executable));
-    if (submit_val == 0) [[unlikely]] {
-        return;
+    if (!submitted) [[unlikely]] {
+        return std::unexpected(submitted.error());
     }
 
-    VkSemaphore         semaphore = ringBuffer.GetSemaphore();
-    VkSemaphoreWaitInfo wait_info = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .pNext = nullptr, .flags = 0, .semaphoreCount = 1, .pSemaphores = &semaphore, .pValues = &submit_val
+    if (const VkResult waited = ring.WaitValue(*submitted); waited != VK_SUCCESS) [[unlikely]] {
+        if (waited == VK_ERROR_DEVICE_LOST) {
+
+            ctx.Instance().IncrementDeviceLost();
+        }
+        return std::unexpected(ToError(waited));
+    }
+
+    return {};
+}
+
+template <QueueType QType = QueueType::Graphics, size_t Capacity = 8, typename RecordFn>
+[[nodiscard]] auto ExecuteImmediate(
+    const Context& ctx, CommandRing<QType, Capacity>& ring, StagingRingBuffer& ringBuffer, RecordFn&& record
+) -> std::expected<void, ErrorCode> {
+    auto acquired = ring.Acquire();
+    if (!acquired) {
+        return std::unexpected(acquired.error());
+    }
+    auto slot      = *acquired;
+    auto recording = CommandRecorder::Begin(slot.cmd);
+    if (!recording) {
+        return std::unexpected(recording.error());
+    }
+    std::forward<RecordFn>(record)(recording->Handle());
+    auto executable = std::move(*recording).End();
+    if (!executable) {
+        return std::unexpected(executable.error());
+    }
+
+    auto submitted = ring.Submit(ringBuffer, slot, std::move(*executable));
+    if (!submitted) [[unlikely]] {
+        return std::unexpected(submitted.error());
+    }
+
+    const VkSemaphore semaphore = ringBuffer.GetSemaphore();
+    const uint64_t     value     = *submitted;
+    const VkSemaphoreWaitInfo waitInfo {
+        .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+        .semaphoreCount = 1,
+        .pSemaphores    = &semaphore,
+        .pValues        = &value,
     };
-    vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
+    if (const VkResult waited = vkWaitSemaphores(ctx.Device(), &waitInfo, UINT64_MAX); waited != VK_SUCCESS) [[unlikely]] {
+        if (waited == VK_ERROR_DEVICE_LOST) {
+            ctx.Instance().IncrementDeviceLost();
+        }
+        return std::unexpected(ToError(waited));
+    }
+
+    return {};
 }
 
 class CommandEncoder {
@@ -248,7 +305,7 @@ class CommandEncoder {
         if (!hasCullMode || lastCullMode != mode) {
             vkCmdSetCullMode(cmd, mode);
             lastCullMode = mode;
-            hasCullMode = true;
+            hasCullMode  = true;
         }
     }
 
@@ -270,8 +327,8 @@ class CommandEncoder {
     void PushDrawData(const T& pushConstants) noexcept {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw's push struct is written for: DrawInstanced<Shaders::Modules::X>(...)");
         static_assert(
-            PushConstantLayoutMatchesAll<T, Modules...>(),
-            "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
+            PushConstantLayoutMatchesAll<T, Modules...>(), "the push struct is not the push-constant block the named shader module(s) declare: same members, "
+                                                           "same offsets, same sizes, or it is not the same struct"
         );
         PushData(cmd, 0, pushConstants);
     }
@@ -334,4 +391,4 @@ class CommandEncoder {
     }
 };
 
-}
+} // namespace ZHLN::Vk

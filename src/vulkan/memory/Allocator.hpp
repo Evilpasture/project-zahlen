@@ -514,7 +514,7 @@ class StagingRingBuffer {
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;
-    auto               Submit(ExecutableCommands cmds, VkFence fence = VK_NULL_HANDLE) noexcept -> uint64_t;
+    [[nodiscard]] auto Submit(ExecutableCommands cmds) noexcept -> std::expected<uint64_t, ErrorCode>;
     void               Recycle() noexcept;
 
     void RetirePool(VkCommandPool pool, uint64_t timelineValue) noexcept;

@@ -168,7 +168,7 @@ bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayou
 
     auto executable = std::move(*recording).End();
     if (!executable || !g.ring.Submit(g.queue, slot, std::move(*executable))) { return false; }
-    return vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS;
+    return g.ring.WaitValue(g.ring.CompletionValue(slot.index)) == VK_SUCCESS;
 }
 
 GLFWwindow* ResolveWindow(GLFWwindow* requested, uint32_t width, uint32_t height) noexcept {

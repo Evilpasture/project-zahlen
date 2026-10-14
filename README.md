@@ -15,6 +15,7 @@ This project's renderer proudly has zero:
 - `VkPipelineCache`: Killed by pipeline binaries.
 - `VkBufferView`: Never existed due to buffer device addresses.
 - `VkEvent`: Never existed due to synchronization2.
+- `VkFence`: Replaced entirely by monotonic `VK_KHR_timeline_semaphore` completion values.
 
 Besides that, it's kinda like Bevy but C++26 and Vulkan.
 

@@ -711,13 +711,13 @@ auto StagingRingBuffer::Allocate(VkDeviceSize size, VkDeviceSize alignment) noex
     };
 }
 
-auto StagingRingBuffer::Submit(ExecutableCommands cmds, VkFence fence) noexcept -> uint64_t {
+auto StagingRingBuffer::Submit(ExecutableCommands cmds) noexcept -> std::expected<uint64_t, ErrorCode> {
     const uint64_t nextValue = _timelineValue + 1;
     if (auto res = QueueSubmit(
-            _queue, std::move(cmds), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), nextValue, VK_PIPELINE_STAGE_2_COPY_BIT, fence
+            _queue, std::move(cmds), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _timelineSemaphore.Get(), nextValue, VK_PIPELINE_STAGE_2_COPY_BIT
         );
         !res) [[unlikely]] {
-        return 0;
+        return std::unexpected(res.error());
     }
 
     _timelineValue = nextValue;

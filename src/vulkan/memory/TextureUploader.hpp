@@ -60,7 +60,7 @@ class TextureUploader {
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
         std::memcpy(stagingAlloc.mappedData, desc.data, byteSize);
 
-        ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
+        if (auto uploaded = ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, mips
             );
@@ -84,7 +84,9 @@ class TextureUploader {
                     cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
                 );
             }
-        });
+        }); !uploaded) [[unlikely]] {
+            return std::unexpected(uploaded.error());
+        }
 
         const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, mips);
 
@@ -113,7 +115,7 @@ class TextureUploader {
         if (stagingAlloc.mappedData == nullptr) return std::unexpected(StagingError::MemoryMappingFailed);
         std::memcpy(stagingAlloc.mappedData, desc.data, byteSize);
 
-        ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
+        if (auto uploaded = ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
@@ -131,7 +133,9 @@ class TextureUploader {
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
-        });
+        }); !uploaded) [[unlikely]] {
+            return std::unexpected(uploaded.error());
+        }
 
         const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
 
@@ -162,7 +166,7 @@ class TextureUploader {
             std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceBytes), desc.faceData[i], faceBytes);
         }
 
-        ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
+        if (auto uploaded = ExecuteImmediate(_ctx, _cmdRing, _staging, [&](VkCommandBuffer cmd) {
             TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
@@ -171,7 +175,9 @@ class TextureUploader {
             TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
                 cmd, imgRes->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, 1
             );
-        });
+        }); !uploaded) [[unlikely]] {
+            return std::unexpected(uploaded.error());
+        }
 
         const VkImageViewCreateInfo viewInfo = imgRes->ViewInfo();
 

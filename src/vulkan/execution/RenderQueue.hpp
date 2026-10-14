@@ -43,8 +43,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VkQueue queue,
     ExecutableCommands cmds,
     std::span<const VkSemaphoreSubmitInfo> waits = {},
-    std::span<const VkSemaphoreSubmitInfo> signals = {},
-    VkFence fence = VK_NULL_HANDLE
+    std::span<const VkSemaphoreSubmitInfo> signals = {}
 ) noexcept -> std::expected<void, ErrorCode>;
 
 [[nodiscard]] auto QueueSubmit(
@@ -55,8 +54,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VkPipelineStageFlags2 waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkSemaphore signalSemaphore = VK_NULL_HANDLE,
     uint64_t signalValue = 0,
-    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-    VkFence fence = VK_NULL_HANDLE
+    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
 ) noexcept -> std::expected<void, ErrorCode>;
 
 // NOLINTNEXTLINE(performance-enum-size)
@@ -232,11 +230,10 @@ template <QueueType QType>
     VkPipelineStageFlags2 waitStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     VkSemaphore signalSemaphore = VK_NULL_HANDLE,
     uint64_t signalValue = 0,
-    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-    VkFence fence = VK_NULL_HANDLE
+    VkPipelineStageFlags2 signalStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
 ) noexcept -> std::expected<void, ErrorCode> {
     return QueueSubmit(
-        ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence
+        ResolveQueue<QType>(ctx), std::move(cmd), waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage
     );
 }
 
