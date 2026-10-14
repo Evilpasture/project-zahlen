@@ -226,12 +226,9 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
     return found;
 }
 
-// Source shader names are not case-sensitive, and shipped content spells the
-// class every way there is: this map's own prop materials use
-// `VertexLitGeneric`, `vertexlitgeneric` and `vertexlitGeneric`, and the
-// parser preserves whatever the .vmt said. A case-sensitive comparison drops
-// the class on those materials, which loses both the emission scale and the
-// unlit-by-construction flag.
+// Source shader names are not case-sensitive. Keep these predicates local:
+// the shared strength table and these rendering decisions must use the same
+// case-insensitive semantics.
 [[nodiscard]] auto ShaderNameEquals(std::string_view shader, std::string_view expected) noexcept -> bool {
     if (shader.size() != expected.size()) {
         return false;
@@ -242,41 +239,7 @@ constexpr float kEmissiveStrengthEpsilon = 0.02f;
 }
 
 [[nodiscard]] auto ShaderNameIn(std::string_view shader, std::initializer_list<std::string_view> names) noexcept -> bool {
-    for (const std::string_view name: names) {
-        if (ShaderNameEquals(shader, name)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// How emissive each Source shader is when it carries no self-illumination
-// keyvalues of its own. Ordered by construction: UnlitGeneric, Sprite, Cable
-// and Beam have no lighting path at all (every pixel is the albedo, at full
-// scale), MonitorScreen samples its framebuffer and modulates it by the albedo,
-// VertexLitGeneric is per-vertex lit with a dark ambient, and
-// LightmappedGeneric is baked and dark unless it self-illuminates.
-[[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
-    if (ShaderNameIn(shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
-        return 1.0f;
-    }
-    if (ShaderNameEquals(shader, "MonitorScreen")) {
-        return 1.0f;
-    }
-    if (ShaderNameEquals(shader, "VertexLitGeneric")) {
-        return 0.55f;
-    }
-    if (ShaderNameEquals(shader, "LightmappedGeneric")) {
-        return 0.35f;
-    }
-    if (ShaderNameIn(shader, {"Water", "Refract"})) {
-        return 0.40f;
-    }
-    return 0.0f; // WorldVertexTransition, Patch, EyeRefract, ... : not emitters
-}
-
-auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
-    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
+    return std::ranges::any_of(names, [shader](std::string_view name) { return ShaderNameEquals(shader, name); });
 }
 
 auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const MaterialStreams& part, const VMTMaterial* vmt) -> MaterialDesc {

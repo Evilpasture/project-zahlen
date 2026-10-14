@@ -58,12 +58,13 @@ class Tokenizer {
             _cursor++;
             std::string str;
             while (_cursor < _src.size() && _src[_cursor] != '"') {
-                if (_src[_cursor] == '\\' && _cursor + 1 < _src.size()) {
-                    _cursor++;
-                    str.push_back(_src[_cursor]);
-                } else {
-                    str.push_back(_src[_cursor]);
+                // KeyValues only needs the quote escape here. A backslash in
+                // material/texture paths is a path separator, not a generic
+                // escape prefix, and must survive for SourceVFS to normalize.
+                if (_src[_cursor] == '\\' && _cursor + 1 < _src.size() && _src[_cursor + 1] == '"') {
+                    ++_cursor;
                 }
+                str.push_back(_src[_cursor]);
                 _cursor++;
             }
             if (_cursor < _src.size() && _src[_cursor] == '"') {
@@ -156,6 +157,28 @@ auto VMTMaterial::Has(std::string_view key) const noexcept -> bool {
 
 auto VMTMaterial::Get(std::string_view key, std::string_view defaultVal) const noexcept -> std::string_view {
     return Find(key).value_or(defaultVal);
+}
+
+auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
+    const std::string name = ToLower(shader);
+    if (name == "unlitgeneric" || name == "unlittwotexture" || name == "monitorscreen" || name == "sprite" || name == "spritecard" ||
+        name == "cable" || name == "beam") {
+        return 1.0f;
+    }
+    if (name == "vertexlitgeneric" || name == "vertexlittwotexture") {
+        return 0.55f;
+    }
+    if (name == "lightmappedgeneric" || name == "worldvertextransition" || name == "patch") {
+        return 0.35f;
+    }
+    if (name == "eyerefract" || name == "water" || name == "refract") {
+        return 0.40f;
+    }
+    return 0.0f;
+}
+
+auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
+    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
 }
 
 auto ParseVMT(std::string_view text) -> std::expected<VMTMaterial, ErrorCode> {

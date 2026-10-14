@@ -5,6 +5,7 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Float4.h>
+#include <Jolt/Math/Vec3.h>
 #include <Zahlen/Error.hpp>
 #include <expected>
 #include <optional>
@@ -41,6 +42,10 @@ struct VMTMaterial {
     [[nodiscard]] auto Get(std::string_view key, std::string_view defaultVal = "") const noexcept -> std::string_view;
     [[nodiscard]] auto Find(std::string_view key) const noexcept -> std::optional<std::string_view>;
 };
+
+// Shared Source-material rules used by importing and lighting.
+[[nodiscard]] auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float;
+[[nodiscard]] auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float;
 
 // Parses a VMT KeyValues script.
 [[nodiscard]] auto ParseVMT(std::string_view text) -> std::expected<VMTMaterial, ErrorCode>;

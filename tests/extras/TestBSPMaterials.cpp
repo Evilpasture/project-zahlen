@@ -218,6 +218,17 @@ struct BSPMaterialsTestSuite {
             ZHLN::Test::ExpectEq(*mat.Find("$basetexture"), "brick/brickwall003d");
             ZHLN::Test::ExpectFalse(mat.Find("$nonexistent").has_value());
 
+            // Keys are case-insensitive and Windows path separators survive
+            // tokenization for SourceVFS::NormalizePath to handle later.
+            const auto windowsPath = ZHLN::BSP::ParseVMT(
+                R"(VertexLitGeneric { "$BaseTexture" "models\props\de_nuke\light_wall" "$Color2" "[0.2 0.4 0.6]" })");
+            ZHLN::Test::ExpectTrue(windowsPath.has_value());
+            if (windowsPath) {
+                ZHLN::Test::ExpectEq(windowsPath->baseTexture, "models\\props\\de_nuke\\light_wall");
+                ZHLN::Test::ExpectEq(*windowsPath->Find("$BASETEXTURE"), "models\\props\\de_nuke\\light_wall");
+                ZHLN::Test::ExpectTrue(windowsPath->Find("$color2").has_value());
+            }
+
             return {};
         }
 

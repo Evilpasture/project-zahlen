@@ -84,10 +84,6 @@ constexpr float kProjectedTextureDefaultFovDegrees = 90.0f;
 
 // The luminance the renderer itself uses for light-importance sorting, so the
 // emissive ranking and the engine agree on what "bright" means.
-[[nodiscard]] auto Rec709Luma(const JPH::Vec3& rgb) noexcept -> float {
-    return rgb.GetX() * 0.2126f + rgb.GetY() * 0.7152f + rgb.GetZ() * 0.0722f;
-}
-
 [[nodiscard]] auto Rec709Luma(std::span<const float, 3> rgb) noexcept -> float {
     return rgb[0] * 0.2126f + rgb[1] * 0.7152f + rgb[2] * 0.0722f;
 }
@@ -414,30 +410,6 @@ auto IsEmissiveMaterialName(std::string_view materialName) noexcept -> bool {
         }
     }
     return false;
-}
-
-// Shader-class defaults, applied when the .vmt resolves but authors no
-// $selfillum. UnlitGeneric already bypasses the lighting model entirely, so it
-// is a full emitter; the lit shaders only get a fraction, because most of their
-// brightness is reflected light the entity lights already provide.
-auto ShaderEmissiveStrength(std::string_view shader) noexcept -> float {
-    if (shader.empty()) {
-        return 0.0f;
-    }
-    if (shader == "UnlitGeneric" || shader == "UnlitTwoTexture" || shader == "MonitorScreen" || shader == "Sprite" || shader == "SpriteCard" ||
-        shader == "Cable" || shader == "Beam") {
-        return 1.0f;
-    }
-    if (shader == "VertexLitGeneric" || shader == "VertexLitTwoTexture") {
-        return 0.55f;
-    }
-    if (shader == "LightmappedGeneric" || shader == "WorldVertexTransition" || shader == "Patch") {
-        return 0.35f;
-    }
-    if (shader == "EyeRefract" || shader == "Water" || shader == "Refract") {
-        return 0.40f;
-    }
-    return 0.0f;
 }
 
 // `$selfillumtint` / `$color2` / `$color`, all of which Source spells as
