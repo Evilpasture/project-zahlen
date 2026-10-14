@@ -201,8 +201,6 @@ struct RenderFrameContext {
     // are already written against RenderFrameContext&, and leaving the members
     // behind would strand those passes on Impl&. Step 1 (per-pass pipeline
     // ownership) is where they move on to the passes that actually own them.
-    Vk::HeapPassBindings   cullingHeapBindings;
-    Vk::DynamicComputePass cullingPass;
     Vk::Pipeline           meshParticleRenderPipeline;
     Vk::Pipeline           meshParticleShadowPipeline;
     Vk::Pipeline           csgWritePipeline;

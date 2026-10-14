@@ -19,9 +19,9 @@ struct HiZPushConstants {
 static_assert(GpuAbi::ScenePassPayload<HiZPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t width  = impl.graphResources.hizMap.extent.width;
-    const uint32_t height = impl.graphResources.hizMap.extent.height;
-    const uint32_t mips   = std::min(impl.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+    const uint32_t width  = frame.graphResources.hizMap.extent.width;
+    const uint32_t height = frame.graphResources.hizMap.extent.height;
+    const uint32_t mips   = std::min(frame.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
     for (uint32_t mip = 0; mip < mips; ++mip) {
         if (mip > 0) {
@@ -37,13 +37,13 @@ void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {
             1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u
         };
 
-        const Vk::ImageWrite inDepth = mip == 0 ? Vk::ImageWrite {impl.presenter.depthTarget.image.ViewInfo()} :
-                                                  Vk::ImageWrite {impl.graphResources.hizMap.image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
-        const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::Hiz>(
-            impl.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
-            Vk::Slot<"outDepth">(impl.graphResources.hizMap.image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
+        const Vk::ImageWrite inDepth = mip == 0 ? Vk::ImageWrite {frame.presenter.depthTarget.image.ViewInfo()} :
+                                                  Vk::ImageWrite {frame.graphResources.hizMap.image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 1), VK_IMAGE_LAYOUT_GENERAL};
+        const Vk::HeapBlockBase block = frame.heapManager.WriteHeapParameters<Shaders::Hiz>(
+            cull.hizHeapBindings, Vk::Slot<"inDepth">(inDepth),
+            Vk::Slot<"outDepth">(frame.graphResources.hizMap.image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1))
         );
-        impl.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
+        cull.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(cmd, block, dstW, dstH, 1, hizPC);
     }
 }
 

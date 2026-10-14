@@ -57,7 +57,7 @@ struct TaskSystemSchedulerAdapter {
 // pipeline-sorted runs are drawn from it. The HiZ pyramid is the rejection
 // test, so this is also the point where the second-pass candidate list is
 // produced for the resolve pass to pick up.
-void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd        = passCtx.Cmd();
     auto&           ctx        = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;
@@ -86,13 +86,13 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
     };
 
     const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
+        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
         Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
         Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
     );
-    ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
+    cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
@@ -185,13 +185,13 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
 } // namespace
 
 void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, impl);
+    PassContext passCtx(cmd, frame);
 
-    const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
+    const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
     if (drawCount == 0) {
         // Nothing to draw, but the GBuffer still has to be in a defined state:
         // clear it rather than leave last frame's contents in the targets.
-        const GBufferTargets in = GBufferSceneTargets(impl);
+        const GBufferTargets in = GBufferSceneTargets(frame);
         Vk::DynamicPass(in.sceneColor.Extent())
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
@@ -205,14 +205,14 @@ void GBufferBasePass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(impl);
+    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(frame);
 
-    const bool useGpuCulling = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers[impl.presenter.frameIndex].Valid() &&
-                               (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
+    const bool useGpuCulling = cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
+                               (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive();
 
-    const GBufferTargets in = GBufferSceneTargets(impl);
+    const GBufferTargets in = GBufferSceneTargets(frame);
     if (useGpuCulling) {
-        RecordGpuCulled(passCtx, groups, drawCount, in);
+        RecordGpuCulled(passCtx, cull, groups, drawCount, in);
     } else {
         RecordCpuCulled(passCtx, drawCount, in);
     }

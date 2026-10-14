@@ -186,7 +186,7 @@ auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets {
     };
 }
 
-auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange> {
+auto BuildGroupRanges(const RenderFrameContext& impl) -> ZHLN::Array<GroupRange> {
     const auto   drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
     ZHLN::Array<GroupRange> groups;
     groups.reserve((drawCount + 15) / 16);

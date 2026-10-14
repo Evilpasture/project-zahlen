@@ -13,6 +13,7 @@
 #include "GpuLayout.hpp"
 #include "PassPayloads.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
+#include "passes/culling/CullingResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -157,9 +158,11 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::HeapMappingBundle decalSceneHeapMappings;
     Vk::HeapMappingBundle decalHeapMappings;
 
-    Vk::HeapPassBindings hizHeapBindings;
-    Vk::HeapPassBindings clusterBoundsHeapBindings;
-    Vk::HeapPassBindings clusterCullingHeapBindings;
+    // Depth reduction, the GPU draw cull, and the two cluster passes: one
+    // family, owned by the passes that dispatch them. Takes the place of the
+    // three heap-binding slots that used to sit here, so construction and
+    // destruction order relative to its neighbours is unchanged.
+    CullingResources culling;
     Vk::HeapPassBindings bakeHeapBindings;
     Vk::HeapPassBindings iblBakeHeapBindings;
     Vk::HeapPassBindings volumetricClearHeapBindings;
@@ -190,8 +193,6 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::FullscreenPass<LightingLayout> lightingPass;
     Vk::FullscreenPass<BlitLayout>     blitPass;
 
-    Vk::FixedComputePass   clusterBoundsPass;
-    Vk::FixedComputePass   clusterCullingPass;
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
@@ -238,13 +239,6 @@ struct RenderContext::Impl : RenderFrameContext {
     template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
-
-    Vk::ReflectedLayout    cullingLayout;
-    Vk::DynamicComputePass hizGeneratePass;
-    Vk::ReflectedLayout    hizDescLayout;
-
-    Vk::ReflectedLayout clusterCullingDescLayout;
-    Vk::ReflectedLayout clusterBoundsDescLayout;
 
     Vk::ReflectedLayout proceduralBakeDescLayout;
     Vk::ReflectedLayout iblBakeDescLayout;

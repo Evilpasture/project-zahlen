@@ -7,8 +7,8 @@
 namespace ZHLN::Passes {
 
 void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t      fIdx          = impl.presenter.frameIndex;
-    const Vk::Buffer&   counterBuffer = impl.frames.globalCounterBuffers[fIdx];
+    const uint32_t      fIdx          = frame.presenter.frameIndex;
+    const Vk::Buffer&   counterBuffer = frame.frames.globalCounterBuffers[fIdx];
 
     Vk::FillBuffer(cmd, counterBuffer, 0, 0u);
 
@@ -17,17 +17,17 @@ void ClusterCullingPass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
     );
 
-    const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
-        impl.clusterCullingHeapBindings,
-        Vk::Slot<"in_Bounds">(impl.clusterBoundsBuffer),
-        Vk::Slot<"out_Grid">(impl.frames.clusterGridBuffers[fIdx]),
-        Vk::Slot<"out_IndexList">(impl.frames.lightIndexListBuffers[fIdx]),
-        Vk::Slot<"out_Counter">(impl.frames.globalCounterBuffers[fIdx]),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"lights">(impl.frames.lightStorageBuffers[fIdx])
+    const Vk::HeapBlockBase block = frame.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
+        cull.clusterCullingHeapBindings,
+        Vk::Slot<"in_Bounds">(frame.clusterBoundsBuffer),
+        Vk::Slot<"out_Grid">(frame.frames.clusterGridBuffers[fIdx]),
+        Vk::Slot<"out_IndexList">(frame.frames.lightIndexListBuffers[fIdx]),
+        Vk::Slot<"out_Counter">(frame.frames.globalCounterBuffers[fIdx]),
+        Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
+        Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx])
     );
 
-    impl.clusterCullingPass.DispatchHeapIndexed(cmd, block);
+    cull.clusterCullingPass.DispatchHeapIndexed(cmd, block);
 }
 
 }

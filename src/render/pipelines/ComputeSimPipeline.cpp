@@ -28,14 +28,14 @@ namespace {
 // The cluster volume's froxel bounds only change when the projection does, so
 // the bounds pass runs on demand rather than every frame.
 void RebuildClusterBounds(RenderContext::Impl& impl, VkCommandBuffer cmd, uint32_t fIdx) noexcept {
-    if (!impl.frameState.clusterBoundsDirty || !impl.clusterBoundsPass.Valid() || !impl.clusterBoundsPass.HasFixedDispatchDomain()) {
+    if (!impl.frameState.clusterBoundsDirty || !impl.culling.clusterBoundsPass.Valid() || !impl.culling.clusterBoundsPass.HasFixedDispatchDomain()) {
         return;
     }
 
     const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
-        impl.clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(impl.clusterBoundsBuffer), Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+        impl.culling.clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(impl.clusterBoundsBuffer), Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
     );
-    impl.clusterBoundsPass.DispatchHeapIndexed(cmd, block);
+    impl.culling.clusterBoundsPass.DispatchHeapIndexed(cmd, block);
     Vk::MemoryBarrier(cmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead);
     impl.frameState.clusterBoundsDirty = false;
 }
@@ -63,7 +63,7 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
     // volumetric ladder is strictly ordered through the voxel grid, while the
     // two particle updates touch disjoint buffers and are free to fork.
     auto computeGraph = Vk::MakePassPack(
-                            Passes::ClusterCullingPass {.impl = impl},
+                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
                             Passes::VolumetricFogInjectPass {.impl = impl},
                             Passes::VolumetricLightInjectPass {.impl = impl},
                             Passes::VolumetricIntegrationPass {.impl = impl},

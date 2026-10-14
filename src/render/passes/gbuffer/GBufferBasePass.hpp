@@ -20,7 +20,8 @@ struct GBufferBasePass: Vk::RenderPass<
                             Vk::ColorWrite<Res_Emissive>, Vk::ColorWrite<Res_Clearcoat>, Vk::ColorWrite<Res_Anisotropy>, Vk::ColorWrite<Res_Sheen>, Vk::DepthStencilWrite<Res_Depth>> {
     using PushConstants = ObjectConstants;
 
-    RenderContext::Impl& impl;
+    CullingResources&    cull;
+    RenderFrameContext& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

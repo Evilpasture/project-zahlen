@@ -12,7 +12,8 @@ namespace ZHLN::Passes {
 // reduces the one before it, so the whole ladder is `kMaxGeneratedHiZMips`
 // dispatches separated by write-to-read barriers.
 struct HiZGeneratePass: Vk::RenderPass<"HiZGenerate", Vk::ShaderRead<Res_Depth>, Vk::ComputeWrite<Res_HiZ>> {
-    RenderContext::Impl& impl;
+    CullingResources&    cull;
+    RenderFrameContext& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

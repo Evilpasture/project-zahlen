@@ -304,23 +304,23 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
 
 auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     auto shader = Vk::CreateShaderDesc<Shaders::Modules::HizGenerateCS>();
-    if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!culling.hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, hizDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
+            heapManager, culling.hizDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, culling.hizHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
     }
 
-    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, &pipelineBinaries);
+    return culling.hizGeneratePass.BuildHeap(ctx.Device(), shader, culling.hizHeapBindings.GetInfo(), culling.hizHeapBindings.indexPushOffset, &pipelineBinaries);
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
     auto cullingShader = Vk::CreateShaderDesc<Shaders::Modules::CullingCS>();
-    if (!cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+    if (!culling.cullingLayout.Build(ctx.Device(), cullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -332,7 +332,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, cullingLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
+            heapManager, culling.cullingLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, culling.cullingHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -370,7 +370,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, &pipelineBinaries);
+            return culling.cullingPass.BuildHeap(ctx.Device(), cullingShader, culling.cullingHeapBindings.GetInfo(), culling.cullingHeapBindings.indexPushOffset, &pipelineBinaries);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
@@ -401,12 +401,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             }
             clusterBoundsBuffer = std::move(*bounds);
 
-            if (!clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            if (!culling.clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterCullingDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-                    clusterCullingHeapBindings
+                    heapManager, culling.clusterCullingDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    culling.clusterCullingHeapBindings
                 );
                 !built) {
                 return std::unexpected(built.error());
@@ -441,23 +441,23 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bDesc = Vk::CreateShaderDesc<Shaders::Modules::ClusterBoundsCS>();
-            if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
+            if (!culling.clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterBoundsDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-                    clusterBoundsHeapBindings
+                    heapManager, culling.clusterBoundsDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    culling.clusterBoundsHeapBindings
                 );
                 !built) {
                 return std::unexpected(built.error());
             }
-            return clusterBoundsPass.BuildHeap(
-                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, &pipelineBinaries
+            return culling.clusterBoundsPass.BuildHeap(
+                ctx.Device(), bDesc, culling.clusterBoundsHeapBindings.GetInfo(), culling.clusterBoundsHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
+            return culling.clusterCullingPass.BuildHeap(
+                ctx.Device(), clusterCullingShader, culling.clusterCullingHeapBindings.GetInfo(), culling.clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

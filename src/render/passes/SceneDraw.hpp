@@ -93,6 +93,6 @@ using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
 
 // Collapses the draw queue into runs of consecutive draws that share a
 // pipeline and dynamic cull mode, the granularity of a GPU-culled indirect draw.
-[[nodiscard]] auto BuildGroupRanges(const RenderContext::Impl& impl) -> ZHLN::Array<GroupRange>;
+[[nodiscard]] auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange>;
 
 }

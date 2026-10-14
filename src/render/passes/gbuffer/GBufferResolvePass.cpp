@@ -13,7 +13,7 @@ namespace {
 // Second GPU-culling dispatch: `passIndex = 1` makes the shader read the
 // candidate list the base pass's dispatch produced instead of testing every
 // instance again, and the draw reads the second indirect buffer.
-void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;
@@ -40,13 +40,13 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
         .passIndex      = 1,
     };
     const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-        ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
+        cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
         Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
         Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[frameIndex]),
         Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[frameIndex])
     );
-    ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
+    cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
     using enum Vk::BarrierStage;
     using enum Vk::BarrierAccess;
@@ -110,21 +110,21 @@ void RecordCpuCulled(PassContext& passCtx, const GBufferTargets& in) noexcept {
 } // namespace
 
 void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext passCtx(cmd, impl);
+    PassContext passCtx(cmd, frame);
 
-    const auto drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
-    if (drawCount == 0 && impl.queues.MeshParticleEmitters().empty() && impl.queues.CsgDraws().empty()) {
+    const auto drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
+    if (drawCount == 0 && frame.queues.MeshParticleEmitters().empty() && frame.queues.CsgDraws().empty()) {
         return;
     }
 
-    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(impl);
+    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(frame);
 
-    const bool useGpuCulling  = impl.cullingPass.pipeline.Valid() && impl.frames.indirectCommandsBuffers[impl.presenter.frameIndex].Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling() && !impl.MeshShadingActive();
+    const bool useGpuCulling  = cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                               !Diag::DisableGpuCulling() && !frame.MeshShadingActive();
 
-    const GBufferTargets in = GBufferSceneTargets(impl);
+    const GBufferTargets in = GBufferSceneTargets(frame);
     if (useGpuCulling) {
-        RecordGpuCulled(passCtx, groups, drawCount, in);
+        RecordGpuCulled(passCtx, cull, groups, drawCount, in);
     } else {
         RecordCpuCulled(passCtx, in);
     }
