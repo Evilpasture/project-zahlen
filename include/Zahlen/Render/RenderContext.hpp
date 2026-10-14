@@ -4,26 +4,25 @@
 #pragma once
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Core/ErrorCode.hpp>
 #include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/ParticleEmitterDesc.hpp>
-#include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/Render/FrameData.hpp>
+#include <Zahlen/Render/FrameResult.hpp>
+#include <Zahlen/Render/FrameScope.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/PresentTiming.hpp>
+#include <Zahlen/Render/SceneData.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
-#include <Zahlen/Render/SceneData.hpp>
-#include <Zahlen/Render/FrameScope.hpp>
-#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/UIData.hpp>
 #include <array>
-#include <atomic>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -37,7 +36,6 @@
 
 namespace ZHLN {
 
-
 struct Camera;
 namespace FS {
 class FileSystemWatcher;
@@ -47,17 +45,13 @@ class PipelineStatsCapture;
 class PresentationTarget;
 
 struct EnvironmentRadianceDesc {
-    // Original top-down HDR is retained for the visible sky. When supplied,
-    // the conditioned lighting map drives BOTH SH and specular prefiltering.
-    std::span<const float> rgba {};
-    std::span<const float> lightingRgba {};
-    // Exact smooth irradiance from asset preparation; empty = GPU SH bake.
-    std::span<const std::array<float, 3>> diffuseSH {};
-    Extent2D               extent {};
-    uint64_t               contentHash  = 0;
-    bool                   renderSkybox = false;
+    std::span<const float>                rgba;
+    std::span<const float>                lightingRgba;
+    std::span<const std::array<float, 3>> diffuseSH;
+    Extent2D                              extent {};
+    uint64_t                              contentHash  = 0;
+    bool                                  renderSkybox = false;
 };
-
 
 class ZHLN_API RenderContext {
   private:
@@ -91,7 +85,6 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
-
     // Empty optional = skipped (minimized). A FrameScope = this frame is open.
     [[nodiscard]] FrameOutcome<FrameScope> BeginFrame() noexcept;
 
@@ -99,11 +92,11 @@ class ZHLN_API RenderContext {
 
     using ViewportRect = ZHLN::ViewportRect;
 
-    void SetViewport(const ViewportRect& rect) noexcept;
+    void                       SetViewport(const ViewportRect& rect) noexcept;
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
-    [[nodiscard]] float GetViewportAspect() const noexcept;
-    [[nodiscard]] RenderInfo GetInfo() const noexcept;
-    [[nodiscard]] uint32_t   GetFrameIndex() const noexcept;
+    [[nodiscard]] float        GetViewportAspect() const noexcept;
+    [[nodiscard]] RenderInfo   GetInfo() const noexcept;
+    [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
 
     [[nodiscard]] std::optional<float> GetPacedDeltaTime() const noexcept;
     [[nodiscard]] PresentTimingMetrics GetPresentTiming() const noexcept;
@@ -112,15 +105,15 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::optional<Material> GetGPUMaterial(MaterialID id) const noexcept;
     // Non-owning lookup: registration never transfers buffer ownership.
     // Unregister before releasing the buffers; a cache clear only drops lookups.
-    void                                  RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
-    void                                  UnregisterGPUMesh(AssetID id) noexcept;
+    void RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
+    void UnregisterGPUMesh(AssetID id) noexcept;
     // Release all buffers referenced by one mesh (but not its registration).
-    void                                  DestroyMesh(const Mesh& mesh) noexcept;
-    void                                  RegisterGPUMaterial(MaterialID id, Material mat) noexcept;
+    void DestroyMesh(const Mesh& mesh) noexcept;
+    void RegisterGPUMaterial(MaterialID id, Material mat) noexcept;
     // Retire a registered material's pipelines when the scene no longer uses it.
-    void                                  UnregisterGPUMaterial(MaterialID id) noexcept;
+    void UnregisterGPUMaterial(MaterialID id) noexcept;
     // Drops mesh lookups (not their caller-owned buffers), materials, and textures.
-    void                                  ClearGPUCaches() noexcept;
+    void ClearGPUCaches() noexcept;
 
     [[nodiscard]] auto CreateBuffer(const BufferDesc& desc) -> BufferHandle;
 
@@ -132,20 +125,24 @@ class ZHLN_API RenderContext {
         if constexpr (Usage == BufferUsage::Index) {
             static_assert(ValidIndexType<T>, "Index buffers must use uint16_t or uint32_t elements.");
         }
-        return CreateBuffer(BufferDesc {
-            .usage  = Usage,
-            .data   = std::as_bytes(elements),
-            .stride = static_cast<uint32_t>(sizeof(T)),
-        });
+        return CreateBuffer(
+            BufferDesc {
+                .usage  = Usage,
+                .data   = std::as_bytes(elements),
+                .stride = static_cast<uint32_t>(sizeof(T)),
+            }
+        );
     }
 
     template <BufferUsage Usage, typename T = std::byte>
     [[nodiscard]] auto CreateBuffer(size_t elementCount) -> BufferHandle {
-        return CreateBuffer(BufferDesc {
-            .usage  = Usage,
-            .size   = elementCount * sizeof(T),
-            .stride = static_cast<uint32_t>(sizeof(T)),
-        });
+        return CreateBuffer(
+            BufferDesc {
+                .usage  = Usage,
+                .size   = elementCount * sizeof(T),
+                .stride = static_cast<uint32_t>(sizeof(T)),
+            }
+        );
     }
 
     void DestroyBuffer(BufferHandle handle);
@@ -167,7 +164,6 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
-
     // TextureHandles are the only texture identity outside the renderer.
     // The descriptor index a handle maps to is draw-submission business and
     // stays inside; nothing out here can ask for it.
@@ -175,25 +171,27 @@ class ZHLN_API RenderContext {
     // Unnamed uploads each get a fresh handle; release it with UnloadTexture.
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
     // A name gives repeat uploads a stable identity and deduplicates identical pixels.
-    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true)
-        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto
+        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
-    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
-        -> std::expected<TextureHandle, ErrorCode> {
+    template <typename T, size_t SpanExtent>
+        requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto CreateTexture(std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
         return CreateTexture(std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
     }
-    template <typename T, size_t SpanExtent> requires std::is_trivially_copyable_v<T>
-    [[nodiscard]] auto CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true)
-        -> std::expected<TextureHandle, ErrorCode> {
+    template <typename T, size_t SpanExtent>
+        requires std::is_trivially_copyable_v<T>
+    [[nodiscard]] auto
+        CreateTexture(std::string_view name, std::span<T, SpanExtent> pixels, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode> {
         return CreateTexture(name, std::span<const std::byte> {std::as_bytes(pixels)}, extent, isSRGB);
     }
     void UnloadTexture(TextureHandle handle);
 
-    template <typename Func> requires std::invocable<Func&, std::span<uint32_t>>
+    template <typename Func>
+        requires std::invocable<Func&, std::span<uint32_t>>
     [[nodiscard]] auto CreateTextureProcedural(Extent2D extent, bool isSRGB, Func&& callback) -> std::expected<TextureHandle, ErrorCode> {
         std::vector<uint32_t> pixels(static_cast<size_t>(extent.width) * extent.height);
-        callback(std::span<uint32_t> {pixels});
+        std::forward<Func>(callback)(std::span<uint32_t> {pixels});
         return CreateTexture(std::span {pixels}, extent, isSRGB);
     }
 
@@ -214,8 +212,8 @@ class ZHLN_API RenderContext {
     [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
     void                                         ProvokeDeviceLost();
 
-    [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
-        -> std::expected<TextureHandle, ErrorCode>;
+    [[nodiscard]] auto
+        BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
@@ -236,23 +234,17 @@ class ZHLN_API RenderContext {
 
   private:
     friend class FrameScope;
-    void SubmitParticleEmitter(
-        uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive
-    );
-    void SubmitMeshParticleEmitter(
-        uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat
-    );
-    void DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive);
+    void               SubmitParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const ParticleEmitterDesc& desc, TextureHandle texture, bool additive);
+    void               SubmitMeshParticleEmitter(uint64_t emitterId, uint32_t maxParticles, const MeshParticleEmitterDesc& desc, AssetID mesh, MaterialID mat);
+    void               DrawBillboards(TextureHandle texture, std::span<const BillboardQuad> billboards, bool additive);
     [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
-    void SetFrameData(
-        const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt
-    ) noexcept;
+    void SetFrameData(const Camera& cam, const FrameData& frame, const JPH::Mat44& shadowProjView, std::span<const LightDesc> lights, float dt) noexcept;
     void ApplySimulationData(const SceneData& scene) noexcept;
     void ApplyDrawData(const SceneData& scene) noexcept;
-    [[nodiscard]] auto RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
-    [[nodiscard]] auto RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto                            RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
+    [[nodiscard]] auto                            RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
     [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
-    void AbortFrame() noexcept;
+    void                                          AbortFrame() noexcept;
     void DrawDebugTriangles(std::span<const VertexPosition> positions, std::span<const VertexSurface> surfaces, const Material& material) noexcept;
 
     std::unique_ptr<Impl> _impl;
@@ -282,4 +274,4 @@ class ZHLN_API PipelineStatsCapture {
     RenderContext::Impl* _impl = nullptr;
 };
 
-}
+} // namespace ZHLN

@@ -17,9 +17,9 @@ namespace ZHLN {
 namespace {
 
 [[nodiscard]] auto HashEnvironmentPixels(const EnvironmentRadianceDesc& desc) noexcept -> uint64_t {
-    const uint32_t width = desc.extent.width;
+    const uint32_t width  = desc.extent.width;
     const uint32_t height = desc.extent.height;
-    uint64_t hash = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
+    uint64_t       hash   = Hash64(reinterpret_cast<const char*>(&width), sizeof(width));
     hash ^= Hash64(reinterpret_cast<const char*>(&height), sizeof(height)) + kGolden64 + (hash << 6) + (hash >> 2);
     hash ^= Hash64(reinterpret_cast<const char*>(desc.rgba.data()), desc.rgba.size_bytes()) + kGolden64 + (hash << 6) + (hash >> 2);
     if (!desc.lightingRgba.empty()) {
@@ -38,11 +38,8 @@ enum class BindlessSetupError : uint8_t {
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
-    return LoadAndCreateShaders(
-               Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>()
-    )
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVS>(), Vk::MakeStageSource<Shaders::Modules::BasicPS>())
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
-
             const auto basicView     = basicStages.View();
             const auto reflectInputs = std::to_array<Vk::ReflectedStageInput>({
                 {.shader = basicView.Vertex(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
@@ -59,9 +56,8 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            globalSamplerConfig = Vk::SamplerConfig::LinearRepeat()
-                .WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
-                .WithLodRange(0.0F, 0.0F);
+            globalSamplerConfig =
+                Vk::SamplerConfig::LinearRepeat().WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).WithLodRange(0.0F, 0.0F);
             clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
             return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);
@@ -96,8 +92,8 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept
     -> std::expected<void, ErrorCode> {
     globalSamplerConfig = globalSamplerValue;
-    clampSamplerConfig = clampSamplerValue;
-    auto init_res = heapManager.Init(
+    clampSamplerConfig  = clampSamplerValue;
+    auto init_res       = heapManager.Init(
         ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kFrameTransientResourceSlots,
         kImmediateTransientResourceSlots
     );
@@ -215,10 +211,10 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
 
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     const Vk::SamplerConfig defaultConfig = defaultSamplerConfig;
-    const Vk::SamplerConfig pointConfig = pointSamplerConfig;
-    const Vk::SamplerConfig shadowConfig = shadowSamplerConfig;
-    const Vk::SamplerConfig clampConfig = clampSamplerConfig;
-    const Vk::SamplerConfig skyConfig = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
+    const Vk::SamplerConfig pointConfig   = pointSamplerConfig;
+    const Vk::SamplerConfig shadowConfig  = shadowSamplerConfig;
+    const Vk::SamplerConfig clampConfig   = clampSamplerConfig;
+    const Vk::SamplerConfig skyConfig     = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
         Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
     );
     const Vk::SamplerConfig blueNoiseConfig = blueNoiseSamplerConfig;
@@ -231,8 +227,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig),
-        Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
@@ -271,9 +266,8 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         std::memcpy(mapped->Data(), identities.data(), identities.size() * sizeof(JPH::Mat44));
     }
 
-    auto mdb_res = Vk::Buffer::Create(
-        allocator, sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
-    );
+    auto mdb_res =
+        Vk::Buffer::Create(allocator, sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
     if (!mdb_res) {
         return std::unexpected(ErrorCode(mdb_res.error()));
     }
@@ -290,7 +284,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     }
     auto staging = std::move(*started);
 
-    auto ibl = Vk::IBLProcessor::Bake(*this);
+    auto ibl = IBLProcessor::Bake(*this);
     if (!ibl) {
         return std::unexpected(ibl.error());
     }
@@ -317,11 +311,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     }
 
     constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-    auto makeLtc = [&] {
-        return Vk::Image::Create(
-            allocator, Vk::ImageConfig::Texture2D({64, 64}, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage)
-        );
-    };
+    auto           makeLtc   = [&] { return Vk::Image::Create(allocator, Vk::ImageConfig::Texture2D({64, 64}, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage)); };
     bool           submitted = false;
     auto           matImg    = makeLtc();
     if (!matImg) {
@@ -360,8 +350,8 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 
     ltcMatImage = std::move(*matImg);
     ltcAmpImage = std::move(*ampImg);
-    post.ltcMat  = matInfo;
-    post.ltcAmp  = ampInfo;
+    post.ltcMat = matInfo;
+    post.ltcAmp = ampInfo;
     ApplyImageDebugNames(*this);
     return {};
 }
@@ -391,32 +381,25 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
     const Vk::SamplerConfig equirectSampler = Vk::SamplerConfig::LinearRepeat().WithAddressModes(
         Vk::SamplerAddressMode::Repeat, Vk::SamplerAddressMode::ClampToEdge, Vk::SamplerAddressMode::ClampToEdge
     );
-    Vk::InitHeapPassSamplers<Shaders::IblBake>(
-        heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectSampler)
-    );
+    Vk::InitHeapPassSamplers<Shaders::IblBake>(heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectSampler));
     return {};
 }
 
 auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl      = _impl.get();
     const bool  hasPixels = !desc.rgba.empty();
-    if (hasPixels && (desc.extent.width > Vk::kMaxEnvironmentRadianceExtent || desc.extent.height > Vk::kMaxEnvironmentRadianceExtent)) {
-        return std::unexpected(Vk::EnvironmentBakeError::RadianceTooLarge);
+    if (hasPixels && (desc.extent.width > kMaxEnvironmentRadianceExtent || desc.extent.height > kMaxEnvironmentRadianceExtent)) {
+        return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
     }
     if ((hasPixels &&
          (desc.extent.width == 0 || desc.extent.height == 0 || desc.rgba.size() != static_cast<size_t>(desc.extent.width) * desc.extent.height * 4)) ||
-        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0)) ||
-        (!desc.lightingRgba.empty() && desc.lightingRgba.size() != desc.rgba.size()) ||
+        (!hasPixels && (desc.extent.width != 0 || desc.extent.height != 0)) || (!desc.lightingRgba.empty() && desc.lightingRgba.size() != desc.rgba.size()) ||
         (!desc.diffuseSH.empty() && (desc.lightingRgba.empty() || desc.diffuseSH.size() != 9))) {
-        return std::unexpected(Vk::EnvironmentBakeError::InvalidRadianceData);
+        return std::unexpected(EnvironmentBakeError::InvalidRadianceData);
     }
 
-    uint64_t hash = 0;
-    int      mode = 0;
-    if (hasPixels) {
-        hash = desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc);
-        mode = !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3);
-    }
+    const uint64_t hash = hasPixels ? desc.contentHash != 0 ? desc.contentHash : HashEnvironmentPixels(desc) : 0;
+    const int      mode = hasPixels ? !desc.renderSkybox ? 2 : (desc.lightingRgba.empty() ? 1 : 3) : 0;
     if (impl->iblPayload.contentHash == hash && (mode != 3 || impl->iblPayload.visualSkyInfo.image != VK_NULL_HANDLE)) {
         impl->iblPayload.environmentMode = mode;
         return {};
@@ -424,20 +407,21 @@ auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) 
 
     const auto& sky = impl->settings.environment;
 
-    Vk::IBLProcessor::RadianceSource source {};
-    if (hasPixels) {
-        source.rgba         = desc.lightingRgba.empty() ? desc.rgba.data() : desc.lightingRgba.data();
-        source.visualRgba   = desc.lightingRgba.empty() ? nullptr : desc.rgba.data();
-        source.diffuseSH    = desc.diffuseSH;
-        source.width        = desc.extent.width;
-        source.height       = desc.extent.height;
-        source.renderSkybox = desc.renderSkybox ? 1 : 0;
-    }
+    const auto source = hasPixels ?
+                            IBLProcessor::RadianceSource {
+                                .rgba         = desc.lightingRgba.empty() ? desc.rgba.data() : desc.lightingRgba.data(),
+                                .visualRgba   = desc.lightingRgba.empty() ? nullptr : desc.rgba.data(),
+                                .diffuseSH    = desc.diffuseSH,
+                                .width        = desc.extent.width,
+                                .height       = desc.extent.height,
+                                .renderSkybox = desc.renderSkybox ? 1 : 0
+                            } :
+                            IBLProcessor::RadianceSource {};
 
     if (auto waited = Vk::WaitIdle(impl->ctx.Device()); !waited) {
         return std::unexpected(waited.error());
     }
-    auto baked = Vk::IBLProcessor::Bake(*impl, sky, source);
+    auto baked = IBLProcessor::Bake(*impl, sky, source);
     if (!baked) {
         return std::unexpected(baked.error());
     }

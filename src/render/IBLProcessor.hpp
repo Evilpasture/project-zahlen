@@ -19,7 +19,7 @@
 #include <span>
 #include <utility>
 
-namespace ZHLN::Vk {
+namespace ZHLN {
 
 inline constexpr uint32_t kMaxEnvironmentRadianceExtent = 8192;
 
@@ -52,10 +52,10 @@ class IBLProcessor {
         if (hasRadiance && (radiance.width > kMaxEnvironmentRadianceExtent || radiance.height > kMaxEnvironmentRadianceExtent)) {
             return std::unexpected(EnvironmentBakeError::RadianceTooLarge);
         }
+
         const VkFormat cubeFormat      = hasRadiance ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
         const bool     useVisualSky    = hasRadiance && radiance.visualRgba != nullptr && radiance.renderSkybox != 0;
         const int      environmentMode = hasRadiance ? (radiance.renderSkybox == 0 ? 2 : (useVisualSky ? 3 : 1)) : 0;
-        const uint32_t hasRadianceWord = hasRadiance ? 1u : 0u;
 
         if (hasRadiance) {
             ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips from a {}x{} radiance map...", radiance.width, radiance.height);
@@ -63,233 +63,206 @@ class IBLProcessor {
             ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (procedural sky)...");
         }
 
-        const auto requireShader = [](const ShaderDesc& shader) -> std::expected<ShaderDesc, ZHLN::ErrorCode> {
-            if (shader.code == nullptr || shader.size == 0) {
-                return std::unexpected(ZHLN::Vk::ShaderStageCreationError::ShaderLoadingFailed);
-            }
-            return shader;
+        // 1. Compile Bake Compute Pipelines
+        auto makePass = [&](const Vk::ShaderDesc& shader, const auto& bindings) {
+            return CreateHeapComputePass(impl.ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, &impl.pipelineBinaries);
         };
-
-        const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>();
-        const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
-        const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
-        const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
-        const auto      toVec4     = [](std::span<const float, 4> values) { return JPH::Vec4(values[0], values[1], values[2], values[3]); };
-        const JPH::Vec4 skyZenith  = toVec4(sky.skyZenith);
-        const JPH::Vec4 skyHorizon = toVec4(sky.skyHorizon);
-        const JPH::Vec4 skyGround  = toVec4(sky.skyGround);
-
-        for (const auto shader: {brdfShader, specShader, shShader}) {
-            if (auto checked = requireShader(shader); !checked) {
-                return std::unexpected(checked.error());
-            }
-        }
-        auto brdfPass = CreateHeapComputePass(
-            impl.ctx.Device(), brdfShader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
-        );
-        if (!brdfPass) {
-            return std::unexpected(brdfPass.error());
-        }
-        auto specPass = CreateHeapComputePass(
-            impl.ctx.Device(), specShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
-        );
-        if (!specPass) {
-            return std::unexpected(specPass.error());
-        }
-        auto shPass = CreateHeapComputePass(
-            impl.ctx.Device(), shShader, impl.iblBakeHeapBindings.GetInfo(), impl.iblBakeHeapBindings.indexPushOffset, &impl.pipelineBinaries
-        );
-        if (!shPass) {
-            return std::unexpected(shPass.error());
+        auto brdfPass = makePass(Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>(), impl.bakeHeapBindings);
+        auto specPass = makePass(Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>(), impl.iblBakeHeapBindings);
+        auto shPass   = makePass(Vk::CreateShaderDesc<Shaders::Modules::IblShCS>(), impl.iblBakeHeapBindings);
+        if (!brdfPass || !specPass || !shPass) {
+            return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
 
-        struct State {
-            Buffer     shGpu;
-            Buffer     shCpu;
-            IBLPayload payload;
-        } state;
-        ZHLN::defer _([&] {
-            state.payload.Destroy(impl.allocator);
-            impl.allocator.DestroyBuffer(state.shGpu);
-            impl.allocator.DestroyBuffer(state.shCpu);
+        // 2. Allocate Output Targets & Scratch Storage
+        IBLPayload payload;
+        Vk::Buffer shBuffer;
+
+        ZHLN::defer rollback([&] {
+            payload.Destroy(impl.allocator);
+            impl.allocator.DestroyBuffer(shBuffer);
         });
 
-        if (!hasPreparedSH) {
-            auto shGpu = Buffer::Create(
-                impl.allocator, kSHBytes, BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst | BufferUsage::ShaderDeviceAddress,
-                MemoryUsage::GPUOnly
-            );
-            if (!shGpu) {
-                return std::unexpected(shGpu.error());
-            }
-            state.shGpu = std::move(*shGpu);
-            auto shCpu  = Buffer::Create(impl.allocator, kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
-            if (!shCpu) {
-                return std::unexpected(shCpu.error());
-            }
-            state.shCpu = std::move(*shCpu);
+        auto lutImg = Vk::Image::Create(
+            impl.allocator, Vk::ImageConfig::Texture2D({kLutSize, kLutSize}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
+        );
+        auto specImg =
+            Vk::Image::Create(impl.allocator, Vk::ImageConfig::Cube(kBaseSize, cubeFormat, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, kMipLevels));
+        if (!lutImg || !specImg) {
+            return std::unexpected(lutImg ? specImg.error() : lutImg.error());
         }
 
-        auto lutImg =
-            Image::Create(impl.allocator, ImageConfig::Texture2D({kLutSize, kLutSize}, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled));
-        if (!lutImg) {
-            return std::unexpected(lutImg.error());
-        }
-        state.payload.brdfLutImage = std::move(*lutImg);
-        auto specImg = Image::Create(impl.allocator, ImageConfig::Cube(kBaseSize, cubeFormat, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels));
-        if (!specImg) {
-            return std::unexpected(specImg.error());
-        }
-        state.payload.prefilteredImage  = std::move(*specImg);
-        state.payload.prefilteredFormat = cubeFormat;
-        state.payload.environmentMode   = environmentMode;
+        payload.brdfLutImage      = std::move(*lutImg);
+        payload.prefilteredImage  = std::move(*specImg);
+        payload.prefilteredFormat = cubeFormat;
+        payload.environmentMode   = environmentMode;
+
         if (useVisualSky) {
-            auto skyImg = Image::Create(
-                impl.allocator,
-                ImageConfig::Texture2D({radiance.width, radiance.height}, VK_FORMAT_R32G32B32A32_SFLOAT, ImageUsage::TransferDst | ImageUsage::Sampled)
+            auto skyImg = Vk::Image::Create(
+                impl.allocator, Vk::ImageConfig::Texture2D(
+                                    {radiance.width, radiance.height}, VK_FORMAT_R32G32B32A32_SFLOAT, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled
+                                )
             );
             if (!skyImg) {
                 return std::unexpected(skyImg.error());
             }
-            state.payload.visualSkyImage = std::move(*skyImg);
+            payload.visualSkyImage = std::move(*skyImg);
         }
 
-        const uint32_t       uploadWidth     = hasRadiance ? radiance.width : 1u;
-        const uint32_t       uploadHeight    = hasRadiance ? radiance.height : 1u;
-        const uint32_t       sourceMipLevels = hasRadiance ? GetMipLevels(uploadWidth, uploadHeight) : 1u;
-        const size_t         uploadBytes     = static_cast<size_t>(uploadWidth) * uploadHeight * sizeof(float) * 4u;
-        std::array<float, 4> dummy {};
-        const float*         pixels = hasRadiance ? radiance.rgba : dummy.data();
-
-        bool gpuSourceMips = false;
-        if (hasRadiance) {
-            VkFormatProperties props {};
-            vkGetPhysicalDeviceFormatProperties(impl.ctx.Physical(), VK_FORMAT_R32G32B32A32_SFLOAT, &props);
-            const auto features = props.optimalTilingFeatures;
-            if ((features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
-                return std::unexpected(EnvironmentBakeError::RadianceFilteringUnsupported);
+        if (!hasPreparedSH) {
+            // Directly write to host-visible memory over BDA: eliminates the GPU-to-CPU buffer copy and extra barrier
+            auto shBufRes =
+                Vk::Buffer::Create(impl.allocator, kSHBytes, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUToCPU);
+            if (!shBufRes) {
+                return std::unexpected(shBufRes.error());
             }
-            constexpr VkFormatFeatureFlags blitFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
-            gpuSourceMips                               = sourceMipLevels > 1 && (features & blitFeatures) == blitFeatures;
-        }
-        const bool cpuSourceMips = hasRadiance && sourceMipLevels > 1 && !gpuSourceMips;
-        if (cpuSourceMips) {
-            ZHLN::Log("[IBL] FP32 linear blit unsupported; staging the radiance mip chain on the CPU.");
+            shBuffer = std::move(*shBufRes);
         }
 
-        std::array<size_t, GetMipLevels(kMaxEnvironmentRadianceExtent, kMaxEnvironmentRadianceExtent)> sourceMipOffsets {};
-        size_t stagedFloats = static_cast<size_t>(uploadWidth) * uploadHeight * 4u;
-        if (cpuSourceMips) {
-            for (uint32_t mip = 1; mip < sourceMipLevels; ++mip) {
-                sourceMipOffsets[mip] = stagedFloats;
-                stagedFloats += static_cast<size_t>(std::max(1u, uploadWidth >> mip)) * std::max(1u, uploadHeight >> mip) * 4u;
-            }
+        // 3. Stage & Upload Radiance Input
+        auto stagedInput = StageRadianceInput(impl, radiance, hasRadiance, useVisualSky);
+        if (!stagedInput) {
+            return std::unexpected(stagedInput.error());
         }
-        const size_t visualOffsetFloats = stagedFloats;
-        if (useVisualSky) {
-            stagedFloats += static_cast<size_t>(uploadWidth) * uploadHeight * 4u;
-        }
-        auto radianceImage = Image::Create(
-            impl.allocator, ImageConfig::Texture2D(
-                                {uploadWidth, uploadHeight}, VK_FORMAT_R32G32B32A32_SFLOAT,
-                                ImageUsage::TransferDst | ImageUsage::Sampled | (gpuSourceMips ? ImageUsage::TransferSrc : ImageUsage::None), sourceMipLevels
-                            )
-        );
-        if (!radianceImage) {
-            return std::unexpected(radianceImage.error());
-        }
-        defer _([&] { impl.allocator.DestroyImage(*radianceImage); });
-        auto  staging = Buffer::Create(impl.allocator, stagedFloats * sizeof(float), BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
-        if (!staging) {
-            return std::unexpected(staging.error());
-        }
-        defer _([&] { impl.allocator.DestroyBuffer(*staging); });
-        {
-            auto mapped = staging->Map(impl.allocator);
-            if (!mapped) {
-                return std::unexpected(mapped.error());
-            }
-            std::memcpy(mapped->Data(), pixels, uploadBytes);
-            if (cpuSourceMips) {
-                auto* mipPixels = mapped->As<float>();
-                for (uint32_t mip = 1; mip < sourceMipLevels; ++mip) {
-                    DownsampleEquirect(
-                        mipPixels + sourceMipOffsets[mip - 1], mipPixels + sourceMipOffsets[mip], std::max(1u, uploadWidth >> (mip - 1)),
-                        std::max(1u, uploadHeight >> (mip - 1)), std::max(1u, uploadWidth >> mip), std::max(1u, uploadHeight >> mip)
-                    );
-                }
-            }
-            if (useVisualSky) {
-                std::memcpy(mapped->As<float>() + visualOffsetFloats, radiance.visualRgba, uploadBytes);
-            }
-        }
+        ZHLN::defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
 
-        const BRDFLUTPush lutPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128};
-        const IBLBakePush shPush {
-            .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(state.shGpu.Handle()),
+        // 4. Descriptor Heap Setups
+        const auto        toVec4 = [](std::span<const float, 4> v) { return JPH::Vec4(v[0], v[1], v[2], v[3]); };
+        const IBLBakePush basePush {
+            .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
             .sampleCount = 16384,
-            .hasRadiance = hasRadianceWord,
-            .skyZenith   = skyZenith,
-            .skyHorizon  = skyHorizon,
-            .skyGround   = skyGround,
-            .sunDir      = sunDir,
+            .hasRadiance = hasRadiance ? 1u : 0u,
+            .skyZenith   = toVec4(sky.skyZenith),
+            .skyHorizon  = toVec4(sky.skyHorizon),
+            .skyGround   = toVec4(sky.skyGround),
+            .sunDir      = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f),
         };
 
         impl.heapManager.BeginImmediate();
+        const auto brdfBlock =
+            impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(payload.brdfLutImage.ViewInfo()));
 
-        const VkImageViewCreateInfo brdfWriteInfo = state.payload.brdfLutImage.ViewInfo();
-        const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(impl.bakeHeapBindings, Vk::Slot<"outTexture">(brdfWriteInfo));
-
-        const VkImageViewCreateInfo radianceWriteInfo = radianceImage->ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceMipLevels);
-
-        std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
-        std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
+        const auto                                radianceView = stagedInput->image.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, stagedInput->mipLevels);
+        std::array<Vk::HeapBlockBase, kMipLevels> specMipBlocks {};
         for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-            specMipInfos[mip]  = state.payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
+            const auto mipView = payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
             specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipInfos[mip]), Vk::Slot<"radianceMap">(radianceWriteInfo)
-            );
-        }
-        HeapBlockBase shBlock {};
-        if (!hasPreparedSH) {
-            shBlock = impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
-                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(specMipInfos[0]), Vk::Slot<"radianceMap">(radianceWriteInfo)
+                impl.iblBakeHeapBindings, Vk::Slot<"outTexture">(mipView), Vk::Slot<"radianceMap">(radianceView)
             );
         }
 
-        ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
+        const auto shBlock =
+            !hasPreparedSH ? impl.heapManager.WriteHeapParameters<Shaders::IblBake>(
+                                 impl.iblBakeHeapBindings,
+                                 Vk::Slot<"outTexture">(payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6, VK_IMAGE_VIEW_TYPE_2D_ARRAY)),
+                                 Vk::Slot<"radianceMap">(radianceView)
+                             ) :
+                             Vk::HeapBlockBase {};
+
+        // 5. Execute Bake Dispatches
+        ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) {
             impl.heapManager.BindHeaps(cmd);
 
-            TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-                cmd, radianceImage->Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceMipLevels
-            );
-            const VkBufferImageCopy2 region = {
-                .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-                .pNext             = nullptr,
-                .bufferOffset      = 0,
-                .bufferRowLength   = 0,
-                .bufferImageHeight = 0,
-                .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-                .imageOffset       = {0, 0, 0},
-                .imageExtent       = {uploadWidth, uploadHeight, 1},
-            };
-            CopyBufferToImage(cmd, staging->Handle(), radianceImage->Handle(), region);
-            if (gpuSourceMips) {
+            stagedInput->RecordUpload(cmd, useVisualSky ? payload.visualSkyImage.Handle() : VK_NULL_HANDLE);
 
-                GenerateMipmaps(cmd, radianceImage->Handle(), uploadWidth, uploadHeight, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.brdfLutImage.Handle());
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, payload.prefilteredImage.Handle());
+
+            brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(
+                cmd, brdfBlock, kLutSize, kLutSize, 1, BRDFLUTPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128}
+            );
+
+            if (!hasPreparedSH) {
+                shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(cmd, shBlock, 64, 1, 1, basePush);
+            }
+
+            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
+                const uint32_t mipSize     = kBaseSize >> mip;
+                const uint32_t sampleCount = (mip == 0) ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
+
+                IBLBakePush push = basePush;
+                push.width       = mipSize;
+                push.height      = mipSize;
+                push.roughness   = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
+                push.sampleCount = sampleCount;
+
+                for (uint32_t face = 0; face < 6; ++face) {
+                    push.face = face;
+                    specPass->DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
+                }
+            }
+
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
+        });
+
+        // 6. Finalize & Read Back SH
+        if (!hasPreparedSH) {
+            auto mappedSH = shBuffer.Map(impl.allocator);
+            if (!mappedSH) {
+                return std::unexpected(mappedSH.error());
+            }
+            std::memcpy(payload.shCoeffs.data(), mappedSH->Data(), kSHBytes);
+        } else {
+            for (size_t c = 0; c < payload.shCoeffs.size(); ++c) {
+                const auto& rgb     = radiance.diffuseSH[c];
+                payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
+            }
+        }
+
+        payload.brdfLutInfo     = payload.brdfLutImage.ViewInfo();
+        payload.prefilteredInfo = payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
+        if (useVisualSky) {
+            payload.visualSkyInfo = payload.visualSkyImage.ViewInfo();
+        }
+
+        rollback.Dismiss();
+        impl.allocator.DestroyBuffer(shBuffer);
+        return payload;
+    }
+
+  private:
+    struct StagedRadiance {
+        Vk::Image                                                                                          image;
+        Vk::Buffer                                                                                         staging;
+        uint32_t                                                                                           width         = 1;
+        uint32_t                                                                                           height        = 1;
+        uint32_t                                                                                           mipLevels     = 1;
+        bool                                                                                               gpuSourceMips = false;
+        bool                                                                                               cpuSourceMips = false;
+        size_t                                                                                             visualOffset  = 0;
+        std::array<size_t, Vk::GetMipLevels(kMaxEnvironmentRadianceExtent, kMaxEnvironmentRadianceExtent)> mipOffsets {};
+
+        void Destroy(Vk::Allocator& allocator) noexcept {
+            allocator.DestroyImage(image);
+            allocator.DestroyBuffer(staging);
+        }
+
+        void RecordUpload(VkCommandBuffer cmd, VkImage visualSky) const noexcept {
+            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
+
+            const VkBufferImageCopy2 region {
+                .sType            = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+                .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
+                .imageExtent      = {width, height, 1},
+            };
+            Vk::CopyBufferToImage(cmd, staging.Handle(), image.Handle(), region);
+
+            if (gpuSourceMips) {
+                Vk::GenerateMipmaps(cmd, image.Handle(), width, height, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
             } else {
                 if (cpuSourceMips) {
-                    for (uint32_t mip = 1; mip < sourceMipLevels; ++mip) {
+                    for (uint32_t mip = 1; mip < mipLevels; ++mip) {
                         VkBufferImageCopy2 mipRegion        = region;
-                        mipRegion.bufferOffset              = sourceMipOffsets[mip] * sizeof(float);
+                        mipRegion.bufferOffset              = mipOffsets[mip] * sizeof(float);
                         mipRegion.imageSubresource.mipLevel = mip;
-                        mipRegion.imageExtent = {.width = std::max(1u, uploadWidth >> mip), .height = std::max(1u, uploadHeight >> mip), .depth = 1u};
-                        CopyBufferToImage(cmd, staging->Handle(), radianceImage->Handle(), mipRegion);
+                        mipRegion.imageExtent               = {.width = std::max(1u, width >> mip), .height = std::max(1u, height >> mip), .depth = 1u};
+                        Vk::CopyBufferToImage(cmd, staging.Handle(), image.Handle(), mipRegion);
                     }
                 }
-                ImageBarrier(
-                    cmd, ImageBarrierDesc {
-                             .image      = radianceImage->Handle(),
+                Vk::ImageBarrier(
+                    cmd, Vk::ImageBarrierDesc {
+                             .image      = image.Handle(),
                              .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                              .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
                              .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -298,121 +271,166 @@ class IBLProcessor {
                              .dst_stage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                              .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
                              .base_mip   = 0,
-                             .mip_count  = sourceMipLevels,
+                             .mip_count  = mipLevels
                          }
                 );
             }
 
-            if (useVisualSky) {
-                TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, state.payload.visualSkyImage.Handle());
-                VkBufferImageCopy2 visualRegion = region;
-                visualRegion.bufferOffset       = visualOffsetFloats * sizeof(float);
-                CopyBufferToImage(cmd, staging->Handle(), state.payload.visualSkyImage.Handle(), visualRegion);
-                ImageBarrier(
-                    cmd, ImageBarrierDesc {
-                             .image      = state.payload.visualSkyImage.Handle(),
-                             .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                             .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
-                             .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                             .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                             .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                             .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                             .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
-                             .base_mip   = 0,
-                             .mip_count  = 1,
-                         }
+            if (visualSky != VK_NULL_HANDLE) {
+                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, visualSky);
+                auto visualRegion         = region;
+                visualRegion.bufferOffset = visualOffset * sizeof(float);
+                Vk::CopyBufferToImage(cmd, staging.Handle(), visualSky, visualRegion);
+                Vk::ImageBarrier(
+                    cmd, {.image      = visualSky,
+                          .src_access = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          .dst_access = VK_ACCESS_2_SHADER_READ_BIT,
+                          .src_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          .dst_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                          .dst_stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                          .base_mip   = 0,
+                          .mip_count  = 1}
                 );
-            }
-
-            TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
-            TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
-
-            brdfPass->DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
-
-            if (!hasPreparedSH) {
-                shPass->DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(cmd, shBlock, 64, 1, 1, shPush);
-            }
-
-            for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
-                const uint32_t mipSize   = kBaseSize >> mip;
-                const float    roughness = static_cast<float>(mip) / static_cast<float>(kMipLevels - 1);
-
-                const uint32_t sampleCount = mip == 0 ? 1u : (hasRadiance ? (mip >= 3 ? 1024u : 512u) : 32u);
-                for (uint32_t face = 0; face < 6; ++face) {
-                    const IBLBakePush push {
-                        .width       = mipSize,
-                        .height      = mipSize,
-                        .roughness   = roughness,
-                        .face        = face,
-                        .sampleCount = sampleCount,
-                        .hasRadiance = hasRadianceWord,
-                        .skyZenith   = skyZenith,
-                        .skyHorizon  = skyHorizon,
-                        .skyGround   = skyGround,
-                        .sunDir      = sunDir,
-                    };
-                    specPass->DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
-                }
-            }
-
-            if (!hasPreparedSH) {
-                MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Transfer, BarrierAccess::TransferRead);
-                CopyBuffer(cmd, state.shGpu, state.shCpu, kSHBytes);
-            }
-
-            TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.brdfLutImage.Handle());
-            TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, state.payload.prefilteredImage.Handle());
-        });
-
-        if (!hasPreparedSH) {
-            auto mappedSH = state.shCpu.Map(impl.allocator);
-            if (!mappedSH) {
-                return std::unexpected(mappedSH.error());
-            }
-            std::memcpy(state.payload.shCoeffs.data(), mappedSH->Data(), kSHBytes);
-        } else {
-            for (size_t c = 0; c < state.payload.shCoeffs.size(); ++c) {
-                const auto& rgb           = radiance.diffuseSH[c];
-                state.payload.shCoeffs[c] = JPH::Vec4(rgb[0], rgb[1], rgb[2], 0.0f);
             }
         }
+    };
 
-        state.payload.brdfLutInfo     = state.payload.brdfLutImage.ViewInfo();
-        state.payload.prefilteredInfo = state.payload.prefilteredImage.ViewInfo(VK_IMAGE_ASPECT_COLOR_BIT, 0, kMipLevels);
+    static auto StageRadianceInput(RenderContext::Impl& impl, const RadianceSource& src, bool hasRadiance, bool useVisualSky)
+        -> std::expected<StagedRadiance, ErrorCode> {
+        StagedRadiance out {
+            .width     = hasRadiance ? src.width : 1u,
+            .height    = hasRadiance ? src.height : 1u,
+            .mipLevels = hasRadiance ? Vk::GetMipLevels(src.width, src.height) : 1u,
+        };
+
+        if (hasRadiance) {
+            VkFormatProperties props {};
+            vkGetPhysicalDeviceFormatProperties(impl.ctx.Physical(), VK_FORMAT_R32G32B32A32_SFLOAT, &props);
+            if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
+                return std::unexpected(EnvironmentBakeError::RadianceFilteringUnsupported);
+            }
+            constexpr auto kBlitFlags = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+            out.gpuSourceMips         = (out.mipLevels > 1) && ((props.optimalTilingFeatures & kBlitFlags) == kBlitFlags);
+            out.cpuSourceMips         = (out.mipLevels > 1) && !out.gpuSourceMips;
+        }
+
+        size_t stagedFloats = static_cast<size_t>(out.width) * out.height * 4u;
+        if (out.cpuSourceMips) {
+            for (uint32_t mip = 1; mip < out.mipLevels; ++mip) {
+                out.mipOffsets[mip] = stagedFloats;
+                stagedFloats += static_cast<size_t>(std::max(1u, out.width >> mip)) * std::max(1u, out.height >> mip) * 4u;
+            }
+        }
+        out.visualOffset = stagedFloats;
         if (useVisualSky) {
-            state.payload.visualSkyInfo = state.payload.visualSkyImage.ViewInfo();
+            stagedFloats += static_cast<size_t>(out.width) * out.height * 4u;
         }
-        return std::move(state.payload);
+
+        auto imgRes = Vk::Image::Create(
+            impl.allocator,
+            Vk::ImageConfig::Texture2D(
+                {out.width, out.height}, VK_FORMAT_R32G32B32A32_SFLOAT,
+                Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled | (out.gpuSourceMips ? Vk::ImageUsage::TransferSrc : Vk::ImageUsage::None), out.mipLevels
+            )
+        );
+        auto stgRes = Vk::Buffer::Create(impl.allocator, stagedFloats * sizeof(float), Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly);
+        if (!imgRes || !stgRes) {
+            if (imgRes) {
+                impl.allocator.DestroyImage(*imgRes);
+            }
+            return std::unexpected(imgRes ? stgRes.error() : imgRes.error());
+        }
+
+        out.image   = std::move(*imgRes);
+        out.staging = std::move(*stgRes);
+
+        auto mapped = out.staging.Map(impl.allocator);
+        if (!mapped) {
+            out.Destroy(impl.allocator);
+            return std::unexpected(mapped.error());
+        }
+
+        std::array<float, 4> dummy {};
+        const float*         pixels = hasRadiance ? src.rgba : dummy.data();
+        std::memcpy(mapped->Data(), pixels, static_cast<size_t>(out.width) * out.height * sizeof(float) * 4u);
+
+        if (out.cpuSourceMips) {
+            auto* mipPixels = mapped->As<float>();
+            for (uint32_t mip = 1; mip < out.mipLevels; ++mip) {
+                DownsampleEquirect(
+                    mipPixels + out.mipOffsets[mip - 1], mipPixels + out.mipOffsets[mip], std::max(1u, out.width >> (mip - 1)),
+                    std::max(1u, out.height >> (mip - 1)), std::max(1u, out.width >> mip), std::max(1u, out.height >> mip)
+                );
+            }
+        }
+        if (useVisualSky) {
+            std::memcpy(mapped->As<float>() + out.visualOffset, src.visualRgba, static_cast<size_t>(out.width) * out.height * sizeof(float) * 4u);
+        }
+        return out;
     }
 
-  private:
     static void DownsampleEquirect(const float* src, float* dst, uint32_t srcW, uint32_t srcH, uint32_t dstW, uint32_t dstH) noexcept {
         constexpr float pi = std::numbers::pi_v<float>;
+
+        // Cast dimensions once upfront
+        const auto srcW_f = static_cast<float>(srcW);
+        const auto srcH_f = static_cast<float>(srcH);
+        const auto dstW_f = static_cast<float>(dstW);
+        const auto dstH_f = static_cast<float>(dstH);
+
         for (uint32_t y = 0; y < dstH; ++y) {
-            const float top    = static_cast<float>(y) * static_cast<float>(srcH) / static_cast<float>(dstH);
-            const float bottom = static_cast<float>(y + 1) * static_cast<float>(srcH) / static_cast<float>(dstH);
+            const auto   y_f          = static_cast<float>(y);
+            const float  top          = y_f * srcH_f / dstH_f;
+            const float  bottom       = (y_f + 1.0f) * srcH_f / dstH_f;
+            const size_t dstRowOffset = static_cast<size_t>(y) * dstW * 4u;
+
             for (uint32_t x = 0; x < dstW; ++x) {
-                const float left  = static_cast<float>(x) * static_cast<float>(srcW) / static_cast<float>(dstW);
-                const float right = static_cast<float>(x + 1) * static_cast<float>(srcW) / static_cast<float>(dstW);
-                double      sum[4] {};
-                double      weightSum = 0.0;
-                for (auto sy = static_cast<uint32_t>(top); sy < srcH && static_cast<float>(sy) < bottom; ++sy) {
-                    const float rowOverlap = std::min(static_cast<float>(sy + 1), bottom) - std::max(static_cast<float>(sy), top);
-                    const float rowWeight  = rowOverlap * std::sin(pi * (static_cast<float>(sy) + 0.5f) / static_cast<float>(srcH));
-                    for (auto sx = static_cast<uint32_t>(left); sx < srcW && static_cast<float>(sx) < right; ++sx) {
-                        const float  colOverlap = std::min(static_cast<float>(sx + 1), right) - std::max(static_cast<float>(sx), left);
-                        const double weight     = static_cast<double>(rowWeight) * static_cast<double>(colOverlap);
-                        const size_t index      = (static_cast<size_t>(sy) * srcW + sx) * 4u;
-                        for (uint32_t c = 0; c < 4; ++c) {
-                            sum[c] += static_cast<double>(src[index + c]) * weight;
+                const auto  x_f   = static_cast<float>(x);
+                const float left  = x_f * srcW_f / dstW_f;
+                const float right = (x_f + 1.0f) * srcW_f / dstW_f;
+
+                std::array<double, 4> sum {};
+                double                weightSum = 0.0;
+
+                const auto syStart = static_cast<uint32_t>(top);
+                for (uint32_t sy = syStart; sy < srcH; ++sy) {
+                    const auto sy_f = static_cast<float>(sy);
+                    if (sy_f >= bottom) {
+                        break;
+                    }
+
+                    const float  rowOverlap   = std::min(sy_f + 1.0f, bottom) - std::max(sy_f, top);
+                    const float  rowWeight    = rowOverlap * std::sin(pi * (sy_f + 0.5f) / srcH_f);
+                    const size_t srcRowOffset = static_cast<size_t>(sy) * srcW;
+
+                    const auto sxStart = static_cast<uint32_t>(left);
+                    for (uint32_t sx = sxStart; sx < srcW; ++sx) {
+                        const auto sx_f = static_cast<float>(sx);
+                        if (sx_f >= right) {
+                            break;
                         }
+
+                        const float  colOverlap = std::min(sx_f + 1.0f, right) - std::max(sx_f, left);
+                        const auto   weight     = static_cast<double>(rowWeight * colOverlap);
+                        const size_t index      = (srcRowOffset + sx) * 4u;
+
+                        sum[0] += static_cast<double>(src[index + 0]) * weight;
+                        sum[1] += static_cast<double>(src[index + 1]) * weight;
+                        sum[2] += static_cast<double>(src[index + 2]) * weight;
+                        sum[3] += static_cast<double>(src[index + 3]) * weight;
                         weightSum += weight;
                     }
                 }
-                const size_t index = (static_cast<size_t>(y) * dstW + x) * 4u;
-                for (uint32_t c = 0; c < 4; ++c) {
-                    dst[index + c] = static_cast<float>(sum[c] / weightSum);
-                }
+
+                const size_t dstIndex  = dstRowOffset + (static_cast<size_t>(x) * 4u);
+                const double invWeight = weightSum > 0.0 ? (1.0 / weightSum) : 0.0;
+
+                dst[dstIndex + 0] = static_cast<float>(sum[0] * invWeight);
+                dst[dstIndex + 1] = static_cast<float>(sum[1] * invWeight);
+                dst[dstIndex + 2] = static_cast<float>(sum[2] * invWeight);
+                dst[dstIndex + 3] = static_cast<float>(sum[3] * invWeight);
             }
         }
     }
@@ -422,7 +440,7 @@ class IBLProcessor {
         uint32_t height      = 0;
         uint32_t sampleCount = 0;
     };
-    static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+    static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>);
 
     struct IBLBakePush {
         uint64_t  outAddr     = 0;
@@ -437,8 +455,8 @@ class IBLProcessor {
         JPH::Vec4 skyGround   = JPH::Vec4::sZero();
         JPH::Vec4 sunDir      = JPH::Vec4::sZero();
     };
-    static_assert(GpuAbi::ScenePassPayload<IBLBakePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+    static_assert(GpuAbi::ScenePassPayload<IBLBakePush>);
     static_assert(sizeof(IBLBakePush) == 96);
 };
 
-} // namespace ZHLN::Vk
+} // namespace ZHLN

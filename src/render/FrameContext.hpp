@@ -26,22 +26,22 @@
 #include <array>
 #include <cstdint>
 
-namespace ZHLN::Vk {
+namespace ZHLN {
 
 struct IBLPayload {
-    Image                 brdfLutImage;
+    Vk::Image             brdfLutImage;
     VkImageViewCreateInfo brdfLutInfo {};
-    Image                 prefilteredImage;
+    Vk::Image             prefilteredImage;
     VkImageViewCreateInfo prefilteredInfo {};
 
-    Image                    visualSkyImage;
+    Vk::Image                visualSkyImage;
     VkImageViewCreateInfo    visualSkyInfo {};
     std::array<JPH::Vec4, 9> shCoeffs {};
     VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
     uint64_t                 contentHash       = 0;
     int                      environmentMode   = 0;
 
-    void Destroy(Allocator& allocator) noexcept {
+    void Destroy(Vk::Allocator& allocator) noexcept {
         brdfLutInfo     = {};
         prefilteredInfo = {};
         visualSkyInfo   = {};
@@ -50,10 +50,6 @@ struct IBLPayload {
         allocator.DestroyImage(visualSkyImage);
     }
 };
-
-} // namespace ZHLN::Vk
-
-namespace ZHLN {
 
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, Vk::kFramesInFlight> pools;
@@ -139,11 +135,10 @@ struct RenderFrameContext {
 
     FrameTransientState frameState;
 
-    Vk::IBLPayload iblPayload;
+    IBLPayload iblPayload;
 
     RenderFrameContext() noexcept:
-        targets(ctx, allocator, graphicsCmdRing),
-        textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
+        targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
         geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue), reflectionPipeline(*this) {
     }
 
