@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // behind a surface. It runs before the translucent lighting resolve and clears
 // both of its targets.
 struct TranslucentPrePass: Vk::RenderPass<"TransPrePass", Vk::ColorWrite<Res_TransNorm>, Vk::ColorWrite<Res_TransAnisotropy>, Vk::ColorWrite<Res_TransSheen>, Vk::DepthStencilWrite<Res_TransDepth>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

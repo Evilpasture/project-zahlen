@@ -10,7 +10,7 @@ namespace ZHLN::Passes {
 // Front-to-back ray march over the light grid, accumulating transmittance and
 // in-scattered radiance into the integrated voxel volume.
 struct VolumetricIntegrationPass: Vk::RenderPass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

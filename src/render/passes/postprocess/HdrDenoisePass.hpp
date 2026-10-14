@@ -10,7 +10,7 @@ namespace ZHLN::Passes {
 struct HdrDenoisePass: Vk::RenderPass<
                            "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>,
                            Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

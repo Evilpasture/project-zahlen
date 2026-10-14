@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // irradiance into Res_DdgiRays.
 struct DdgiRayTracePass: Vk::RenderPass<
                              "DdgiRayTrace", Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>, Vk::ComputeWrite<Res_DdgiRays>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

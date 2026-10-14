@@ -89,7 +89,7 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept;
 // same way, so the spelling lives here rather than in each pass.
 using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>;
 
-[[nodiscard]] auto GBufferSceneTargets(RenderContext::Impl& impl) noexcept -> GBufferTargets;
+[[nodiscard]] auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets;
 
 // Collapses the draw queue into runs of consecutive draws that share a
 // pipeline and dynamic cull mode, the granularity of a GPU-culled indirect draw.

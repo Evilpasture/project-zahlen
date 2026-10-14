@@ -25,7 +25,7 @@ struct ReflectionPass: Vk::RenderPass<
                           Vk::ShaderRead<Res_DdgiIrradiance>,
                           Vk::ShaderRead<Res_DdgiDistance>,
                           Vk::ColorWrite<OutputTag>> {
-    RenderContext::Impl&                 impl;
+    RenderFrameContext&                   impl;
     GeneratedGpu::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {

@@ -14,7 +14,7 @@ struct RtgiCompositePass: Vk::RenderPass<
                               "RtgiComposite", Vk::ComputeRead<Res_SceneColor>, Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>,
                               Vk::ComputeRead<Res_Anisotropy>, Vk::ComputeRead<Res_Clearcoat>, Vk::ComputeRead<Res_Sheen>,
                               Vk::ComputeRead<Res_Lighting>, Vk::ComputeRead<Res_RtgiHalf>, Vk::ComputeWrite<Res_LightingGI>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

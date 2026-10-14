@@ -18,7 +18,7 @@ namespace ZHLN::Passes {
 struct GBufferBasePass: Vk::RenderPass<
                             "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>,
                             Vk::ColorWrite<Res_Emissive>, Vk::ColorWrite<Res_Clearcoat>, Vk::ColorWrite<Res_Anisotropy>, Vk::ColorWrite<Res_Sheen>, Vk::DepthStencilWrite<Res_Depth>> {
-    using PushConstants = RenderContext::Impl::ObjectConstants;
+    using PushConstants = ObjectConstants;
 
     RenderContext::Impl& impl;
 

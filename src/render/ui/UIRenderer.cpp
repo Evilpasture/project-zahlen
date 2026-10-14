@@ -246,7 +246,7 @@ void UIRenderer::RecordBatches(
 
     impl.arenaOffset[slot] = vertexOffset + safeCount;
 
-    RenderContext::Impl::UIObjectConstants uipc {};
+    UIObjectConstants uipc {};
     uipc.orthoMatrix = Math::CreateOrthoMatrix(static_cast<float>(width), static_cast<float>(height));
 
     const VkRect2D defaultScissor = {

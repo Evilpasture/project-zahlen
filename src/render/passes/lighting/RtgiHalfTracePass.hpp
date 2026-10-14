@@ -14,7 +14,7 @@ struct RtgiHalfTracePass: Vk::RenderPass<
                               "RtgiHalfTrace", Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>, Vk::ComputeRead<Res_Anisotropy>,
                               Vk::ComputeRead<Res_Lighting>, Vk::ComputeRead<Res_DdgiIrradiance>, Vk::ComputeRead<Res_DdgiDistance>,
                               Vk::ComputeWrite<Res_RtgiHalf>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

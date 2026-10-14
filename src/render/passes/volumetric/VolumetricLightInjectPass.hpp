@@ -13,7 +13,7 @@ namespace ZHLN::Passes {
 // inject pass left it writable.
 struct VolumetricLightInjectPass:
     Vk::RenderPass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

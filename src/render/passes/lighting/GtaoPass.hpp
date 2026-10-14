@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // the two that need an AO term, and it is a compute pass: it reads depth and
 // normal/roughness and writes the AO target directly.
 struct GtaoPass: Vk::RenderPass<"GtaoAo", Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>> {
-    RenderContext::Impl&                          impl;
+    RenderFrameContext&                            impl;
     GeneratedGpu::ScenePassPushConstants          pc {};
 
     void operator()(VkCommandBuffer cmd) const noexcept;

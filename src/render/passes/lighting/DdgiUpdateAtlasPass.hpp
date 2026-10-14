@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // hysteresis and 1-texel octahedral border wrapping.
 struct DdgiUpdateAtlasPass: Vk::RenderPass<
                                 "DdgiUpdateAtlas", Vk::ComputeRead<Res_DdgiRays>, Vk::ComputeWrite<Res_DdgiIrradiance>, Vk::ComputeWrite<Res_DdgiDistance>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

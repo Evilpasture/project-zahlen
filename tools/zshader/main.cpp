@@ -63,6 +63,7 @@
 #include <Zahlen/Core/Ranges.hpp>
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -323,5 +324,24 @@ auto RunCommandLine(int argc, char** argv) -> int {
 } // namespace ZHLN::ZShader
 
 int main(int argc, char** argv) {
-    return ZHLN::ZShader::RunCommandLine(argc, argv);
+    // Registered before anything else runs, so that an exit taken by libslang
+    // -- which owns no diagnostic of its own -- is still reported. See the
+    // SILENT-EXIT GUARD note in ZShader.hpp.
+    std::atexit(&ZHLN::ZShader::ReportUnexplainedExit);
+
+    const int status = ZHLN::ZShader::RunCommandLine(argc, argv);
+
+    if (status == 0) {
+        ZHLN::ZShader::ExitCleanly();
+        return 0;
+    }
+
+    // RunCommandLine either returns 0 or leaves through Fail(), so a non-zero
+    // return here would be a new path that forgot to report itself. Say so
+    // rather than let the build step print a status and nothing else.
+    ZHLN::ZShader::Detail::ExitWasExplained() = true;
+    std::println("zshader: RunCommandLine returned {}", status);
+    std::println(stderr, "zshader: RunCommandLine returned {}", status);
+    std::fflush(stdout);
+    return status;
 }

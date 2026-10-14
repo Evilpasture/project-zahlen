@@ -32,7 +32,7 @@ template <typename Declared, Vk::ShaderProgram... Modules>
 struct FullscreenPassRecorder {
     template <typename LayoutT, typename Prepare>
     static void Record(
-        RenderContext::Impl&                  impl,
+        RenderFrameContext&                  impl,
         VkCommandBuffer                        cmd,
         Vk::FullscreenPass<LayoutT>&           pass,
         Prepare&&                              prepare
@@ -47,7 +47,7 @@ struct FullscreenPassRecorder {
     // final blit into the current swapchain image's dynamic-rendering scope.
     template <typename LayoutT, typename Prepare, typename Draw>
     static void RecordCustom(
-        RenderContext::Impl&                  impl,
+        RenderFrameContext&                  impl,
         VkCommandBuffer                        cmd,
         Vk::FullscreenPass<LayoutT>&           pass,
         Prepare&&                              prepare,

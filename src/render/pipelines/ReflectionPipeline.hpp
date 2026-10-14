@@ -6,7 +6,6 @@
 #include "graph/RenderGraph.hpp"
 #include "pipeline/FullscreenPass.hpp"
 #include <GeneratedGpuTypes.hpp>
-#include <Zahlen/Render/RenderContext.hpp>
 
 namespace ZHLN::Passes {
 struct GBufferSurface;
@@ -14,10 +13,12 @@ struct GBufferSurface;
 
 namespace ZHLN {
 
+struct RenderFrameContext;
+
 class ReflectionPipeline {
 public:
-    explicit ReflectionPipeline(RenderContext::Impl& impl) noexcept:
-        _impl{impl} {
+    explicit ReflectionPipeline(RenderFrameContext& ctx) noexcept:
+        _ctx{ctx} {
     }
 
     // Both graph passes use the same shader, variants, attachment format, and
@@ -31,7 +32,7 @@ public:
     ) const noexcept;
 
 private:
-    RenderContext::Impl& _impl;
+    RenderFrameContext& _ctx;
 };
 
 }

@@ -77,7 +77,7 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
     const auto     sceneVp = ctx.EffectiveViewport();
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
 
-    const RenderContext::Impl::CullingConstants pc {
+    const CullingConstants pc {
         .viewProj       = ctx.unjittered_view_proj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
         .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
@@ -123,7 +123,7 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,
                     },
-                    RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                    ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                 );
             }
         });
@@ -176,7 +176,7 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
                     drawCmd.material->pipeline == VK_NULL_HANDLE || IsForwardOnly(drawCmd.instanceData.flags)) {
                     return;
                 }
-                SubmitDrawInstanced(encoder, drawCmd, i, RenderContext::Impl::ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
+                SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
             }
         );
     });

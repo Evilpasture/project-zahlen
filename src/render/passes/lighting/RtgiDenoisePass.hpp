@@ -13,7 +13,7 @@ namespace ZHLN::Passes {
 struct RtgiDenoisePass: Vk::RenderPass<
                             "RtgiDenoise", Vk::ComputeWrite<Res_RtgiHalf>, Vk::ComputeWrite<Res_RtgiDenoiseA>, Vk::ComputeWrite<Res_RtgiDenoiseB>,
                             Vk::ComputeRead<Res_RtgiHistory>, Vk::ComputeRead<Res_Velocity>, Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

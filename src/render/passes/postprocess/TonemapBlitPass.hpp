@@ -90,7 +90,7 @@ struct TonemapBlitPass: Vk::RenderPass<
                     Vk::Unread<"frame">(impl.frames.frameUniformBuffers[fIdx])
                 );
             },
-            [this](RenderContext::Impl& drawImpl, VkCommandBuffer drawCmd, auto&& execute) {
+            [this](RenderFrameContext& drawImpl, VkCommandBuffer drawCmd, auto&& execute) {
                 const auto swapchainTarget = getSwapchainImage();
 
                 drawImpl.BindHeapsAndPushFrame(drawCmd);

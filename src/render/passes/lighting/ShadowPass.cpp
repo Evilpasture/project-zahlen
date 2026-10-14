@@ -31,7 +31,7 @@ constexpr uint32_t kFirstAtlasSlot = 1;
 
 [[nodiscard]] constexpr auto IndirectOffsetForSlot(uint32_t slot) noexcept -> uint32_t {
     return slot == kCascadeSlot ? 0
-                                : RenderContext::Impl::kGpuCullingMaxInstances + (slot - kFirstAtlasSlot) * ShadowRenderer::kAtlasInstancesPerLight;
+                                : kGpuCullingMaxInstances + (slot - kFirstAtlasSlot) * ShadowRenderer::kAtlasInstancesPerLight;
 }
 
 } // namespace
@@ -43,8 +43,8 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
 
     passCtx.EnsureHeapState();
 
-    std::array<Frustum, RenderContext::Impl::NUM_CASCADES> cascadeFrustums {};
-    for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+    std::array<Frustum, TargetManager::kCascades> cascadeFrustums {};
+    for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
         cascadeFrustums[c].Update(ctx.currentUniforms.lightSpaceMatrices[c]);
     }
 
@@ -82,7 +82,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
         const float     radius     = drawCmd.instanceData.cullRadius;
 
         bool inAnyCascade = false;
-        for (uint32_t c = 0; c < RenderContext::Impl::NUM_CASCADES; ++c) {
+        for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
             if (cascadeFrustums[c].IsSphereVisible(meshPos, radius)) {
                 inAnyCascade = true;
                 break;
@@ -154,7 +154,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                                  .instanceCount = 1,
                                  .firstVertex   = 0,
                                  .firstInstance = instanceIdx},
-                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
+                                ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                             );
                             continue;
                         }
@@ -164,7 +164,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
                              .groupCountZ = 1},
-                            RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
+                            ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                         );
                     }
                 } else if (csmDrawCount > 0) {
@@ -173,7 +173,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                          .argumentBuffer = ctx.shadows.IndirectCommands(frameIndex).Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(IndirectOffsetForSlot(kCascadeSlot)),
                          .drawCount      = csmDrawCount},
-                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}
+                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}
                     );
                 }
 

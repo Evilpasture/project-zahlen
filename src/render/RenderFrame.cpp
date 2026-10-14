@@ -48,7 +48,7 @@ template <typename... Ptrs>
 
 } // namespace
 
-auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
+auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
     return {
         ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()),
         ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
@@ -59,7 +59,7 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     };
 }
 
-void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
+void RenderFrameContext::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
     Vk::PushHeapFrameAddresses(cmd, GpuAbi::kScenePushLayout, addresses);

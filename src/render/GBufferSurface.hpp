@@ -22,7 +22,7 @@ struct OpaqueSurface {
     using Sheen      = Res_Sheen;
     using Anisotropy = Res_Anisotropy;
 
-    [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> GBufferSurface {
+    [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
         return {
             .depth      = Vk::Assume<Vk::ShaderRead<Depth>>(impl.presenter.depthTarget).Raw(),
             .normals    = Vk::Assume<Vk::ShaderRead<Normals>>(impl.graphResources.normalRoughnessBuffer).Raw(),
@@ -38,7 +38,7 @@ struct TranslucentSurface {
     using Sheen      = Res_TransSheen;
     using Anisotropy = Res_TransAnisotropy;
 
-    [[nodiscard]] static auto Resolve(RenderContext::Impl& impl) noexcept -> GBufferSurface {
+    [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
         return {
             .depth      = Vk::Assume<Vk::ShaderRead<Depth>>(impl.graphResources.transDepthBuffer).Raw(),
             .normals    = Vk::Assume<Vk::ShaderRead<Normals>>(impl.graphResources.transNormalBuffer).Raw(),

@@ -32,7 +32,7 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
 
     const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
     const auto     sceneVp = ctx.EffectiveViewport();
-    const RenderContext::Impl::CullingConstants pc {
+    const CullingConstants pc {
         .viewProj       = ctx.unjittered_view_proj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
         .maxHiZMipLevel = hizMips > 0 ? hizMips - 1 : 0,
@@ -76,7 +76,7 @@ void RecordGpuCulled(PassContext& passCtx, std::span<const GroupRange> groups, u
                         .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                         .drawCount      = group.count,
                     },
-                    RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                    ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                 );
             }
             DrawCSGMeshes(passCtx, in.sceneColor.Extent());

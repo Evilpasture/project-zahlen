@@ -16,7 +16,7 @@ struct BloomPass: Vk::RenderPass<
                       "BloomKawase", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeRead<Res_Emissive>, Vk::ComputeWrite<Res_BloomThresh>,
                       Vk::ComputeWrite<Res_BloomDown1>, Vk::ComputeWrite<Res_BloomDown2>, Vk::ComputeWrite<Res_BloomDown3>, Vk::ComputeWrite<Res_BloomUp2>,
                       Vk::ComputeWrite<Res_BloomUp1>, Vk::ComputeWrite<Res_BloomFinal>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

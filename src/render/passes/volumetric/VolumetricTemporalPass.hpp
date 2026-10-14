@@ -14,7 +14,7 @@ namespace ZHLN::Passes {
 // `Res_VoxelResolved` are two names for the same pair of images.
 struct VolumetricTemporalPass:
     Vk::RenderPass<"VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

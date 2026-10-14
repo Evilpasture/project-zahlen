@@ -47,7 +47,7 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
                     continue;
                 }
 
-                const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
                 SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive());
             }
         });

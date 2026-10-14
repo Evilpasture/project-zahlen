@@ -11,7 +11,7 @@ namespace ZHLN::Passes {
 // its mip chain for rough refraction in the forward pass. The graph enters in
 // transfer-dst layout; GenerateMipmaps leaves every level shader-readable.
 struct OpaqueSceneCopyPass: Vk::RenderPass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWriteThenShaderRead<Res_TransLighting>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

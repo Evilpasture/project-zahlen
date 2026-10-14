@@ -18,11 +18,11 @@ struct ReflectionInputs {
     Vk::AsAddressWrite tlas {};
 };
 
-[[nodiscard]] auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs;
+[[nodiscard]] auto GatherReflectionInputs(RenderFrameContext& impl) noexcept -> ReflectionInputs;
 
 // Which specialization of the reflection pipeline this frame runs: bit 0 adds
 // screen-space reflection, bit 1 the ray-traced one. Resolved from the frame's
 // settings so a pass does not have to be told.
-[[nodiscard]] auto ReflectionVariant(RenderContext::Impl& impl) noexcept -> uint32_t;
+[[nodiscard]] auto ReflectionVariant(RenderFrameContext& impl) noexcept -> uint32_t;
 
 }

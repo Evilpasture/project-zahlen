@@ -5,7 +5,7 @@
 
 namespace ZHLN::Passes {
 
-auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInputs {
+auto GatherReflectionInputs(RenderFrameContext& impl) noexcept -> ReflectionInputs {
     return ReflectionInputs {
         .prefiltered = Vk::ImageWrite {impl.iblPayload.prefilteredInfo},
         .visualSky   = Vk::ImageWrite {impl.iblPayload.visualSkyInfo.image != VK_NULL_HANDLE ? impl.iblPayload.visualSkyInfo :
@@ -21,7 +21,7 @@ auto GatherReflectionInputs(RenderContext::Impl& impl) noexcept -> ReflectionInp
     };
 }
 
-auto ReflectionVariant(RenderContext::Impl& impl) noexcept -> uint32_t {
+auto ReflectionVariant(RenderFrameContext& impl) noexcept -> uint32_t {
     const bool rtrActive = impl.settings.rayTracing.enableReflections && impl.ctx.RayTracingSupported();
     return (impl.settings.post.enableSSR ? 1u : 0u) | (rtrActive ? 2u : 0u);
 }

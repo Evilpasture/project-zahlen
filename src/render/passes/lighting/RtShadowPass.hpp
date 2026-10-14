@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 // shades the G-buffer.
 struct RtShadowPass: Vk::RenderPass<
                          "RtShadow", Vk::FragmentAndComputeRead<Res_Depth>, Vk::FragmentAndComputeRead<Res_NormRough>, Vk::ComputeWrite<Res_RtShadowMask>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

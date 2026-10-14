@@ -4,14 +4,18 @@
 #pragma once
 #include "DrawCommands.hpp"
 #include "DrawQueueManager.hpp"
+#include "FrameContext.hpp"
 #include "FrameDestinations.hpp"
+#include "FrameResources.hpp"
 #include "GenerationalPool.hpp"
 #include "GeometryManager.hpp"
 #include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
+#include "PassPayloads.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
+#include "RenderConstants.hpp"
 #include "Rendering.hpp"
 #include "ShaderReloadRegistry.hpp"
 #include "TargetManager.hpp"
@@ -73,36 +77,6 @@ struct TaskSystemScheduler {
 
 } // namespace ZHLN
 
-namespace ZHLN::Vk {
-
-struct IBLPayload {
-    // Baked textures keep no VkImageView handles at all: only the plain view
-    // descriptions their heap writes are built from.
-    Image                 brdfLutImage;
-    VkImageViewCreateInfo brdfLutInfo {};
-    Image                 prefilteredImage;
-    VkImageViewCreateInfo prefilteredInfo {};
-    // Original RGBA32F sky, only retained when the lighting cube was cooked
-    // from a different (sunless) panorama and the skybox is visible.
-    Image                    visualSkyImage;
-    VkImageViewCreateInfo    visualSkyInfo {};
-    std::array<JPH::Vec4, 9> shCoeffs {};
-    VkFormat                 prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
-    uint64_t                 contentHash       = 0;
-    int                      environmentMode   = 0;
-
-    void Destroy(Allocator& allocator) noexcept {
-        brdfLutInfo     = {};
-        prefilteredInfo = {};
-        visualSkyInfo   = {};
-        allocator.DestroyImage(brdfLutImage);
-        allocator.DestroyImage(prefilteredImage);
-        allocator.DestroyImage(visualSkyImage);
-    }
-};
-
-} // namespace ZHLN::Vk
-
 namespace ZHLN {
 
 [[nodiscard]] inline auto AsFrameError(ErrorCode code) noexcept -> ErrorCode {
@@ -115,28 +89,6 @@ namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 [[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
-
-static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
-static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-
-static constexpr uint32_t kParallelChunkSize = 256;
-
-static constexpr uint32_t kSceneStaticResourceSlots = 16;
-static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
-static_assert(kSceneStaticSamplerSlots >= 3 + kMaterialSamplerVariantCount);
-static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
-static constexpr uint32_t kImmediateTransientResourceSlots = 64;
-static constexpr uint32_t kPassStaticSamplerSlots          = 64;
-
-static constexpr Color4 kClearColorScene      = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f};
-static constexpr Color4 kClearColorVelocity   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr Color4 kClearColorEmissive   = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr Color4 kClearColorClearcoat  = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr Color4 kClearColorAnisotropy = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f}; // A is glTF occlusion.
-static constexpr Color4 kClearColorSheen      = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-static constexpr float  kClearDepthValue      = 1.0f;
-
-static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 using GlobalSceneLayout    = Vk::ReflectedLayout;
 using TAALayout            = Vk::ReflectedLayout;
@@ -153,64 +105,6 @@ using ClusterCullingLayout = Vk::ReflectedLayout;
 using BakeLayout           = Vk::ReflectedLayout;
 using DecalLayout          = Vk::ReflectedLayout;
 
-enum class Stage : uint8_t {
-    MainPass1,
-    HiZGenerate,
-    ClusterCulling,
-    MainPass2,
-    MainShadow,
-    ParticleUpdate,
-    MeshParticleUpdate,
-    VolumetricClear,
-    VolumetricFogInject,
-    VolumetricLightInject,
-    VolumetricIntegrate,
-    VolumetricTemporal,
-    Lighting,
-    Reflection,
-    TransPrePass,
-    TransReflection,
-    Forward,
-    BloomKawase,
-    DecalPass,
-    TAA,
-    FXAA,
-    MLAA,
-    SmaaEdge,
-    SmaaWeight,
-    SmaaBlend,
-    Blit,
-    Viewmodel,
-};
-
-using FrameProfiler = Profiler::GpuProfiler<Stage>;
-
-static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
-static constexpr uint32_t kGpuCullingMaxBatches          = 256;
-static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
-
-// Scene-light budget. The GPU light storage buffer and the submit path share
-// this one constant so the two cannot drift apart again.
-//
-// It used to be 128, in two places that had to be edited together: the buffer
-// allocation in RenderInitScenePipelines.cpp and the head-of-list truncation in
-// RenderContext::SetFrameData. A compiled Source map blows straight past it --
-// gm_murder_drones offers 1227 entity lights and the emissive heuristic adds
-// 151 area-light proxies -- so 1250 lights were silently discarded before the
-// shader ever saw them, and which 128 survived was entity-lump order, i.e.
-// unrelated to where the camera was. That is what reads in-game as lights
-// popping in and out as the player moves.
-//
-// The cost of a bigger pool is culling time, not shading time: the clustered
-// culling pass still bounds every pixel at Cluster.MaxLights (64), and it walks
-// the whole list once per cluster on the GPU.
-static constexpr uint32_t kMaxSceneLights = 4096;
-
-struct WorkerCmdContext {
-    std::array<Vk::CommandPool<Vk::QueueType::Graphics>, Vk::kFramesInFlight> pools;
-    std::array<ZHLN::Atomic<uint32_t>, Vk::kFramesInFlight>                   cmdCount {};
-};
-
 template <VkImageLayout ColorL, VkImageLayout DepthL>
 struct SceneResources {
     Vk::TypedImage<ColorL> sceneColor;
@@ -226,9 +120,12 @@ struct SceneResources {
 namespace Resource {
 }
 
-struct RenderContext::Impl {
-    using GraphResources = TargetManager::GraphResources;
-
+// Everything not listed here is on RenderFrameContext; see FrameContext.hpp.
+// The base is what a pass sees, and RenderContext::Impl is what owns the rest
+// of it: initialization, presentation internals, diagnostics, the host-side
+// resource registries, and the pipelines that still belong to a pass rather
+// than to the frame.
+struct RenderContext::Impl : RenderFrameContext {
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
@@ -248,114 +145,23 @@ struct RenderContext::Impl {
 
     PresentationTarget&                                           presentationTarget;
     String64                                                      appName;
-    Vk::Context                                                   ctx;
     Vk::PipelineBinaryStore                                       pipelineBinaries;
-    Vk::Allocator                                                 allocator;
-    Vk::SwapchainPresenter                                        presenter;
     PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;
     Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute> computePools;
-    Vk::StagingRingBuffer                                         stagingRingBuffer;
-    mutable Vk::StagingRingBuffer                                 transferRingBuffer;
-
-    mutable Vk::CommandRing<Vk::QueueType::Graphics, 8> graphicsCmdRing;
-    mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    // Multi-pass subsystems. Each owns the pipelines and scratch assets its
-    // passes need, so a pass is a description of recording work rather than a
-    // holder of GPU state.
-    ShadowRenderer      shadows;
-    ShadowAtlas         shadowAtlas;
-    VolumetricFogSystem fog;
-    PostProcessFeature  postProcess;
-
     std::unique_ptr<Vk::SubmittedStagingWork> submittedStaging;
-    Vk::DeletionQueue                         deletionQueue;
     bool                                      frameOpen = false;
 
-    static constexpr size_t                                        kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
-    ZHLN::Array<WorkerCmdContext>                                  workerCmds;
     PerFrame<Vk::ParallelCommandRecorder<kParallelRecordingSlots>> parallelRecorders;
 
-    TargetManager   targets;
-    GraphResources& graphResources = targets.Graph();
-
-    uint32_t viewportX = 0;
-    uint32_t viewportY = 0;
-    uint32_t viewportW = 0;
-    uint32_t viewportH = 0;
-
-    [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport {
-        const auto& fb = graphResources.sceneColor.extent;
-        if (viewportW <= 1 || viewportH <= 1) {
-            return VkViewport {
-                .x        = 0.0F,
-                .y        = 0.0F,
-                .width    = static_cast<float>(fb.width),
-                .height   = static_cast<float>(fb.height),
-                .minDepth = 0.0F,
-                .maxDepth = 1.0F,
-            };
-        }
-        const uint32_t x = std::min<uint32_t>(viewportX, fb.width);
-        const uint32_t y = std::min<uint32_t>(viewportY, fb.height);
-        const uint32_t w = std::min<uint32_t>(viewportW, fb.width - x);
-        const uint32_t h = std::min<uint32_t>(viewportH, fb.height - y);
-        return VkViewport {
-            .x        = static_cast<float>(x),
-            .y        = static_cast<float>(y),
-            .width    = static_cast<float>(w),
-            .height   = static_cast<float>(h),
-            .minDepth = 0.0F,
-            .maxDepth = 1.0F,
-        };
-    }
-
-    struct PerFrameResources {
-        PerFrame<Vk::Buffer>      lineVbos;
-        PerFrame<VkDeviceAddress> lineVboAddresses;
-        PerFrame<Vk::Buffer>      clusterGridBuffers;
-        PerFrame<Vk::Buffer>      lightIndexListBuffers;
-        PerFrame<Vk::Buffer>      globalCounterBuffers;
-        PerFrame<Vk::Buffer>      frameUniformBuffers;
-        PerFrame<Vk::Buffer>      lightStorageBuffers;
-        PerFrame<Vk::Buffer>      shadowTileBuffers;
-        PerFrame<Vk::Buffer>      instanceDataBuffers;
-        PerFrame<Vk::Buffer>      indirectCommandsBuffers;
-        PerFrame<Vk::Buffer>      indirectCommandsBuffersPass2;
-        PerFrame<Vk::Buffer>      secondPassCandidatesBuffers;
-        PerFrame<Vk::Buffer>      secondPassCountBuffers;
-        // Joint data is addressed by both the current and previous frame slot.
-        // Its physical lifetime follows the N-slot frame ring, not PingPong.
-        PerFrame<Vk::Buffer>                jointBuffers;
-        PerFrame<Vk::AccelerationStructure> tlas;
-        // The address is the TLAS's only identity outside the build: passes,
-        // descriptors and instances consume it, never the object handle.
-        // Cached at creation (BuildTLAS builds into the same objects, so
-        // these stay valid for the objects' whole lifetime).
-        PerFrame<Vk::DeviceAddress<>>       tlasAddresses;
-        PerFrame<Vk::Buffer>                tlasBuffer;
-        PerFrame<Vk::Buffer>                tlasScratchBuffer;
-        PerFrame<Vk::Buffer>                tlasInstanceBuffers;
-        PerFrame<BufferHandle>              debugMeshHandles;
-    };
-
-    PerFrameResources                                         frames;
-    PingPong<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumulationHistory;
-
-    Vk::Buffer clusterBoundsBuffer;
-    Vk::Buffer morphDeltasBuffer;
-
     Vk::ReflectedLayout bindlessLayout;
-
-    Vk::HeapManager heapManager;
 
     Vk::HeapMappingBundle sceneHeapMappings;
     Vk::HeapMappingBundle decalSceneHeapMappings;
     Vk::HeapMappingBundle decalHeapMappings;
 
     Vk::HeapPassBindings hizHeapBindings;
-    Vk::HeapPassBindings cullingHeapBindings;
     Vk::HeapPassBindings clusterBoundsHeapBindings;
     Vk::HeapPassBindings clusterCullingHeapBindings;
     Vk::HeapPassBindings bakeHeapBindings;
@@ -394,18 +200,9 @@ struct RenderContext::Impl {
 
     Vk::FixedComputePass   clusterBoundsPass;
     Vk::FixedComputePass   clusterCullingPass;
-    Vk::DynamicComputePass cullingPass;
     Vk::DynamicComputePass skinningPass;
     Vk::DynamicComputePass proceduralBakePass;
     Vk::DynamicComputePass hangGpuPass;
-
-    bool enableMeshShading = true;
-
-    [[nodiscard]] bool MeshShadingActive() const noexcept {
-        return enableMeshShading && ctx.MeshShadersSupported();
-    }
-
-    TextureManager textureManager;
 
     struct EmitterStorage {
         BufferHandle buffer = BufferHandle::Invalid;
@@ -421,15 +218,11 @@ struct RenderContext::Impl {
     Vk::TypedPipeline<1, false> particleRenderPipeline;
 
     Vk::DynamicComputePass meshParticleUpdatePass;
-    Vk::Pipeline           meshParticleRenderPipeline;
-    Vk::Pipeline           meshParticleShadowPipeline;
 
     Vk::ReflectedLayout decalDescLayout;
     Vk::Pipeline        decalPipeline;
 
     Vk::Pipeline     linePipeline;
-    uint32_t                  activeLineVertexCount = 0;
-    uint32_t                  lineInstanceId        = 0;
     std::span<const LineSegment> pendingLines {};
 
     std::expected<void, ErrorCode> BuildLinePipeline();
@@ -441,9 +234,6 @@ struct RenderContext::Impl {
         Vk::BufferUsage            extraFlags = Vk::BufferUsage::None
     ) noexcept;
     void FlushLineQueue(std::span<const LineSegment> lines);
-
-    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
-    void               BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
     std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
     void                           BuildSceneHeapMappings() noexcept;
@@ -472,12 +262,6 @@ struct RenderContext::Impl {
     Vk::Image     ltcAmpImage;
     VkImageViewCreateInfo ltcAmpInfo {};
 
-    Vk::IBLPayload iblPayload;
-
-    GeometryManager geometry;
-
-    DrawQueueManager queues;
-
     // Billboards: renderer-owned storage, one slot per (texture, blend, facing, call) --
     // a host that draws the same texture twice in a frame gets two slots rather than one
     // overwritten buffer, and the serial restarts when the emitter queue empties, which
@@ -494,8 +278,6 @@ struct RenderContext::Impl {
     ZHLN::Array<BillboardSlot> billboardSlots;
     ZHLN::Array<Particle>      billboardStaging;
     uint32_t                   billboardSerial = 0;
-
-    ZHLN::Array<Light> mappedLights;
 
     // The shadow atlas's answer to this frame's lights: one tile base per
     // submitted light, in submitted order, -1 for the lights that asked and did
@@ -515,13 +297,7 @@ struct RenderContext::Impl {
 
     uint32_t packedLightCount = 0;
 
-    Vk::Pipeline     csgWritePipeline;
-    Vk::Pipeline     csgDifferencePipeline;
-    Vk::Pipeline     csgIntersectionPipeline;
-
     UIRenderer uiRenderer;
-
-    FrameDestinations destinations;
 
     struct RenderTexture {
         Vk::ImageSlice       image {};
@@ -541,7 +317,6 @@ struct RenderContext::Impl {
     uint64_t                            nextAcquisition = 1;
     std::atomic<uint32_t> invalidDrawWarningCount {0};
     bool warnedUnwrittenTarget = false;
-    bool rtHistoryValid        = false;
 
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
@@ -555,30 +330,8 @@ struct RenderContext::Impl {
     static_assert(Vk::ForkRecorder<ForkReplayer>);
     std::unique_ptr<ForkReplayer> forkReplayer;
 
-    struct FrameTransientState {
-        bool computeSubmitted = false;
-
-        bool inForkSecondary = false;
-
-        bool hasSkinned = false;
-
-        bool resized            = true;
-        bool clusterBoundsDirty = true;
-
-        void Reset() noexcept {
-            computeSubmitted = false;
-            inForkSecondary  = false;
-            hasSkinned       = false;
-        }
-    };
-
-    FrameTransientState frameState;
-
     [[nodiscard]] auto ForkExecutor() noexcept -> ForkReplayer* {
         return forkReplayer.get();
-    }
-    [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
-        return frameState.inForkSecondary;
     }
 
     struct DestinationVend {
@@ -617,27 +370,9 @@ struct RenderContext::Impl {
     // a frame or used as an alternate path around ResolveTarget.
     std::optional<Vk::ImageSlice> sceneTarget;
 
-    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
-        if (const auto active = destinations.Active()) {
-            return active->Presenter();
-        }
-        return presenter;
-    }
-
     void ApplySceneView(const SceneView& view) noexcept;
 
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
-
-    JPH::Mat44 current_view_proj    = JPH::Mat44::sIdentity();
-    JPH::Mat44 unjittered_view_proj = JPH::Mat44::sIdentity();
-    // Kept for the pack boundary: light packing needs a world-to-view matrix, and
-    // nothing else in the renderer holds one separately from the projection.
-    JPH::Mat44    view_matrix    = JPH::Mat44::sIdentity();
-    JPH::Mat44    shadowProjView = JPH::Mat44::sIdentity();
-    FrameUniforms currentUniforms {};
-    float         currentDt = 0.0166f;
-
-    GraphicsSettings settings {};
 
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
@@ -651,7 +386,6 @@ struct RenderContext::Impl {
     ShaderReloadRegistry                   shaderReloads;
 
     uint32_t nextMorphDeltaIndex = 0;
-    uint32_t blueNoiseTexIdx     = 0;
 
     float lastAspectRatio = 0.0f;
     float lastFov         = 0.0f;
@@ -660,8 +394,6 @@ struct RenderContext::Impl {
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
 
-    ReflectionPipeline reflectionPipeline;
-
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
@@ -669,11 +401,11 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
+    // RenderFrameContext's own constructor builds targets, textureManager,
+    // geometry and reflectionPipeline; they depend on the device members the
+    // base declares, which is why they cannot be initialized here.
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
-        presentationTarget(target), targets(ctx, allocator, graphicsCmdRing), textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
-        geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
-        pipelines(ctx, pipelineBinaries, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher),
-        reflectionPipeline(*this) {
+        presentationTarget(target), pipelines(ctx, pipelineBinaries, sceneHeapMappings, gpuDiagnostics, deletionQueue), fileSystemWatcher(watcher) {
     }
 
     ~Impl() {
@@ -697,13 +429,6 @@ struct RenderContext::Impl {
         // The registry destructor runs after this body; enqueue its pipelines
         // now, before the explicit deletion-queue drain below.
         pipelines.RetireAll();
-        // Acceleration structures must go before their backing VMA buffers.
-        for (auto& tlas: frames.tlas) {
-            tlas = Vk::AccelerationStructure {};
-        }
-        for (auto& tlasAddress: frames.tlasAddresses) {
-            tlasAddress = nullptr;
-        }
         uiRenderer.DestroyBuffers(allocator);
         shadows.DestroyResources(allocator);
         fog.DestroyNoise(allocator);
@@ -719,26 +444,10 @@ struct RenderContext::Impl {
         }
         presenter.Cleanup();
 
-        auto destroyFrames = [this](auto& buffers) {
-            for (auto& buffer: buffers)
-                allocator.DestroyBuffer(buffer);
-        };
-        destroyFrames(frames.lineVbos);
-        destroyFrames(frames.clusterGridBuffers);
-        destroyFrames(frames.lightIndexListBuffers);
-        destroyFrames(frames.globalCounterBuffers);
-        destroyFrames(frames.frameUniformBuffers);
-        destroyFrames(frames.lightStorageBuffers);
-        destroyFrames(frames.shadowTileBuffers);
-        destroyFrames(frames.instanceDataBuffers);
-        destroyFrames(frames.indirectCommandsBuffers);
-        destroyFrames(frames.indirectCommandsBuffersPass2);
-        destroyFrames(frames.secondPassCandidatesBuffers);
-        destroyFrames(frames.secondPassCountBuffers);
-        destroyFrames(frames.jointBuffers);
-        destroyFrames(frames.tlasBuffer);
-        destroyFrames(frames.tlasScratchBuffer);
-        destroyFrames(frames.tlasInstanceBuffers);
+        // Every per-frame allocation, released in the order the driver needs:
+        // acceleration structures first, then their backing VMA buffers, then
+        // the rest. The list lives in FrameResources, next to the members.
+        frames.Destroy(allocator);
         allocator.DestroyBuffer(clusterBoundsBuffer);
         allocator.DestroyBuffer(morphDeltasBuffer);
 
@@ -752,123 +461,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitCorePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();
     [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
-
-    struct alignas(16) ComputePushConstants {
-        VkDeviceAddress       particleBufferAddr;
-        uint32_t              particleCount;
-        float                 deltaTime;
-        ParticleEmitterParams p;
-    };
-
-    struct CullingConstants {
-        JPH::Mat44 viewProj;
-        float      hizScreenSize[2];
-        uint32_t   maxHiZMipLevel;
-        uint32_t   drawCount;
-        uint32_t   passIndex;
-    };
-
-    struct ParticleRenderPushConstants {
-        VkDeviceAddress particleBufferAddr;
-        uint32_t        alignment;
-        uint32_t        textureIndex;
-    };
-
-    struct alignas(16) MeshParticleComputePush {
-        VkDeviceAddress           particleBufferAddr;
-        uint32_t                  particleCount;
-        float                     deltaTime;
-        MeshParticleEmitterParams p;
-    };
-
-    struct MeshParticleRenderPush {
-        VkDeviceAddress particleBufferAddr;
-        VkDeviceAddress posAddress;
-        JPH::Float4     baseColorFactor {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Float4     emissiveFactor {0.0f, 0.0f, 0.0f, 1.0f};
-        VkDeviceAddress tangentFrameAddress;
-        VkDeviceAddress surfaceAddress;
-        VkDeviceAddress iboAddress;
-
-        uint32_t indexCount;
-        uint32_t albedoIdx;
-        uint32_t normalIdx;
-        uint32_t pbrIdx;
-        uint32_t emissiveIdx;
-        float    roughness;
-        float    metallic;
-        float    alphaCutoff;
-        uint32_t alphaMode;
-
-        uint32_t samplerCodes0;
-        uint32_t samplerCodes1;
-        uint32_t unlit;
-    };
-    static_assert(sizeof(MeshParticleRenderPush) == 120);
-    static_assert(offsetof(MeshParticleRenderPush, baseColorFactor) == 16);
-    static_assert(offsetof(MeshParticleRenderPush, emissiveFactor) == 32);
-    static_assert(offsetof(MeshParticleRenderPush, tangentFrameAddress) == 48);
-    static_assert(offsetof(MeshParticleRenderPush, surfaceAddress) == 56);
-    static_assert(offsetof(MeshParticleRenderPush, indexCount) == 72);
-
-    struct ObjectConstants {
-        uint32_t instanceId;
-        uint32_t isShadowPass;
-    };
-    static_assert(sizeof(ObjectConstants) == 8);
-
-    struct UIObjectConstants {
-        JPH::Mat44 orthoMatrix;
-        uint64_t   posAddress;
-        uint64_t   surfaceAddress;
-        uint32_t   albedoIdx;
-        uint32_t   isSDF;
-        uint32_t   useTextureColor;
-    };
-    static_assert(sizeof(UIObjectConstants) == 96);
-    static_assert(offsetof(UIObjectConstants, surfaceAddress) == 72);
-
-    using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
-    using PPPushConstants        = ScenePassPushConstants;
-
-    struct alignas(8) SkinningConstants {
-        Vk::DeviceAddress<VertexPosition>     inPosAddr;
-        Vk::DeviceAddress<VertexTangentFrame> inFrameAddr;
-        // The shader reads the skin stream as raw uint words (packed joint
-        // indices + weight bits); there is no CPU-side element struct.
-        Vk::DeviceAddress<uint32_t>           inSkinAddr;
-        Vk::DeviceAddress<VertexPosition>     outPosAddr;
-        Vk::DeviceAddress<VertexTangentFrame> outFrameAddr;
-        Vk::DeviceAddress<JPH::Mat44>         jointsAddr; // shader GPUJoint: four float4 columns
-        Vk::DeviceAddress<JPH::Float4>        morphDeltasAddr;
-        uint32_t                              vertexCount;
-        uint32_t        jointOffset;
-        uint32_t        morphOffset;
-        uint32_t        activeMorphCount;
-        JPH::Float4     morphWeights {0.0f, 0.0f, 0.0f, 0.0f};
-    };
-    static_assert(offsetof(SkinningConstants, inFrameAddr) == 8);
-    static_assert(offsetof(SkinningConstants, outFrameAddr) == 32);
-
-    struct BakePush {
-        uint32_t width;
-        uint32_t height;
-        float    scale;
-        float    randomness;
-        float    distortion;
-    };
-
-    // The payloads still declared here are the ones with no single pass to
-    // live in: skinning, baking and the shared instance-draw constants are
-    // reached from more than one place. Every payload that belongs to exactly
-    // one pass is declared next to that pass and asserted there.
-    static_assert(
-        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> &&
-         GpuAbi::ScenePassPayload<MeshParticleComputePush> && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> &&
-         GpuAbi::ScenePassPayload<UIObjectConstants> && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> &&
-         GpuAbi::ScenePassPayload<ScenePassPushConstants>),
-        "a shared pass payload no longer fits the push blob's prefix in front of the frame addresses"
-    );
 
     // Packs the submitted lights, and answers their shadow asks first: the
     // atlas allocation has to exist before the pack, because a light's tile
@@ -914,7 +506,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
@@ -935,9 +526,6 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
     [[nodiscard]] std::expected<Vk::OwnedShaderStages, ErrorCode> LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::FragmentStageSource ps) const noexcept;
-    [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
-        return ctx.BufferAddress(buffer);
-    }
 };
 
 template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
@@ -965,10 +553,10 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
 // holds the sole command-buffer handle; the frame slot comes from ctx.presenter.
 struct PassContext {
     Vk::CommandEncoder   encoder;
-    RenderContext::Impl& ctx;
+    RenderFrameContext&  ctx;
     bool                 heapsInherited;
 
-    PassContext(VkCommandBuffer cmd, RenderContext::Impl& impl, bool inherited = false) noexcept: encoder(cmd), ctx(impl), heapsInherited(inherited) {
+    PassContext(VkCommandBuffer cmd, RenderFrameContext& impl, bool inherited = false) noexcept: encoder(cmd), ctx(impl), heapsInherited(inherited) {
     }
 
     [[nodiscard]] auto Cmd() const noexcept -> VkCommandBuffer {

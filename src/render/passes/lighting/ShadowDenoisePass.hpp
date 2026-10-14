@@ -12,7 +12,7 @@ namespace ZHLN::Passes {
 struct ShadowDenoisePass: Vk::RenderPass<
                               "ShadowDenoise", Vk::ComputeWrite<Res_RtShadowMask>, Vk::ComputeWrite<Res_ShadowDenoiseA>, Vk::ComputeWrite<Res_ShadowDenoiseB>,
                               Vk::ComputeRead<Res_RtShadowHistory>, Vk::ComputeRead<Res_Velocity>, Vk::ComputeRead<Res_Depth>, Vk::ComputeRead<Res_NormRough>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

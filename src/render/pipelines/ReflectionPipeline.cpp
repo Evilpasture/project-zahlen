@@ -14,7 +14,7 @@ void ReflectionPipeline::Dispatch(
     const Passes::GBufferSurface& surface,
     const GeneratedGpu::ScenePassPushConstants& pc
 ) const noexcept {
-    RenderContext::Impl& impl = _impl;
+    RenderFrameContext& impl = _ctx;
     const uint32_t fIdx = impl.presenter.frameIndex;
     const Passes::ReflectionInputs inputs = Passes::GatherReflectionInputs(impl);
 

@@ -45,7 +45,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                     continue;
                 }
 
-                const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
@@ -75,7 +75,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             }
 
             if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
-                const RenderContext::Impl::ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
+                const ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
 
                 passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),

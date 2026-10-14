@@ -38,7 +38,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
         Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
-            const RenderContext::Impl::ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
+            const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
             SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline);
         }
 
@@ -50,7 +50,7 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
             return;
         }
 
-        const RenderContext::Impl::ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
+        const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
         SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline);
     }
 }
@@ -78,7 +78,7 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
             continue;
         }
 
-        RenderContext::Impl::MeshParticleRenderPush rpc = {
+        MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
@@ -137,7 +137,7 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
             continue;
         }
 
-        RenderContext::Impl::MeshParticleRenderPush rpc = {
+        MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress.Get(),
             .baseColorFactor =
@@ -173,7 +173,7 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
     }
 }
 
-auto GBufferSceneTargets(RenderContext::Impl& impl) noexcept -> GBufferTargets {
+auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets {
     return GBufferTargets {
         .sceneColor = Vk::Assume<Vk::ColorWrite<Res_SceneColor>>(impl.graphResources.sceneColor),
         .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(impl.graphResources.velocityBuffer),

@@ -11,7 +11,7 @@ namespace ZHLN::Passes {
 // height falloff, scattering and emission, modulated by the tiling 3D noise
 // `VolumetricFogSystem` uploaded at startup.
 struct VolumetricFogInjectPass: Vk::RenderPass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>> {
-    RenderContext::Impl& impl;
+    RenderFrameContext&   impl;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
