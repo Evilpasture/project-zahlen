@@ -37,7 +37,7 @@ constexpr uint32_t kFirstAtlasSlot = 1;
 } // namespace
 
 void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
-    PassContext    passCtx(cmd, impl, impl.InheritsHeaps());
+    PassContext    passCtx(cmd, frame, frame.InheritsHeaps());
     auto&          ctx        = passCtx.ctx;
     const uint32_t frameIndex = ctx.presenter.frameIndex;
 
@@ -178,7 +178,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                 }
 
                 if (hasMeshParticles) {
-                    Draw3DParticleShadows(passCtx);
+                    Draw3DParticleShadows(passCtx, particles);
                 }
             });
     }

@@ -85,8 +85,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
     // positional `{self}` would be read as an initializer for that base rather
     // than for the pass's own `impl`.
     auto core = Vk::MakePassPack(
-        Passes::ShadowPass {.impl = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
-        Passes::GBufferResolvePass {.cull = self.culling, .frame = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
+        Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
+        Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self}, Passes::DecalPass {.impl = self}, Passes::ViewmodelPass {.impl = self},
         Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc},
         Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.impl = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},

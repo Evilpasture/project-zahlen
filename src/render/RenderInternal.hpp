@@ -14,6 +14,7 @@
 #include "PassPayloads.hpp"
 #include "passes/aa/AntiAliasingResources.hpp"
 #include "passes/culling/CullingResources.hpp"
+#include "passes/SceneDrawResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -163,6 +164,11 @@ struct RenderContext::Impl : RenderFrameContext {
     // three heap-binding slots that used to sit here, so construction and
     // destruction order relative to its neighbours is unchanged.
     CullingResources culling;
+
+    // The pipelines the shared SceneDraw helpers draw with: the stencil trio
+    // for CSG, the pair for mesh particles.
+    CsgResources          csg;
+    MeshParticlePipelines meshParticles;
     Vk::HeapPassBindings bakeHeapBindings;
     Vk::HeapPassBindings iblBakeHeapBindings;
     Vk::HeapPassBindings volumetricClearHeapBindings;

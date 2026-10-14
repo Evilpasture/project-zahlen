@@ -13,7 +13,10 @@ namespace {
 // Second GPU-culling dispatch: `passIndex = 1` makes the shader read the
 // candidate list the base pass's dispatch produced instead of testing every
 // instance again, and the draw reads the second indirect buffer.
-void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in) noexcept {
+void RecordGpuCulled(
+    PassContext& passCtx, CullingResources& cull, const CsgResources& csg, const MeshParticlePipelines& particles,
+    std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in
+) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
     const uint32_t  frameIndex = ctx.presenter.frameIndex;
@@ -79,14 +82,14 @@ void RecordGpuCulled(PassContext& passCtx, CullingResources& cull, std::span<con
                     ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                 );
             }
-            DrawCSGMeshes(passCtx, in.sceneColor.Extent());
-            Draw3DParticles(passCtx);
+            DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());
+            Draw3DParticles(passCtx, particles);
         });
 }
 
 // CPU path: no second culling dispatch to replay, so this is only the work
 // that could not run until the GBuffer's depth buffer was complete.
-void RecordCpuCulled(PassContext& passCtx, const GBufferTargets& in) noexcept {
+void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshParticlePipelines& particles, const GBufferTargets& in) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
 
@@ -102,8 +105,8 @@ void RecordCpuCulled(PassContext& passCtx, const GBufferTargets& in) noexcept {
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
             ctx.BindHeapsAndPushFrame(cmd);
-            DrawCSGMeshes(passCtx, in.sceneColor.Extent());
-            Draw3DParticles(passCtx);
+            DrawCSGMeshes(passCtx, csg, in.sceneColor.Extent());
+            Draw3DParticles(passCtx, particles);
         });
 }
 
@@ -124,9 +127,9 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     const GBufferTargets in = GBufferSceneTargets(frame);
     if (useGpuCulling) {
-        RecordGpuCulled(passCtx, cull, groups, drawCount, in);
+        RecordGpuCulled(passCtx, cull, csg, particles, groups, drawCount, in);
     } else {
-        RecordCpuCulled(passCtx, in);
+        RecordCpuCulled(passCtx, csg, particles, in);
     }
 }
 

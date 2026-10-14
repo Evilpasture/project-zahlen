@@ -56,7 +56,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .CullBack()
                 .Binaries(&pipelineBinaries)
                 .Build(ctx.Device())
-                .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                .transform([&](auto&& pipeline) -> auto { meshParticles.render = std::forward<decltype(pipeline)>(pipeline); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return LoadAndCreateShaders(
@@ -72,7 +72,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .CullNone()
                         .Binaries(&pipelineBinaries)
                         .Build(ctx.Device())
-                        .transform([&](auto&& pipeline) -> auto { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
+                        .transform([&](auto&& pipeline) -> auto { meshParticles.shadow = std::forward<decltype(pipeline)>(pipeline); });
                 });
         });
 }
@@ -238,7 +238,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .Binaries(&pipelineBinaries)
         .Build(ctx.Device())
         .and_then([&](auto&& writePipeline) -> auto {
-            csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
+            csg.write = std::forward<decltype(writePipeline)>(writePipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
@@ -254,7 +254,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
         .and_then([&](auto&& diffPipeline) -> auto {
-            csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
+            csg.difference = std::forward<decltype(diffPipeline)>(diffPipeline);
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(stages)
@@ -270,7 +270,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .transform_error([](auto e) -> ErrorCode { return e; });
         })
         .transform([&](auto&& intersectPipeline) -> auto {
-            csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
+            csg.intersection = std::forward<decltype(intersectPipeline)>(intersectPipeline);
 
             diagnostics.shaderReloads.Register("CSGStencil", {Shaders::Modules::BasicVS::Path, Shaders::Modules::BasicPS::Path}, [this]() -> void {
                 auto res = InitCSGPipelines();

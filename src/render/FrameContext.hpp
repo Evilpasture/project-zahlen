@@ -195,18 +195,6 @@ struct RenderFrameContext {
     Vk::IBLPayload iblPayload;
 
 
-    // Pipelines and heap bindings the passes reach for directly. These sit on the
-    // frame context rather than on Impl because the passes that use them -- both
-    // GBuffer passes for the GPU cull, SceneDraw for CSG and mesh particles --
-    // are already written against RenderFrameContext&, and leaving the members
-    // behind would strand those passes on Impl&. Step 1 (per-pass pipeline
-    // ownership) is where they move on to the passes that actually own them.
-    Vk::Pipeline           meshParticleRenderPipeline;
-    Vk::Pipeline           meshParticleShadowPipeline;
-    Vk::Pipeline           csgWritePipeline;
-    Vk::Pipeline           csgDifferencePipeline;
-    Vk::Pipeline           csgIntersectionPipeline;
-
     RenderFrameContext() noexcept:
         targets(ctx, allocator, graphicsCmdRing),
         textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),

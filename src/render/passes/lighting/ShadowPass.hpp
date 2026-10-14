@@ -21,7 +21,8 @@ namespace ZHLN::Passes {
 // tiles `ShadowAtlas` reports as cached keep last frame's depth and cost
 // nothing to keep.
 struct ShadowPass: Vk::RenderPass<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>> {
-    RenderFrameContext&   impl;
+    const MeshParticlePipelines& particles;
+    RenderFrameContext&          frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };

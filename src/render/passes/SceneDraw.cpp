@@ -23,11 +23,11 @@ auto UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool m
            drawCmd.instanceData.meshletCount > 0;
 }
 
-void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
+void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D extent) noexcept {
     VkCommandBuffer cmd = passCtx.Cmd();
     auto&           ctx = passCtx.ctx;
 
-    auto* const stencilWritePipeline = ctx.csgWritePipeline.Get();
+    auto* const stencilWritePipeline = csg.write.Get();
     if (ctx.queues.CsgDraws().empty() || stencilWritePipeline == VK_NULL_HANDLE) {
         return;
     }
@@ -42,9 +42,9 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
             SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline);
         }
 
-        auto activePipeline = ctx.csgDifferencePipeline.Get();
+        auto activePipeline = csg.difference.Get();
         if (!csgCmd.cutters.empty() && csgCmd.cutters[0].operation == CSGOperation::Intersection) {
-            activePipeline = ctx.csgIntersectionPipeline.Get();
+            activePipeline = csg.intersection.Get();
         }
         if (activePipeline == VK_NULL_HANDLE) {
             return;
@@ -55,9 +55,9 @@ void DrawCSGMeshes(PassContext& passCtx, VkExtent3D extent) noexcept {
     }
 }
 
-void Draw3DParticles(PassContext& passCtx) noexcept {
+void Draw3DParticles(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept {
     auto& ctx = passCtx.ctx;
-    if (!ctx.meshParticleRenderPipeline.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
+    if (!particles.render.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
         return;
     }
 
@@ -105,7 +105,7 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
-            {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
+            {.pipeline      = particles.render.Get(),
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
@@ -115,9 +115,9 @@ void Draw3DParticles(PassContext& passCtx) noexcept {
     }
 }
 
-void Draw3DParticleShadows(PassContext& passCtx) noexcept {
+void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& particles) noexcept {
     auto& ctx = passCtx.ctx;
-    if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
+    if (!particles.shadow.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
         return;
     }
 
@@ -163,7 +163,7 @@ void Draw3DParticleShadows(PassContext& passCtx) noexcept {
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
-            {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
+            {.pipeline      = particles.shadow.Get(),
              .vertexCount   = drawVertexCount,
              .instanceCount = emitter.maxParticles,
              .firstVertex   = 0,
