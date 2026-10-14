@@ -60,6 +60,51 @@ void PSShadow(ShadowGeometryOutput input) {
     }
 }
 
+// KHR_materials_specular: the fragment's dielectric response, resolved from
+// the instance's authored factors plus the one texture slot the material
+// layout has left for the extension. That slot holds specularTexture.a and/or
+// specularColorTexture.rgb depending on the mode the importer picked; the
+// color half is sRGB-encoded and already decoded by the sampler.
+struct DielectricResponse {
+    float3 f0;  // dielectric reflectance, already clamped and scaled
+    float  f90; // grazing reflectance (the extension's specularFactor)
+};
+
+DielectricResponse ResolveDielectricResponse(InstanceData inst, float2 uv, float2 uv1, uint instanceId) {
+    float3 color  = inst.specularColorFactor;
+    float  factor = inst.specularFactor;
+    if (inst.specularTexIndex != 0xFFFFu) {
+        uint2  codes = uint2(inst.samplerCodes0, inst.samplerCodes1);
+        float4 texel = SampleMaterialTexture(
+            inst.specularTexIndex, SceneTextureUV(uv, uv1, instanceId, kSamplerSpecular), codes, kSamplerSpecular
+        );
+        // Mode 1 binds specularTexture.a alone, mode 2 specularColorTexture.rgb
+        // alone; anything unmapped keeps its authored factor. The unused half
+        // is never read as data, as the extension's texture definition asks.
+        if (inst.specularTextureMode != 1u) {
+            color *= texel.rgb;
+        }
+        if (inst.specularTextureMode != 2u) {
+            factor *= texel.a;
+        }
+    }
+
+    // transmissionIor is the authored KHR_materials_ior for every material,
+    // transmitting or not: the importer writes it unconditionally and defaults
+    // it to 1.5, so it is the right source for eta here. volumeParams() is not
+    // -- it substitutes 1.5 for any opaque material, which is exactly the case
+    // this extension changes.
+    float ior = max(inst.transmissionIor, 1.0f);
+    float eta = (ior - 1.0f) / (ior + 1.0f);
+
+    DielectricResponse response;
+    // The extension clamps the IOR reflectance to 1 *before* applying the
+    // factor: the factor scales the response, it is not a reflectance itself.
+    response.f0  = min(float3(eta * eta) * color, float3(1.0f)) * factor;
+    response.f90 = factor;
+    return response;
+}
+
 PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
     PSOutput output;
     MaterialSampleInputs material = MakeMaterialInputs(input.uv, input.color, input.materialIndices, input.samplerCodes,
@@ -110,7 +155,29 @@ PSOutput PSMain(GBufferGeometryOutput input, bool isFrontFace: SV_IsFrontFace) {
         output.emissive        = float4(surface.emissive, 1.0f);
         float2 packedNormal    = PackNormalOctahedron(surface.normal) * 0.5f + 0.5f;
         output.normalRoughness = float4(packedNormal, surface.roughness, surface.metallic);
-        output.clearcoat       = surface.clearcoat;
+        // The opaque lighting passes reconstruct F0 from albedo and metallic
+        // and cannot see a material's specular response, so the material pass
+        // carries it out in the clearcoat lanes -- which are empty for every
+        // material that has no coat. See DecodeSpecularResponse.
+        InstanceData inst = scene.g_instances[input.instanceId];
+        float4 coatOutput = surface.clearcoat;
+        if (inst.hasSpecularResponse && coatOutput.a <= 1.0f / 255.0f) {
+            DielectricResponse response = ResolveDielectricResponse(inst, input.uv, input.uv1, input.instanceId);
+            // Lane order is the one DecodeSpecularResponse reads: rgb is the
+            // response as a multiple of the 0.04 baseline -- so the eight bits
+            // keep their resolution there, and a response stronger than the
+            // baseline saturates in this lane while the forward and
+            // transmission paths read the instance and keep it exactly -- the
+            // blue lane carries the payload marker plus f90, and alpha stays
+            // cleared, which is what every other reader of this target has to
+            // keep seeing. Slang has no float4(float3, float, float) overload,
+            // so the lanes are written by name.
+            float4 payload = float4(0.0f);
+            payload.rgb    = response.f0 / kDielectricF0;
+            payload.z      = kSpecularPayloadBase + kSpecularPayloadSpan * saturate(response.f90);
+            coatOutput     = payload;
+        }
+        output.clearcoat       = coatOutput;
         output.anisotropy      = float4(surface.anisotropy.xy, EncodeGBufferAnisotropy(surface.anisotropy.z), surface.anisotropy.w);
         output.sheen           = surface.sheen;
     }
@@ -172,10 +239,21 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, b
 
     float ior = max(input.volumeParams.y, 1.0f);
     float eta = (ior - 1.0f) / (ior + 1.0f);
-    float3 F0 = lerp(float3(eta * eta), albedo, metallic);
+    // KHR_materials_specular replaces the dielectric reflectance the IOR
+    // implies and carries the grazing value the plain Schlick form cannot:
+    // f90 is the material's reflectance at 90 degrees, not 1.
+    float3       dielectricF0 = float3(eta * eta);
+    float        f90          = 1.0f;
+    InstanceData inst         = scene.g_instances[input.instanceId];
+    if (inst.hasSpecularResponse) {
+        DielectricResponse response = ResolveDielectricResponse(inst, input.uv, input.uv1, input.instanceId);
+        dielectricF0                = response.f0;
+        f90                         = response.f90;
+    }
+    float3 F0 = lerp(dielectricF0, albedo, metallic);
     // A metal reflects rather than transmitting; at IOR 1 the dielectric
     // component alone has no index boundary and must not reflect air.
-    float3 F = (ior > 1.0f || metallic > 0.0f) ? FresnelSchlickRoughness(NdotV, F0, roughness) : float3(0.0f);
+    float3 F = (ior > 1.0f || metallic > 0.0f) ? SpecularFresnelRoughness(NdotV, F0, EffectiveF90(f90, metallic), roughness) : float3(0.0f);
     if (iridescence > 0.0f && thicknessNm > 0.0f) {
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
@@ -278,12 +356,24 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
     float3 anisotropicT = aniso.z > 0.0f ? UnpackAnisotropy(aniso.xy, N) : T;
     float3 anisotropicB = cross(N, anisotropicT);
     float3 R = AnisotropicReflection(N, V, anisotropicB, roughness, aniso.z);
-    float3 F0       = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallic);
-    float3 F_rough  = FresnelSchlickRoughness(NdotV, F0, roughness);
-    float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    // KHR_materials_specular scales the dielectric reflectance and lowers the
+    // grazing value; both reach the split-sum LUT's two coefficients.
+    InstanceData inst   = scene.g_instances[input.instanceId];
+    float3       baseF0 = float3(kDielectricF0);
+    float        f90    = 1.0f;
+    if (inst.hasSpecularResponse) {
+        DielectricResponse response = ResolveDielectricResponse(inst, input.uv, input.uv1, input.instanceId);
+        baseF0                      = response.f0;
+        f90                         = response.f90;
+    }
+    float3 F0      = lerp(baseF0, albedo.rgb, metallic);
+    float  f90Sum  = EffectiveF90(f90, metallic);
+    float3 F_rough = SpecularFresnelRoughness(NdotV, F0, f90Sum, roughness);
+    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
     // The split-sum LUT already integrates Schlick's angle-dependent Fresnel.
-    // Its A coefficient multiplies F0, not a second grazing-angle evaluation.
-    float3 FssEss   = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+    // Its A coefficient multiplies F0 and its B coefficient the grazing value,
+    // not a second grazing-angle evaluation. Metals keep that value at 1.
+    float3 FssEss   = F0 * envBRDF.x + float3(f90Sum) * envBRDF.y;
     float3 prefiltered = SampleAnisotropicEnvironment(scene.prefilteredMap, scene.clampSampler, R, roughness, aniso.z);
     float3 specularIBL = prefiltered * scene.frame.ambientExposure * FssEss;
     float3 diffuseIBL  = albedo.rgb * (1.0f - F_rough) * (1.0f - metallic) * scene.frame.ambientExposure * 0.5f;

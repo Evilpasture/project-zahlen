@@ -153,6 +153,11 @@ struct InstanceDataDesc {
     uint32_t                  sheenRoughnessTex    = kNoFilmTexture;
     uint32_t                  occlusionTex         = kNoFilmTexture;
     float                     occlusionStrength    = 1.0f;
+    bool                      specularEnabled      = false;
+    float                     specularFactor       = 1.0f;
+    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    uint32_t                  specularTex     = kNoFilmTexture;
+    uint32_t                  specularTexMode = 0;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 };
@@ -246,6 +251,9 @@ struct InstanceDataDesc {
         .transmissionTexIndex    = desc.transmissionTex,
         .uvRow0                  = uvRow0,
         .uvRow1                  = uvRow1,
+        .specularParams          = {desc.specularColorFactor.x, desc.specularColorFactor.y, desc.specularColorFactor.z, std::max(desc.specularFactor, 0.0f)},
+        .specularTexIndex        = desc.specularTex,
+        .specularFlags           = (desc.specularEnabled ? 1u : 0u) | (std::min(desc.specularTexMode, 3u) << 1u),
     };
 }
 
@@ -415,6 +423,11 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .sheenRoughnessTex        = OptionalTextureIndex(_impl.get(), material.sheenRoughnessMap),
                  .occlusionTex             = OptionalTextureIndex(_impl.get(), material.occlusionMap),
                  .occlusionStrength        = material.occlusionStrength,
+                 .specularEnabled          = material.specularEnabled,
+                 .specularFactor           = material.specularFactor,
+                 .specularColorFactor      = material.specularColorFactor,
+                 .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
+                 .specularTexMode          = material.specularTexMode,
                  .textureSamplers          = material.textureSamplers,
                  .textureTransforms        = material.textureTransforms,
              }
@@ -490,6 +503,11 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .anisotropyStrength       = material.anisotropyStrength,
                     .anisotropyRotation       = material.anisotropyRotation,
                     .anisotropyTex            = OptionalTextureIndex(_impl.get(), material.anisotropyMap),
+                    .specularEnabled          = material.specularEnabled,
+                    .specularFactor           = material.specularFactor,
+                    .specularColorFactor      = material.specularColorFactor,
+                    .specularTex              = OptionalTextureIndex(_impl.get(), material.specularMap),
+                    .specularTexMode          = material.specularTexMode,
                     .textureSamplers          = material.textureSamplers,
                     .textureTransforms        = material.textureTransforms,
                 }

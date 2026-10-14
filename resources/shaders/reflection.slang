@@ -276,13 +276,19 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         float3 B = cross(N, T);
         float3 R = AnisotropicReflection(N, V, B, roughness, strength);
 
-        float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
-        float NdotV    = saturate(dot(N, V));
-        float2 envBRDF = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
+        float NdotV = saturate(dot(N, V));
+        // KHR_materials_specular's dielectric response rides in the clearcoat
+        // lanes for a material that has no coat. Sampling it here also feeds
+        // the coat block below, which reads the same word.
+        float4           coatRaw  = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+        SpecularResponse specular = DecodeSpecularResponse(coatRaw);
+        float3           F0       = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
+        float2           envBRDF  = brdfLUT.SampleLevel(clampSampler, float2(NdotV, roughness), 0.0f).rg;
         // The LUT's A/B terms already integrate Schlick Fresnel over the GGX
-        // lobe. Applying the grazing Fresnel again here can wash out dark
-        // metal and amplify white glints on masked foliage and thin chains.
-        float3 FssEss  = F0 * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+        // lobe: A multiplies F0 and B the grazing value. Applying the grazing
+        // Fresnel again here can wash out dark metal and amplify white glints
+        // on masked foliage and thin chains.
+        float3 FssEss  = F0 * envBRDF.x + float3(EffectiveF90(specular.f90, metallic)) * envBRDF.y;
 
         float3 R_corr = R;
         float boxFade = 0.0f;
@@ -315,7 +321,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float3 sheenPref = texEnvMap.SampleLevel(clampSampler, reflect(-V, N), max(sheenRaw.a, 0.2f) * 5.0f).rgb;
             sheenIBL = sheenPref * frame.ambientExposure * SheenEnvironmentWeight(sheenRaw.rgb, NdotV) * ao;
         }
-        float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
         float coatAtt = 1.0f;
         float3 coatIBL = float3(0.0f);
         if (coatRaw.a > 1.0f / 255.0f) {

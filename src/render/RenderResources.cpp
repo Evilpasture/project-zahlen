@@ -568,6 +568,11 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
         .sheenRoughnessMap        = desc.sheenRoughnessMap,
         .occlusionMap             = desc.occlusionMap,
         .occlusionStrength        = desc.occlusionStrength,
+        .specularEnabled          = desc.specularEnabled,
+        .specularFactor           = desc.specularFactor,
+        .specularColorFactor      = desc.specularColorFactor,
+        .specularMap              = desc.specularMap,
+        .specularTexMode          = desc.specularTexMode,
         .textureSamplers          = desc.textureSamplers,
         .textureTransforms        = desc.textureTransforms,
     };

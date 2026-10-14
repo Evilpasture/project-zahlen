@@ -54,13 +54,20 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
     float3 V = SafeNormalize(frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
-    float3 F0 = lerp(float3(0.04f), albedo, metallic);
-    float3 kD = (1.0f - FresnelSchlickRoughness(NdotV, F0, roughness)) * (1.0f - metallic);
+
+    // KHR_materials_specular's dielectric response rides in the clearcoat lanes
+    // for a material that has no coat: it replaces the F0 this pass reconstructs
+    // from albedo and metallic, and it reweights the indirect diffuse term below
+    // through the Fresnel that term subtracts.
+    float4           coatRaw  = texClearcoat.Load(int3(tid.xy, 0));
+    SpecularResponse specular = DecodeSpecularResponse(coatRaw);
+    float3           F0       = lerp(float3(kDielectricF0) * specular.scale, albedo, metallic);
+    float            f90      = EffectiveF90(specular.f90, metallic);
+    float3 kD = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
 
     float4 sheenRaw = texSheen.Load(int3(tid.xy, 0));
     float sheenAtt = SheenAlbedoScaling(sheenRaw.rgb, sheenRaw.a, NdotV, NdotV);
 
-    float4 coatRaw = texClearcoat.Load(int3(tid.xy, 0));
     float coatAtt = 1.0f;
     if (coatRaw.a > 1.0f / 255.0f) {
         float3 coatNormal = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);

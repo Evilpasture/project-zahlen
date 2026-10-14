@@ -328,6 +328,8 @@ void DrawModelNodeRows(
            (a.anisotropyStrength == b.anisotropyStrength) && (a.anisotropyRotation == b.anisotropyRotation) && (a.anisotropyMap == b.anisotropyMap) &&
            (a.sheenColorFactor == b.sheenColorFactor) && (a.sheenRoughnessFactor == b.sheenRoughnessFactor) && (a.sheenColorMap == b.sheenColorMap) &&
            (a.sheenRoughnessMap == b.sheenRoughnessMap) && (a.occlusionMap == b.occlusionMap) && (a.occlusionStrength == b.occlusionStrength) &&
+           (a.specularEnabled == b.specularEnabled) && (a.specularFactor == b.specularFactor) && (a.specularColorFactor == b.specularColorFactor) &&
+           (a.specularMap == b.specularMap) && (a.specularTexMode == b.specularTexMode) &&
            (a.textureSamplers == b.textureSamplers) && (a.textureTransforms == b.textureTransforms);
 }
 

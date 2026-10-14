@@ -276,6 +276,11 @@ struct CPUPrimitiveJob {
     float                     anisotropyStrength       = 0.0f;
     float                     anisotropyRotation       = 0.0f;
     cgltf_image*              anisotropyImage          = nullptr;
+    bool                      specularEnabled          = false;
+    float                     specularFactor           = 1.0f;
+    float                     specularColorFactor[3]   = {1.0f, 1.0f, 1.0f};
+    cgltf_image*              specularImage            = nullptr;
+    uint32_t                  specularTexMode          = 0;
     float                     sheenColorFactor[3]      = {0.0f, 0.0f, 0.0f};
     float                     sheenRoughnessFactor     = 0.0f;
     cgltf_image*              sheenColorImage          = nullptr;
@@ -706,6 +711,19 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job, float emissiveFactorScale) {
                 job.anisotropyImage = prim.material->anisotropy.anisotropy_texture.texture->image;
             }
         }
+        if (prim.material->has_specular) {
+            const auto& specular = prim.material->specular;
+            job.specularEnabled  = true;
+            job.specularFactor   = specular.specular_factor;
+            for (uint32_t i = 0; i < 3; ++i) {
+                // The extension allows specularColorFactor above 1: a response
+                // brighter than the IOR default. The lane the opaque path
+                // carries it in holds a multiple of the 0.04 baseline and
+                // cannot, so the factor is clamped here, once, for every path
+                // to agree on.
+                job.specularColorFactor[i] = std::clamp(specular.specular_color_factor[i], 0.0f, 1.0f);
+            }
+        }
     }
 
     const size_t vertexCount = posAcc->count;
@@ -884,7 +902,8 @@ struct ImportedTextureRef {
 auto GatherImagesAndPrimitiveJobs(const cgltf_data* data) -> std::pair<std::vector<ImportedTextureRef>, std::vector<CPUPrimitiveJob>> {
     std::vector<ImportedTextureRef> outUniqueImages;
     std::vector<CPUPrimitiveJob>    outPrimitiveJobs;
-    auto RegisterTexture = [&](CPUPrimitiveJob& job, const cgltf_texture_view& view, cgltf_image*& image, MaterialTextureSlot slot) -> void {
+    auto RegisterTexture = [&](CPUPrimitiveJob& job, const cgltf_texture_view& view, cgltf_image*& image, MaterialTextureSlot slot,
+                               bool srgbOverride = false) -> void {
         cgltf_texture* texture = view.texture;
         if (texture == nullptr) {
             return;
@@ -892,11 +911,39 @@ auto GatherImagesAndPrimitiveJobs(const cgltf_data* data) -> std::pair<std::vect
         image                                            = texture->image;
         job.textureSamplers[static_cast<size_t>(slot)]   = SamplerAddress(texture);
         job.textureTransforms[static_cast<size_t>(slot)] = DecodeTextureTransform(view);
-        const bool               srgb = slot == MaterialTextureSlot::Albedo || slot == MaterialTextureSlot::Emissive || slot == MaterialTextureSlot::SheenColor;
+        const bool srgb = srgbOverride || slot == MaterialTextureSlot::Albedo || slot == MaterialTextureSlot::Emissive ||
+                          slot == MaterialTextureSlot::SheenColor;
         const ImportedTextureRef ref {image, srgb};
         if (image != nullptr && std::ranges::find(outUniqueImages, ref) == outUniqueImages.end()) {
             outUniqueImages.push_back(ref);
         }
+    };
+
+    // KHR_materials_specular owns two texture references but the material
+    // layout has one sampler slot left, so the references share it. A shared
+    // image is the authored case and is uploaded sRGB: its RGB is decoded on
+    // read while alpha stays linear, which is exactly what the two halves of
+    // the extension want. Two distinct images cannot both fit; the strength
+    // half wins, because it scales the whole response where the color half
+    // only tints it.
+    auto RegisterSpecularTextures = [&](CPUPrimitiveJob& job, const cgltf_specular& specular) -> void {
+        const bool hasStrength = specular.specular_texture.texture != nullptr;
+        const bool hasColor    = specular.specular_color_texture.texture != nullptr;
+        if (!hasStrength && !hasColor) {
+            return;
+        }
+        if (hasStrength && hasColor && specular.specular_texture.texture->image == specular.specular_color_texture.texture->image) {
+            job.specularTexMode = 0;
+            RegisterTexture(job, specular.specular_texture, job.specularImage, MaterialTextureSlot::Specular, true);
+            return;
+        }
+        if (hasStrength) {
+            job.specularTexMode = 1;
+            RegisterTexture(job, specular.specular_texture, job.specularImage, MaterialTextureSlot::Specular);
+            return;
+        }
+        job.specularTexMode = 2;
+        RegisterTexture(job, specular.specular_color_texture, job.specularImage, MaterialTextureSlot::Specular, true);
     };
 
     for (cgltf_size i = 0; i < data->nodes_count; ++i) {
@@ -947,6 +994,9 @@ auto GatherImagesAndPrimitiveJobs(const cgltf_data* data) -> std::pair<std::vect
                 RegisterTexture(job, prim.material->occlusion_texture, job.occlusionImage, MaterialTextureSlot::Occlusion);
                 if (prim.material->has_anisotropy) {
                     RegisterTexture(job, prim.material->anisotropy.anisotropy_texture, job.anisotropyImage, MaterialTextureSlot::Anisotropy);
+                }
+                if (prim.material->has_specular) {
+                    RegisterSpecularTextures(job, prim.material->specular);
                 }
             }
             outPrimitiveJobs.push_back(std::move(job));
@@ -1139,6 +1189,13 @@ auto GetOrCreateCompiledPrimitive(
                             .sheenRoughnessMap        = textureHandle(primJob.sheenRoughnessImage),
                             .occlusionMap             = textureHandle(primJob.occlusionImage),
                             .occlusionStrength        = primJob.occlusionStrength,
+                            .specularEnabled          = primJob.specularEnabled,
+                            .specularFactor           = primJob.specularFactor,
+                            .specularColorFactor      = {primJob.specularColorFactor[0], primJob.specularColorFactor[1], primJob.specularColorFactor[2]},
+                            // Mode 1 binds specularTexture.a from a linear image;
+                            // the packed and color-only modes bind an sRGB one.
+                            .specularMap              = textureHandle(primJob.specularImage, primJob.specularTexMode != 1),
+                            .specularTexMode          = primJob.specularTexMode,
                             .textureSamplers          = primJob.textureSamplers,
                             .textureTransforms        = primJob.textureTransforms})
             .value_or(Material {});

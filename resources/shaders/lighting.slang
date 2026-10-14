@@ -191,8 +191,19 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
     float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
-    float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
     float NdotV = saturate(dot(N, V));
+
+    // KHR_materials_specular's dielectric response rides in the clearcoat
+    // lanes for a material that has no coat: this pass keeps reconstructing F0
+    // from albedo and metallic, and cannot see a material's own response
+    // otherwise. See DecodeSpecularResponse.
+    float4           coatRaw      = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+    SpecularResponse specular     = DecodeSpecularResponse(coatRaw);
+    float3           F0           = lerp(float3(kDielectricF0) * specular.scale, albedoRaw.rgb, metallic);
+    // Dielectrics take the extension's grazing reflectance; metals keep
+    // Schlick's 1, which the extension leaves untouched.
+    float            f90          = EffectiveF90(specular.f90, metallic);
+
     float4 sheenRaw = texSheen.SampleLevel(pointSampler, input.uv, 0);
     float3 sheenColor = sheenRaw.rgb;
     float materialAo = anisoRaw.w;
@@ -200,7 +211,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 T = anisoStrength > 0.0f ? UnpackAnisotropy(anisoRaw.xy, N) : float3(0.0f);
     float3 B = cross(N, T);
 
-    float4 coatRaw    = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
     float coatFactor  = coatRaw.a;
     float coatRough   = max(coatRaw.z, 0.001f);
     float3 Nc         = N;
@@ -268,7 +278,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     }
 #endif
 
-    float3 F     = FresnelSchlick(saturate(dot(H_sun, V)), F0);
+    float3 F     = SpecularFresnel(saturate(dot(H_sun, V)), F0, f90);
     float3 spec  = SpecularGGX(N, V, L_sun, H_sun, roughness, F, T, B, anisoStrength);
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
@@ -302,7 +312,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float2 schlick = float2(t2.x, t2.y);
 
             float3 specLTC = LTC_Evaluate(N, V, worldPos, Minv, light.points, light.twoSided == 1);
-            specLTC *= F0 * schlick.x + (1.0f - F0) * schlick.y;
+            // The LTC's second coefficient integrates the grazing lobe, so it
+            // scales with f90 rather than with one-minus-F0.
+            specLTC *= F0 * schlick.x + float3(f90) * schlick.y;
 
             float3 diffLTC = LTC_Evaluate(N, V, worldPos, float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1), light.points, light.twoSided == 1);
 
@@ -343,7 +355,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             if (NdotL > 0.0f) {
                 float3 H   = SafeNormalize(V + L_p, N);
-                float3 F_p = FresnelSchlick(max(dot(H, V), 0.0f), F0);
+                float3 F_p = SpecularFresnel(max(dot(H, V), 0.0f), F0, f90);
                 float3 spec_p = SpecularGGX(N, V, L_p, H, roughness, F_p, T, B, anisoStrength);
                 float3 kD_p   = (1.0f - F_p) * (1.0f - metallic);
 
@@ -394,7 +406,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // Ambient SH/GI is diffuse irradiance. Metals have no diffuse lobe; adding
     // it unconditionally to the specular IBL in reflection.slang made rough
     // metal look white even with physically correct exposure and no clearcoat.
-    float3 kD_ambient = (1.0f - FresnelSchlickRoughness(NdotV, F0, roughness)) * (1.0f - metallic);
+    float3 kD_ambient = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
     float sheenAttAmbient = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
     float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * ao * materialAo *
                       sheenAttAmbient * coatAtt + directSun + directPunctual + emissive;

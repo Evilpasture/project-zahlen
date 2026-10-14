@@ -50,7 +50,7 @@ public struct InstanceData {
     public float anisotropyRotation;
     public uint anisotropyTexIndex;
     public uint samplerCodes0; // Slots 0..7, four bits each; reuses anisotropy padding.
-    public uint samplerCodes1; // Slots 8..14.
+    public uint samplerCodes1; // Slots 8..15.
 
     // Linear-space sheen RGB and independent alpha-channel roughness. A zero
     // color disables the layer; these fields are not part of the film/coat union.
@@ -75,8 +75,17 @@ public struct InstanceData {
     // One affine transform per textureInfo (not per shared image). Each row is
     // (u coefficient, v coefficient, offset, unused/UV set). Keep them in
     // InstanceData so vertex, fragment, meshlet and shadow paths agree.
-    public float4 uvRow0[15];
-    public float4 uvRow1[15];
+    public float4 uvRow0[16];
+    public float4 uvRow1[16];
+
+    // KHR_materials_specular. Independent of the coat/film union above, and
+    // resolved per-fragment rather than baked into albedo: the response scales
+    // the dielectric F0 baseline and replaces its grazing value. Declared after
+    // the UV rows so the float4 seats where both a tight and a 16-byte-aligned
+    // layout put it, without an implicit pad either way.
+    public float4 specularParams; // rgb: specularColorFactor; a: specularFactor.
+    public uint specularTexIndex; // 0xFFFF when absent; slot 15's sampler code and UV row.
+    public uint specularFlags;    // Bit 0: the extension is declared on this material. Bits 1..2: texture mode.
 };
 
 // Field order is load-bearing: coneCutoff's 4 bytes fill 44..48 so coneAxis
@@ -187,6 +196,41 @@ public extension InstanceData {
         [ForceInline]
         get { return this._paddingMeshlet & 0xFFFFu; }
     }
+    // True only for a material that declares KHR_materials_specular: the
+    // extension's defaults reproduce the engine's own dielectric baseline, so
+    // absence and an all-default extension must stay distinguishable.
+    public property bool hasSpecularResponse {
+        [ForceInline]
+        get {
+            return (this.specularFlags & 1u) != 0u;
+        }
+    }
+    // 0: a shared image carries specularColorTexture.rgb and specularTexture.a,
+    // 1: the bound image carries specularTexture.a only,
+    // 2: the bound image carries specularColorTexture.rgb only.
+    public property uint specularTextureMode {
+        [ForceInline]
+        get {
+            return (this.specularFlags >> 1u) & 3u;
+        }
+    }
+    // specularColorFactor (linear, clamped to [0, 1] by the importer).
+    public property float3 specularColorFactor {
+        [ForceInline]
+        get {
+            return this.specularParams.rgb;
+        }
+    }
+    // specularFactor, the scale on F0 and the extension's grazing reflectance.
+    // Unclamped above 1, which the extension permits and the forward paths use;
+    // only the opaque G-buffer payload saturates it.
+    public property float specularFactor {
+        [ForceInline]
+        get {
+            return this.specularParams.a;
+        }
+    }
+
     [ForceInline]
     public float4 transmissionParams() {
         if (this.transmissionValue <= 0.0f) {

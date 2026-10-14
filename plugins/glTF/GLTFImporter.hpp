@@ -72,6 +72,19 @@ static constexpr std::array kCapabilities {
     Capability {.name = "KHR_materials_iridescence", .kind = CapabilityKind::Extension},
     Capability {.name = "KHR_materials_sheen", .kind = CapabilityKind::Extension},
     Capability {.name = "KHR_materials_anisotropy", .kind = CapabilityKind::Extension},
+    // The response is resolved per fragment in every lit path: the forward and
+    // transmission shaders read the instance, and the opaque path carries it
+    // through the clearcoat G-buffer lanes and decodes it again in the lighting,
+    // reflection and RTGI passes (see pbr_helpers.slang). Three shapes of the
+    // extension are narrower than the spec. specularColorFactor above 1 is
+    // clamped on import, since the response lane holds a multiple of the 0.04
+    // baseline. The two texture references share the one sampler slot the
+    // material layout has left, so when they name different images only the
+    // strength half is bound, on the strength half's sampler and UV transform.
+    // And a material that also declares
+    // KHR_materials_clearcoat keeps the coat's lanes, so its opaque response
+    // stays at the IOR baseline -- transmission still honors the extension.
+    Capability {.name = "KHR_materials_specular", .kind = CapabilityKind::Extension},
     Capability {.name = "KHR_lights_punctual", .kind = CapabilityKind::Extension},
 };
 

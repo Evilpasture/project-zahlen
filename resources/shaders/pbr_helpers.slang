@@ -342,6 +342,98 @@ public float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness
     return F0 + (max(float3(1.0f - roughness, 1.0f - roughness, 1.0f - roughness), F0) - F0) * pow(saturate(1.0f - cosTheta), 5.0f);
 }
 
+// --- KHR_materials_specular -------------------------------------------------
+
+// ((1.5 - 1) / (1.5 + 1))^2, the dielectric reflectance of the default IOR
+// that every non-extended material is shaded with.
+public static const float kDielectricF0 = 0.04f;
+
+// The opaque G-buffer has no free lane for the extension, and Res_Clearcoat is
+// empty for every material that does not declare KHR_materials_clearcoat.
+// Those four lanes therefore carry the specular response of a material that
+// does declare KHR_materials_specular, written by the material pass:
+//
+//   rgb = saturate(f0 / kDielectricF0)
+//         A multiple of the 0.04 baseline, not an absolute reflectance: the
+//         bits then resolve 0.4% of the baseline, where 0.04 stored raw would
+//         quantize to ten steps and band across a smooth highlight. The
+//         ceiling is the baseline itself, so a response stronger than the
+//         default -- an authored IOR past 1.5, a specularFactor above 1 -- is
+//         clamped to the baseline in the opaque path. The forward path reads
+//         the instance rather than the lane and carries it exactly.
+//   z   = kSpecularPayloadBase + kSpecularPayloadSpan * saturate(f90)
+//         One lane carries both the marker and f90. The band starts at 0.5,
+//         and the payload leaves alpha cleared, so the coat test a reader
+//         already performs (a > 1/255) skips these lanes the same way it
+//         skips a coatless material. The band's lower half is the marker, so
+//         the quantized f90 resolves 1/128 rather than 1/255, and a factor
+//         above 1 saturates at the top of the band.
+//   a   = 0: "no clearcoat", which is what every other reader of this target
+//         must keep seeing.
+//
+// A material pass that declares no response leaves the lanes cleared, which is
+// not inside the band, and shading falls back to the plain IOR baseline.
+//
+// Both tests are exact rather than heuristic: the only other writers of these
+// lanes (basic.slang's material pass and the shared material model) either
+// zero all four or write a coat whose alpha is above 1/255, so a lane is
+// cleared, a coat, or this payload -- never something in between.
+public static const float kSpecularPayloadBase = 0.5f;
+public static const float kSpecularPayloadSpan = 0.5f;
+
+public struct SpecularResponse {
+    public float3 scale;       // multiplies the 0.04 dielectric baseline
+    public float  f90;         // Schlick grazing reflectance; 1.0 without the extension
+    public bool   hasResponse; // false: shade with the plain IOR baseline
+};
+
+public SpecularResponse DecodeSpecularResponse(float4 clearcoatRaw) {
+    SpecularResponse response = {float3(1.0f), 1.0f, false};
+    if (clearcoatRaw.a > 1.0f / 255.0f) {
+        return response; // A clearcoat layer owns these lanes.
+    }
+    if (clearcoatRaw.z < kSpecularPayloadBase) {
+        return response;
+    }
+    response.scale       = clearcoatRaw.rgb;
+    response.f90         = (clearcoatRaw.z - kSpecularPayloadBase) / kSpecularPayloadSpan;
+    response.hasResponse = true;
+    return response;
+}
+
+// The extension's dielectric Fresnel: F0 is the (possibly tinted, possibly
+// textured) dielectric reflectance and f90 its grazing value. Schlick's weight
+// is shared with the metal lobe, which the extension leaves alone, so f90 = 1
+// and the metal F0 reproduce FresnelSchlick exactly.
+public float3 SpecularFresnel(float cosTheta, float3 f0, float f90) {
+    return f0 + (float3(f90) - f0) * pow(saturate(1.0f - cosTheta), 5.0f);
+}
+
+// The roughness-aware ambient form: it lifts f90 towards the horizon rather
+// than towards a mirror, and f90 = 1 reproduces FresnelSchlickRoughness.
+public float3 SpecularFresnelRoughness(float cosTheta, float3 f0, float f90, float roughness) {
+    float3 f90v = float3(f90) * (1.0f - roughness);
+    return f0 + (max(f90v, f0) - f0) * pow(saturate(1.0f - cosTheta), 5.0f);
+}
+
+// Metals are unaffected by the extension: only the dielectric part of the
+// lerped reflectance takes the authored grazing value, the metal part keeps
+// Schlick's 1. One lobe means one f90, so blend it by metalness.
+public float EffectiveF90(float f90, float metallic) {
+    return lerp(1.0f, f90, 1.0f - metallic);
+}
+
+// One deviation from the extension's text is deliberate. It weights the
+// diffuse lobe by (1 - max_value(dielectric_fresnel)), the scalar maximum of
+// the *dielectric* Fresnel alone; the engine's energy split subtracts the
+// Fresnel component-wise from the metalness-lerped F0 instead. The two agree
+// wherever the reflectance is gray -- every material without the extension, and
+// the extension's own defaults -- and differ only by the tint of an authored
+// specular color, which stays inside the single-lobe approximation the
+// metalness lerp already makes. Generalizing the existing expression keeps a
+// material that declares the extension with default factors shading exactly as
+// it did without it.
+
 float3 EvalIridescenceSensitivity(float opd, float3 shift) {
     const float kPi = 3.14159265f;
     float phase = 2.0f * kPi * opd * 1.0e-9f;

@@ -72,8 +72,22 @@ float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal
 
     float metallic = saturate(hitInst.metallicFactor);
     float roughness = saturate(hitInst.roughnessFactor);
-    float3 F0 = lerp(float3(0.04f), baseColor, metallic);
-    float3 diffuseWeight = (1.0f - FresnelSchlickRoughness(saturate(dot(hitNormal, viewDirection)), F0, roughness)) * (1.0f - metallic);
+    // This fallback shades a hit from its own InstanceData rather than from a
+    // G-buffer lane, so KHR_materials_specular's factors (its texture is
+    // sampled per fragment and cannot be resolved from a hit point) apply here
+    // exactly.
+    float3 dielectricF0 = float3(kDielectricF0);
+    float  f90          = 1.0f;
+    if (hitInst.hasSpecularResponse) {
+        float ior = max(hitInst.transmissionIor, 1.0f);
+        float eta = (ior - 1.0f) / (ior + 1.0f);
+        dielectricF0 = min(float3(eta * eta) * hitInst.specularColorFactor, float3(1.0f)) * hitInst.specularFactor;
+        f90          = hitInst.specularFactor;
+    }
+    float3 F0 = lerp(dielectricF0, baseColor, metallic);
+    float3 diffuseWeight =
+        (1.0f - SpecularFresnelRoughness(saturate(dot(hitNormal, viewDirection)), F0, EffectiveF90(f90, metallic), roughness)) *
+        (1.0f - metallic);
     float3 ambientIrradiance = SampleDDGIOrSH(hitPos, hitNormal, viewDirection, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
     float3 outgoing = baseColor * diffuseWeight * ambientIrradiance;
     outgoing += DirectSunFallback(hitPos, hitNormal, baseColor, diffuseWeight);

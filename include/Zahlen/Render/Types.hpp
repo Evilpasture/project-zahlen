@@ -68,6 +68,7 @@ enum class MaterialTextureSlot : uint8_t {
     SheenRoughness,
     Occlusion,
     Transmission,
+    Specular,
     Count
 };
 inline constexpr uint32_t kMaterialSamplerVariantCount = 9; // Three S modes x three T modes.
@@ -145,6 +146,23 @@ struct Material {
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
     TextureHandle             occlusionMap         = TextureHandle::Invalid;
     float                     occlusionStrength    = 1.0f;
+    // KHR_materials_specular. Absent, the extension's defaults reproduce the
+    // engine's own 0.04 dielectric reflectance exactly, so `specularEnabled`
+    // (the extension being declared on this material) is what decides whether
+    // the authored response replaces that baseline. A specularColorFactor
+    // above 1 is clamped by the importer: the lane the opaque path carries the
+    // response in holds a multiple of the 0.04 baseline, and clamping once is
+    // what keeps every path agreeing on the same reflectance.
+    bool                      specularEnabled      = false;
+    float                     specularFactor       = 1.0f;
+    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    TextureHandle             specularMap          = TextureHandle::Invalid;
+    // Which half of the single KHR_materials_specular texture slot this
+    // material's image carries: 0 = specularColorTexture.rgb and
+    // specularTexture.a of one shared image, 1 = specularTexture.a only,
+    // 2 = specularColorTexture.rgb only. The extension has two texture
+    // references but glTF's sampler codes have exactly one nibble left.
+    uint32_t                  specularTexMode      = 0;
     MaterialSamplerAddresses  textureSamplers {}; // Repeat/Repeat for non-glTF materials.
     MaterialTextureTransforms textureTransforms {};
 };
@@ -220,6 +238,13 @@ struct MaterialDesc {
     TextureHandle             sheenRoughnessMap    = TextureHandle::Invalid;
     TextureHandle             occlusionMap         = TextureHandle::Invalid;
     float                     occlusionStrength    = 1.0f;
+    // See Material: `specularEnabled` is the extension's presence on this
+    // material, not a deviation of the factors from their defaults.
+    bool                      specularEnabled      = false;
+    float                     specularFactor       = 1.0f;
+    JPH::Float3               specularColorFactor {1.0f, 1.0f, 1.0f};
+    TextureHandle             specularMap          = TextureHandle::Invalid;
+    uint32_t                  specularTexMode      = 0;
     MaterialSamplerAddresses  textureSamplers {};
     MaterialTextureTransforms textureTransforms {};
 

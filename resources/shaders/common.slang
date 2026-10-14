@@ -43,7 +43,8 @@ public struct GlobalSceneRegistry {
 public ParameterBlock<GlobalSceneRegistry> scene;
 
 // MaterialTextureSlot in Render/Types.hpp uses this exact order. The first
-// eight four-bit sampler codes are packed in x and the remaining seven in y.
+// eight four-bit sampler codes are packed in x and the remaining eight in y;
+// all sixteen slots of the material layout are spoken for.
 public static const uint kSamplerAlbedo             = 0u;
 public static const uint kSamplerNormal             = 1u;
 public static const uint kSamplerPbr                = 2u;
@@ -59,6 +60,9 @@ public static const uint kSamplerSheenColor         = 11u;
 public static const uint kSamplerSheenRoughness     = 12u;
 public static const uint kSamplerOcclusion          = 13u;
 public static const uint kSamplerTransmission       = 14u;
+// The fifteenth slot is KHR_materials_specular's; it occupies the last free
+// four-bit code, the high nibble of the second sampler word.
+public static const uint kSamplerSpecular           = 15u;
 
 [ForceInline]
 public float4 SampleMaterialTexture(uint index, float2 uv, uint2 codes, uint slot) {
