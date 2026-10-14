@@ -202,6 +202,7 @@ struct CrosshairPick {
     JPH::Vec3   normal    = JPH::Vec3::sAxisY();
     float       distance  = 0.0f;
     uint32_t    bodyIndex = 0;
+    ZHLN::Entity entity    = ZHLN::Entity::Null();
 };
 
 CrosshairPick g_pick;
@@ -311,7 +312,8 @@ void UpdateCrosshairPick(ZHLN::Engine& engine) {
             continue;
         }
         if (phys->physicsHandle == hit.handle) {
-            g_pick.label = PickLabel(reg, e);
+            g_pick.label  = PickLabel(reg, e);
+            g_pick.entity = e;
             return;
         }
     }
@@ -369,6 +371,48 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
         kCrosshairDot,
         dotInk
     );
+
+    // Context prompt for the entity under the reticle. InteractionSystem uses
+    // the same 2.5 m use range; keeping the HUD behind that gate means it never
+    // advertises an action which pressing E cannot perform.
+    std::string_view prompt;
+    if (g_pick.entity != ZHLN::Entity::Null() && g_pick.distance <= 2.5f) {
+        auto& reg = engine.GetRegistry();
+        if (const auto door = reg.Get<ZHLN::Interaction::DoorComponent>(g_pick.entity)) {
+            if ((door->flags & ZHLN::Interaction::DoorFlags::Locked) != ZHLN::Interaction::DoorFlags::None) {
+                prompt = "Locked";
+            } else if (door->state == ZHLN::Interaction::DoorState::Closed || door->state == ZHLN::Interaction::DoorState::Closing) {
+                prompt = "Press E to open";
+            } else if ((door->flags & ZHLN::Interaction::DoorFlags::Toggle) != ZHLN::Interaction::DoorFlags::None) {
+                prompt = "Press E to close";
+            }
+        } else if (const auto button = reg.Get<ZHLN::Interaction::ButtonComponent>(g_pick.entity)) {
+            if ((button->flags & ZHLN::Interaction::ButtonFlags::Locked) != ZHLN::Interaction::ButtonFlags::None) {
+                prompt = "Locked";
+            } else if (button->state == ZHLN::Interaction::ButtonState::Off ||
+                       (button->flags & ZHLN::Interaction::ButtonFlags::Toggle) != ZHLN::Interaction::ButtonFlags::None) {
+                prompt = "Press E to activate";
+            }
+        }
+    }
+
+    if (!prompt.empty()) {
+        ui.Box(
+            "interaction-prompt",
+            ZHLN::GUI::BoxConfig {
+                .width        = {.fixed = 220.0f},
+                .height       = {.fixed = 34.0f},
+                .color        = {0.02f, 0.03f, 0.05f, 0.82f},
+                .cornerRadius = {5.0f, 5.0f, 5.0f, 5.0f},
+                .padding      = 7.0f,
+                .alignMain    = ZHLN::GUI::Alignment::Center,
+                .alignCross   = ZHLN::GUI::Alignment::Center,
+                .offsetX      = cx - 110.0f,
+                .offsetY      = cy + 28.0f,
+            },
+            [&]() -> void { ui.Text(prompt, 16.0f, {0.92f, 0.96f, 1.0f, 1.0f}); }
+        );
+    }
 
     engine.SetPendingUIData(ui.EndFrame());
 }

@@ -272,22 +272,6 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
-            const auto doorStateName = [](DoorState s) -> const char* {
-                switch (s) {
-                    case DoorState::Closed: return "Closed";
-                    case DoorState::Opening: return "Opening";
-                    case DoorState::Open: return "Open";
-                    case DoorState::Closing: return "Closing";
-                }
-                return "?";
-            };
-            Log("[Interaction] E -> {} (door) dist={:.2f} state={} progress={:.2f} flags={:#x} startsOpen={} touchOpens={} useOpens={} "
-                "closed=({:.1f},{:.1f},{:.1f}) open=({:.1f},{:.1f},{:.1f})",
-                DebugLabel(registry, doorEnt), dist, doorStateName(door.state), door.progress, static_cast<uint32_t>(door.flags),
-                (door.flags & DoorFlags::StartsOpen) != DoorFlags::None, (door.flags & DoorFlags::TouchOpens) != DoorFlags::None,
-                (door.flags & DoorFlags::UseOpens) != DoorFlags::None, door.closedPosition.GetX(), door.closedPosition.GetY(),
-                door.closedPosition.GetZ(), door.openPosition.GetX(), door.openPosition.GetY(), door.openPosition.GetZ());
-
             if ((door.flags & DoorFlags::TouchOpens) != DoorFlags::None && door.state == DoorState::Closed) {
                 FireEntityInput(registry, doorEnt, "Open", "", audio);
             }
@@ -327,8 +311,6 @@ void InteractionSystem::Update(
 
         const float dist = (trans->position - playerPos).Length();
         if (dist <= 2.5f) {
-            Log("[Interaction] E -> {} (button) dist={:.2f} state={} progress={:.2f} flags={:#x}", DebugLabel(registry, buttonEnt), dist,
-                static_cast<uint32_t>(button.state), button.progress, static_cast<uint32_t>(button.flags));
             if ((button.flags & ButtonFlags::TouchActivates) != ButtonFlags::None && button.state == ButtonState::Off) {
                 FireEntityInput(registry, buttonEnt, "Press", "", audio);
             }
