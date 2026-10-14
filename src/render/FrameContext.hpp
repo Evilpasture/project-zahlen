@@ -107,7 +107,13 @@ struct RenderFrameContext {
 
     bool     enableMeshShading = true;
     bool     rtHistoryValid    = false;
-    uint32_t blueNoiseTexIdx   = 0;
+    // DDGI atlas texels are indexed by probe coordinate, so moving the grid
+    // changes the world position represented by every texel. Track that
+    // separately from FrameUniforms (which is rebuilt from FrameData each
+    // frame) so relocation can invalidate temporal probe accumulation.
+    bool      ddgiGridOriginValid = false;
+    JPH::Vec3 ddgiGridOrigin      = JPH::Vec3::sZero();
+    uint32_t  blueNoiseTexIdx     = 0;
 
     uint32_t activeLineVertexCount = 0;
 

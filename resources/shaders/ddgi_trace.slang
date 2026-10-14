@@ -132,10 +132,15 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             radiance = DirectSunProbeHit(hitPos, hitNormal, diffuseReflectance) + emissive;
 
             // Infinite multi-bounce: sample previous frame's DDGI irradiance at the hit point
-            float3 prevBounce = SampleDDGIIrradiance(
-                hitPos, hitNormal, -rayDir, ddgi, texDdgiIrradiance, texDdgiDistance, clampSampler
-            );
-            radiance += diffuseReflectance * prevBounce * 0.85f;
+            // Hysteresis zero marks a fresh/relocated grid. Its atlas still
+            // contains the previous grid until the update pass later this
+            // frame, so it cannot be used as a multi-bounce source yet.
+            if (ddgi.hysteresis > 0.0f) {
+                float3 prevBounce = SampleDDGIIrradiance(
+                    hitPos, hitNormal, -rayDir, ddgi, texDdgiIrradiance, texDdgiDistance, clampSampler
+                );
+                radiance += diffuseReflectance * prevBounce * 0.85f;
+            }
         }
     } else {
         // Ray escaped to the sky: evaluate baseline environment SH

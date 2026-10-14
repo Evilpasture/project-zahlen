@@ -1829,6 +1829,12 @@ auto main(int argc, char* argv[]) -> int {
                     // so FreeCamSystem stops driving the camera and this frame's
                     // FirstPersonCamera step pins the view back onto the character.
                     ZHLN::FreeCam::Detach(*engine);
+                    // Attach stands the procedural first-person layer down so it
+                    // cannot overwrite the fly camera. Restore the character's
+                    // pre-flight view mode now; otherwise cameraInitialized stays
+                    // false and FirstPersonCameraStep uses the generic 1.62 m
+                    // fallback instead of the rig's evaluated eye offset.
+                    SetFirstPersonView(*engine, g_view.firstPerson);
                     ZHLN::Log("[BSPSample] Free camera off: view returns to the character.");
                 } else {
                     // The camera is still on the eye from last frame, so the

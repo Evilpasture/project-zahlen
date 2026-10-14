@@ -100,7 +100,13 @@ void RenderContext::SetFrameData(
                                     _impl->frames.tlasAddresses[fIdx] != nullptr &&
                                     (_impl->settings.rayTracing.enableDiffuseGI || _impl->settings.rayTracing.enableReflections ||
                                      _impl->settings.rayTracing.enableShadows);
-    const float ddgiHysteresis    = _impl->rtHistoryValid ? 0.96f : 0.0f;
+    // Probe atlas indices have no world-space identity of their own. If the
+    // camera-following grid snaps, all existing texels describe the old probe
+    // positions and must not be blended into the new ones.
+    const bool ddgiGridMoved = !_impl->ddgiGridOriginValid || (gridOrigin - _impl->ddgiGridOrigin).LengthSq() > 1.0e-6f;
+    const float ddgiHysteresis = (_impl->rtHistoryValid && !ddgiGridMoved) ? 0.96f : 0.0f;
+    _impl->ddgiGridOrigin      = gridOrigin;
+    _impl->ddgiGridOriginValid = true;
     gpuUniforms.ddgiOriginSpacing = JPH::Float4 {gridOrigin.GetX(), gridOrigin.GetY(), gridOrigin.GetZ(), kProbeSpacing};
     gpuUniforms.ddgiGridCounts    = JPH::Float4 {16.0f, 8.0f, 16.0f, 64.0f};
     gpuUniforms.ddgiParams        = JPH::Float4 {ddgiHysteresis, 0.1f, 0.2f, ddgiEnabled ? 1.0f : 0.0f};

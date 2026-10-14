@@ -39,7 +39,7 @@ void DdgiUpdateAtlasPass::operator()(VkCommandBuffer cmd) const noexcept {
     const DdgiUpdatePushConstants push {
         .totalProbes    = totalProbes,
         .raysPerProbe   = raysPerProbe,
-        .hysteresis     = impl.rtHistoryValid ? 0.96f : 0.0f,
+        .hysteresis     = impl.currentUniforms.ddgiParams.x,
         .depthSharpness = 16.0f,
     };
     impl.postProcess.DdgiUpdate().DispatchHeapIndexedThreads<Shaders::Modules::DdgiUpdateIrradianceCS>(

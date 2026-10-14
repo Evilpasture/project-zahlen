@@ -31,7 +31,6 @@ void RtgiHalfTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         Vk::Slot<"texDepth">(Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
         Vk::Slot<"texAnisotropy">(Vk::Assume<Vk::ComputeRead<Res_Anisotropy>>(impl.graphResources.anisotropyBuffer)),
-        Vk::Slot<"texLighting">(Vk::Assume<Vk::ComputeRead<Res_Lighting>>(impl.graphResources.lightingTarget)),
         Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
         Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
         Vk::Slot<"blueNoiseTex">(impl.textureManager.ViewInfo(impl.blueNoiseTexIdx)),

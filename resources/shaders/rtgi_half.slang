@@ -17,7 +17,6 @@ RtgiHalfPushConstants pc;
 Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 Texture2D<float4> texAnisotropy;
-Texture2D<float4> texLighting;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<InstanceData> g_instances;
 Texture2D<float4> blueNoiseTex;
@@ -94,41 +93,6 @@ float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal
     return outgoing + emissive;
 }
 
-bool TryReadVisibleLighting(float3 hitPos, float3 hitNormal, out float3 radiance) {
-    radiance = float3(0.0f);
-    float4 hitClipPos = mul(frame.viewProj, float4(hitPos, 1.0f));
-    if (hitClipPos.w <= 0.1f) {
-        return false;
-    }
-
-    float2 uv = hitClipPos.xy / hitClipPos.w * 0.5f + 0.5f;
-    if (any(uv < 0.0f) || any(uv >= 1.0f)) {
-        return false;
-    }
-
-    uint2 dimensions = uint2(frame.screenResolution);
-    uint2 pixel = min(uint2(uv * float2(dimensions)), dimensions - 1u);
-    float sampledDepth = texDepth.Load(int3(pixel, 0));
-    if (sampledDepth >= 1.0f) {
-        return false;
-    }
-
-    float4 linearClip = mul(frame.invProj, float4(0.0f, 0.0f, sampledDepth, 1.0f));
-    float sampledViewDepth = abs(linearClip.z / max(abs(linearClip.w), 1e-6f));
-    float maxDepthDiff = max(0.04f, hitClipPos.w * 0.015f);
-    if (abs(hitClipPos.w - sampledViewDepth) > maxDepthDiff) {
-        return false;
-    }
-
-    float4 hitNormalRaw = texNormalRoughness.Load(int3(pixel, 0));
-    float3 screenNormal = UnpackNormalOctahedron(hitNormalRaw.xy * 2.0f - 1.0f);
-    if (dot(screenNormal, hitNormal) < 0.45f) {
-        return false;
-    }
-
-    radiance = max(texLighting.Load(int3(pixel, 0)).rgb, float3(0.0f));
-    return true;
-}
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
@@ -214,15 +178,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             hitNormal = -hitNormal;
         }
 
-        if (!TryReadVisibleLighting(hitPos, hitNormal, radiance)) {
-            radiance = FallbackHitRadiance(hitInst, hitPos, hitNormal, -ray.Direction);
-        }
-        if (frame.ddgiParams.w > 0.0f) {
-            DDGIUniforms ddgi        = GetDDGIUniforms(frame);
-            float        ddgiWeight  = GetDDGIVolumeWeight(worldPos, ddgi);
-            float        contactFade = saturate(1.0f - rayT / max(ddgi.probeSpacing * 4.0f, 8.0f));
-            radiance *= lerp(1.0f, contactFade, ddgiWeight);
-        }
+        // Shade secondary hits in world space. Reusing the current screen's
+        // lighting made the same hit switch radiance whenever it crossed the
+        // viewport, depth, or normal acceptance thresholds as the camera
+        // rotated. The fallback is deterministic for a given world-space hit.
+        radiance = FallbackHitRadiance(hitInst, hitPos, hitNormal, -ray.Direction);
     } else {
         // Clustered lighting already supplies baseline SH sky and direct sun.
         // An escaped GI ray must not add that environment a second time; only
