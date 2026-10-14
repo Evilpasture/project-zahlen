@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <span>
@@ -12,14 +12,12 @@
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, ErrorCode> {
-    if (!proceduralBakeDescLayout.Build(
-            ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), VK_SHADER_STAGE_COMPUTE_BIT
-        )) {
+    if (!proceduralBakeDescLayout.Build(ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    const auto source = Vk::MakeStageSource<Shaders::Modules::ProceduralBakeCS>();
-    const auto loaded = LoadShaderData(source);
+    const auto           source     = Vk::MakeStageSource<Shaders::Modules::ProceduralBakeCS>();
+    const auto           loaded     = LoadShaderData(source);
     const Vk::ShaderDesc shaderDesc = Vk::CreateShaderDesc(loaded.Code(), source.entryPoint);
 
     struct BakeSpec {
@@ -53,20 +51,15 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 
 auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
     -> std::expected<TextureHandle, ErrorCode> {
-    auto* const device = ctx.Device();
-
-    const auto imageConfig = Vk::ImageConfig::Texture2D(
-        {width, height}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled
-    );
-    return Vk::Image::Create(allocator, imageConfig)
-        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
-            defer _([&] { allocator.DestroyImage(gpuImage); });
+    return Vk::Image::Create(
+               allocator, Vk::ImageConfig::Texture2D({width, height}, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled)
+    )
+        .and_then([&, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<TextureHandle, ErrorCode> {
+            defer                       _([&] { allocator.DestroyImage(gpuImage); });
             const VkImageViewCreateInfo writeInfo = gpuImage.ViewInfo();
 
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
-                bakeHeapBindings, Vk::Slot<"outTexture">(writeInfo)
-            );
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(bakeHeapBindings, Vk::Slot<"outTexture">(writeInfo));
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
@@ -91,4 +84,4 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 #pragma GCC diagnostic pop
 #endif
 
-}
+} // namespace ZHLN
