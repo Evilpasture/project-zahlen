@@ -11,7 +11,8 @@ namespace ZHLN::Passes {
 // no velocity, which is why it can run where TAA cannot -- on a scene the
 // camera has just teleported, or on a render-to-texture destination.
 struct FXAAPass: Vk::RenderPass<"FXAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_AccumCurrent>> {
-    RenderContext::Impl& impl;
+    AntiAliasingResources& aa;
+    RenderFrameContext&    frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };

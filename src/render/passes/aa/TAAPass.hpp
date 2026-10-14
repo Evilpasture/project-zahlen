@@ -17,7 +17,8 @@ namespace ZHLN::Passes {
 struct TAAPass: Vk::RenderPass<
                     "TAA", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_Velocity>, Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_AccumCurrent>,
                     Vk::ShaderRead<Res_AccumPrevious>> {
-    RenderContext::Impl& impl;
+    AntiAliasingResources& aa;
+    RenderFrameContext&    frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };

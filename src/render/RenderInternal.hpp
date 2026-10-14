@@ -12,6 +12,7 @@
 #include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
 #include "PassPayloads.hpp"
+#include "passes/aa/AntiAliasingResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -92,12 +93,6 @@ namespace Diag {
 } // namespace Diag
 
 using GlobalSceneLayout    = Vk::ReflectedLayout;
-using TAALayout            = Vk::ReflectedLayout;
-using FXAALayout           = Vk::ReflectedLayout;
-using MLAALayout           = Vk::ReflectedLayout;
-using SMAAEdgeLayout       = Vk::ReflectedLayout;
-using SMAAWeightLayout     = Vk::ReflectedLayout;
-using SMAABlendLayout      = Vk::ReflectedLayout;
 using LightingLayout       = Vk::ReflectedLayout;
 using BlitLayout           = Vk::ReflectedLayout;
 using CullingLayout        = Vk::ReflectedLayout;
@@ -189,12 +184,8 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
 
-    Vk::FullscreenPass<TAALayout>        taaPass;
-    Vk::FullscreenPass<FXAALayout>       fxaaPass;
-    Vk::FullscreenPass<MLAALayout>       mlaaPass;
-    Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdgePass;
-    Vk::FullscreenPass<SMAAWeightLayout> smaaWeightPass;
-    Vk::FullscreenPass<SMAABlendLayout>  smaaBlendPass;
+    // The six AA pipelines, owned as one group by the passes that read them.
+    AntiAliasingResources antiAliasing;
 
     Vk::FullscreenPass<LightingLayout> lightingPass;
     Vk::FullscreenPass<BlitLayout>     blitPass;

@@ -16,39 +16,39 @@ namespace ZHLN {
 
 auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, taaPass, Vk::MakeStageSource<Shaders::Modules::TaaVS>(), Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
+        this, antiAliasing.taa, Vk::MakeStageSource<Shaders::Modules::TaaVS>(), Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, fxaaPass, Vk::MakeStageSource<Shaders::Modules::FxaaVS>(), Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
+        this, antiAliasing.fxaa, Vk::MakeStageSource<Shaders::Modules::FxaaVS>(), Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-        this, mlaaPass, Vk::MakeStageSource<Shaders::Modules::MlaaVS>(), Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
+        this, antiAliasing.mlaa, Vk::MakeStageSource<Shaders::Modules::MlaaVS>(), Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
         {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
-               this, smaaEdgePass, Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
+               this, antiAliasing.smaaEdge, Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
                Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaWeightPass, Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
+                this, antiAliasing.smaaWeight, Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
                 Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
-                this, smaaBlendPass, Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
+                this, antiAliasing.smaaBlend, Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
                 Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
@@ -130,42 +130,42 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(
                 GraphicsPassDesc {
-                    .pass        = taaPass,
+                    .pass        = antiAliasing.taa,
                     .name        = "TAA",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::TaaVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::TaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
-                    .pass        = fxaaPass,
+                    .pass        = antiAliasing.fxaa,
                     .name        = "FXAA",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::FxaaVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::FxaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
-                    .pass        = mlaaPass,
+                    .pass        = antiAliasing.mlaa,
                     .name        = "MLAA",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::MlaaVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::MlaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
-                    .pass        = smaaEdgePass,
+                    .pass        = antiAliasing.smaaEdge,
                     .name        = "SMAA Edge Detection",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgeVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaEdgePS>(),
                     .colorFormat = VK_FORMAT_R8G8_UNORM
                 },
                 GraphicsPassDesc {
-                    .pass        = smaaWeightPass,
+                    .pass        = antiAliasing.smaaWeight,
                     .name        = "SMAA Blending Weight",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaWeightPS>(),
                     .colorFormat = VK_FORMAT_R8G8B8A8_UNORM
                 },
                 GraphicsPassDesc {
-                    .pass        = smaaBlendPass,
+                    .pass        = antiAliasing.smaaBlend,
                     .name        = "SMAA Neighborhood Blend",
                     .vs          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendVS>(),
                     .ps          = Vk::MakeStageSource<Shaders::Modules::SmaaBlendPS>(),

@@ -27,8 +27,8 @@ static_assert(GpuAbi::ScenePassPayload<SmaaPushConstants>, "a pass payload that 
 
 void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(
-        impl, ctx.Cmd(), impl.smaaEdgePass, [&]() {
-            const auto& inputColor = impl.graphResources.hdrSceneColor;
+        frame, ctx.Cmd(), aa.smaaEdge, [&]() {
+            const auto& inputColor = frame.graphResources.hdrSceneColor;
 
             return MakeFullscreenPassArgs(
                 MetricsOf(inputColor.extent),
@@ -40,13 +40,13 @@ void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(
-        impl, ctx.Cmd(), impl.smaaWeightPass, [&]() {
-            const auto& areaInfo   = impl.textureManager.ViewInfo(impl.postProcess.SmaaAreaTexture());
-            const auto& searchInfo = impl.textureManager.ViewInfo(impl.postProcess.SmaaSearchTexture());
+        frame, ctx.Cmd(), aa.smaaWeight, [&]() {
+            const auto& areaInfo   = frame.textureManager.ViewInfo(frame.postProcess.SmaaAreaTexture());
+            const auto& searchInfo = frame.textureManager.ViewInfo(frame.postProcess.SmaaSearchTexture());
 
             return MakeFullscreenPassArgs(
-                MetricsOf(impl.graphResources.smaaWeightTarget.extent),
-                Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(impl.graphResources.smaaEdgeTarget)),
+                MetricsOf(frame.graphResources.smaaWeightTarget.extent),
+                Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)),
                 Vk::Slot<"areaTex">(areaInfo),
                 Vk::Slot<"searchTex">(searchInfo)
             );
@@ -56,13 +56,13 @@ void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
 
 void SmaaBlendPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::SmaaBlend, Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>::Record(
-        impl, ctx.Cmd(), impl.smaaBlendPass, [&]() {
-            const auto& inputColor = impl.graphResources.hdrSceneColor;
+        frame, ctx.Cmd(), aa.smaaBlend, [&]() {
+            const auto& inputColor = frame.graphResources.hdrSceneColor;
 
             return MakeFullscreenPassArgs(
                 MetricsOf(inputColor.extent),
                 Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
-                Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(impl.graphResources.smaaWeightTarget))
+                Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(frame.graphResources.smaaWeightTarget))
             );
         }
     );

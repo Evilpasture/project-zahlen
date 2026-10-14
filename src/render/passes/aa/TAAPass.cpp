@@ -16,15 +16,15 @@ static_assert(GpuAbi::ScenePassPayload<TAAPushConstants>, "a pass payload that o
 
 void TAAPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::Taa, Shaders::Modules::TaaPS>::Record(
-        impl, ctx.Cmd(), impl.taaPass, [&]() {
-            const uint32_t fIdx = impl.presenter.frameIndex;
+        frame, ctx.Cmd(), aa.taa, [&]() {
+            const uint32_t fIdx = frame.presenter.frameIndex;
 
             return MakeFullscreenPassArgs(
-                TAAPushConstants {.feedback = impl.settings.antiAliasing.taaFeedback},
-                Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(impl.graphResources.hdrSceneColor)),
-                Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumPrevious>>(impl.accumulationHistory.Previous())),
-                Vk::Slot<"texVelocity">(Vk::Assume<Vk::ShaderRead<Res_Velocity>>(impl.graphResources.velocityBuffer)),
-                Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+                TAAPushConstants {.feedback = frame.settings.antiAliasing.taaFeedback},
+                Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(frame.graphResources.hdrSceneColor)),
+                Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumPrevious>>(frame.accumulationHistory.Previous())),
+                Vk::Slot<"texVelocity">(Vk::Assume<Vk::ShaderRead<Res_Velocity>>(frame.graphResources.velocityBuffer)),
+                Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
             );
         }
     );

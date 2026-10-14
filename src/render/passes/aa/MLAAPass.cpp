@@ -19,13 +19,13 @@ static_assert(GpuAbi::ScenePassPayload<MLAAPushConstants>, "a pass payload that 
 
 void MLAAPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     FullscreenPassRecorder<Shaders::Mlaa, Shaders::Modules::MlaaPS>::Record(
-        impl, ctx.Cmd(), impl.mlaaPass, [&]() {
-            const auto& inputColor = impl.graphResources.hdrSceneColor;
+        frame, ctx.Cmd(), aa.mlaa, [&]() {
+            const auto& inputColor = frame.graphResources.hdrSceneColor;
             const float rcpW       = 1.0f / static_cast<float>(inputColor.extent.width);
             const float rcpH       = 1.0f / static_cast<float>(inputColor.extent.height);
 
             return MakeFullscreenPassArgs(
-                MLAAPushConstants {rcpW, rcpH, impl.settings.antiAliasing.mlaaThreshold, impl.settings.antiAliasing.mlaaMaxSearchSteps},
+                MLAAPushConstants {rcpW, rcpH, frame.settings.antiAliasing.mlaaThreshold, frame.settings.antiAliasing.mlaaMaxSearchSteps},
                 Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
             );
         }

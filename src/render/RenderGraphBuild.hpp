@@ -103,13 +103,13 @@ template <AAMode Mode, typename GetSwapchainImageT>
     //    tonemapper reads.
     auto aa = [&] {
         if constexpr (Mode == AAMode::TAA) {
-            return Vk::MakePassPack(Passes::TAAPass {.impl = self});
+            return Vk::MakePassPack(Passes::TAAPass {.aa = self.antiAliasing, .frame = self});
         } else if constexpr (Mode == AAMode::FXAA) {
-            return Vk::MakePassPack(Passes::FXAAPass {.impl = self});
+            return Vk::MakePassPack(Passes::FXAAPass {.aa = self.antiAliasing, .frame = self});
         } else if constexpr (Mode == AAMode::MLAA) {
-            return Vk::MakePassPack(Passes::MLAAPass {.impl = self});
+            return Vk::MakePassPack(Passes::MLAAPass {.aa = self.antiAliasing, .frame = self});
         } else if constexpr (Mode == AAMode::SMAA) {
-            return Vk::MakePassPack(Passes::SmaaEdgePass {.impl = self}, Passes::SmaaWeightPass {.impl = self}, Passes::SmaaBlendPass {.impl = self});
+            return Vk::MakePassPack(Passes::SmaaEdgePass {.aa = self.antiAliasing, .frame = self}, Passes::SmaaWeightPass {.aa = self.antiAliasing, .frame = self}, Passes::SmaaBlendPass {.aa = self.antiAliasing, .frame = self});
         } else {
             return Vk::MakePassPack();
         }

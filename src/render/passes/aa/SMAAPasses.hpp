@@ -22,19 +22,22 @@ namespace ZHLN::Passes {
 // separate nodes. They still fork nowhere and run strictly in this order.
 
 struct SmaaEdgePass: Vk::RenderPass<"SmaaEdge", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ColorWrite<Res_SmaaEdge>> {
-    RenderContext::Impl& impl;
+    AntiAliasingResources& aa;
+    RenderFrameContext&    frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
 struct SmaaWeightPass: Vk::RenderPass<"SmaaWeight", Vk::ShaderRead<Res_SmaaEdge>, Vk::ColorWrite<Res_SmaaWeight>> {
-    RenderContext::Impl& impl;
+    AntiAliasingResources& aa;
+    RenderFrameContext&    frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
 struct SmaaBlendPass: Vk::RenderPass<"SmaaBlend", Vk::ShaderRead<Res_HdrSceneColor>, Vk::ShaderRead<Res_SmaaWeight>, Vk::ColorWrite<Res_AccumCurrent>> {
-    RenderContext::Impl& impl;
+    AntiAliasingResources& aa;
+    RenderFrameContext&    frame;
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
