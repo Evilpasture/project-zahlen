@@ -18,6 +18,12 @@ enum class BufferSourceError : uint8_t {
     RaggedElements  ZHLN_ANNOTATION(ZHLN::Description<"Buffer source byte count is not a whole number of its elements"> {}),
 };
 
+enum class BufferUpdateError : uint8_t {
+    InvalidHandle ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received an invalid or unknown buffer handle"> {}) = 1,
+    NullData      ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received a null data pointer"> {}),
+    EmptyData     ZHLN_ANNOTATION(ZHLN::Description<"Buffer update received zero bytes"> {}),
+};
+
 [[nodiscard]] auto SourceError(const GeometryManager::BufferSource& source) noexcept -> std::optional<BufferSourceError> {
     if (source.bytes.empty() && source.allocationSize == 0) {
         return BufferSourceError::EmptySource;
@@ -113,12 +119,18 @@ auto GeometryManager::Adopt(Vk::Buffer buffer, uint32_t vertexCount, Vk::DeviceA
 }
 
 auto GeometryManager::Update(BufferHandle handle, const void* data, size_t size) noexcept -> std::expected<void, ErrorCode> {
-    if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
-        return {};
+    if (handle == BufferHandle::Invalid) {
+        return std::unexpected(BufferUpdateError::InvalidHandle);
+    }
+    if (data == nullptr) {
+        return std::unexpected(BufferUpdateError::NullData);
+    }
+    if (size == 0) {
+        return std::unexpected(BufferUpdateError::EmptyData);
     }
     auto* nativeMesh = _buffers.Resolve(handle);
     if (nativeMesh == nullptr) {
-        return {};
+        return std::unexpected(BufferUpdateError::InvalidHandle);
     }
 
     auto staging = AllocateStaging(_transferRing, size);
