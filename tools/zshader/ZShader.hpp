@@ -116,46 +116,6 @@ struct Options {
     std::vector<std::pair<std::string, std::vector<std::string>>> sets; // one per --set, in the order given
 };
 
-// --- SILENT-EXIT GUARD -----------------------------------------------------
-//
-// Nothing in this tool is allowed to leave the process without saying why, and
-// not every exit is ours to speak for. Fail() sets the flag below; main() sets
-// it once a run has finished cleanly. An exit that reaches atexit with the flag
-// still clear therefore left by a path that owns no diagnostic at all -- and
-// there is exactly one of those in this tool: the Slang replay link (see
-// SlangReflect.cpp and the notes in cmake/ShaderCompilation.cmake) calls
-// exit()/abort() out of its own error paths, which is how a run can end in a
-// bare status 1 with nothing printed anywhere.
-//
-// The guard is what turns that into a sentence. It cannot help with a SIGSEGV,
-// which runs no atexit handler; it does help with the case that looks identical
-// from the build system's side and is far more common.
-namespace Detail {
-inline bool& ExitWasExplained() {
-    static bool explained = false;
-    return explained;
-}
-} // namespace Detail
-
-// Called from main() once the run is known to have finished successfully, so
-// the guard registered there stays quiet on the way out.
-inline void ExitCleanly() { Detail::ExitWasExplained() = true; }
-
-// Installed by main(). Runs after every exit() taken by this process, including
-// one taken by libslang; says nothing when Fail() or ExitCleanly() already did.
-inline void ReportUnexplainedExit() {
-    if (Detail::ExitWasExplained()) {
-        return;
-    }
-    const auto* const text =
-        "zshader: exiting without a diagnostic -- the failure left by a path this tool "
-        "does not own (libslang calls exit()/abort() from its own error paths), so the "
-        "build system sees only a status";
-    std::println("{}", text);
-    std::println(stderr, "{}", text);
-    std::fflush(stdout);
-}
-
 // Reports a build configuration the tool cannot carry on from: one line on
 // stdout and one on stderr, prefixed with the tool's name, and a non-zero exit.
 //
@@ -171,7 +131,6 @@ inline void ReportUnexplainedExit() {
 template <typename... Args>
 [[noreturn]] void Fail(std::format_string<Args...> fmt, Args&&... args) {
     const std::string message = std::format(fmt, std::forward<Args>(args)...);
-    Detail::ExitWasExplained() = true;
     std::println("zshader: {}", message);
     std::println(stderr, "zshader: {}", message);
     std::fflush(stdout);
