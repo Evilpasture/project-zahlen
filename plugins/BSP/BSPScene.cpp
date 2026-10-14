@@ -367,9 +367,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                     const DModel&   bspModel = map.models[static_cast<size_t>(modelIndex)];
                     const JPH::Vec3 mins(bspModel.mins[0], bspModel.mins[1], bspModel.mins[2]);
                     const JPH::Vec3 maxs(bspModel.maxs[0], bspModel.maxs[1], bspModel.maxs[2]);
-                    const JPH::Vec3 bspHalf = (maxs - mins) * 0.5f;
+                    const JPH::Vec3 bspHalf       = (maxs - mins) * 0.5f;
+                    const JPH::Vec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
                     const JPH::Vec3 engineHalf(
-                        std::abs(bspHalf.GetX()) * options.unitScale, std::abs(bspHalf.GetY()) * options.unitScale, std::abs(bspHalf.GetZ()) * options.unitScale
+                        std::abs(convertedHalf.GetX()), std::abs(convertedHalf.GetY()), std::abs(convertedHalf.GetZ())
                     );
                     interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
                 } else if (isTrigger) {
@@ -389,10 +390,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                         }
                         const JPH::Vec3 enginePos = ConvertPosition(options, bspCenter);
                         interactive.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
-                        const JPH::Vec3 bspHalf = (maxs - mins) * 0.5f;
+                        const JPH::Vec3 bspHalf       = (maxs - mins) * 0.5f;
+                        const JPH::Vec3 convertedHalf = ConvertDirection(options, bspHalf) * options.unitScale;
                         const JPH::Vec3 engineHalf(
-                            std::abs(bspHalf.GetX()) * options.unitScale, std::abs(bspHalf.GetY()) * options.unitScale,
-                            std::abs(bspHalf.GetZ()) * options.unitScale
+                            std::abs(convertedHalf.GetX()), std::abs(convertedHalf.GetY()), std::abs(convertedHalf.GetZ())
                         );
                         interactive.halfExtents = {std::max(engineHalf.GetX(), 0.05f), std::max(engineHalf.GetY(), 0.05f), std::max(engineHalf.GetZ(), 0.05f)};
                     } else {

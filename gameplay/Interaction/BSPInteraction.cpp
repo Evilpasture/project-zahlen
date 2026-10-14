@@ -110,16 +110,11 @@ auto ParseMoveDir(std::string_view movedirStr, const BSP::ImportOptions& opts) -
 }
 
 auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity {
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
-        if (nameComp && std::string_view(nameComp->name) == matchName) {
-            return e;
-        }
-    }
     if (!modelSource.empty()) {
-        // Brush entities reference their submodel as "*N". Placeholder boxes
-        // are stamped with that exact string; authored-geometry submodel
-        // prefabs are stamped "<map path>#model_N", so match the suffix too.
+        // A targetname is not an entity identity: Source deliberately allows
+        // many brush entities to share one so an input can address the whole
+        // group. Match the unique brush submodel first; otherwise every member
+        // of a named door bank attaches its components to the first entity.
         std::string modelSuffix;
         if (modelSource.starts_with('*')) {
             modelSuffix = "#model_" + std::string(modelSource.substr(1));
@@ -133,6 +128,12 @@ auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std
             if (source == modelSource || (!modelSuffix.empty() && source.ends_with(modelSuffix))) {
                 return e;
             }
+        }
+    }
+    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
+        const auto nameComp = registry.Get<Components::NameComponent>(e);
+        if (nameComp && std::string_view(nameComp->name) == matchName) {
+            return e;
         }
     }
     return Entity::Null();

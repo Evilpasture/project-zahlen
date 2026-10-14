@@ -667,7 +667,8 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
 
     // One prefab per interactive submodel, cached under "<map>#model_<N>" --
     // the source BSPScene stamps on the door/button entity description.
-    // Re-base every interactive submodel on its pivot, rotating or not.
+    // Normalize world-space interactive submodels to their pivot; leave the
+    // usual entity-local VBSP representation untouched.
     //
     // The rotating path has always done this; the sliding path did not, on the
     // theory that "the entity transform is just the movement delta". That left
@@ -694,7 +695,20 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         if (subImported.parts.empty()) {
             continue; // Pure tool faces (clip/hint brushes): nothing to draw.
         }
-        ShiftImportedGeometry(subImported, -sub.pivot);
+        // VBSP normally stores brush-entity vertices in entity-local space
+        // (gm_murder_drones' door models *123..*125 are centred on zero while
+        // their origins are around (-504, 1592, 184)). Older/other branches can
+        // leave them in world space. Re-base only the latter: unconditionally
+        // subtracting the entity pivot sends already-local render geometry back
+        // to the map origin, while the fallback collider remains at the door.
+        const JPH::Vec3 geometryCenter(
+            (subImported.boundsMin.x + subImported.boundsMax.x) * 0.5f,
+            (subImported.boundsMin.y + subImported.boundsMax.y) * 0.5f,
+            (subImported.boundsMin.z + subImported.boundsMax.z) * 0.5f
+        );
+        if ((geometryCenter - sub.pivot).LengthSq() < geometryCenter.LengthSq()) {
+            ShiftImportedGeometry(subImported, -sub.pivot);
+        }
 
         const std::string subPath      = std::string(virtualPath) + "#model_" + std::to_string(sub.modelIndex);
         auto              subPrefab    = std::make_unique<ModelPrefab>();
