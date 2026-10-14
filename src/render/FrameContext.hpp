@@ -166,7 +166,6 @@ struct RenderFrameContext {
     uint32_t blueNoiseTexIdx   = 0;
 
     uint32_t activeLineVertexCount = 0;
-    uint32_t lineInstanceId        = 0;
 
     static constexpr size_t       kParallelRecordingSlots = 2; // concurrent secondary recordings, not frames in flight
     ZHLN::Array<WorkerCmdContext> workerCmds;

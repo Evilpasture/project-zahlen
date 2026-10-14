@@ -4,6 +4,7 @@
 #include "passes/forward/ForwardPass.hpp"
 #include "passes/SceneDraw.hpp"
 #include <ShaderBindings.hpp>
+#include <cstddef>
 
 namespace ZHLN::Passes {
 
@@ -15,6 +16,19 @@ struct ParticleRenderPushConstants {
     uint32_t        textureIndex;
 };
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+
+// Debug lines carry everything they need in the push block: the view-projection
+// and the device address of their interleaved vertex buffer. No instance index,
+// because a line is not an entry in the instance table -- debug_line.slang
+// declares no descriptor set at all. The block is 80 bytes: 64 of matrix, 8 of
+// address, padded to the matrix's 16-byte alignment, which is how
+// UIObjectConstants already matches its shader half.
+struct LinePushConstants {
+    JPH::Mat44      viewProj;
+    VkDeviceAddress vertexBufferAddress;
+};
+static_assert(sizeof(LinePushConstants) == 80);
+static_assert(offsetof(LinePushConstants, vertexBufferAddress) == 64);
 
 } // namespace
 
@@ -75,14 +89,17 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             }
 
             if (forward.line.Valid() && ctx.activeLineVertexCount > 0) {
-                const ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
+                const LinePushConstants pc = {
+                    .viewProj            = ctx.current_view_proj,
+                    .vertexBufferAddress = ctx.frames.lineVboAddresses[ctx.presenter.frameIndex]
+                };
 
-                passCtx.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
+                passCtx.encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
                     {.pipeline      = forward.line.Get(),
                      .vertexCount   = ctx.activeLineVertexCount,
                      .instanceCount = 1,
                      .firstVertex   = 0,
-                     .firstInstance = ctx.lineInstanceId},
+                     .firstInstance = 0},
                     pc
                 );
             }

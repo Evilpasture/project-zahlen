@@ -90,13 +90,12 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
     return compute.skinning.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
-auto RenderContext::Impl::AllocateDynamicVertexBuffers(
+auto RenderContext::Impl::AllocateLineVertexBuffers(
     size_t                     maxVertices,
     PerFrame<Vk::Buffer>&      bufs,
-    PerFrame<VkDeviceAddress>& addrs,
-    Vk::BufferUsage            extraFlags
+    PerFrame<VkDeviceAddress>& addrs
 ) noexcept -> std::expected<void, ErrorCode> {
-    const size_t              bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexSurface));
+    const size_t              bufferSize = maxVertices * sizeof(LineVertex);
     PerFrame<Vk::Buffer>      created;
     PerFrame<VkDeviceAddress> createdAddresses;
     defer                     _([&] {
@@ -106,7 +105,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     });
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
         auto res =
-            Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags, Vk::MemoryUsage::CPUToGPU);
+            Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -123,15 +122,17 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
 }
 
 auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, ErrorCode> {
-    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, Vk::BufferUsage::Vertex);
+    return AllocateLineVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses);
 }
 
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
-    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::BasicVSForward>(), Vk::MakeStageSource<Shaders::Modules::ForwardPS>())
+    return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DebugLineVS>(), Vk::MakeStageSource<Shaders::Modules::DebugLinePS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
+            // No HeapMappings: debug_line.slang declares no descriptor set. The
+            // vertex shader reads the interleaved buffer through the device
+            // address in its push block, and the fragment shader is a passthrough.
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
-                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)

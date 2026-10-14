@@ -225,13 +225,13 @@ struct RenderContext::Impl : RenderFrameContext {
 
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
-    std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
+    // The debug-line vertex buffers: one interleaved LineVertex stream per
+    // frame, read by debug_line.slang through its device address.
+    std::expected<void, ErrorCode> AllocateLineVertexBuffers(
         size_t                     maxVertices,
         PerFrame<Vk::Buffer>&      bufs,
-        PerFrame<VkDeviceAddress>& addrs,
-        Vk::BufferUsage            extraFlags = Vk::BufferUsage::None
+        PerFrame<VkDeviceAddress>& addrs
     ) noexcept;
-    void FlushLineQueue(std::span<const LineSegment> lines);
 
     std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
     void                           BuildSceneHeapMappings() noexcept;

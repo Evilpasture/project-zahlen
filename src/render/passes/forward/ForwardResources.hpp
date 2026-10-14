@@ -8,9 +8,9 @@
 // rendercontext-impl-decomposition.md. One struct because ForwardPass is the
 // only consumer of either.
 //
-// linePipeline is also read by Impl::FlushLineQueue, which is why this lives
-// on Impl rather than inside the pass: the line queue is flushed from the draw
-// command path, not from the pass.
+// ForwardPass is the only reader of either pipeline. They still live on Impl
+// rather than inside the pass because they are built once at init and outlive
+// any one frame's pass instance, the same as the other *Resources groups.
 
 #pragma once
 

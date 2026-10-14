@@ -691,6 +691,15 @@ add_shader_target(forward_shader
         "${SHADER_SRC_DIR}/basic_mesh.slang|MeshMainForward|ms_6_5|SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
 )
 
+# Debug lines. No descriptor set: the vertex shader reads one interleaved
+# buffer through its device address, so there is no heap mapping to reflect
+# and no entry for it in ZHLN_SHADER_CATALOG_SETS below.
+add_shader_target(debug_line_shader
+    STAGES
+        "${SHADER_SRC_DIR}/debug_line.slang|VSMain|vs_6_5|SHADER_DEBUG_LINE_SLANG_VS_PATH"
+        "${SHADER_SRC_DIR}/debug_line.slang|PSMain|ps_6_5|SHADER_DEBUG_LINE_SLANG_PS_PATH"
+)
+
 add_shader_target(hang_gpu_shader
     STAGES "${SHADER_SRC_DIR}/hang_gpu.slang|CSMain|cs_6_0|SHADER_HANG_GPU_SLANG_CS_PATH"
 )
@@ -925,6 +934,8 @@ set(ZHLN_SHADER_CATALOG_MODULES
     "ClusterCullingCS=SHADER_CLUSTER_CULLING_CS_PATH"
     "SkinningCS=SHADER_SKINNING_SLANG_CS_PATH"
     "ForwardPS=SHADER_FORWARD_SLANG_PS_PATH"
+    "DebugLineVS=SHADER_DEBUG_LINE_SLANG_VS_PATH"
+    "DebugLinePS=SHADER_DEBUG_LINE_SLANG_PS_PATH"
     "HangGpuCS=SHADER_HANG_GPU_SLANG_CS_PATH"
     "ProceduralBakeCS=SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
     "BrdfLutCS=SHADER_BRDF_LUT_CS_PATH"

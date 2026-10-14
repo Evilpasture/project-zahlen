@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "graph/RenderGraph.hpp"
@@ -279,7 +280,37 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
         queues.Draws().resize(kGpuCullingMaxInstances);
     }
 
-    FlushLineQueue(pendingLines);
+    // Debug lines are not scene meshes and never enter the instance table.
+    // They get their own interleaved buffer, uploaded here, which is what
+    // keeps them out of the slot range the CSG cutters index below: the flush
+    // used to write an InstanceData at queues.Draws().size(), which is exactly
+    // where csgOffset starts.
+    if (pendingLines.empty()) {
+        activeLineVertexCount = 0;
+    } else {
+        const uint32_t maxVertices = std::min(static_cast<uint32_t>(pendingLines.size() * 2), kMaxLineVertices);
+
+        activeLineVertexCount = 0;
+        if (auto mapped = frames.lineVbos[presenter.frameIndex].Map(allocator)) {
+            auto*    dst  = mapped->As<LineVertex>();
+            uint32_t vIdx = 0;
+            for (const auto& line: pendingLines) {
+                if (vIdx + 2 > maxVertices) {
+                    break;
+                }
+
+                dst[vIdx++] = {
+                    .position = {line.start.GetX(), line.start.GetY(), line.start.GetZ()},
+                    .color    = Math::PackColor(line.colorStart.GetX(), line.colorStart.GetY(), line.colorStart.GetZ(), line.colorStart.GetW())
+                };
+                dst[vIdx++] = {
+                    .position = {line.end.GetX(), line.end.GetY(), line.end.GetZ()},
+                    .color    = Math::PackColor(line.colorEnd.GetX(), line.colorEnd.GetY(), line.colorEnd.GetZ(), line.colorEnd.GetW())
+                };
+            }
+            activeLineVertexCount = vIdx;
+        }
+    }
     pendingLines = {};
     queues.Sort();
 
