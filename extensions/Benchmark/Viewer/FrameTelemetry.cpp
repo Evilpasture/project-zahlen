@@ -495,10 +495,21 @@ void FrameTelemetry::WriteCaptureRow(float frameMs) noexcept {
 
     // One cell per column, in the header's order. A column whose metric has left
     // the table leaves an empty cell rather than shifting the rest of the row.
+    //
+    // The table is two sorted runs -- GPU stages first, CPU scopes after them --
+    // and is only sorted by name *inside* each run. Searching the whole vector
+    // assumes a single sorted range and silently misses every metric whose name
+    // would sort into the other run, which is how the capture came to write
+    // blank cells for every CPU scope. Search the run the name belongs to, as
+    // AccumulateStage already does.
+    const auto gpuBoundary = m_stages.begin() + static_cast<std::ptrdiff_t>(m_gpuCount);
     for (const std::string& column: m_captureColumns) {
         line.push_back(',');
-        const auto found = std::lower_bound(m_stages.begin(), m_stages.end(), std::string_view(column), ByName {});
-        if (found != m_stages.end() && found->name == column) {
+        const bool gpu        = IsGpuStageName(column);
+        const auto runBegin   = gpu ? m_stages.begin() : gpuBoundary;
+        const auto runEnd     = gpu ? gpuBoundary : m_stages.end();
+        const auto found      = std::lower_bound(runBegin, runEnd, std::string_view(column), ByName {});
+        if (found != runEnd && found->name == column) {
             std::format_to(std::back_inserter(line), "{:.4f}", found->lastMs);
         }
     }
