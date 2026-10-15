@@ -41,6 +41,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float  centerValue  = inShadow.Load(int3(tid.xy, 0)).r;
     float  centerDepth  = LinearizeDepth(depth, frame.invProj);
     float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
+    float3 centerWorldPos = ReconstructWorldPos((float2(tid.xy) + 0.5f) / float2(fullSize), depth, frame.invViewProj);
 
     int   step     = int(max(pc.stepSize, 1u));
     float depthTol = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
@@ -63,7 +64,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             float  sampleValue  = inShadow.Load(int3(coord, 0)).r;
             float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
 
-            float wDepth  = exp(-abs(centerDepth - LinearizeDepth(sampleDepthRaw, frame.invProj)) / depthTol);
+            float3 sampleWorldPos = ReconstructWorldPos((float2(coord) + 0.5f) / float2(fullSize), sampleDepthRaw, frame.invViewProj);
+            float  planeDistance  = abs(dot(sampleWorldPos - centerWorldPos, centerNormal));
+            float  wDepth  = exp(-planeDistance / depthTol);
             float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
             float weight  = WaveletKernel[x + 2] * WaveletKernel[y + 2] * wDepth * wNormal;
 
@@ -85,8 +88,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float2 prevUV   = uv - velocity - (frame.jitterParams.xy - frame.jitterParams.zw);
 
         if (all(prevUV >= 0.0f) && all(prevUV <= 1.0f) && !any(isnan(prevUV))) {
-            float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
-            float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
+            float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(centerWorldPos, 1.0f));
             if (prevClip.w > 0.1f && abs(prevClip.w - abs(centerDepth)) < max(0.25f, abs(centerDepth) * 0.1f)) {
                 float2 histCoord  = prevUV * float2(fullSize) - 0.5f;
                 int2   baseTap    = int2(floor(histCoord));

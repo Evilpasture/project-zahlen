@@ -31,6 +31,13 @@ constexpr float kAmbientBrightnessNormalisation = 30.0f;
 // environment-derived irradiance before it becomes sky radiance.
 constexpr float kAmbientExposure = 25.0f;
 
+constexpr float kSceneProbeHalfSpanX = 15.0f * 0.5f * 3.2f;
+constexpr float kSceneProbeHalfSpanY = 7.0f * 0.5f * 3.2f;
+
+constexpr float kAoRadius  = 0.5f;
+constexpr float kAoBias    = 0.02f;
+constexpr float kAoPower   = 1.5f;
+constexpr int   kAoSamples = 24;
 // Analytic inverse of JPH::Quat::sEulerAngles, which Scene::Instantiate uses
 // to rebuild the transform (Math::EulerDegreesToQuat). sEulerAngles(x,y,z)
 // composes Qz(z)*Qy(y)*Qx(x), so the triplet slots act as: x = roll about the
@@ -177,6 +184,13 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         scene.environment.skyGround  = {sky.x * 0.35f, sky.y * 0.35f, sky.z * 0.35f};
     }
 
+    if (options.ambientOcclusion) {
+        scene.environment.giMode    = 3;
+        scene.environment.aoRadius  = kAoRadius;
+        scene.environment.aoBias    = kAoBias;
+        scene.environment.aoPower   = kAoPower;
+        scene.environment.giSamples = kAoSamples;
+    }
     // Interactive brush submodels: doors/buttons get the authored submodel
     // prefab the importer caches under "<map>#model_<N>"; their pivots decide
     // where the entity transform sits.
@@ -557,6 +571,56 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         }
     }
 
+    if (options.punctualShadowFaceBudget > 0) {
+        const JPH::Vec3 viewer {scene.camera.position};
+
+        struct PunctualShadowCandidate {
+            float    distSq = 0.0f;
+            uint32_t faces  = 0;
+            size_t   index  = 0;
+        };
+
+        std::vector<PunctualShadowCandidate> candidates;
+        for (size_t index = 0; index < scene.lights.size(); ++index) {
+            Scene::SceneLight& light = scene.lights[index];
+            if (light.pinned || light.castsShadow) {
+                continue;
+            }
+            if (light.type != "Point" && light.type != "Spot") {
+                continue;
+            }
+            const uint32_t faces = (light.type == "Point") ? 6u : 1u;
+            candidates.push_back(
+                PunctualShadowCandidate {
+                    .distSq = (JPH::Vec3 {light.position} - viewer).LengthSq(),
+                    .faces  = faces,
+                    .index  = index,
+                }
+            );
+        }
+
+        std::ranges::sort(candidates, [](const PunctualShadowCandidate& a, const PunctualShadowCandidate& b) -> bool {
+            return a.distSq < b.distSq;
+        });
+
+        uint32_t spentFaces = 0;
+        uint32_t casters    = 0;
+        for (const PunctualShadowCandidate& candidate: candidates) {
+            if (spentFaces + candidate.faces > options.punctualShadowFaceBudget) {
+                break;
+            }
+            scene.lights[candidate.index].castsShadow = true;
+            spentFaces += candidate.faces;
+            ++casters;
+        }
+
+        if (casters > 0) {
+            Log(
+                "BSP Scene: {} -> {} of {} punctual light(s) cast into the shadow atlas ({} of {} faces)", virtualPath, casters, scene.lights.size(),
+                spentFaces, options.punctualShadowFaceBudget
+            );
+        }
+    }
     // Lighting accounting, same contract as the importer's: the number of
     // lights that did not make it into the scene, and why, is the difference
     // between "the map has no lights" and "the map's lights were suppressed
@@ -564,6 +628,12 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     if (sceneLightSuppressed > 0) {
         Log("BSP Scene: {} -> {} lights ({} entity lights suppressed: disabled spawnflag or zero colour/brightness)", virtualPath,
             scene.lights.size(), sceneLightSuppressed);
+    }
+
+    if (cameraSet) {
+        const JPH::Float3 spawn = scene.camera.position;
+        scene.environment.probeMin = JPH::Float3 {spawn.x - kSceneProbeHalfSpanX, spawn.y - kSceneProbeHalfSpanY, spawn.z - kSceneProbeHalfSpanX};
+        scene.environment.probeMax = JPH::Float3 {spawn.x + kSceneProbeHalfSpanX, spawn.y + kSceneProbeHalfSpanY, spawn.z + kSceneProbeHalfSpanX};
     }
 
     return scene;

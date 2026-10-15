@@ -61,6 +61,13 @@ struct ImportOptions {
     // environment defaults.
     bool deriveAmbient = true;
 
+    // Author the map's ambient occlusion into the scene description. The values
+    // are the scene's, in the scene's units (BSPScene.cpp), not import inputs.
+    bool ambientOcclusion = true;
+
+    // Atlas faces the map's own point and spot lights may spend on shadow tiles.
+    uint32_t punctualShadowFaceBudget = 24;
+
     // Guarantee a non-black scene: lift a black ambient to a visible floor and
     // synthesise a fill light when the map offers no light at all. See
     // BSPLighting.hpp's EnforceLightingFloor.

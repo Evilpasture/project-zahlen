@@ -102,8 +102,9 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 continue;
             }
 
-            float tapDepth = LinearizeDepth(tapDepthRaw, frame.invProj);
-            float depthWeight = exp(-abs(tapDepth - centerDepth) / max(centerDepth * 0.02f, 0.01f));
+            float3 tapWorldPos = ReconstructWorldPos((float2(samplePixel) + 0.5f) / float2(pc.fullRes), tapDepthRaw, frame.invViewProj);
+            float  planeDistance = abs(dot(tapWorldPos - worldPos, N));
+            float  depthWeight = exp(-planeDistance / max(centerDepth * 0.02f, 0.01f));
             float4 tapNormalRaw = texNormalRoughness.Load(int3(samplePixel, 0));
             float3 tapNormal = UnpackNormalOctahedron(tapNormalRaw.xy * 2.0f - 1.0f);
             float normalWeight = pow(saturate(dot(N, tapNormal)), 24.0f);

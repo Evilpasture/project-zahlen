@@ -102,8 +102,16 @@ struct SceneEnvironment {
     JPH::Float3 skyHorizon      = {0.015f, 0.035f, 0.080f};
     JPH::Float3 skyGround       = {0.001f, 0.001f, 0.003f};
 
+    int   giMode    = 0;
+    float aoRadius  = 0.5f;
+    float aoBias    = 0.05f;
+    float aoPower   = 1.8f;
+    int   giSamples = 8;
     bool enableSSR = true;
     bool enableRTR = false;
+
+    JPH::Float3 probeMin = {-22.0f, 0.0f, -22.0f};
+    JPH::Float3 probeMax = {22.0f, 12.0f, 22.0f};
 
     float       exposure      = 0.015f;
     float       bloomStrength = 0.5f;

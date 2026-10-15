@@ -94,8 +94,9 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                     const float  tapAo  = texAo.SampleLevel(pointSampler, tuv, 0).r;
                     const float  tapRaw = texDepth.SampleLevel(pointSampler, tuv, 0).r;
                     const float3 tapPos = ReconstructWorldPos(tuv, tapRaw, pc.invViewProj);
-                    const float  tapViewDepth = mul(frame.unjitteredViewProj, float4(tapPos, 1.0f)).w;
-                    const float  edgeStop = exp(-abs(tapViewDepth - viewDepth) / max(viewDepth * 0.02f, 1e-3f));
+                    const float3 tapN   = UnpackNormalOctahedron(texNormalRoughness.SampleLevel(pointSampler, tuv, 0).xy * 2.0f - 1.0f);
+                    const float  planeDistance = abs(dot(tapPos - worldPos, N));
+                    const float  edgeStop = exp(-planeDistance / max(viewDepth * 0.02f, 1e-3f)) * pow(saturate(dot(N, tapN)), 16.0f);
                     const float  w        = bilinear * edgeStop;
                     weightSum += w;
                     aoSum += w * tapAo;
@@ -362,12 +363,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 float shadowVisibility = 1.0f;
                 if (light.shadowTileBase >= 0) {
                     // A point light is six atlas tiles, one per cube face in
-                    // Vulkan layer order (+X,-X,+Y,-Y,+Z,-Z), so the face this
-                    // direction lands on picks the tile. A spot light is a
-                    // single tile and always takes face 0. The face order here
-                    // is the order `ShadowAtlas` writes the matrices in.
+                    // Vulkan layer order (+X,-X,+Y,-Y,+Z,-Z); a spot is one.
                     uint face = 0u;
-                    if (light.type == LightType::Point) {
+                    if (light.type == LightType::Point || light.outerConeCos <= -0.5f) {
                         float3 r  = worldPos - light.position;
                         float3 ar = abs(r);
                         if (ar.x >= ar.y && ar.x >= ar.z) {
@@ -387,7 +385,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     if (sPos.w > 0.0f) {
                         float2 tileUv  = sPos.xy / sPos.w * 0.5f + 0.5f;
                         float2 atlasUv = tile.uvOrigin + tileUv * tile.uvScale;
-                        shadowVisibility = shadowAtlas.SampleCmpLevelZero(shadowSampler, atlasUv, sPos.z / sPos.w - 0.0025f);
+                        float ndl        = max(NdotL, 1e-3f);
+                        float slope      = sqrt(max(0.0f, 1.0f - ndl * ndl)) / ndl;
+                        float depthBias  = 0.0005f + 0.0025f * min(slope, 8.0f);
+                        shadowVisibility = shadowAtlas.SampleCmpLevelZero(shadowSampler, atlasUv, sPos.z / sPos.w - depthBias);
                     }
                 }
 

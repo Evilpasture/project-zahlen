@@ -152,9 +152,21 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
         return Grant {};
     }
 
-    uint32_t x = 0;
-    uint32_t y = 0;
-    if (!Place(faceCount, req.tile, x, y)) {
+    uint32_t tile = req.tile;
+    while (tile > kMinTile && tile * faceCount > kSize) {
+        tile /= 2;
+    }
+
+    uint32_t x      = 0;
+    uint32_t y      = 0;
+    bool     placed = false;
+    while (!(placed = Place(faceCount, tile, x, y))) {
+        if (tile <= kMinTile) {
+            break;
+        }
+        tile /= 2;
+    }
+    if (!placed) {
         _placements.push_back(Placement {.lightIndex = req.lightIndex, .tileBase = -1, .faceCount = faceCount, .cached = false});
         return Grant {};
     }
@@ -166,7 +178,7 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
             break;
         }
     }
-    bool reuse = cached != nullptr && cached->seen == false && cached->x == x && cached->y == y && cached->tile == req.tile &&
+    bool reuse = cached != nullptr && cached->seen == false && cached->x == x && cached->y == y && cached->tile == tile &&
                  cached->faceCount == faceCount;
     if (reuse) {
         for (uint32_t face = 0; face < faceCount && reuse; ++face) {
@@ -177,11 +189,11 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
     const int32_t tileBase = static_cast<int32_t>(_tiles.size());
     const float   invAtlas = 1.0f / static_cast<float>(kSize);
     for (uint32_t face = 0; face < faceCount; ++face) {
-        ShadowTile tile {};
-        tile.viewProj = req.faces[face];
-        tile.uvOrigin = JPH::Float2 {static_cast<float>(x + face * req.tile) * invAtlas, static_cast<float>(y) * invAtlas};
-        tile.uvScale  = static_cast<float>(req.tile) * invAtlas;
-        _tiles.push_back(tile);
+        ShadowTile tileEntry {};
+        tileEntry.viewProj = req.faces[face];
+        tileEntry.uvOrigin = JPH::Float2 {static_cast<float>(x + face * tile) * invAtlas, static_cast<float>(y) * invAtlas};
+        tileEntry.uvScale  = static_cast<float>(tile) * invAtlas;
+        _tiles.push_back(tileEntry);
     }
 
     if (cached == nullptr) {
@@ -190,7 +202,7 @@ auto ShadowAtlas::Acquire(const Request& req) noexcept -> Grant {
     }
     cached->key       = req.key;
     cached->faceCount = faceCount;
-    cached->tile      = req.tile;
+    cached->tile      = tile;
     cached->x         = x;
     cached->y         = y;
     cached->seen      = true;

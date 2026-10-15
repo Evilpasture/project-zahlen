@@ -45,6 +45,10 @@ void CameraSystem::Update(ECS::Registry& reg, Extent2D res, float , float ) {
             } else {
                 if (aaComp) {
                     aaComp->state.frameIndex = 0;
+                    aaComp->state.jitterX     = 0.0f;
+                    aaComp->state.jitterY     = 0.0f;
+                    aaComp->state.prevJitterX = 0.0f;
+                    aaComp->state.prevJitterY = 0.0f;
                 }
                 cComp->viewProj = cComp->unjitteredViewProj;
             }

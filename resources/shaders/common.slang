@@ -351,8 +351,8 @@ public extension InstanceData {
             } else {
                 prevWorldPos = mul(prevWorldMatrix, localPos);
             }
-            float4x4 activeVP = this.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.viewProj;
-            output.currClip = mul(activeVP, worldPos);
+            float4x4 velocityVP = this.isViewmodel ? scene.frame.viewmodelViewProj : scene.frame.unjitteredViewProj;
+            output.currClip = mul(velocityVP, worldPos);
             output.prevClip = mul(scene.frame.prevUnjitteredViewProj, prevWorldPos);
         }
         return output;

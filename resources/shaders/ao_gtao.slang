@@ -21,17 +21,31 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     outAo[tid.xy] = 1.0f;
 
-    const uint2 fullPos = tid.xy * 2u;
-    const float depth   = texDepth.Load(int3(fullPos, 0)).r;
+    const uint2 blockOrigin = tid.xy * 2u;
+    float3 normalSum = float3(0.0f, 0.0f, 0.0f);
+    float  depth     = 1.0f;
+    [unroll]
+    for (uint by = 0u; by < 2u; ++by) {
+        [unroll]
+        for (uint bx = 0u; bx < 2u; ++bx) {
+            const uint2 pixel = blockOrigin + uint2(bx, by);
+            if (float(pixel.x) >= frame.screenResolution.x || float(pixel.y) >= frame.screenResolution.y) {
+                continue;
+            }
+            const float4 nr = texNormalRoughness.Load(int3(pixel, 0));
+            normalSum += UnpackNormalOctahedron(nr.xy * 2.0f - 1.0f);
+            depth = min(depth, texDepth.Load(int3(pixel, 0)).r);
+        }
+    }
+
     if (depth >= 1.0f) {
         return;
     }
 
-    const float4 nr = texNormalRoughness.Load(int3(fullPos, 0));
-    const float3 N  = UnpackNormalOctahedron(nr.xy * 2.0f - 1.0f);
+    const float3 N = SafeNormalize(normalSum, float3(0.0f, 1.0f, 0.0f));
 
-    const float2 uv       = (float2(fullPos) + 0.5f) * pc.rcpFullRes;
-    const float3 worldPos = ReconstructWorldPos(uv, depth, pc.invViewProj);
+    const float2 uv        = (float2(blockOrigin) + 1.0f) * pc.rcpFullRes;
+    const float3 worldPos  = ReconstructWorldPos(uv, depth, pc.invViewProj);
     const float  viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
     const float fade = saturate((50.0f - viewDepth) / 10.0f);
@@ -44,7 +58,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float occlusion = 0.0f;
 
-    const float angle        = GetStableWeylNoise(fullPos, pc.time) * 2.0f * 3.14159265f;
+    const float angle        = GetStableWeylNoise(blockOrigin, pc.time) * 2.0f * 3.14159265f;
     const int   steps        = max(int(pc.giSamples) / 6, 1);
     const float jitterOffset = GetRotationAngle(uv, pc.time);
 

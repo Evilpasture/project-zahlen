@@ -843,6 +843,7 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                     continue;
                 }
 
+                std::vector<JPH::Vec3> grid(static_cast<size_t>(side) * side);
                 for (uint32_t j = 0; j < side; ++j) {
                     const float fv = static_cast<float>(j) / static_cast<float>(gridSize);
                     for (uint32_t i = 0; i < side; ++i) {
@@ -854,9 +855,34 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
                         const DDispVert& dispVert = map.dispVerts[vertBase + static_cast<size_t>(j) * side + i];
                         const JPH::Vec3  dispVec(dispVert.vec[0], dispVert.vec[1], dispVert.vec[2]);
-                        const JPH::Vec3  sourcePos = base + dispVec * dispVert.dist;
+                        grid[static_cast<size_t>(j) * side + i] = base + dispVec * dispVert.dist;
+                    }
+                }
 
-                        EmitVertex(part, options, *projection, sourcePos, faceNormal, result, partBoundsFirst, globalBoundsFirst);
+                std::vector<JPH::Vec3> vertexNormals(static_cast<size_t>(side) * side, JPH::Vec3::sZero());
+                for (uint32_t j = 0; j < gridSize; ++j) {
+                    for (uint32_t i = 0; i < gridSize; ++i) {
+                        const JPH::Vec3& p00 = grid[static_cast<size_t>(j) * side + i];
+                        const JPH::Vec3& p10 = grid[static_cast<size_t>(j) * side + i + 1];
+                        const JPH::Vec3& p01 = grid[static_cast<size_t>(j + 1) * side + i];
+                        const JPH::Vec3 cell = (p10 - p00).Cross(p01 - p00);
+                        for (uint32_t corner = 0; corner < 4; ++corner) {
+                            const uint32_t ci = i + (corner & 1u);
+                            const uint32_t cj = j + ((corner >> 1) & 1u);
+                            vertexNormals[static_cast<size_t>(cj) * side + ci] += cell;
+                        }
+                    }
+                }
+
+                for (uint32_t j = 0; j < side; ++j) {
+                    for (uint32_t i = 0; i < side; ++i) {
+                        JPH::Vec3 vertexNormal = vertexNormals[static_cast<size_t>(j) * side + i];
+                        if (vertexNormal.LengthSq() <= kEpsilon * kEpsilon) {
+                            vertexNormal = faceNormal;
+                        } else if (vertexNormal.Dot(faceNormal) < 0.0f) {
+                            vertexNormal = -vertexNormal;
+                        }
+                        EmitVertex(part, options, *projection, grid[static_cast<size_t>(j) * side + i], vertexNormal, result, partBoundsFirst, globalBoundsFirst);
                     }
                 }
 

@@ -57,6 +57,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 centerNormal = UnpackNormalOctahedron(centerNormRough.xy * 2.0f - 1.0f);
     float  centerLuma   = KarisLuma(centerValue.rgb);
     float  depthTol     = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
+    const float2 centerUV       = (float2(centerFullCoord) + 0.5f) / float2(frame.screenResolution);
+    const float3 centerWorldPos = ReconstructWorldPos(centerUV, depthRaw, frame.invViewProj);
     float  lumaTol      = max(pc.phiLuma, 1e-4f);
     int    step         = int(max(pc.stepSize, 1u));
 
@@ -89,12 +91,14 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             float  sampleDepth  = LinearizeDepth(sampleDepthRaw, frame.invProj);
             float  sampleLuma   = KarisLuma(sampleValue.rgb);
 
-            float wDepth  = exp(-abs(centerDepth - sampleDepth) / depthTol);
+            float3 sampleWorldPos = ReconstructWorldPos((float2(fullCoord) + 0.5f) / float2(frame.screenResolution), sampleDepthRaw, frame.invViewProj);
+            float  planeDistance  = abs(dot(sampleWorldPos - centerWorldPos, centerNormal));
+            float  wPlane  = exp(-planeDistance / depthTol);
             float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
             float wLuma   = exp(-abs(centerLuma - sampleLuma) / lumaTol);
-            float weight  = WaveletKernel[x + 2] * WaveletKernel[y + 2] * wDepth * wNormal * wLuma;
+            float weight  = WaveletKernel[x + 2] * WaveletKernel[y + 2] * wPlane * wNormal * wLuma;
 
-            if (wDepth * wNormal > 0.25f) {
+            if (wPlane * wNormal > 0.25f) {
                 nbMin = min(nbMin, sampleValue);
                 nbMax = max(nbMax, sampleValue);
             }
@@ -113,8 +117,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float2 prevUV   = uv - velocity - (frame.jitterParams.xy - frame.jitterParams.zw);
 
         if (all(prevUV >= 0.0f) && all(prevUV <= 1.0f) && !any(isnan(prevUV))) {
-            float3 worldPos = ReconstructWorldPos(uv, depthRaw, frame.invViewProj);
-            float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
+            float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(centerWorldPos, 1.0f));
             if (prevClip.w > 0.1f && abs(prevClip.w - abs(centerDepth)) < max(0.25f, abs(centerDepth) * 0.1f)) {
                 float2 histCoord  = prevUV * float2(halfRes) - 0.5f;
                 int2   baseTap    = int2(floor(histCoord));

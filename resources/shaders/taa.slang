@@ -117,32 +117,34 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 currentYCoCg = RGBToYCoCg(current.rgb);
     float3 historyYCoCg = RGBToYCoCg(history.rgb);
 
-    float3 m1 = 0.0f;
-    float3 m2 = 0.0f;
+    float3 m1        = 0.0f;
+    float3 m2        = 0.0f;
+    float  weightSum = 0.0f;
 
-    float4 centerSample = texCurrent.SampleLevel(smp, input.uv, 0);
-    float3 centerYCoCg  = RGBToYCoCg(centerSample.rgb);
-    m1 += centerYCoCg;
-    m2 += centerYCoCg * centerYCoCg;
+    float2 offsets[9] = { float2(0.0f, 0.0f),  float2(1.0f, 0.0f),  float2(-1.0f, 0.0f), float2(0.0f, 1.0f), float2(0.0f, -1.0f),
+                          float2(1.0f, 1.0f), float2(1.0f, -1.0f), float2(-1.0f, 1.0f), float2(-1.0f, -1.0f) };
+    float  weights[9] = { 4.0f, 2.0f, 2.0f, 2.0f, 2.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
-    float2 offsets[4] = { float2(1.0f, 0.0f), float2(-1.0f, 0.0f), float2(0.0f, 1.0f), float2(0.0f, -1.0f) };
-
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 9; ++i) {
         float4 c      = texCurrent.SampleLevel(smp, input.uv + offsets[i] * texelSize, 0);
         float3 cYCoCg = RGBToYCoCg(c.rgb);
-        m1 += cYCoCg;
-        m2 += cYCoCg * cYCoCg;
+        m1 += cYCoCg * weights[i];
+        m2 += cYCoCg * cYCoCg * weights[i];
+        weightSum += weights[i];
     }
 
-    float3 mean   = m1 / 5.0f;
-    float3 stddev = sqrt(max(0.0f, (m2 / 5.0f) - (mean * mean)));
+    float3 mean   = m1 / weightSum;
+    float3 stddev = sqrt(max(0.0f, (m2 / weightSum) - (mean * mean)));
 
     if (any(isnan(stddev))) {
         stddev = 0.0f;
     }
 
-    float3 minColor = mean - stddev;
-    float3 maxColor = mean + stddev;
+    const float kMinVarianceRatio = 0.08f;
+    float3      clampFloor        = kMinVarianceRatio * max(mean.x, 1e-4f);
+
+    float3 minColor = mean - max(stddev, clampFloor);
+    float3 maxColor = mean + max(stddev, clampFloor);
     historyYCoCg    = ClipHistoryYCoCg(historyYCoCg, minColor, maxColor, mean);
 
     float3 blendedYCoCg = lerp(currentYCoCg, historyYCoCg, pc.feedback);
