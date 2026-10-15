@@ -7,11 +7,12 @@
 // clang-format off
 #include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
-#include <Zahlen/Audio/AudioTypes.hpp>
-#include <Zahlen/Core/AssetID.hpp>
+#include <ProjectLightClient/SceneMirror.hpp>
+#include <Replication/ClassVocabulary.hpp>
+#include <Replication/ReplicaState.hpp>
+#include <Replication/ReplicationComponents.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GameModule.hpp>
-#include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <array>
 #include <chrono>
@@ -137,45 +138,16 @@ struct LaunchConfig {
     -> std::expected<std::vector<std::string>, std::string>;
 
 // ============================================================================
-// Replicated server instance state (the live DataModel is held by the client)
+// Replicated instance state
 // ============================================================================
+//
+// The mirrored record, its playout history and the identity components all live
+// under Replication/. What is left in this header is transport: bytes in, bytes
+// out, and the session that owns both.
 
-enum class PartShape : uint8_t { Cube = 0, Sphere = 1, Wedge = 2, CornerWedge = 3, Cylinder = 4, Capsule = 5, Cone = 6, Head = 7 };
-enum class HumanoidState : uint8_t { Idle = 0, Running = 1, Jumping = 2, Freefall = 3, FallingDown = 4, GettingUp = 5 };
-
-struct TransformState {
-    JPH::Vec3 position       = JPH::Vec3::sZero();
-    JPH::Quat rotation       = JPH::Quat::sIdentity();
-    JPH::Vec3 linearVelocity = JPH::Vec3::sZero();
-};
-
-struct NetworkTransformSample {
-    JPH::Vec3                             position = JPH::Vec3::sZero();
-    JPH::Quat                             rotation = JPH::Quat::sIdentity();
-    std::chrono::steady_clock::time_point receivedAt;
-};
-
-// A small fixed ring keeps enough 60 Hz samples for a short, jitter-tolerant
-// 20 ms playout target without imposing the Python client's longer delay.
-struct NetworkTransformHistory {
-    static constexpr std::size_t Capacity = 8;
-
-    void Push(const NetworkTransformSample& sample) noexcept;
-    void Clear() noexcept {
-        m_next  = 0;
-        m_count = 0;
-    }
-    [[nodiscard]] auto Empty() const noexcept -> bool {
-        return m_count == 0;
-    }
-    [[nodiscard]] auto Sample(std::chrono::steady_clock::time_point renderTime, JPH::Vec3& position, JPH::Quat& rotation) const noexcept -> bool;
-
-  private:
-    std::array<NetworkTransformSample, Capacity> m_samples {};
-    std::size_t                                  m_next  = 0;
-    std::size_t                                  m_count = 0;
-};
-
+// InputControls is session-side: it is what this client sends, not what it is
+// told. Kept here rather than in Replication/ so a change to the outbound shape
+// lands next to the sender.
 struct InputControls {
     bool  forward  = false;
     bool  backward = false;
@@ -185,93 +157,16 @@ struct InputControls {
     float yaw      = -90.0f;
 };
 
-struct ReplicatedObject {
-    uint64_t    uid = 0u;
-    std::string className;
-    std::string name      = "Instance";
-    uint64_t    parentUid = 0u;
-
-    JPH::Vec3               position         = JPH::Vec3::sZero();
-    JPH::Vec3               rotationEulerDeg = JPH::Vec3::sZero();
-    JPH::Quat               rotationQuat     = JPH::Quat::sIdentity();
-    JPH::Vec3               linearVelocity   = JPH::Vec3::sZero();
-    JPH::Vec3               renderPosition   = JPH::Vec3::sZero();
-    JPH::Quat               renderRotation   = JPH::Quat::sIdentity();
-    NetworkTransformHistory physicsHistory {};
-    bool                    hasPhysicsSample = false;
-    JPH::Vec3               size             = JPH::Vec3(4.0f, 1.0f, 2.0f);
-    JPH::Vec3               color            = JPH::Vec3(0.75f, 0.75f, 0.75f);
-    float                   transparency     = 0.0f;
-    float                   metallic         = 0.0f;
-    float                   roughness        = 0.5f;
-    float                   emission         = 0.0f;
-    bool                    anchored         = false;
-    bool                    canCollide       = true;
-    uint64_t                networkOwnerUid  = 0u;
-    PartShape               shape            = PartShape::Cube;
-    std::string             meshId;
-    JPH::Vec3               meshScale = JPH::Vec3::sReplicate(1.0f);
-
-    uint64_t      primaryPartUid = 0u;
-    uint64_t      rootPartUid    = 0u;
-    uint64_t      characterUid   = 0u;
-    uint64_t      userId         = 0u;
-    HumanoidState humanoidState  = HumanoidState::Idle;
-    float         walkSpeed      = 16.0f;
-    float         jumpPower      = 50.0f;
-    float         health         = 100.0f;
-    float         maxHealth      = 100.0f;
-
-    uint64_t  part1Uid        = 0u;
-    uint64_t  part2Uid        = 0u;
-    JPH::Vec3 offset1         = JPH::Vec3::sZero();
-    JPH::Vec3 offset2         = JPH::Vec3::sZero();
-    JPH::Vec3 rotationOffset1 = JPH::Vec3::sZero();
-    JPH::Vec3 rotationOffset2 = JPH::Vec3::sZero();
-    float     currentAngle    = 0.0f;
-    float     desiredAngle    = 0.0f;
-    float     maxVelocity     = 30.0f;
-
-    bool  enabled      = true;
-    float intensity    = 1.0f;
-    bool  shadows      = true;
-    float sourceRadius = 0.0f;
-    // ProjectLight directional vectors describe ray travel; the renderer-facing
-    // conversion to a toward-source vector is done at the ECS boundary.
-    JPH::Vec3 direction       = JPH::Vec3(0.0f, -1.0f, 0.0f);
-    JPH::Vec3 nightColor      = JPH::Vec3(0.45f, 0.55f, 0.8f);
-    float     nightIntensity  = 0.35f;
-    bool      isMain          = false;
-    float     range           = 16.0f;
-    float     ambient         = 0.01f;
-    float     timeOfDay       = 14.0f;
-    float     latitude        = 0.0f;
-    bool      proceduralSky   = true;
-    bool      serverAuthority = false;
-
-    std::string soundId;
-    float       volume  = 0.5f;
-    bool        loops   = false;
-    bool        playing = false;
-
-    Entity      entity            = Entity::Null();
-    MaterialID  materialId        = InvalidMaterialID;
-    JPH::Vec3   spawnedSize       = JPH::Vec3::sZero();
-    PartShape   spawnedShape      = PartShape::Cube;
-    uint64_t    spawnedOwnerUid   = 0u;
-    bool        hasPhysicsBody    = false;
-    bool        spawnedAnchored   = false;
-    bool        spawnedCanCollide = true;
-    bool        spawnedBlend      = false;
-    bool        visualDirty       = true;
-    bool        transformDirty    = true;
-    bool        removalPending    = false;
-    AudioHandle audioHandle       = AudioHandle::Invalid;
-};
-
 // ============================================================================
-// TCP/UDP session, DataModel replicator, and ECS/renderer bridge
+// TCP/UDP session and DataModel replicator
 // ============================================================================
+//
+// ClientSession talks to the server: it connects, polls, decodes packets, applies
+// what they say to the mirrored records, and sends this client's own state back.
+// It does not build the scene -- that is SceneMirror's job, which it reaches
+// through MirrorState() and nothing else. The split matters because the two halves
+// fail differently: a session bug loses state, a mirror bug loses entities, and
+// only one of them needs a socket to reproduce.
 
 class ClientSession {
   public:
@@ -312,6 +207,18 @@ class ClientSession {
     }
     [[nodiscard]] auto FindObject(uint64_t uid) const noexcept -> const ReplicatedObject*;
 
+    // The session's uid -> entity binding: the one owner of "where is instance N
+    // in the scene". Spawning binds, teardown takes.
+    [[nodiscard]] auto Index() noexcept -> ReplicationIndex& {
+        return m_index;
+    }
+    [[nodiscard]] auto Index() const noexcept -> const ReplicationIndex& {
+        return m_index;
+    }
+    [[nodiscard]] auto EntityFor(InstanceId uid) const noexcept -> Entity {
+        return m_index.Find(uid);
+    }
+
     // Public packet hook is useful for deterministic, socket-free protocol tests.
     auto HandlePacket(const MsgPackValue& packet) -> bool;
     void PollNetwork(Engine& engine);
@@ -333,16 +240,11 @@ class ClientSession {
     void               RefreshPlayerLinks() noexcept;
     [[nodiscard]] auto IsPartOfCharacter(uint64_t partUid, uint64_t characterUid) const noexcept -> bool;
     [[nodiscard]] auto IsLocalCharacterPart(uint64_t uid) const noexcept -> bool;
-    [[nodiscard]] auto ShouldCreatePhysics(const ReplicatedObject& object) const noexcept -> bool;
 
-    void SyncSceneEntities(Engine& engine);
-    void SyncEnvironment(Engine& engine);
-    void SpawnOrUpdatePartEntity(Engine& engine, ReplicatedObject& object);
-    void SpawnOrUpdateLightEntity(Engine& engine, ReplicatedObject& object);
-    void UpdateLocalController(Engine& engine);
-    void UpdateLocalCharacterParts(Engine& engine, float dt);
-    void UpdateRemoteCharacterParts(Engine& engine, float dt);
-    void UpdateSoundVoices(Engine& engine);
+    // The scene half's view of this session. Built per call, never stored: the
+    // members above stay the owners, the mirror only visits them.
+    [[nodiscard]] auto MirrorState() noexcept -> SceneMirrorState;
+
     void SendRealtimeFrame(Engine& engine);
 
     [[nodiscard]] auto SendTcpPacket(const MsgPackValue& packet) -> bool;
@@ -405,6 +307,8 @@ class ClientSession {
     std::unordered_map<uint64_t, NetworkTransformHistory> m_playerControllerStates;
     std::vector<uint64_t>                                 m_pendingRemovals;
     std::unordered_map<uint64_t, ReplicatedObject>        m_objects;
+    ReplicationIndex                                      m_index;
+    SceneMirror                                           m_mirror;
 };
 
 // The module as a value: the client's two frame steps, the scene-cleanup pass

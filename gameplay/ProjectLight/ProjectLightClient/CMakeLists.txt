@@ -20,6 +20,7 @@ add_library(zahlen_project_light_client STATIC EXCLUDE_FROM_ALL
     ClientConfig.cpp
     ProjectLightClient.cpp
     LightProtocol.cpp
+    SceneMirror.cpp
 )
 
 set_target_properties(zahlen_project_light_client PROPERTIES

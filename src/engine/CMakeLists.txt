@@ -5,9 +5,9 @@
 # does not name is not compiled, and that failure mode is quiet: the symbols it
 # should have defined stay undefined, the shared library still links (undefined
 # symbols are allowed there), and only the callers that happen to sit in an
-# archive linked into an executable report them. configure/
-# check_source_registration.py is what makes forgetting one a configure error
-# instead of a link error in someone else's target.
+# archive linked into an executable report them. Add the file here in the same
+# commit that adds the file; the link error that says otherwise names a target
+# two steps away from the omission.
 
 set(RAW_ENGINE_SOURCES
     Log.cpp
