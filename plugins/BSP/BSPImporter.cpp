@@ -51,8 +51,12 @@ auto IsToolTexture(std::string_view name) -> bool {
 // ceiling fixture into a blinding glare. Scale them to read as bright but
 // sub-threshold. Missing textures would otherwise fall back to the raw
 // baseColor (usually pure white) and blow out wherever direct light reaches.
-inline constexpr float kUnlitDim          = 0.55f;
-inline constexpr float kMissingTextureDim = 0.25f;
+inline constexpr float kUnlitDim                   = 0.55f;
+inline constexpr float kMissingTextureDim          = 0.25f;
+// Source's self-illumination is authored for an LDR framebuffer. Preserve its
+// mask and colour, but lift it into useful HDR radiance so it survives PBR
+// exposure and contributes to bloom instead of stopping at the bloom threshold.
+inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
 auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true) -> TextureHandle {
     // 1. Try VTF first
@@ -302,9 +306,21 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         }
     }
 
-    // Shader class + emission, through the rules every material pass shares
-    // (see ApplyVmtLighting in BSPImporter.hpp). A material has to render the
-    // same on a brush face and on a prop, and Source puts the lamps on props.
+    // Source self-illumination is normally masked. Keep that spatial detail:
+    // an explicit mask wins, otherwise the base texture is the mask Source's
+    // $selfillum path uses. Sampling only a constant emissive factor made whole
+    // materials glow uniformly and left the authored lamp pixels dark.
+    if (const auto mask = material.Find("$selfillummask"); mask && !mask->empty()) {
+        if (const auto maskPath = vfs.ResolveTexture(*mask); maskPath) {
+            if (const auto maskBytes = vfs.ReadFile(*maskPath); maskBytes) {
+                desc.emissiveMap = LoadTextureFromBytes(ctx, *mask, *maskBytes, true);
+            }
+        }
+    } else if (material.Find("$selfillum").has_value()) {
+        desc.emissiveMap = desc.albedoMap;
+    }
+
+    // Shader class + emission, through the rules every material pass shares.
     ApplyVmtLighting(vfs, material, desc);
 
     return desc;
@@ -804,7 +820,7 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
     }
 
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
-    const float scale = emission.strength / luma;
+    const float scale = emission.strength * kSourceEmissionHdrScale / luma;
     desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
 
     // Emissive *and* unlit by construction: an UnlitGeneric that gets here is

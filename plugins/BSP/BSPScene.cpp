@@ -156,12 +156,22 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // `_ambient "64 95 166 10"` lands at (0.0033, 0.0050, 0.0087), which is
         // the same irradiance VRAD baked its LDR lightmaps against.
         const float ladder = 1.0f / (kAmbientBrightnessNormalisation * kAmbientExposure);
-        const JPH::Float3 sky = {ambient.color.GetX() * ambient.intensity * ladder,
-                                 ambient.color.GetY() * ambient.intensity * ladder,
-                                 ambient.color.GetZ() * ambient.intensity * ladder};
-        // Keep the authored chromaticity, keep the authored magnitude: the
-        // engine's defaults are a blue-grey noon, and a map that authored
-        // something else should not be quietly replaced by them.
+        JPH::Float3 sky = {ambient.color.GetX() * ambient.intensity * ladder,
+                           ambient.color.GetY() * ambient.intensity * ladder,
+                           ambient.color.GetZ() * ambient.intensity * ladder};
+
+        // VRAD's _ambient magnitude is irradiance for baked surfaces, not the
+        // visible sky's radiance. Using it verbatim made authored night skies
+        // nearly black after exposure. Preserve its chromaticity while giving
+        // the visible environment enough radiance to be a sky and an IBL miss.
+        const float peak = std::max({sky.x, sky.y, sky.z, 1.0e-5f});
+        constexpr float kNightSkyZenithFloor = 0.02f;
+        if (peak < kNightSkyZenithFloor) {
+            const float lift = kNightSkyZenithFloor / peak;
+            sky.x *= lift;
+            sky.y *= lift;
+            sky.z *= lift;
+        }
         scene.environment.skyZenith  = sky;
         scene.environment.skyHorizon = {sky.x * 4.0f, sky.y * 4.0f, sky.z * 4.0f};
         scene.environment.skyGround  = {sky.x * 0.35f, sky.y * 0.35f, sky.z * 0.35f};
