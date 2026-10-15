@@ -116,7 +116,6 @@ struct ByName {
 } // namespace
 
 FrameTelemetry::FrameTelemetry() {
-    m_frames.resize(kWindowFrames);
     m_scratch.resize(kWindowFrames);
 }
 
@@ -169,8 +168,7 @@ void FrameTelemetry::Tick() {
 
 void FrameTelemetry::Reset() {
     m_system.Reset();
-    m_write        = 0;
-    m_filled       = 0;
+    m_window.Clear();
     m_sinceStats   = 0;
     m_chartShown   = 0;
     m_ticksStarted = false;
@@ -210,11 +208,7 @@ auto FrameTelemetry::GpuStageCount() const noexcept -> size_t {
 }
 
 void FrameTelemetry::RecordSample(float frameMs) noexcept {
-    m_frames[m_write] = frameMs;
-    m_write           = (m_write + 1) % kWindowFrames;
-    if (m_filled < kWindowFrames) {
-        ++m_filled;
-    }
+    m_window.Push(frameMs);
     ++m_snapshot.frames;
 
     UpdateChart();
@@ -222,43 +216,40 @@ void FrameTelemetry::RecordSample(float frameMs) noexcept {
     // A window shorter than the stride has nothing to partition, and the numbers
     // are wanted in the first second of a run: refresh every frame until the
     // window is a stride deep, then on the stride.
-    if (m_filled < kPercentileStride || ++m_sinceStats >= kPercentileStride) {
+    if (m_window.Count() < kPercentileStride || ++m_sinceStats >= kPercentileStride) {
         RefreshStatistics();
         m_sinceStats = 0;
     }
 }
 
 void FrameTelemetry::UpdateChart() noexcept {
-    // The newest kChartFrames samples, oldest first: the rightmost bar is the
-    // frame that just happened.
-    const size_t shown = std::min(m_filled, kChartFrames);
-    m_chartShown       = shown;
-    for (size_t age = 0; age < shown; ++age) {
-        m_chart[shown - 1 - age] = m_frames[RingIndex(age)];
-    }
-    for (size_t i = shown; i < kChartFrames; ++i) {
-        m_chart[i] = 0.0f;
-    }
+    // The newest kChartFrames samples, oldest first, with the newest at the
+    // right: the window copies them into the end of the strip and says how many
+    // it wrote. A window that has not filled leaves the bars before it at zero.
+    m_chart.fill(0.0f);
+    m_chartShown = m_window.CopyNewest(std::span<float>(m_chart));
 }
 
 void FrameTelemetry::RefreshStatistics() noexcept {
-    if (m_filled == 0) {
+    const size_t count = m_window.Count();
+    if (count == 0) {
         return;
     }
 
+    // One pass over the window, oldest first: the wall time it covers, and its
+    // fastest and slowest frame.
     double seconds = 0.0;
-    float  minMs   = m_frames[0];
-    float  maxMs   = m_frames[0];
-    for (size_t i = 0; i < m_filled; ++i) {
-        const float sample = m_frames[i];
+    float  minMs   = m_window.Newest();
+    float  maxMs   = minMs;
+    m_window.ForEachOldest([&](float sample) -> void {
         seconds += static_cast<double>(sample) * 0.001;
         minMs = std::min(minMs, sample);
         maxMs = std::max(maxMs, sample);
-    }
+    });
 
     m_snapshot.windowSeconds = seconds;
-    m_snapshot.avgFps        = seconds > 0.0 ? static_cast<float>(static_cast<double>(m_filled) / seconds) : 0.0f;
-    m_snapshot.frameMsAvg    = static_cast<float>(seconds * 1000.0 / static_cast<double>(m_filled));
+    m_snapshot.avgFps        = seconds > 0.0 ? static_cast<float>(static_cast<double>(count) / seconds) : 0.0f;
+    m_snapshot.frameMsAvg    = static_cast<float>(seconds * 1000.0 / static_cast<double>(count));
     m_snapshot.frameMsMin    = minMs;
     m_snapshot.frameMsMax    = maxMs;
     m_snapshot.frameMsLow1   = SlowestMean(0.01f);
@@ -266,7 +257,7 @@ void FrameTelemetry::RefreshStatistics() noexcept {
 }
 
 auto FrameTelemetry::SlowestMean(float fraction) -> float {
-    const size_t count = m_filled;
+    const size_t count = m_window.Count();
     if (count == 0) {
         return 0.0f;
     }
@@ -277,7 +268,7 @@ auto FrameTelemetry::SlowestMean(float fraction) -> float {
     size_t tail = static_cast<size_t>(static_cast<double>(fraction) * static_cast<double>(count));
     tail        = std::clamp<size_t>(tail, 1, count);
 
-    std::copy_n(m_frames.begin(), count, m_scratch.begin());
+    m_window.CopyOldest(std::span<float>(m_scratch.data(), count));
 
     // nth_element leaves exactly the `tail` slowest samples in front of the cut,
     // unordered: the set is all a mean needs, and a partition costs one pass
@@ -292,14 +283,6 @@ auto FrameTelemetry::SlowestMean(float fraction) -> float {
         sum += static_cast<double>(*it);
     }
     return static_cast<float>(sum / static_cast<double>(tail));
-}
-
-auto FrameTelemetry::RingIndex(size_t age) const noexcept -> size_t {
-    // Walk back from the slot just written, which is the newest sample whatever
-    // m_write happens to be: a ring indexed from its oldest end would answer
-    // with the window's first samples once it fills, and the caller asking for
-    // the newest 128 would get the same 128 forever (see UpdateChart).
-    return (m_write + kWindowFrames - 1 - age) % kWindowFrames;
 }
 
 void FrameTelemetry::SampleStages() noexcept {

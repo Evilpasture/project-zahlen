@@ -365,7 +365,13 @@ set_target_properties(zahlen PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED
 
 if(ZHLN_BUILD_EXTRAS)
     add_executable(zahlen_ui_editor app/UIEditor.cpp)
-    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+    # The hierarchy row's label fit lives in the widget layer
+    # (extensions/Widget), so the editor measures through it instead of keeping
+    # its own copy of that arithmetic. zahlen_widgets arrives with
+    # add_subdirectory(extensions) further down: a link item resolves to its
+    # target by generate time, whatever the order here.
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine
+                          zahlen_widgets Jolt)
     target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
 
     zahlen_add_runtime_dlls(zahlen_ui_editor)

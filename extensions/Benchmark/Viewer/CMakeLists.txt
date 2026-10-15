@@ -55,9 +55,20 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 # LogicBenchmark* (GetBenchmark), so a consumer of this target is a consumer of
 # that type's definition. Core comes with it -- the panel is drawn through
 # GUI::Context and the window through Engine -- and is named for clarity.
+#
+# zahlen_widgets is where the panel's drawing patterns live: the rolling window
+# the frame-time chart is a projection of, the bar strips the chart, the stage
+# sparklines and the core cells are drawn as, the card an element opens on
+# hover, and the text measurement that keeps a line inside its column. PRIVATE
+# because none of it reaches this target's public header -- a consumer of the
+# viewer gets a viewer, not a widget library.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_benchmark
     zahlen_engine
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_widgets
 )
 
 # Public headers are included as <Benchmark/Viewer/...> by consumers, so the

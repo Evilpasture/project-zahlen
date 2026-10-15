@@ -38,6 +38,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Widget/TextFit.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
@@ -74,6 +75,15 @@ constexpr float            kGrowSnap        = 0.25f;
 constexpr float            kColorSnap       = 0.05f;
 constexpr float            kDegreeSnap      = 15.0f;
 constexpr std::string_view kCanvasStageId   = "CanvasStage";
+
+// The hierarchy's geometry, as the layout above builds it: a 260 px panel with
+// 10 px of padding, a row box with 4 px of its own, and 10 px of indent per
+// level. A row's label is cut to what is left of that width -- an element wider
+// than its box is not clipped, Clay draws past the edge, so a node several levels
+// down would otherwise draw its path over the panel's border.
+constexpr float kHierarchyRowTextWidth = kLeftPanelWidth - (10.0f * 2.0f) - (4.0f * 2.0f);
+constexpr float kHierarchyIndent       = 10.0f;
+constexpr float kHierarchyFontSize     = 13.0f;
 
 [[nodiscard]] auto Snap(float value, float step) -> float {
     if (step <= 0.0f) {
@@ -172,6 +182,11 @@ struct Session {
     ZHLN::ECS::Registry         previewGui;
     GUI::PropertyStore          previewProperties; // runtime instance; Design keeps `properties`
 
+    // The font the chrome draws with, for measuring a row against its panel
+    // (see DrawHierarchyRow): null until the atlas is built, and the measuring
+    // falls back to the documented ratio while it is.
+    const ZHLN::FontAtlas* fontAtlas = nullptr;
+
     XformMode    xform        = XformMode::None;
     GUI::NodeBox xformBackup  {};
     float        startMouseX  = 0.0f;
@@ -216,7 +231,17 @@ void DrawHierarchyRow(GUI::Context& gui, Session& session, const GUI::UINode& no
     std::array<char, 160> hierIdBuf {};
     std::array<char, 160> labelBuf {};
     const std::string_view hierId = ZHLN::FormatTo(hierIdBuf, "hier/{}", id);
-    const std::string_view label  = ZHLN::FormatTo(labelBuf, "{}  {}", id, ZHLN::Reflect::EnumToString(node.kind));
+
+    // The label is cut to the row it goes in rather than drawn past it (see
+    // <Widget/TextFit.hpp>): the indent is inside the row, the measure is the
+    // font the chrome is drawing with, and the cut goes into the buffer the
+    // label was formatted into, so a row costs no allocation a frame.
+    const float            indent  = static_cast<float>(depth) * kHierarchyIndent;
+    const float            advance = GUI::Widget::AdvancePerChar(session.fontAtlas, kHierarchyFontSize);
+    const float            textWidth = std::max(kHierarchyRowTextWidth - indent, 0.0f);
+    const std::string_view label = GUI::Widget::FitToWidthInto(
+        ZHLN::FormatTo(labelBuf, "{}  {}", id, ZHLN::Reflect::EnumToString(node.kind)), textWidth, advance, labelBuf
+    );
 
     gui.Box(
         hierId,
@@ -227,9 +252,9 @@ void DrawHierarchyRow(GUI::Context& gui, Session& session, const GUI::UINode& no
         },
         [&]() {
             if (depth > 0) {
-                gui.BeginRow(0.0f, static_cast<float>(depth) * 10.0f);
+                gui.BeginRow(0.0f, indent);
             }
-            gui.Text(label, 13.0f, {0.92f, 0.94f, 0.98f, 1.0f});
+            gui.Text(label, kHierarchyFontSize, {0.92f, 0.94f, 0.98f, 1.0f});
             if (depth > 0) {
                 gui.EndRow();
             }
@@ -971,6 +996,13 @@ auto main(int argc, char* argv[]) -> int {
     session.tree       = MakeDemoTree();
     session.selectedId = "panel";
     BindHostActions(session);
+
+    // The chrome's type, for measuring a hierarchy row against its panel. The
+    // atlas is the one the Context draws text with; until it exists the rows
+    // measure with the widget's fallback ratio.
+    if (auto settings = registry.GetSingleton<ZHLN::GUI::UISettingsComponent>(); settings && (settings->fontAtlas.glyphCount > 0)) {
+        session.fontAtlas = &settings->fontAtlas;
+    }
 
     ZHLN::Clock clock;
     while (kernel->IsRunning()) {

@@ -9,6 +9,9 @@
 #include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIData.hpp>
+#include <Widget/BarStrip.hpp>
+#include <Widget/HoverCard.hpp>
+#include <Widget/TextFit.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -80,13 +83,13 @@ inline constexpr float kSparkFloorMs = 0.05f;
 // The card a line or a cell opens under the pointer. It carries what the panel
 // would otherwise print as a second line under every reading -- the window's
 // tails, the clock, the provenance -- so the panel keeps what a glance needs and
-// the rest is one hover away.
-inline constexpr float       kCardFontSize   = 11.0f;
-inline constexpr float       kCardLineHeight = 14.0f; // a line at that size, plus its gap
-inline constexpr float       kCardPadding    = 6.0f;
-inline constexpr float       kCardGap        = 4.0f;
-inline constexpr float       kCardOffsetX    = 0.5f; // the panel's left edge, and non-zero so the box floats
-inline constexpr const char* kHoverCardId    = "hovercard";
+// the rest is one hover away. The card itself is drawn by the widget library
+// (see <Widget/HoverCard.hpp>, and Impl::CardStyle for these numbers): what is
+// left here is the panel's own type size and spacing.
+inline constexpr float kCardFontSize   = 11.0f;
+inline constexpr float kCardLineHeight = 14.0f; // a line at that size, plus its gap
+inline constexpr float kCardPadding    = 6.0f;
+inline constexpr float kCardGap        = 4.0f;
 
 // The panel's own element id: a card is placed against the element it belongs to
 // and against this, both as they were laid out in the last frame.
@@ -104,12 +107,11 @@ inline constexpr float kCoreLoadHot  = 85.0f;
 inline constexpr float kTelemetryWidthDefault = ((kTableNameMax + kTableValueWidth + kTableSparkWidth + (kTableGap * 2.0f)) * 2.0f) + kColumnGap +
                                                 (kPanelPadding * 2.0f);
 
-// Per-character advance assumed when the engine has no font asset and is drawing
-// with its embedded fallback. That fallback is 18/32 = 0.5625 em per glyph, and
-// JetBrains Mono -- the font this tree vendors -- is 0.6 em, which is also what
-// the panel was measured against on screen: a 30-character 16 px title is 288 px
-// of ink. The larger of the two, so the layout is never narrower than the text.
-inline constexpr float kFallbackAdvanceRatio = 0.6f;
+// Per-character advance assumed before the atlas has been measured, when the
+// table is laid out for the first time. The rule and its fallback live in
+// <Widget/TextFit.hpp>; this is the same ratio, so a first frame and a measured
+// frame agree.
+inline constexpr float kFallbackAdvanceRatio = ZHLN::GUI::Widget::kFallbackAdvanceRatio;
 
 // A row of the profiler table: what a name column, a value column and a
 // sparkline are laid out as. Rebuilt per frame from the font in use, so a longer
@@ -127,54 +129,13 @@ struct TableStyle {
     }
 };
 
-// The advance of one character at `fontSize`, straight from the atlas the
-// Context will draw with -- the product GUIContext's own measure function uses.
-// Absent or empty glyph data falls back to the ratio above.
-[[nodiscard]] auto AdvancePerChar(const ZHLN::FontAtlas* atlas, float fontSize) noexcept -> float {
-    if (atlas != nullptr && atlas->glyphCount > 0 && atlas->fontSize > 0.0f) {
-        // Every font this tree ships is monospaced, so one advance is all of
-        // them; in a proportional one 'M' is the widest, which is the safe
-        // choice either way.
-        const float advance = atlas->GlyphFor(static_cast<uint32_t>('M')).xadvance * atlas->ScaleFor(fontSize);
-        if (advance > 0.0f) {
-            return advance;
-        }
-    }
-    return kFallbackAdvanceRatio * fontSize;
-}
-
-// `text` cut to the longest prefix whose ink fits `maxWidth`, with a two-dot
-// ellipsis when anything was dropped. A text element wider than its box does not
-// clip -- Clay draws past the edge -- so a name column too narrow for its
-// content is a name drawn over the value beside it.
-// The slack every fit leaves. The advance is the atlas's average per character,
-// and a line of digits and capitals is wider than its average, so a line fitted
-// to its last character still overflows the box it is drawn in -- and a text that
-// overflows wraps, which puts the ".." on a line of its own and makes the
-// truncation look like a glitch rather than a cut. One character is enough to
-// cover the difference.
-inline constexpr float kFitSlackChars = 1.0f;
-
-// Whether a line drawn at this advance fits, asked before it is cut, so a caller
-// can lay a long line out twice instead of printing the end of it as "..".
-[[nodiscard]] auto FitsWidth(std::string_view text, float maxWidth, float advance) noexcept -> bool {
-    return advance <= 0.0f || maxWidth <= 0.0f || static_cast<float>(text.size()) <= (maxWidth / advance) - kFitSlackChars;
-}
-
-[[nodiscard]] auto FitToWidth(std::string_view text, float maxWidth, float advance) -> std::string {
-    if (advance <= 0.0f || maxWidth <= 0.0f) {
-        return std::string(text);
-    }
-
-    const size_t fits = static_cast<size_t>(std::max(0.0f, (maxWidth / advance) - kFitSlackChars));
-    if (text.size() <= fits) {
-        return std::string(text);
-    }
-    if (fits <= 3) {
-        return std::string(text.substr(0, std::min(text.size(), fits)));
-    }
-    return std::format("{}..", text.substr(0, fits - 2));
-}
+// The advance of one character, the fit that keeps a line inside its column and
+// the slack it leaves are the widget library's now: the panel asks
+// <Widget/TextFit.hpp> for all three instead of carrying its own copy of rules
+// that every panel needs.
+using ZHLN::GUI::Widget::AdvancePerChar;
+using ZHLN::GUI::Widget::FitToWidth;
+using ZHLN::GUI::Widget::FitsWidth;
 
 // The widest name in a run of rows, in pixels. Not a measurement of the glyphs
 // (that would be a pass per row per frame for a number that only moves when the
@@ -225,6 +186,29 @@ const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
     return percent >= kCoreLoadWarm ? kSlowBarInk : kFastBarInk;
 }
 
+// A core cell's history bars read by the same ramp as its percentage, and the
+// bars before the core's first sample are an absence rather than a reading --
+// which is the one thing a bar strip cannot decide for itself, so it asks.
+[[nodiscard]] auto CoreBarInk(void* /*user*/, [[maybe_unused]] size_t bar, float value, bool absent) -> JPH::Vec4 {
+    return absent ? kChartInk : LoadInk(value);
+}
+
+// The tick chart's bars: green to orange over the window, so the shape of the
+// distribution reads at a glance with the outliers the eye is looking for at the
+// top. The ramp is the bar's share of the scale the strip is drawing with, which
+// the caller passes by pointer -- the policy is told a bar's value, and the scale
+// is the caller's own number.
+[[nodiscard]] auto TickBarInk(void* user, [[maybe_unused]] size_t bar, float value, [[maybe_unused]] bool absent) -> JPH::Vec4 {
+    const float peak = *static_cast<const float*>(user);
+    const float fill = peak > 0.0f ? std::clamp(value / peak, 0.0f, 1.0f) : 0.0f;
+    return JPH::Vec4 {
+        kFastBarInk.GetX() + ((kSlowBarInk.GetX() - kFastBarInk.GetX()) * fill),
+        kFastBarInk.GetY() + ((kSlowBarInk.GetY() - kFastBarInk.GetY()) * fill),
+        kFastBarInk.GetZ() + ((kSlowBarInk.GetZ() - kFastBarInk.GetZ()) * fill),
+        1.0f
+    };
+}
+
 // One hardware series as the line the panel prints: the level now, the level
 // averaged, and the two tails of the window, all in the series' own unit --
 // percent as written, MHz divided down to GHz. The percentiles are labelled
@@ -265,14 +249,12 @@ inline constexpr float kChartScaleLows    = 1.5f;
 
 } // namespace
 
-// One card, held between the section that sees the pointer over something and
-// the end of the panel, where it is drawn: a card drawn the moment it is decided
-// sits under every row below it. The panel draws it last, floating and out of the
-// layout flow, which is also what lets it be as tall as its lines need.
-struct HoverCard {
-    std::string              id;    // the element the pointer is over
-    std::vector<std::string> lines; // what it says, one entry per line
-};
+// The card the pointer opens is the widget library's (see
+// <Widget/HoverCard.hpp>): the panel owns one state, whatever the pointer is
+// over fills it while the panel is being drawn, and the panel draws it last --
+// floating, out of the layout flow, and on top of everything above it. A card
+// drawn the moment it is decided sits under every row below it, which is the bug
+// the ordering exists to prevent.
 
 struct BenchmarkViewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
@@ -302,8 +284,10 @@ struct BenchmarkViewer::Impl {
     FrameTelemetry telemetry;
 
     // The card the pointer is over, when it is over one: set by the section that
-    // owns the element, drawn by the panel once everything else is down.
-    std::optional<HoverCard> hover;
+    // owns the element, drawn by the panel once everything else is down. Reset at
+    // the top of the panel, so it is one card per frame however many elements
+    // recognise the pointer.
+    GUI::Widget::HoverState hover;
 
     size_t pendingEntities  = 250;
     bool   visible          = false;
@@ -335,7 +319,25 @@ struct BenchmarkViewer::Impl {
     // spills past the panel or is cut shorter than it had to be, and this panel
     // draws at three sizes.
     [[nodiscard]] auto AdvanceAt(float fontSize) const noexcept -> float {
-        return tableCpu.fontSize > 0.0f ? tableCpu.advance * (fontSize / tableCpu.fontSize) : (kFallbackAdvanceRatio * fontSize);
+        return ZHLN::GUI::Widget::AdvanceAt(tableCpu.advance, tableCpu.fontSize, fontSize);
+    }
+
+    // The card's geometry: a line at 11 px with kCardLineHeight under it, the
+    // panel's own content width as the ceiling, and the panel's margin keeping it
+    // off the window edge. The advance is the one the table measured this frame,
+    // so a card cannot be laid out at a size nothing is drawn at.
+    [[nodiscard]] auto CardStyle() const noexcept -> GUI::Widget::HoverCardStyle {
+        return GUI::Widget::HoverCardStyle {
+            .fontSize     = kCardFontSize,
+            .lineHeight   = kCardLineHeight,
+            .advance      = AdvanceAt(kCardFontSize),
+            .padding      = kCardPadding,
+            .anchorGap    = kCardGap,
+            .windowMargin = kPanelMargin,
+            .maxWidth     = telemetryContent,
+            .ink          = kCardInk,
+            .textInk      = kBodyInk,
+        };
     }
 
     void DrawBenchmarkPanel(GUI::Context& ui);
@@ -347,7 +349,6 @@ struct BenchmarkViewer::Impl {
     void DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters);
     void DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
     void DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
-    void DrawHoverCard(GUI::Context& ui, const ZHLN::Extent2D& viewport);
     void DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
     void DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
     void DrawStageColumn(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
@@ -481,47 +482,32 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
             // The chart: the last kChartBars ticks, each bar scaled against the
             // worst tick in the window. Bars are laid out left to right and
             // bottom-aligned, which is what makes them read as time.
-            ui.Box(
-                "BenchmarkChart",
-                GUI::BoxConfig {
-                    .width      = {.fixed = kPanelContentWidth},
-                    .height     = {.fixed = kChartHeight},
-                    .color      = kChartInk,
-                    .gap        = kBarGap,
-                    .direction  = GUI::Direction::Row,
-                    .alignCross = GUI::Alignment::End,
-                },
-                [&]() -> void {
-                    const size_t shown = std::min(history.size(), kChartBars);
-                    if (shown == 0) {
-                        return;
+            const size_t shown = std::min(history.size(), kChartBars);
+            if (shown > 0) {
+                // The scale is the run's worst tick, floored so an empty history
+                // cannot divide by zero: the window's own tallest tick is at most
+                // that, so a bar scrolling out does not rescale the bars left in.
+                float       worst   = std::max(metrics.maxTickTimeMs, 0.001f);
+                const auto  samples = std::span<const float>(history).subspan(history.size() - shown);
+
+                ui.Box(
+                    "BenchmarkChart",
+                    GUI::BoxConfig {.width = {.fixed = kPanelContentWidth}, .height = {.fixed = kChartHeight}, .color = kChartInk},
+                    [&]() -> void {
+                        GUI::Widget::BarStrip(ui, samples, GUI::Widget::BarStripStyle {
+                            .width        = kPanelContentWidth,
+                            .height       = kChartHeight,
+                            .gap          = kBarGap,
+                            .minBarHeight = kMinBarHeight,
+                            .scale        = GUI::Widget::BarScale::OwnPeak,
+                            .peakFloor    = worst,
+                            .inkFor       = TickBarInk,
+                            .inkUser      = &worst,
+                            .idBase       = "BenchmarkBar",
+                        });
                     }
-
-                    const auto  bars    = static_cast<float>(shown);
-                    const float barWide = (kPanelContentWidth - ((bars - 1.0f) * kBarGap)) / bars;
-                    const float worst   = std::max(metrics.maxTickTimeMs, 0.001f);
-
-                    for (size_t i = history.size() - shown; i < history.size(); ++i) {
-                        const float sample = history[i];
-                        const float fill   = std::clamp(sample / worst, 0.0f, 1.0f);
-                        const float height = std::max(kMinBarHeight, fill * kChartHeight);
-
-                        // Green to orange over the window: the shape of the
-                        // distribution at a glance, with the outliers the eye
-                        // is looking for at the top.
-                        const JPH::Vec4 ink {
-                            kFastBarInk.GetX() + ((kSlowBarInk.GetX() - kFastBarInk.GetX()) * fill),
-                            kFastBarInk.GetY() + ((kSlowBarInk.GetY() - kFastBarInk.GetY()) * fill),
-                            kFastBarInk.GetZ() + ((kSlowBarInk.GetZ() - kFastBarInk.GetZ()) * fill), 1.0f
-                        };
-
-                        // A Box with no children still draws: Clay fills the
-                        // element's background, and Begin/End is the contract.
-                        ui.BeginBox(std::format("BenchmarkBar{}", i), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink});
-                        ui.EndBox();
-                    }
-                }
-            );
+                );
+            }
 
             ui.Row(8.0f, [&]() -> void {
                 if (ui.Button("+250")) {
@@ -537,43 +523,34 @@ void BenchmarkViewer::Impl::DrawBenchmarkPanel(GUI::Context& ui) {
 }
 
 void BenchmarkViewer::Impl::DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats) {
+    if (samples.empty()) {
+        return;
+    }
+
+    // The chart is scaled to the frame time that is normal, not to the worst
+    // one: a window holding one 200 ms stall would otherwise flatten every other
+    // bar against the floor. Bars past the top of the scale are clipped, and the
+    // lows they come from are printed directly above the chart. Green below the
+    // 1% low, orange at or above it: the tail the percentiles are computed from
+    // is the visible top of the chart.
+    //
+    // The strip draws its own box, so the chart's background goes on the box
+    // behind it -- same width, same height, and the bars fill it exactly.
     ui.Box(
-        "TelemetryChart",
-        GUI::BoxConfig {
-            .width      = {.fixed = telemetryContent},
-            .height     = {.fixed = kTelemetryChartHeight},
-            .color      = kChartInk,
-            .gap        = kBarGap,
-            .direction  = GUI::Direction::Row,
-            .alignCross = GUI::Alignment::End,
-        },
+        "TelemetryChart", GUI::BoxConfig {.width = {.fixed = telemetryContent}, .height = {.fixed = kTelemetryChartHeight}, .color = kChartInk},
         [&]() -> void {
-            if (samples.empty()) {
-                return;
-            }
-
-            const float bars    = static_cast<float>(samples.size());
-            const float barWide = (telemetryContent - ((bars - 1.0f) * kBarGap)) / bars;
-
-            // The chart is scaled to the frame time that is normal, not to the
-            // worst one: a window holding one 200 ms stall would otherwise
-            // flatten every other bar against the floor. Bars past the top of
-            // the scale are clipped, and the lows they come from are printed
-            // directly above the chart.
-            const float scale = std::max({stats.frameMsAvg * kChartScaleAverage, stats.frameMsLow1 * kChartScaleLows, 1.0f});
-
-            for (size_t i = 0; i < samples.size(); ++i) {
-                const float sample = samples[i];
-                const float fill   = std::clamp(sample / scale, 0.0f, 1.0f);
-                const float height = std::max(kMinBarHeight, fill * kTelemetryChartHeight);
-
-                // Green below the 1% low, orange at or above it: the tail the
-                // percentiles are computed from is the visible top of the chart.
-                const JPH::Vec4 ink = sample >= stats.frameMsLow1 ? kSlowBarInk : kFastBarInk;
-
-                ui.BeginBox(TableId("tchart", 0, i, 0), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink});
-                ui.EndBox();
-            }
+            GUI::Widget::BarStrip(ui, samples, GUI::Widget::BarStripStyle {
+                .width        = telemetryContent,
+                .height       = kTelemetryChartHeight,
+                .gap          = kBarGap,
+                .minBarHeight = kMinBarHeight,
+                .scale        = GUI::Widget::BarScale::Shared,
+                .sharedPeak   = std::max({stats.frameMsAvg * kChartScaleAverage, stats.frameMsLow1 * kChartScaleLows, 1.0f}),
+                .threshold    = stats.frameMsLow1,
+                .ink          = kFastBarInk,
+                .hotInk       = kSlowBarInk,
+                .idBase       = "tchart",
+            });
         }
     );
 }
@@ -656,40 +633,20 @@ void BenchmarkViewer::Impl::DrawStageRow(
             // shared scale would flatten every stage that is not the heaviest one.
             // The scale has a floor, so a row whose samples are all noise draws
             // small bars rather than a full block that cannot move.
-            const float bars    = static_cast<float>(row.spark.size());
-            const float barWide = (style.sparkWidth - ((bars - 1.0f) * kSparkBarGap)) / bars;
-            float       peak    = kSparkFloorMs;
-            for (const float sample: row.spark) {
-                peak = std::max(peak, sample);
-            }
+            const size_t blank = row.spark.size() - std::min(row.filled, row.spark.size());
 
-            ui.Box(
-                TableId(prefix, column, index, 2),
-                GUI::BoxConfig {
-                    .width      = {.fixed = style.sparkWidth},
-                    .height     = {.fixed = kStageSparkHeight},
-                    .gap        = kSparkBarGap,
-                    .direction  = GUI::Direction::Row,
-                    .alignCross = GUI::Alignment::End,
-                },
-                [&]() -> void {
-                    // The bars before the metric's first sample are an absence,
-                    // not readings: drawn in the dim chart ink the core grid uses
-                    // for the same thing, so a row that is three frames old stops
-                    // looking like a row that has gone quiet.
-                    const size_t blank = row.spark.size() - std::min(row.filled, row.spark.size());
-
-                    for (size_t bar = 0; bar < row.spark.size(); ++bar) {
-                        const float     fill   = std::clamp(row.spark[bar] / peak, 0.0f, 1.0f);
-                        const float     height = std::max(kMinBarHeight, fill * kStageSparkHeight);
-                        const JPH::Vec4 ink    = (bar < blank) ? kChartInk : (row.gpuStage ? kGpuSparkInk : kCpuSparkInk);
-                        ui.BeginBox(
-                            TableId(prefix, column, index, 3 + bar), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink}
-                        );
-                        ui.EndBox();
-                    }
-                }
-            );
+            GUI::Widget::BarStrip(ui, row.spark, GUI::Widget::BarStripStyle {
+                .width        = style.sparkWidth,
+                .height       = kStageSparkHeight,
+                .gap          = kSparkBarGap,
+                .minBarHeight = kMinBarHeight,
+                .scale        = GUI::Widget::BarScale::OwnPeak,
+                .peakFloor    = kSparkFloorMs,
+                .absentBars   = blank,
+                .ink          = row.gpuStage ? kGpuSparkInk : kCpuSparkInk,
+                .absentInk    = kChartInk,
+                .idBase       = TableId(prefix, column, index, 2),
+            });
         }
     );
 
@@ -697,98 +654,25 @@ void BenchmarkViewer::Impl::DrawStageRow(
     // the bars draw rather than only the sample it happens to end on, and -- when
     // the profiler has stopped hearing from the metric -- how long it has been.
     if (ui.IsPointerOver(rowId)) {
-        hover = HoverCard {.id = std::string(rowId), .lines = {}};
+        GUI::Widget::SetHover(hover, rowId);
 
         float windowPeak = 0.0f;
         for (const float sample: row.spark) {
             windowPeak = std::max(windowPeak, sample);
         }
 
-        hover->lines.push_back(row.name);
+        GUI::Widget::AddHoverLine(hover, row.name);
         if (row.filled > 0) {
-            hover->lines.push_back(
-                std::format("last {:.2f} ms   highest of the last {} frames {:.2f} ms", row.lastMs, row.filled, windowPeak)
+            GUI::Widget::AddHoverLine(
+                hover, std::format("last {:.2f} ms   highest of the last {} frames {:.2f} ms", row.lastMs, row.filled, windowPeak)
             );
         } else {
-            hover->lines.push_back(std::format("last {:.2f} ms", row.lastMs));
+            GUI::Widget::AddHoverLine(hover, std::format("last {:.2f} ms", row.lastMs));
         }
         if (stale) {
-            hover->lines.push_back(std::format("not reported for {} frames", row.quietTicks));
+            GUI::Widget::AddHoverLine(hover, std::format("not reported for {} frames", row.quietTicks));
         }
     }
-}
-
-// The card the element under the pointer opens. It is built out of the panel's
-// own line builder, so a reading reads the same here as it does on the panel.
-//
-// It is drawn as the last child of the panel so that it is on top: floating, out
-// of the layout flow, and never clipped. Its anchor is the element's rect from
-// the frame before, because this frame's layout is not finished while it is being
-// built -- which costs a card one frame of latency on the frame an element is
-// first hovered, and nothing after that.
-void BenchmarkViewer::Impl::DrawHoverCard(GUI::Context& ui, const ZHLN::Extent2D& viewport) {
-    if (!hover) {
-        return;
-    }
-
-    const std::optional<GUI::Context::ElementRect> anchor = ui.GetLastFrameRect(hover->id);
-    const std::optional<GUI::Context::ElementRect> panel  = ui.GetLastFrameRect(kTelemetryPanelId);
-    if (!anchor || !panel) {
-        return; // the element is not in the last frame's tree yet
-    }
-
-    // As wide as the longest line needs and never wider than the panel's own
-    // content, so a card cannot spill past the panel's right edge.
-    const float advance = AdvanceAt(kCardFontSize);
-    float       longest = 0.0f;
-    for (const std::string& line: hover->lines) {
-        longest = std::max(longest, static_cast<float>(line.size()));
-    }
-
-    const float width  = std::min(telemetryContent, (longest * advance) + (kCardPadding * 2.0f));
-    const float height = (static_cast<float>(hover->lines.size()) * kCardLineHeight) + (kCardPadding * 2.0f);
-
-    // Level with the element, in the space to the left of the panel -- over the
-    // frames the panel is reporting on rather than over the panel itself. That
-    // is not only tidier: hovering is a rectangle test against last frame's
-    // layout, so a card lying across the panel's own rows would hand the hover
-    // to whichever row it covers the moment the pointer reached it. A window
-    // with no room beside the panel gets the card under the element instead.
-    const float beside = (panel->x - width - kCardGap) - panel->x; // negative: the panel's left
-    float       offsetX = beside;
-    float       offsetY = anchor->y - panel->y;
-
-    if ((panel->x + beside) < kPanelMargin) {
-        offsetX = kCardOffsetX;
-        offsetY = (anchor->y + anchor->height + kCardGap) - panel->y;
-    }
-
-    // Neither placement may leave the window: the card is clamped into the
-    // margin, top and bottom, whichever side it ended up on.
-    offsetY = std::clamp(
-        offsetY, kPanelMargin - panel->y, (static_cast<float>(viewport.height) - height - kPanelMargin) - panel->y
-    );
-
-    ui.Box(
-        kHoverCardId,
-        GUI::BoxConfig {
-            .width        = {.fixed = width},
-            .color        = kCardInk,
-            .cornerRadius = {4.0f, 4.0f, 4.0f, 4.0f},
-            .padding      = kCardPadding,
-            .gap          = 2.0f,
-            .direction    = GUI::Direction::Column,
-            // Any non-zero offset floats the box, which is what puts the card
-            // over the panel's neighbours rather than in its column.
-            .offsetX      = offsetX,
-            .offsetY      = offsetY,
-        },
-        [&]() -> void {
-            for (const std::string& line: hover->lines) {
-                ui.Text(FitToWidth(line, width - (kCardPadding * 2.0f), advance), kCardFontSize, kBodyInk);
-            }
-        }
-    );
 }
 
 void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
@@ -812,14 +696,12 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSn
             ui.Text(FitToWidth(std::format("Machine  {}", backend.empty() ? std::string_view("no counters on this platform") : backend), telemetryContent, AdvanceAt(12.0f)), 12.0f, kTitleInk);
         });
         if (ui.IsPointerOver(id)) {
-            hover = HoverCard {
-                .id    = std::string(id),
-                .lines = {
-                    std::format("backend  {}", backend.empty() ? std::string("none compiled in for this platform") : std::string(backend)),
-                    std::format("{} samples over {:.0f} s of host frames", system.samples, system.windowSeconds),
-                    std::format("one reading every {} ms", SystemTelemetry::kSampleInterval.count()),
-                }
-            };
+            GUI::Widget::SetHover(hover, id);
+            GUI::Widget::AddHoverLine(
+                hover, std::format("backend  {}", backend.empty() ? std::string("none compiled in for this platform") : std::string(backend))
+            );
+            GUI::Widget::AddHoverLine(hover, std::format("{} samples over {:.0f} s of host frames", system.samples, system.windowSeconds));
+            GUI::Widget::AddHoverLine(hover, std::format("one reading every {} ms", SystemTelemetry::kSampleInterval.count()));
         }
     }
 
@@ -841,12 +723,12 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSn
         });
 
         if (ui.IsPointerOver(id) && (system.cpuUsagePct || system.cpuClockMHz)) {
-            hover = HoverCard {.id = std::string(id), .lines = {}};
+            GUI::Widget::SetHover(hover, id);
             if (system.cpuUsagePct) {
-                hover->lines.push_back(SeriesLine("cpu usage", *system.cpuUsagePct, 1.0f, 1, "%"));
+                GUI::Widget::AddHoverLine(hover, SeriesLine("cpu usage", *system.cpuUsagePct, 1.0f, 1, "%"));
             }
             if (system.cpuClockMHz) {
-                hover->lines.push_back(SeriesLine("cpu clock", *system.cpuClockMHz, 1000.0f, 2, " GHz"));
+                GUI::Widget::AddHoverLine(hover, SeriesLine("cpu clock", *system.cpuClockMHz, 1000.0f, 2, " GHz"));
             }
         }
     }
@@ -890,12 +772,12 @@ void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSn
         });
 
         if (ui.IsPointerOver(id)) {
-            hover = HoverCard {.id = std::string(id), .lines = {}};
+            GUI::Widget::SetHover(hover, id);
             if (system.gpuUsagePct) {
-                hover->lines.push_back(SeriesLine("gpu usage", *system.gpuUsagePct, 1.0f, 1, "%"));
+                GUI::Widget::AddHoverLine(hover, SeriesLine("gpu usage", *system.gpuUsagePct, 1.0f, 1, "%"));
             }
             if (system.gpuClockMHz) {
-                hover->lines.push_back(SeriesLine("gpu clock", *system.gpuClockMHz, 1000.0f, 2, " GHz"));
+                GUI::Widget::AddHoverLine(hover, SeriesLine("gpu clock", *system.gpuClockMHz, 1000.0f, 2, " GHz"));
             }
         }
     } else {
@@ -989,32 +871,22 @@ void BenchmarkViewer::Impl::DrawCoreCell(GUI::Context& ui, const CoreTelemetry& 
             const std::span<const float> history = counters.CoreUsageHistory(core.index, kCoreSparkBars);
             const size_t                 blank   = kCoreSparkBars - history.size();
 
-            const float bars    = static_cast<float>(kCoreSparkBars);
-            const float barWide = (cellWidth - ((bars - 1.0f) * kCoreSparkBarGap)) / bars;
-
-            ui.Box(
-                TableId("core", 0, cell, 2),
-                GUI::BoxConfig {
-                    .width      = {.fixed = cellWidth},
-                    .height     = {.fixed = kCoreSparkHeight},
-                    .gap        = kCoreSparkBarGap,
-                    .direction  = GUI::Direction::Row,
-                    .alignCross = GUI::Alignment::End,
-                },
-                [&]() -> void {
-                    for (size_t bar = 0; bar < kCoreSparkBars; ++bar) {
-                        const float     sample = bar < blank ? 0.0f : history[bar - blank];
-                        const float     fill   = std::clamp(sample / 100.0f, 0.0f, 1.0f);
-                        const float     height = std::max(kMinBarHeight, fill * kCoreSparkHeight);
-                        // A bar before this core's first sample is a floor, not a
-                        // reading: drawn dim so a young machine does not look
-                        // idle and busy at once.
-                        const JPH::Vec4 ink = bar < blank ? kChartInk : LoadInk(sample);
-                        ui.BeginBox(TableId("core", 0, cell, 3 + bar), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink});
-                        ui.EndBox();
-                    }
-                }
-            );
+            // The bars before this core's first sample are a floor, not a
+            // reading: the strip draws them in the dim ink, so a young machine
+            // does not look idle and busy at once, and the rest take the load
+            // ramp the cell's own percentage uses.
+            GUI::Widget::BarStrip(ui, history, GUI::Widget::BarStripStyle {
+                .width        = cellWidth,
+                .height       = kCoreSparkHeight,
+                .gap          = kCoreSparkBarGap,
+                .minBarHeight = kMinBarHeight,
+                .scale        = GUI::Widget::BarScale::Shared,
+                .sharedPeak   = 100.0f,
+                .absentBars   = blank,
+                .absentInk    = kChartInk,
+                .inkFor       = CoreBarInk,
+                .idBase       = TableId("core", 0, cell, 2),
+            });
         }
     );
 
@@ -1022,15 +894,15 @@ void BenchmarkViewer::Impl::DrawCoreCell(GUI::Context& ui, const CoreTelemetry& 
     // machine's own lines open, for the core it is on. A cell has no room for
     // three tenses of a number, and the panel has no room for twelve of them.
     if (ui.IsPointerOver(id)) {
-        hover = HoverCard {.id = std::string(id), .lines = {}};
+        GUI::Widget::SetHover(hover, id);
         if (core.usagePct) {
-            hover->lines.push_back(SeriesLine(std::format("core {:02} usage", core.index), *core.usagePct, 1.0f, 1, "%"));
+            GUI::Widget::AddHoverLine(hover, SeriesLine(std::format("core {:02} usage", core.index), *core.usagePct, 1.0f, 1, "%"));
         }
         if (core.clockMHz) {
-            hover->lines.push_back(SeriesLine("clock", *core.clockMHz, 1000.0f, 2, " GHz"));
+            GUI::Widget::AddHoverLine(hover, SeriesLine("clock", *core.clockMHz, 1000.0f, 2, " GHz"));
         }
-        if (hover->lines.empty()) {
-            hover.reset(); // a core with neither series has nothing to open
+        if (hover.lines.empty()) {
+            GUI::Widget::ResetHover(hover); // a core with neither series has nothing to open
         }
     }
 }
@@ -1081,7 +953,7 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
             .offsetY      = kPanelMargin,
         },
         [&]() -> void {
-            hover.reset(); // this frame's card is set by whatever the pointer is over
+            GUI::Widget::ResetHover(hover); // this frame's card is set by whatever the pointer is over
 
             ui.Text("Frame Telemetry  (host frames)", 16.0f, kTitleInk);
 
@@ -1117,10 +989,9 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
             // line of the panel for the rest of the session.
             const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
             if (ui.IsPointerOver(captureLabel)) {
-                hover = HoverCard {
-                    .id    = std::string(captureLabel),
-                    .lines = {"one CSV row per frame: the frame columns, then the machine columns", "written under build/cache/captures/"}
-                };
+                GUI::Widget::SetHover(hover, captureLabel);
+                GUI::Widget::AddHoverLine(hover, "one CSV row per frame: the frame columns, then the machine columns");
+                GUI::Widget::AddHoverLine(hover, "written under build/cache/captures/");
             }
 
             if (telemetry.IsCapturing()) {
@@ -1151,8 +1022,9 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
                 });
             }
 
-            // Last of all, so that it is on top of everything above it.
-            DrawHoverCard(ui, viewport);
+            // Last of all, so that it is on top of everything above it: out of
+            // the layout flow, beside the panel it belongs to.
+            GUI::Widget::DrawHoverCard(ui, hover, viewport, CardStyle(), kTelemetryPanelId);
         }
     );
 }

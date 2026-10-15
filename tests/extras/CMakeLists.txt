@@ -125,6 +125,49 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# --- Widget Suite ---
+# The widget layer (extensions/Widget) left the panels that had each grown their
+# own copy of it: the rolling window a history is kept in, the bar strip it is
+# drawn as, the hover card, and the fit that keeps a line inside its box. Links
+# the layer target it exercises and core the way every other suite here lists
+# the library it is written against, and drives it through the registry-only
+# GUI::Context constructor, so the placement rules are checked without a GPU.
+set(TARGET_NAME TestWidgets)
+add_executable(${TARGET_NAME} TestWidgets.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_widgets
+)
+
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${ZHLN_OPTIONAL_INCLUDE_ROOTS}
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})
+
 # --- Two-Bone IK Solver Suite ---
 # The analytic IK toolkit (solver, chain component, pose post-processor) left
 # core for extensions/Animation, and its solver test followed: the suite only

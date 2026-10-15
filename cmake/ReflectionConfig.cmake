@@ -130,7 +130,21 @@ endfunction()
 
 function(zahlen_enable_reflection TARGET_NAME)
     if(COMPILER_HAS_REFLECTION)
-        target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
+        # These flags are one set, and they have to travel as usage
+        # requirements rather than as flags only the target itself compiles
+        # with. Since 4.4 CMake gives every consumer whose compile options
+        # differ from the provider's a synthetic BMI target
+        # ("<provider>@synth_<n>") that rebuilds the provider's module units
+        # with the consumer's own plus transitive options and re-applies the
+        # provider's preprocessor options (defines, -I, -D) on top. A PRIVATE
+        # flag is dropped there: zahlen_engine's -fparameter-reflection reached
+        # such a target while -freflection did not, and the scan of
+        # modules/*.cppm died with "cannot specify '-fparameter-reflection'
+        # without '-freflection'". Public keeps the set together wherever the
+        # module units get built, and a consumer that adds nothing of its own
+        # now matches this target's options outright, so no second BMI set is
+        # generated for it at all.
+        target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
         if(COMPILER_HAS_PARAMETER_REFLECTION_FLAG)
             # CallableInspector is public API: consumers compiling its
             # templates need the same P3096 flag as Zahlen itself.
@@ -139,7 +153,10 @@ function(zahlen_enable_reflection TARGET_NAME)
             target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-freflection-latest>")
         endif()
         if(ZHLN_HAS_ANNOTATION_ATTRIBUTES)
-            target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
+            # The same set has one more member: the annotation syntax only
+            # appears where __cpp_impl_reflection is defined, and a synthetic
+            # target is handed that define back while losing a PRIVATE flag.
+            target_compile_options(${TARGET_NAME} PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
         endif()
         target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
     endif()

@@ -56,6 +56,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <Widget/RollingWindow.hpp>
 #include <vector>
 
 namespace ZHLN::Bench {
@@ -247,17 +248,15 @@ class ZHLN_STATIC_API FrameTelemetry {
     // The mean of the window's slowest `fraction` of frames, in ms.
     [[nodiscard]] auto SlowestMean(float fraction) -> float;
 
-    // The ring's slot for the sample `age` frames back (0 = newest).
-    [[nodiscard]] auto RingIndex(size_t age) const noexcept -> size_t;
-
-    // The window: a ring of frame intervals, a scratch copy for the percentile
-    // partition, and how much of the ring is live.
-    std::vector<float> m_frames;
-    std::vector<float> m_scratch;
-    size_t             m_write        = 0;
-    size_t             m_filled       = 0;
-    size_t             m_sinceStats   = 0;
-    bool               m_ticksStarted = false;
+    // The window: the frame intervals, and a scratch copy for the percentile
+    // partition. The ring is the widget's -- the ordering the chart, the
+    // statistics and the percentile partition all read is the one thing that
+    // cannot be written per panel, and the one thing that went wrong when it was
+    // (see <Widget/RollingWindow.hpp>).
+    GUI::Widget::RollingWindow<float, kWindowFrames> m_window;
+    std::vector<float>                          m_scratch;
+    size_t                                      m_sinceStats   = 0;
+    bool                                        m_ticksStarted = false;
 
     std::chrono::steady_clock::time_point m_lastTick {};
 
