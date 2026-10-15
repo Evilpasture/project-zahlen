@@ -8,7 +8,8 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -359,9 +360,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 namespace {
 
 // Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
-// original schedule position (after GameplayModule, before the simulation
-// graph) through the FrameSchedulerExtension seam.
+// Lifted from core's SystemWiring frame steps; the module declares it at its
+// original position -- after GameplayModule, before the simulation graph --
+// through the step list Describe() returns.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;
@@ -401,19 +402,45 @@ void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-void AddFrameStep(FrameScheduler& scheduler) {
-    scheduler.InsertAfter("GameplayModule", FramePhase::Fallback, "DefaultPreset", &FallbackStep);
+// Declared, and placed after "GameplayModule": the fallback decides whether
+// anything is going to run this frame, so it has to see the outcome of the
+// gameplay step and land before the simulation graph consumes the scene it
+// builds. It used to be inserted by a callback and re-inserted on every
+// schedule rebuild, with no way for anyone outside this file to see where it
+// went.
+constexpr ModuleStep kFrameSteps[] = {
+    {
+        .phase     = FramePhase::Fallback,
+        .name      = "DefaultPreset",
+        .run       = &FallbackStep,
+        .placement = StepPlacement::After,
+        .anchor    = "GameplayModule",
+    },
+};
+
+void Teardown(Engine& engine) {
+    DefaultPreset::ReleaseFor(&engine);
 }
 
 } // namespace
 
+auto Describe() -> Module {
+    return Module{
+        .name       = "FallbackScene",
+        .frameSteps = kFrameSteps,
+        .teardown   = &Teardown,
+    };
+}
+
 void Install(Engine& engine) {
-    engine.AddFrameSchedulerExtension(&AddFrameStep);
-    // The preset parks entity handles in process-global storage; release them
-    // while the owning engine's registry is still whole. This used to be a
-    // hard-coded DefaultPreset::ReleaseFor call in ~Engine -- a Core-to-gameplay-layer
-    // dependency that vanished with the move.
-    engine.AddTeardownHook([](Engine& e) { DefaultPreset::ReleaseFor(&e); });
+    // The preset parks entity handles in process-global storage; the module's
+    // teardown is what releases them, while the owning engine's registry is
+    // still whole. This used to be a hard-coded DefaultPreset::ReleaseFor call
+    // in ~Engine -- a Core-to-gameplay-layer dependency that vanished with the
+    // move.
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[FallbackScene] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN::FallbackScene

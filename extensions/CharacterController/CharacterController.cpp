@@ -7,7 +7,9 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
-#include "Zahlen/FrameScheduler.hpp"
+#include "Zahlen/GameModule.hpp"
+#include "Zahlen/Log.hpp"
+#include "Zahlen/FramePlan.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
@@ -46,18 +48,37 @@ void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     }
 }
 
-void AddFrameSteps(FrameScheduler& scheduler) {
-    // The input step ran first in the core schedule; InsertBefore
-    // "HostUICallback" restores that position now that the core no longer
-    // registers it.
-    if (!scheduler.InsertBefore("HostUICallback", FramePhase::Input, "CharacterInput", &CharacterInputStep)) {
-        scheduler.Add(FramePhase::Input, "CharacterInput", &CharacterInputStep);
-    }
-    // Player intent sits after hot-reload dispatch and before Physics,
-    // exactly where the core PlayerIntent phase step used to.
-    if (!scheduler.InsertAfter("ScriptAndShaderReload", FramePhase::PlayerIntent, "PlayerInputTranslate", &PlayerIntentStep)) {
-        scheduler.Add(FramePhase::PlayerIntent, "PlayerInputTranslate", &PlayerIntentStep);
-    }
+// The steps this module contributes, declared rather than inserted. The input
+// step ran first in the core schedule, and anchoring before "HostUICallback" is
+// that position restored now that core no longer registers it; player intent
+// sits after hot-reload dispatch and before Physics, where the core
+// PlayerIntent phase step used to.
+//
+// Inserting these from a callback is what this replaces. Both used to fall back
+// to a plain append when their anchor was missing, which put character input at
+// the end of the frame -- after rendering -- and said nothing. FramePlan::Compose
+// reports the missing anchor instead, and Engine::InstallModule hands that error
+// back here.
+constexpr ModuleStep kFrameSteps[] = {
+    {
+        .phase     = FramePhase::Input,
+        .name      = "CharacterInput",
+        .run       = &CharacterInputStep,
+        .placement = StepPlacement::Before,
+        .anchor    = "HostUICallback",
+    },
+    {
+        .phase     = FramePhase::PlayerIntent,
+        .name      = "PlayerInputTranslate",
+        .run       = &PlayerIntentStep,
+        .placement = StepPlacement::After,
+        .anchor    = "ScriptAndShaderReload",
+    },
+};
+
+void RegisterComponents(ECS::Registry& reg) {
+    reg.RegisterComponent<MovementComponent>();
+    reg.RegisterComponent<InputComponent>();
 }
 
 // --- Physics substep hooks ----------------------------------------------------
@@ -68,15 +89,6 @@ void CharacterPreStep(Engine& engine, float dt) {
     // Prop interaction runs with the steering it depends on: the impulse is
     // computed from the character velocity committed into the body just above.
     PushProps(engine.GetPhysicsContext(), engine.GetRegistry());
-}
-
-// --- Free-cam speed query -----------------------------------------------------
-
-std::optional<float> QueryFreeCamSpeed(ECS::Registry& reg, Entity target) {
-    if (auto move = reg.Get<MovementComponent>(target)) {
-        return move->speed;
-    }
-    return std::nullopt;
 }
 
 // --- Update-graph contributions ------------------------------------------------
@@ -122,15 +134,27 @@ void AddGraphSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
 
 } // namespace
 
-void Install(Engine& engine) {
-    auto& reg = engine.GetRegistry();
-    reg.RegisterComponent<MovementComponent>();
-    reg.RegisterComponent<InputComponent>();
+auto Describe() -> Module {
+    return Module{
+        .name               = "CharacterController",
+        .registerComponents = &RegisterComponents,
+        .frameSteps         = kFrameSteps,
+        .addGraphSystems    = &AddGraphSystems,
+    };
+}
 
-    engine.SetCharacterStepHooks({.preStep = &CharacterPreStep, .postStep = &WriteCharacterGrounded});
-    engine.SetFreeCamSpeedQuery(&QueryFreeCamSpeed);
-    engine.AddFrameSchedulerExtension(&AddFrameSteps);
-    engine.AddSystemGraphsExtension(&AddGraphSystems);
+void Install(Engine& engine) {
+    // The physics substep hooks are engine-owned lifecycle, not a contribution:
+    // they run inside PhysicsSystem's fixed-timestep loop, which no module can
+    // express as a frame step. See Engine::PhysicsSubstepHooks.
+    engine.SetPhysicsSubstepHooks({.preStep = &CharacterPreStep, .postStep = &WriteCharacterGrounded});
+
+    // A host that wants the placement error itself calls Describe() and
+    // Engine::InstallModule directly; Install is the two-line convenience and
+    // reports through the log.
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[Character] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN::Character

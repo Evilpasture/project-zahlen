@@ -32,6 +32,20 @@ ZHLN_STATIC_API uint32_t ZHLN_GetCommandID(const char* cmdName);
 // 2. Dispatches via O(1) jump table
 ZHLN_STATIC_API uint64_t ZHLN_DispatchCommand(struct ZHLN_Engine* engine, uint32_t cmdID, const void* args);
 
+// 3. Interns a command a *module* contributes, so a script can address it like
+//    any built-in one.
+//
+// The host calls this through ScriptCommandRegistry's interner hook whenever a
+// module adds a command. The name gets a jump-table entry whose handler
+// forwards to engine->GetScriptCommands() by name, which is what keeps this
+// file from naming the module that provides it -- the dispatch target is
+// resolved against whatever the host installed, at call time.
+//
+// Returns ZHLN_GetCommandID's sentinel (0xFFFFFFFF) for a null name. A name
+// that is already interned returns the existing id, so a re-install of the same
+// module is idempotent here as well.
+ZHLN_STATIC_API uint32_t ZHLN_RegisterModuleCommand(const char* cmdName);
+
 // ---------------------------------------------------------------------------
 // Reflection-driven access through ScriptBinder.
 //

@@ -18,9 +18,12 @@
 
 set(TARGET_NAME zahlen_alife)
 
-file(GLOB ZHLN_ALIFE_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_ALIFE_SOURCES
+    Factions.cpp
+    GOAP.cpp
+    Graph.cpp
+    Simulator.cpp
+    SpatialGrid.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -32,9 +35,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_ALIFE_SOURCES)
-    target_sources(${TARGET_NAME} PRIVATE ${ZHLN_ALIFE_SOURCES})
-endif()
+target_sources(${TARGET_NAME} PRIVATE ${ZHLN_ALIFE_SOURCES})
 
 # Core is a public dependency: Simulator.hpp and Graph.hpp name ZHLN::Engine and
 # ZHLN::Entity, and Simulator.cpp registers systems with the ECS, so a consumer

@@ -13,9 +13,10 @@
 
 set(TARGET_NAME zahlen_character_controller)
 
-file(GLOB ZHLN_CHARACTER_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_CHARACTER_SOURCES
+    CharacterController.cpp
+    CharacterMovement.cpp
+    PlayerInput.cpp
 )
 
 add_library(${TARGET_NAME} STATIC ${ZHLN_CHARACTER_SOURCES})

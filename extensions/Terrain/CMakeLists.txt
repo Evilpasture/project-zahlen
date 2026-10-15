@@ -13,9 +13,9 @@
 
 set(TARGET_NAME zahlen_terrain)
 
-file(GLOB ZHLN_TERRAIN_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_TERRAIN_SOURCES
+    TerrainFactory.cpp
+    TerrainSystem.cpp
 )
 
 add_library(${TARGET_NAME} STATIC ${ZHLN_TERRAIN_SOURCES})

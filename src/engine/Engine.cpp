@@ -18,7 +18,7 @@
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
@@ -64,15 +64,22 @@ struct EngineImpl {
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
-    std::vector<Engine::FrameSchedulerExtension> frameSchedulerExtensions;
-    std::vector<Engine::SystemGraphsExtension>   systemGraphsExtensions;
-    Engine::CharacterStepHooks                   characterStepHooks;
-    Engine::FreeCamSpeedQuery                    freeCamSpeedQuery     = nullptr;
-    BonePosePostProcessor                        bonePosePostProcessor = nullptr;
+    // The composition: what the application installed, in install order, and the
+    // timeline those modules' declared steps resolved into. The engine keeps the
+    // Module values rather than a list of callbacks, so a graph rebuild can ask
+    // each module for its systems and a report can say what is running.
+    std::vector<Module> modules;
+    FramePlan           framePlan;
+    bool                framePlanBuilt = false;
+    ScriptCommandRegistry scriptCommands;
+
+    Engine::PhysicsSubstepHooks                  physicsSubstepHooks;
+    // Engine-owned, handed out by reference: the list outlives every graph
+    // rebuild, which is what makes a late install work.
+    PosePostProcessorPipeline                    posePostProcessors;
     std::vector<Engine::TeardownHook>            teardownHooks;
     std::vector<Engine::SceneCleanupPass>        sceneCleanupPasses;
 
-    FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
     float physicsAccumulator = 0.0f;
 
@@ -445,7 +452,7 @@ void Engine::EnsureSystemGraphs() {
             .audio                 = _impl->kernel->GetAudioContext(),
             .assets                = _impl->kernel->GetAssetManager(),
             .articulation          = _impl->world->GetArticulationSystem(),
-            .bonePosePostProcessor = _impl->bonePosePostProcessor,
+            .posePostProcessors    = _impl->posePostProcessors,
             .poseUploads           = _impl->poseUploads,
         }
     );
@@ -551,9 +558,6 @@ void Engine::RunSceneCleanupPasses(bool all) {
     }
 }
 
-auto Engine::GetFrameScheduler() -> FrameScheduler& {
-    return _impl->scheduler;
-}
 auto Engine::GetArticulationSystem() -> ArticulationSystem& {
     return _impl->world->GetArticulationSystem();
 }
@@ -599,52 +603,72 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
     return _impl->deviceLostCallbacks.size();
 }
 
-void Engine::AddFrameSchedulerExtension(FrameSchedulerExtension ext) {
-    if (ext != nullptr) {
-        _impl->frameSchedulerExtensions.push_back(ext);
+auto Engine::InstallModule(const Module& module) -> std::expected<void, FramePlanError> {
+    // The plan first, and on a plan that core has already seeded: a module's
+    // steps are placed against names core owns, and placing them can fail. Doing
+    // it before anything else is applied is what makes the failure clean -- a
+    // module whose steps cannot be placed registers nothing at all.
+    EnsureFramePlan();
+    if (auto composed = _impl->framePlan.Compose(module.frameSteps); !composed) {
+        return composed;
     }
-}
 
-void Engine::AddSystemGraphsExtension(SystemGraphsExtension ext) {
-    if (ext != nullptr) {
-        _impl->systemGraphsExtensions.push_back(ext);
+    if (module.registerComponents != nullptr) {
+        module.registerComponents(GetRegistry());
     }
-}
-
-void Engine::ApplyFrameSchedulerExtensions(FrameScheduler& scheduler) {
-    for (const auto ext: _impl->frameSchedulerExtensions) {
-        ext(scheduler);
+    if (module.sceneCleanup != nullptr) {
+        (void)AddSceneCleanupPass(module.sceneCleanup);
     }
-}
-
-void Engine::ApplySystemGraphsExtensions(SimGraph& updateGraph, RenderGraph& renderGraph) {
-    for (const auto ext: _impl->systemGraphsExtensions) {
-        ext(updateGraph, renderGraph);
+    if (module.teardown != nullptr) {
+        AddTeardownHook(module.teardown);
     }
+    if (module.registerScriptCommands != nullptr) {
+        module.registerScriptCommands(_impl->scriptCommands);
+    }
+
+    _impl->modules.push_back(module);
+    return {};
 }
 
-void Engine::SetCharacterStepHooks(CharacterStepHooks hooks) {
-    _impl->characterStepHooks = hooks;
+auto Engine::GetInstalledModules() const noexcept -> std::span<const Module> {
+    return _impl->modules;
 }
 
-auto Engine::GetCharacterStepHooks() const noexcept -> const CharacterStepHooks& {
-    return _impl->characterStepHooks;
+auto Engine::GetFramePlan() -> FramePlan& {
+    EnsureFramePlan();
+    return _impl->framePlan;
 }
 
-void Engine::SetBonePosePostProcessor(BonePosePostProcessor processor) {
-    _impl->bonePosePostProcessor = processor;
+auto Engine::GetFramePlan() const noexcept -> const FramePlan& {
+    return _impl->framePlan;
 }
 
-auto Engine::GetBonePosePostProcessor() const noexcept -> BonePosePostProcessor {
-    return _impl->bonePosePostProcessor;
+auto Engine::GetScriptCommands() noexcept -> ScriptCommandRegistry& {
+    return _impl->scriptCommands;
 }
 
-void Engine::SetFreeCamSpeedQuery(FreeCamSpeedQuery query) {
-    _impl->freeCamSpeedQuery = query;
+auto Engine::GetScriptCommands() const noexcept -> const ScriptCommandRegistry& {
+    return _impl->scriptCommands;
 }
 
-auto Engine::GetFreeCamSpeedQuery() const noexcept -> FreeCamSpeedQuery {
-    return _impl->freeCamSpeedQuery;
+void Engine::EnsureFramePlan() {
+    if (_impl->framePlanBuilt) {
+        return;
+    }
+    _impl->framePlanBuilt = true;
+    BuildCoreFramePlan(*this);
+}
+
+void Engine::SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks) {
+    _impl->physicsSubstepHooks = hooks;
+}
+
+auto Engine::GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks& {
+    return _impl->physicsSubstepHooks;
+}
+
+auto Engine::GetPosePostProcessors() -> PosePostProcessorPipeline& {
+    return _impl->posePostProcessors;
 }
 
 void Engine::AddTeardownHook(TeardownHook hook) {
@@ -670,14 +694,19 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
-    _impl->scheduler.Execute(*this, dt, ctx);
+    // The plan is whatever the composition produced: core's own steps, plus one
+    // set of steps per module the application installed. The engine executes it
+    // and nothing else -- it holds no callbacks to replay and no ordering of its
+    // own beyond the core steps BuildCoreFramePlan places.
+    EnsureFramePlan();
+    _impl->framePlan.Execute(*this, dt, ctx);
 
     _impl->frameCounter++;
 
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions)
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ModuleInstaller installModules)
     -> std::expected<void, ErrorCode> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
@@ -711,8 +740,11 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     auto engine = std::move(engine_res.value());
     engine->GetPlatformHost().Focus();
 
-    if (installExtensions != nullptr) {
-        installExtensions(*engine);
+    // The application's install pass, before the first scene: modules contribute
+    // components and declare their frame steps, and InitializeDefaultScene then
+    // builds the graphs with the systems they added.
+    if (installModules != nullptr) {
+        installModules(*engine);
     }
 
     engine->InitializeDefaultScene();

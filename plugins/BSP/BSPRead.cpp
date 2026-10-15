@@ -179,6 +179,26 @@ auto BSPEntity::FindFloat(std::string_view key) const noexcept -> std::optional<
     return std::nullopt;
 }
 
+auto BSPEntity::FindUInt(std::string_view key) const noexcept -> std::optional<uint32_t> {
+    const std::string_view raw = Find(key);
+    if (raw.empty()) {
+        return std::nullopt;
+    }
+    const char* cur = raw.data();
+    const char* end = raw.data() + raw.size();
+    while (cur < end && (*cur == ' ' || *cur == '\t')) {
+        cur++;
+    }
+    if (cur >= end) {
+        return std::nullopt;
+    }
+    uint32_t val = 0;
+    if (auto [ptr, ec] = std::from_chars(cur, end, val); ec == std::errc {}) {
+        return val;
+    }
+    return std::nullopt;
+}
+
 auto BSPEntity::FindInt(std::string_view key) const noexcept -> std::optional<int32_t> {
     const std::string_view raw = Find(key);
     if (raw.empty()) {

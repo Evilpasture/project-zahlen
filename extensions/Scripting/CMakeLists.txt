@@ -10,8 +10,10 @@
 # includes a Lua header, so a host that wants the binder can link it without
 # pulling in a Lua runtime.
 #
-# The LuaJIT-backed runtime is configured after gameplay so its ProjectLight bindings can link DataModel; it is
-# the only scripting code in this tree that links LuaJIT.
+# The LuaJIT-backed runtime is configured after gameplay because ProjectLight's
+# Lua bindings (gameplay/ProjectLight/LuaBindings) link the DataModel and the
+# runtime together; they are the only scripting code in this tree that links
+# LuaJIT, and the only place the two layers meet.
 
 set(TARGET_NAME zahlen_scripting)
 

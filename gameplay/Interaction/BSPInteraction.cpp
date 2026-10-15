@@ -1,145 +1,28 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// gameplay/Interaction/BSPInteraction.cpp
+//
+// Two halves of the same idea: the runtime dispatch that runs a door's inputs,
+// and the translation pass that builds the components it dispatches on.
+//
+// The decoding moved to plugins/BSP -- see the header for why the split is on
+// this line. What is left is the part that is about *this game*: the defaults
+// a mapper did not specify, the flag combinations that mean "usable", and the
+// geometry of how far a door travels.
+
 #include "BSPInteraction.hpp"
-#include <BSP/BSPGeometry.hpp>
-#include <BSP/BSPRead.hpp>
-#include <BSP/BSPScene.hpp>
+#include <BSP/BSPInteraction.hpp>
+#include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <algorithm>
-#include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <string>
-#include <string_view>
 
 namespace ZHLN::Interaction {
 
-namespace {
-
-auto ParseFloat(std::string_view sv, float defaultVal = 0.0f) noexcept -> float {
-    if (sv.empty()) {
-        return defaultVal;
-    }
-    const char* cur = sv.data();
-    const char* end = sv.data() + sv.size();
-    while (cur < end && (*cur == ' ' || *cur == '\t')) {
-        cur++;
-    }
-    if (cur >= end) {
-        return defaultVal;
-    }
-    float val = defaultVal;
-    std::from_chars(cur, end, val);
-    return val;
-}
-
-auto ParseUInt(std::string_view sv, uint32_t defaultVal = 0) noexcept -> uint32_t {
-    if (sv.empty()) {
-        return defaultVal;
-    }
-    const char* cur = sv.data();
-    const char* end = sv.data() + sv.size();
-    while (cur < end && (*cur == ' ' || *cur == '\t')) {
-        cur++;
-    }
-    if (cur >= end) {
-        return defaultVal;
-    }
-    uint32_t val = defaultVal;
-    std::from_chars(cur, end, val);
-    return val;
-}
-
-auto ParseInt(std::string_view sv, int32_t defaultVal = 0) noexcept -> int32_t {
-    if (sv.empty()) {
-        return defaultVal;
-    }
-    const char* cur = sv.data();
-    const char* end = sv.data() + sv.size();
-    while (cur < end && (*cur == ' ' || *cur == '\t')) {
-        cur++;
-    }
-    if (cur >= end) {
-        return defaultVal;
-    }
-    int32_t val = defaultVal;
-    std::from_chars(cur, end, val);
-    return val;
-}
-
-auto ParseMoveDir(std::string_view movedirStr, const BSP::ImportOptions& opts) -> JPH::Vec3 {
-    if (movedirStr.empty()) {
-        return ConvertDirection(opts, JPH::Vec3::sAxisX());
-    }
-    float       v[3] = {0.0f, 0.0f, 0.0f};
-    const char* cur  = movedirStr.data();
-    const char* end  = movedirStr.data() + movedirStr.size();
-    for (float& component: v) {
-        while (cur < end && (*cur == ' ' || *cur == '\t')) {
-            cur++;
-        }
-        if (cur >= end) {
-            break;
-        }
-        auto [ptr, ec] = std::from_chars(cur, end, component);
-        if (ec != std::errc {}) {
-            break;
-        }
-        cur = ptr;
-    }
-    // Special Source conventions:
-    // -1 0 0 => UP (+Z in Source Z-up)
-    // -2 0 0 => DOWN (-Z in Source Z-up)
-    if (std::abs(v[0] - (-1.0f)) < 0.01f && std::abs(v[1]) < 0.01f && std::abs(v[2]) < 0.01f) {
-        return ConvertDirection(opts, JPH::Vec3(0.0f, 0.0f, 1.0f));
-    }
-    if (std::abs(v[0] - (-2.0f)) < 0.01f && std::abs(v[1]) < 0.01f && std::abs(v[2]) < 0.01f) {
-        return ConvertDirection(opts, JPH::Vec3(0.0f, 0.0f, -1.0f));
-    }
-    const float     pitch = v[0] * (3.14159265358979323846f / 180.0f);
-    const float     yaw   = v[1] * (3.14159265358979323846f / 180.0f);
-    const float     cp    = std::cos(pitch);
-    const JPH::Vec3 sourceDir(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
-    if (sourceDir.LengthSq() < 1e-4f) {
-        return ConvertDirection(opts, JPH::Vec3(1.0f, 0.0f, 0.0f));
-    }
-    return ConvertDirection(opts, sourceDir.Normalized());
-}
-
-auto FindMatchingEntity(ECS::Registry& registry, std::string_view matchName, std::string_view modelSource) -> Entity {
-    if (!modelSource.empty()) {
-        // A targetname is not an entity identity: Source deliberately allows
-        // many brush entities to share one so an input can address the whole
-        // group. Match the unique brush submodel first; otherwise every member
-        // of a named door bank attaches its components to the first entity.
-        std::string modelSuffix;
-        if (modelSource.starts_with('*')) {
-            modelSuffix = "#model_" + std::string(modelSource.substr(1));
-        }
-        for (const Entity e: registry.GetEntitiesWith<Components::SceneSourceComponent>()) {
-            const auto srcComp = registry.Get<Components::SceneSourceComponent>(e);
-            if (!srcComp) {
-                continue;
-            }
-            const std::string_view source(srcComp->source);
-            if (source == modelSource || (!modelSuffix.empty() && source.ends_with(modelSuffix))) {
-                return e;
-            }
-        }
-    }
-    for (const Entity e: registry.GetEntitiesWith<Components::NameComponent>()) {
-        const auto nameComp = registry.Get<Components::NameComponent>(e);
-        if (nameComp && std::string_view(nameComp->name) == matchName) {
-            return e;
-        }
-    }
-    return Entity::Null();
-}
-
-} // namespace
+// --- Dispatch ---------------------------------------------------------------
 
 void FireEntityInput(
     ECS::Registry&                registry,
@@ -186,7 +69,7 @@ void FireEntityInput(
                 } else if (input == "Unlock") {
                     door->flags &= ~DoorFlags::Locked;
                 } else if (input == "SetSpeed") {
-                    door->speed = ParseFloat(parameter, 100.0f);
+                    door->speed = BSP::ParseFloatOr(parameter, 100.0f);
                 }
             }
 
@@ -298,320 +181,295 @@ void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view 
     }
 }
 
-void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
-    for (const BSP::BSPEntity& entity: map.entities) {
-        const std::string_view className = entity.Find("classname");
-        if (className.empty()) {
-            continue;
-        }
+// --- The translation pass ---------------------------------------------------
 
-        // Teleport landing points are pure logic: DescribeScene deliberately
-        // keeps info_* classes out of the scene entities, so the interaction
-        // layer creates its own lightweight entity here -- a name and a
-        // transform, no mesh and no physics. trigger_teleport resolves its
-        // `target` keyvalue against these names.
-        if (className == "info_teleport_destination") {
-            const auto destName = entity.Find("targetname");
-            if (destName.empty()) {
-                continue; // unnamed destinations are not addressable
+namespace {
+
+// This game's defaults for a mapper's omitted fields. Source-shaped numbers,
+// but they are *rules* -- what a door does when the map does not say -- and
+// they belong to the layer that owns the behaviour.
+constexpr float kDefaultDoorSpeed     = 100.0f; // units per second
+constexpr float kDefaultDoorWait      = 4.0f;   // seconds open before closing
+constexpr float kDefaultDoorRotation  = 90.0f;  // degrees of angular travel
+constexpr float kDefaultButtonSpeed   = 100.0f;
+constexpr float kDefaultButtonWait    = 3.0f;
+constexpr float kDefaultButtonTravel  = 0.05f;  // metres, when the map sets no lip
+constexpr float kDefaultTriggerWait   = 0.2f;   // re-arm delay
+constexpr float kMinLinearTravel      = 0.5f;   // metres, so a zero-extent brush still moves
+
+[[nodiscard]] auto DoorFlagsFrom(const BSP::DoorFlags& decoded, bool rotating) noexcept -> DoorFlags {
+    DoorFlags flags = rotating ? DoorFlags::Rotating : DoorFlags::None;
+    if (decoded.startsOpen) {
+        flags |= DoorFlags::StartsOpen;
+    }
+    if (decoded.toggle) {
+        flags |= DoorFlags::Toggle;
+    }
+    if (decoded.useOpens) {
+        flags |= DoorFlags::UseOpens;
+    }
+    if (decoded.touchOpens) {
+        flags |= DoorFlags::TouchOpens;
+    }
+    if (decoded.locked) {
+        flags |= DoorFlags::Locked;
+    }
+    // A door nobody can use is a wall: unless the map asked for touch
+    // activation, +use opens it.
+    if ((flags & (DoorFlags::UseOpens | DoorFlags::TouchOpens)) == DoorFlags::None) {
+        flags |= DoorFlags::UseOpens;
+    }
+    return flags;
+}
+
+[[nodiscard]] auto ButtonFlagsFrom(const BSP::ButtonFlags& decoded) noexcept -> ButtonFlags {
+    // Unlike a door, a button starts out usable and the flags add to that.
+    ButtonFlags flags = ButtonFlags::UseActivates;
+    if (decoded.dontMove) {
+        flags |= ButtonFlags::DontMove;
+    }
+    if (decoded.toggle) {
+        flags |= ButtonFlags::Toggle;
+    }
+    if (decoded.touchActivates) {
+        flags |= ButtonFlags::TouchActivates;
+    }
+    if (decoded.damageActivates) {
+        flags |= ButtonFlags::DamageActivates;
+    }
+    if (decoded.useActivates) {
+        flags |= ButtonFlags::UseActivates;
+    }
+    return flags;
+}
+
+[[nodiscard]] auto TriggerFlagsFrom(BSP::InteractiveKind kind) noexcept -> TriggerFlags {
+    TriggerFlags flags = TriggerFlags::Active;
+    if (kind == BSP::InteractiveKind::TriggerOnce) {
+        flags |= TriggerFlags::TriggerOnce;
+    }
+    if (kind == BSP::InteractiveKind::TriggerTeleport) {
+        flags |= TriggerFlags::Teleports;
+    }
+    return flags;
+}
+
+[[nodiscard]] auto HalfExtentsOf(ECS::Registry& registry, Entity e) -> JPH::Vec3 {
+    const auto source = registry.Get<Components::SceneSourceComponent>(e);
+    return source ? JPH::Vec3(source->halfExtents) : JPH::Vec3::sZero();
+}
+
+void AttachOutputs(ECS::Registry& registry, Entity e, const std::vector<BSP::EntityOutput>& outputs) {
+    if (outputs.empty()) {
+        return;
+    }
+    EntityConnectionComponent conn;
+    for (const BSP::EntityOutput& decoded: outputs) {
+        // The one conversion this pass makes: decoded strings into the fixed
+        // size names the runtime dispatch compares against.
+        conn.AddOutput(
+            EntityOutput {
+                .event       = String64(decoded.key),
+                .target      = String64(decoded.target),
+                .input       = String64(decoded.input),
+                .parameter   = String64(decoded.parameter),
+                .delay       = decoded.delay,
+                .timesToFire = decoded.timesToFire,
             }
-            const auto  originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-            const auto  anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-            // Exact conjugated Source rotation: TeleportPlayer recovers the
-            // post-teleport view direction from this transform's +X axis.
-            const JPH::Vec3 engineAngles  = BSP::EngineEulerAnglesFromSourceAngles(JPH::Vec3(anglesArr[0], anglesArr[1], anglesArr[2]), options);
-            const JPH::Vec3 enginePos     = BSP::ConvertPosition(options, JPH::Vec3(originArr[0], originArr[1], originArr[2]));
+        );
+    }
+    if (conn.outputCount > 0) {
+        registry.Add(e, std::move(conn));
+    }
+}
+
+void AttachDoor(
+    ECS::Registry& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, Components::TransformComponent* transform
+) {
+    const bool       rotating = record.kind == BSP::InteractiveKind::DoorRotating;
+    const DoorFlags  flags    = DoorFlagsFrom(*record.door, rotating);
+
+    const float speed    = record.speed.value_or(kDefaultDoorSpeed);
+    const float wait     = record.wait.value_or(kDefaultDoorWait);
+    const float lip      = record.lip.value_or(0.0f);
+
+    const JPH::Vec3 closedPos = transform ? transform->position : JPH::Vec3::sZero();
+    JPH::Vec3       openPos   = closedPos;
+    const JPH::Quat closedRot = transform ? transform->rotation : JPH::Quat::sIdentity();
+    JPH::Quat       openRot   = closedRot;
+    JPH::Vec3       rotAxis   = JPH::Vec3::sAxisY();
+    float           rotAngle  = record.distance.value_or(kDefaultDoorRotation);
+    float           speedNorm = 1.0f;
+
+    if (rotating) {
+        if (record.door->rotateBack) {
+            rotAngle = -rotAngle;
+        }
+        const JPH::Vec3 sourceAxis = record.door->axisX ? JPH::Vec3::sAxisX() : (record.door->axisY ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ());
+        rotAxis                    = BSP::ConvertDirection(options, sourceAxis);
+        openRot                    = closedRot * JPH::Quat::sRotation(rotAxis, JPH::DegreesToRadians(rotAngle));
+        speedNorm                  = std::abs(speed / std::max(std::abs(rotAngle), 1.0f));
+    } else {
+        // Travel is the brush's own extent along the direction it moves, minus
+        // the lip; a door that has to open past its frame does not go further
+        // than its own thickness.
+        const JPH::Vec3 half           = HalfExtentsOf(registry, record.entity);
+        const JPH::Vec3 moveDir        = record.moveDirection;
+        const float     extentAlongDir = std::abs(half.GetX() * moveDir.GetX()) + std::abs(half.GetY() * moveDir.GetY()) + std::abs(half.GetZ() * moveDir.GetZ());
+        const float     travelDist     = std::max(2.0f * extentAlongDir - lip * options.unitScale, kMinLinearTravel);
+        openPos                        = closedPos + moveDir * travelDist;
+        speedNorm                      = (speed * options.unitScale) / std::max(travelDist, 0.01f);
+    }
+
+    DoorState state    = DoorState::Closed;
+    float     progress = 0.0f;
+    if ((flags & DoorFlags::StartsOpen) != DoorFlags::None) {
+        state    = DoorState::Open;
+        progress = 1.0f;
+        if (transform != nullptr) {
+            // The instance is authoritative for where the geometry is: a door
+            // that starts open has to *be* open, not animate open on the first
+            // frame.
+            if (rotating) {
+                transform->rotation = openRot;
+            } else {
+                transform->position = openPos;
+            }
+        }
+    }
+
+    registry.Add<DoorComponent>(
+        record.entity,
+        DoorComponent {
+            .state          = state,
+            .flags          = flags,
+            .closedPosition = closedPos,
+            .openPosition   = openPos,
+            .closedRotation = closedRot,
+            .openRotation   = openRot,
+            .rotationAxis   = rotAxis,
+            .rotationAngle  = rotAngle,
+            .speed          = std::max(speedNorm, 0.1f),
+            .progress       = progress,
+            .wait           = wait,
+            .waitTimer      = (state == DoorState::Open) ? wait : 0.0f,
+            .damage         = record.damage.value_or(0.0f),
+            .target         = String64(record.target),
+            .targetname     = String64(record.targetName),
+            .message        = String64(record.message),
+        }
+    );
+}
+
+void AttachButton(ECS::Registry& registry, const BSP::EntityRecord& record, const BSP::ImportOptions& options, Components::TransformComponent* transform) {
+    const ButtonFlags flags = ButtonFlagsFrom(*record.button);
+
+    const float speed = record.speed.value_or(kDefaultButtonSpeed);
+    const float wait  = record.wait.value_or(kDefaultButtonWait);
+    const float lip   = record.lip.value_or(0.0f);
+
+    const JPH::Vec3 unpressed = transform ? transform->position : JPH::Vec3::sZero();
+    const float     travel    = (lip > 0.0f) ? (lip * options.unitScale) : kDefaultButtonTravel;
+    const JPH::Vec3 pressed =
+        ((flags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + record.moveDirection * travel);
+
+    registry.Add<ButtonComponent>(
+        record.entity,
+        ButtonComponent {
+            .state             = ButtonState::Off,
+            .flags             = flags,
+            .unpressedPosition = unpressed,
+            .pressedPosition   = pressed,
+            .speed             = (travel > 0.0f) ? std::max((speed * options.unitScale) / travel, 1.0f) : 2.0f,
+            .progress          = 0.0f,
+            .wait              = wait,
+            .waitTimer         = 0.0f,
+            .target            = String64(record.target),
+            .targetname        = String64(record.targetName),
+        }
+    );
+}
+
+void AttachTrigger(ECS::Registry& registry, const BSP::EntityRecord& record, Components::TransformComponent* /*transform*/) {
+    const float     wait  = record.wait.value_or(kDefaultTriggerWait);
+    const TriggerFlags flags = TriggerFlagsFrom(record.kind);
+
+    const JPH::Vec3 half   = HalfExtentsOf(registry, record.entity);
+    const float     radius = (half.LengthSq() > 0.0f) ? half.Length() : 2.0f;
+
+    registry.Add<TriggerComponent>(
+        record.entity,
+        TriggerComponent {
+            .radius      = radius,
+            .flags       = flags,
+            .halfExtents = half,
+            // A trigger_once is spent rather than re-armed, which the -1 wait
+            // says without a second flag.
+            .wait        = (record.kind == BSP::InteractiveKind::TriggerOnce) ? -1.0f : wait,
+            .waitTimer   = 0.0f,
+            .target      = String64(record.target),
+            .targetname  = String64(record.targetName),
+            .filterName  = String64(record.filterName),
+        }
+    );
+}
+
+} // namespace
+
+void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& /*instance*/, const BSP::ImportOptions& options) {
+    for (const BSP::EntityRecord& record: BSP::DescribeInteractiveEntities(registry, map, options)) {
+        // A teleport landing point is pure logic and has nothing in the scene:
+        // DescribeScene keeps info_* classes out of the spawned entities, so
+        // this layer creates the lightweight entity the trigger resolves its
+        // `target` against. The quaternion is already the conjugated Source
+        // rotation, which TeleportPlayer reads off the transform's +X axis.
+        if (record.kind == BSP::InteractiveKind::TeleportDestination) {
             registry.Create(
-                Components::NameComponent {.name = String64(destName)},
-                // Source stores the origin at the feet; keep it that way and
-                // let the teleport lift the character by its own ground offset.
+                Components::NameComponent {.name = String64(record.targetName)},
                 Components::TransformComponent {
-                    .position = enginePos, .rotation = Math::EulerDegreesToQuat(engineAngles), .scale = JPH::Vec3::sReplicate(1.0f)
+                    .position = record.origin.value_or(JPH::Vec3::sZero()),
+                    .rotation = record.orientation,
+                    .scale    = JPH::Vec3::sReplicate(1.0f)
                 },
                 TeleportDestinationComponent {}
             );
             continue;
         }
 
-        const bool isDoor =
-            (className == "func_door" || className == "func_door_rotating" || className == "prop_door_rotating" || className == "momentary_door");
-        const bool isButton  = (className == "func_button" || className == "func_rot_button" || className == "momentary_rot_button");
-        const bool isTrigger = className.starts_with("trigger_");
-
-        if (!isDoor && !isButton && !isTrigger) {
-            continue;
-        }
-
-        const auto        targetName = entity.Find("targetname");
-        const std::string modelStr   = std::string(entity.Find("model"));
-        // Unnamed brush entities fall back to the deterministic name that
-        // DescribeScene generates: "<classname>_<modelIndex>". The previous
-        // per-map counter did not match DescribeScene's naming, leaving every
-        // unnamed entity addressable only through the model-source fallback.
-        std::string matchName = std::string(targetName);
-        if (matchName.empty()) {
-            matchName = std::string(className);
-            if (modelStr.size() > 1 && modelStr[0] == '*') {
-                int         modelIndex = -1;
-                const char* beg        = modelStr.c_str() + 1;
-                std::from_chars(beg, beg + (modelStr.size() - 1), modelIndex);
-                matchName += "_" + std::to_string(modelIndex);
-            }
-        }
-
-        const Entity e = FindMatchingEntity(registry, matchName, modelStr);
+        const Entity e = record.entity;
         if (e == Entity::Null()) {
             continue;
         }
 
-        const auto spawnflags = ParseUInt(entity.Find("spawnflags"));
-
-        // 1. Assign BSPEntityMetadataComponent
         registry.Add<BSPEntityMetadataComponent>(
             e,
             BSPEntityMetadataComponent {
-                .className  = String64(className),
-                .targetName = String64(targetName),
-                .model      = String64(modelStr),
-                .spawnFlags = spawnflags,
+                .className  = String64(record.className),
+                .targetName = String64(record.targetName),
+                .model      = String64(record.model),
+                .spawnFlags = record.spawnFlags,
             }
         );
 
-        // 2. Parse Connections & Outputs
-        EntityConnectionComponent conn;
-        for (const auto& [key, valRaw]: entity.keys) {
-            if (key.starts_with("On") && !valRaw.empty()) {
-                // GMod-branch VBSP writes the output fields separated by 0x1B
-                // instead of ',' ("Door3\x1bToggle\x1b\x1b0\x1b-1"). Splitting
-                // on comma alone turned every such output into one unmatchable
-                // target string, silently severing button/trigger -> door wiring.
-                std::string        normalized;
-                std::string_view   val = valRaw;
-                if (valRaw.find('\x1b') != std::string_view::npos) {
-                    normalized.assign(valRaw);
-                    for (char& c: normalized) {
-                        if (c == '\x1b') {
-                            c = ',';
-                        }
-                    }
-                    val = normalized;
-                }
-                EntityOutput out;
-                out.event = String64(key);
+        AttachOutputs(registry, e, record.outputs);
 
-                const size_t c1 = val.find(',');
-                if (c1 != std::string::npos) {
-                    out.target      = String64(val.substr(0, c1));
-                    const size_t c2 = val.find(',', c1 + 1);
-                    if (c2 != std::string::npos) {
-                        out.input       = String64(val.substr(c1 + 1, c2 - c1 - 1));
-                        const size_t c3 = val.find(',', c2 + 1);
-                        if (c3 != std::string::npos) {
-                            out.parameter   = String64(val.substr(c2 + 1, c3 - c2 - 1));
-                            const size_t c4 = val.find(',', c3 + 1);
-                            if (c4 != std::string::npos) {
-                                out.delay       = ParseFloat(val.substr(c3 + 1, c4 - c3 - 1));
-                                out.timesToFire = ParseInt(val.substr(c4 + 1), -1);
-                            } else {
-                                out.delay = ParseFloat(val.substr(c3 + 1));
-                            }
-                        } else {
-                            out.parameter = String64(val.substr(c2 + 1));
-                        }
-                    } else {
-                        out.input = String64(val.substr(c1 + 1));
-                    }
-                } else {
-                    out.target = String64(val);
-                    out.input  = String64("Toggle");
-                }
-                conn.AddOutput(out);
-            }
-        }
+        // The instantiator owns the transform. This pass reads it, except in
+        // the "starts open" case, where the geometry has to actually start open
+        // rather than animate open on the first frame -- hence a pointer and not
+        // the borrowed optional Registry::Get hands back.
+        const auto transformView = registry.Get<Components::TransformComponent>(e);
+        auto*      transform     = transformView ? transformView.operator->() : nullptr;
 
-        const std::string_view targetVal = entity.Find("target");
-        if (!targetVal.empty()) {
-            EntityOutput out;
-            out.target = String64(targetVal);
-            out.input  = String64("Toggle");
-            if (isButton) {
-                out.event = String64("OnPressed");
-            } else if (isTrigger) {
-                out.event = String64("OnTrigger");
-            } else if (isDoor) {
-                out.event = String64("OnOpen");
-            }
-            conn.AddOutput(out);
-        }
-
-        if (conn.outputCount > 0) {
-            registry.Add(e, std::move(conn));
-        }
-
-        auto trans = registry.Get<Components::TransformComponent>(e);
-
-        // 3. Attach DoorComponent
-        if (isDoor) {
-            const float speedVal = ParseFloat(entity.Find("speed"), 100.0f);
-            const float waitVal  = ParseFloat(entity.Find("wait"), 4.0f);
-            const float lipVal   = ParseFloat(entity.Find("lip"), 0.0f);
-
-            const bool isRotating = (className == "func_door_rotating" || className == "prop_door_rotating");
-            DoorFlags  doorFlags  = isRotating ? DoorFlags::Rotating : DoorFlags::None;
-
-            if ((spawnflags & 1) != 0) {
-                doorFlags |= DoorFlags::StartsOpen;
-            }
-            if ((spawnflags & 32) != 0) {
-                doorFlags |= DoorFlags::Toggle;
-            }
-            if ((spawnflags & 256) != 0 || (spawnflags & 512) != 0) {
-                doorFlags |= DoorFlags::UseOpens;
-            }
-            if ((spawnflags & 1024) != 0) {
-                doorFlags |= DoorFlags::TouchOpens;
-            }
-            if ((spawnflags & 2048) != 0) {
-                doorFlags |= DoorFlags::Locked;
-            }
-            if ((doorFlags & (DoorFlags::UseOpens | DoorFlags::TouchOpens)) == DoorFlags::None) {
-                doorFlags |= DoorFlags::UseOpens;
-            }
-
-            JPH::Vec3 closedPos = trans ? trans->position : JPH::Vec3::sZero();
-            JPH::Vec3 openPos   = closedPos;
-            JPH::Quat closedRot = trans ? trans->rotation : JPH::Quat::sIdentity();
-            JPH::Quat openRot   = closedRot;
-            JPH::Vec3 rotAxis   = JPH::Vec3::sAxisY();
-            float     rotAngle  = ParseFloat(entity.Find("distance"), 90.0f);
-            float     speedNorm = 1.0f;
-
-            if (isRotating) {
-                if ((spawnflags & 2) != 0) {
-                    rotAngle = -rotAngle;
-                }
-
-                const JPH::Vec3 srcAxis = ((spawnflags & 64) != 0) ? JPH::Vec3::sAxisX() :
-                                                                     (((spawnflags & 128) != 0) ? JPH::Vec3::sAxisY() : JPH::Vec3::sAxisZ());
-                rotAxis                 = ConvertDirection(options, srcAxis);
-                openRot                 = closedRot * JPH::Quat::sRotation(rotAxis, JPH::DegreesToRadians(rotAngle));
-                speedNorm               = std::abs(speedVal / std::max(std::abs(rotAngle), 1.0f));
-            } else {
-                const JPH::Vec3 moveDir        = ParseMoveDir(entity.Find("movedir"), options);
-                auto            srcComp        = registry.Get<Components::SceneSourceComponent>(e);
-                const JPH::Vec3 half           = srcComp ? JPH::Vec3(srcComp->halfExtents) : JPH::Vec3(0.5f, 0.5f, 0.5f);
-                const float     extentAlongDir = std::abs(half.GetX() * moveDir.GetX()) + std::abs(half.GetY() * moveDir.GetY()) +
-                                             std::abs(half.GetZ() * moveDir.GetZ());
-                const float travelDist = std::max(2.0f * extentAlongDir - lipVal * options.unitScale, 0.5f);
-                openPos                = closedPos + moveDir * travelDist;
-                speedNorm              = (speedVal * options.unitScale) / std::max(travelDist, 0.01f);
-            }
-
-            DoorState state    = DoorState::Closed;
-            float     progress = 0.0f;
-            if ((doorFlags & DoorFlags::StartsOpen) != DoorFlags::None) {
-                state    = DoorState::Open;
-                progress = 1.0f;
-                if (trans) {
-                    if (isRotating) {
-                        trans->rotation = openRot;
-                    } else {
-                        trans->position = openPos;
-                    }
-                }
-            }
-
-            registry.Add<DoorComponent>(
-                e,
-                DoorComponent {
-                    .state          = state,
-                    .flags          = doorFlags,
-                    .closedPosition = closedPos,
-                    .openPosition   = openPos,
-                    .closedRotation = closedRot,
-                    .openRotation   = openRot,
-                    .rotationAxis   = rotAxis,
-                    .rotationAngle  = rotAngle,
-                    .speed          = std::max(speedNorm, 0.1f),
-                    .progress       = progress,
-                    .wait           = waitVal,
-                    .waitTimer      = (state == DoorState::Open) ? waitVal : 0.0f,
-                    .damage         = ParseFloat(entity.Find("dmg"), 0.0f),
-                    .target         = String64(entity.Find("target")),
-                    .targetname     = String64(targetName),
-                    .message        = String64(entity.Find("message")),
-                }
-            );
-        } else if (isButton) {
-            const float speedVal = ParseFloat(entity.Find("speed"), 100.0f);
-            const float waitVal  = ParseFloat(entity.Find("wait"), 3.0f);
-            const float lipVal   = ParseFloat(entity.Find("lip"), 0.0f);
-
-            ButtonFlags btnFlags = ButtonFlags::UseActivates;
-            if ((spawnflags & 1) != 0) {
-                btnFlags |= ButtonFlags::DontMove;
-            }
-            if ((spawnflags & 32) != 0) {
-                btnFlags |= ButtonFlags::Toggle;
-            }
-            if ((spawnflags & 512) != 0) {
-                btnFlags |= ButtonFlags::TouchActivates;
-            }
-            if ((spawnflags & 1024) != 0) {
-                btnFlags |= ButtonFlags::DamageActivates;
-            }
-            if ((spawnflags & 2048) != 0) {
-                btnFlags |= ButtonFlags::UseActivates;
-            }
-
-            const JPH::Vec3 moveDir   = ParseMoveDir(entity.Find("movedir"), options);
-            const JPH::Vec3 unpressed = trans ? trans->position : JPH::Vec3::sZero();
-            const float     travel    = (lipVal > 0.0f) ? (lipVal * options.unitScale) : 0.05f;
-            const JPH::Vec3 pressed   = ((btnFlags & ButtonFlags::DontMove) != ButtonFlags::None) ? unpressed : (unpressed + moveDir * travel);
-
-            registry.Add<ButtonComponent>(
-                e,
-                ButtonComponent {
-                    .state             = ButtonState::Off,
-                    .flags             = btnFlags,
-                    .unpressedPosition = unpressed,
-                    .pressedPosition   = pressed,
-                    .speed             = (travel > 0.0f) ? std::max((speedVal * options.unitScale) / travel, 1.0f) : 2.0f,
-                    .progress          = 0.0f,
-                    .wait              = waitVal,
-                    .waitTimer         = 0.0f,
-                    .target            = String64(entity.Find("target")),
-                    .targetname        = String64(targetName),
-                }
-            );
-        } else if (isTrigger) {
-            const float waitVal = ParseFloat(entity.Find("wait"), 0.2f);
-
-            TriggerFlags trigFlags = TriggerFlags::Active;
-            if (className == "trigger_once") {
-                trigFlags |= TriggerFlags::TriggerOnce;
-            }
-            if (className == "trigger_teleport") {
-                trigFlags |= TriggerFlags::Teleports;
-            }
-
-            auto            srcComp = registry.Get<Components::SceneSourceComponent>(e);
-            const JPH::Vec3 half    = srcComp ? JPH::Vec3(srcComp->halfExtents) : JPH::Vec3::sZero();
-            const float     radius  = (half.LengthSq() > 0.0f) ? half.Length() : 2.0f;
-
-            registry.Add<TriggerComponent>(
-                e,
-                TriggerComponent {
-                    .radius      = radius,
-                    .flags       = trigFlags,
-                    .halfExtents = half,
-                    .wait        = (className == "trigger_once") ? -1.0f : waitVal,
-                    .waitTimer   = 0.0f,
-                    .target      = String64(entity.Find("target")),
-                    .targetname  = String64(targetName),
-                    .filterName  = String64(entity.Find("filtername")),
-                }
-            );
+        switch (record.kind) {
+            case BSP::InteractiveKind::Door:
+            case BSP::InteractiveKind::DoorRotating: AttachDoor(registry, record, options, transform); break;
+            case BSP::InteractiveKind::Button:
+            case BSP::InteractiveKind::ButtonRotating: AttachButton(registry, record, options, transform); break;
+            case BSP::InteractiveKind::Trigger:
+            case BSP::InteractiveKind::TriggerOnce:
+            case BSP::InteractiveKind::TriggerTeleport: AttachTrigger(registry, record, transform); break;
+            case BSP::InteractiveKind::TeleportDestination:
+            case BSP::InteractiveKind::None: break;
         }
     }
 }

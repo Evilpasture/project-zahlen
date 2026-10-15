@@ -7,7 +7,8 @@
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
-#include "Zahlen/FrameScheduler.hpp"
+#include "Zahlen/FramePlan.hpp"
+#include "Zahlen/GameModule.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include <FreeCam/FreeCam.hpp>
@@ -45,10 +46,7 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 
 namespace ZHLN::CameraRig {
 
-void TargetCameraSystem::Update(
-    ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity)
-) noexcept {
-    (void)speedQuery;
+void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept {
     auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
@@ -171,35 +169,48 @@ void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
     // The borrow is the component itself, so the system's updates land in the
     // registry without a copy to hand back.
     if (const auto camera = reg.GetSingleton<Components::CameraComponent>()) {
-        sys.Update(reg, camera->camera, dt, engine.GetCurrentAlpha(), engine.GetFreeCamSpeedQuery());
+        sys.Update(reg, camera->camera, dt, engine.GetCurrentAlpha());
     }
 }
 
-void AddFrameStep(FrameScheduler& scheduler) {
-    // Install is idempotent at the seam: a double install (a host that
-    // re-wires, a test that re-installs on a pooled engine) must not register
-    // the step twice on the next rebuild.
-    for (const auto& step: scheduler.GetSteps()) {
-        if (std::string_view(step.name) == "TargetCameraSystem") {
-            return;
-        }
-    }
+// The rig's step, declared. It runs before the core "CameraSystems" step
+// because the rig writes Camera position, yaw, pitch and fov, and the matrices
+// CameraSystem projects have to come from that result.
+//
+// The step name is also the idempotency key: FramePlan::Compose rejects a
+// duplicate name, so a second install of this module is a reported
+// FramePlanError::DuplicateName instead of a second copy of the step. The scan
+// this replaces -- walk the schedule, return early if the name is there --
+// existed because an unused install had to be tolerated; a duplicate is now
+// something the installer has to answer for.
+constexpr ModuleStep kFrameSteps[] = {
+    {
+        .phase     = FramePhase::Camera,
+        .name      = "TargetCameraSystem",
+        .run       = &TargetCameraStep,
+        .placement = StepPlacement::Before,
+        .anchor    = "CameraSystems",
+    },
+};
 
-    // Before the core "CameraSystems" step: the rig writes Camera position,
-    // yaw, pitch and fov, and the matrices CameraSystem projects must come
-    // from that result. Without the anchor (a host trimmed the core schedule)
-    // appending still keeps the rig running, just late.
-    if (!scheduler.InsertBefore("CameraSystems", FramePhase::Camera, "TargetCameraSystem", &TargetCameraStep)) {
-        scheduler.Add(FramePhase::Camera, "TargetCameraSystem", &TargetCameraStep);
-    }
+void RegisterComponents(ECS::Registry& reg) {
+    reg.RegisterComponent<CameraRig::TargetCameraComponent>();
 }
 
 } // namespace
 
+auto CameraRig::Describe() -> Module {
+    return Module{
+        .name               = "CameraRig",
+        .registerComponents = &RegisterComponents,
+        .frameSteps         = kFrameSteps,
+    };
+}
+
 void CameraRig::Install(Engine& engine) {
-    auto& reg = engine.GetRegistry();
-    reg.RegisterComponent<CameraRig::TargetCameraComponent>();
-    engine.AddFrameSchedulerExtension(&AddFrameStep);
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[CameraRig] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN

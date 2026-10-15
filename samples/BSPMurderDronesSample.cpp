@@ -45,7 +45,7 @@
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -1139,17 +1139,23 @@ void FirstPersonCameraStep(ZHLN::Engine& engine, float /*dt*/, ZHLN::FrameContex
     });
 }
 
-void AddFirstPersonCameraStep(ZHLN::FrameScheduler& scheduler) {
-    // Idempotent across schedule rebuilds, same guard the other extensions use.
-    for (const ZHLN::FrameStep& step: scheduler.GetSteps()) {
-        if (std::string_view(step.name) == "FirstPersonCamera") {
-            return;
-        }
-    }
-    if (!scheduler.InsertBefore("CameraSystems", ZHLN::FramePhase::Camera, "FirstPersonCamera", &FirstPersonCameraStep)) {
-        scheduler.Add(ZHLN::FramePhase::Camera, "FirstPersonCamera", &FirstPersonCameraStep);
-    }
-}
+// The sample's own frame step: it pins the view to the character's evaluated
+// eye and runs before core's "CameraSystems" projects from it.
+//
+// This is what a host-local step looks like now that the plan belongs to
+// whoever composes it. There is no extension seam to reach for -- the sample
+// has the engine and inserts the step itself, and a missing anchor comes back
+// as an error it has to deal with instead of a step silently appended after
+// present.
+constexpr ZHLN::ModuleStep kFirstPersonCameraStep[] = {
+    {
+        .phase     = ZHLN::FramePhase::Camera,
+        .name      = "FirstPersonCamera",
+        .run       = &FirstPersonCameraStep,
+        .placement = ZHLN::StepPlacement::Before,
+        .anchor    = "CameraSystems",
+    },
+};
 
 void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("==================================================================");
@@ -1416,8 +1422,17 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::CameraRig::Install(*engine);
 
     // The first-person view is sample-local glue on top: a Camera-phase frame
-    // step that pins the view to the character's evaluated eye.
-    engine->AddFrameSchedulerExtension(&AddFirstPersonCameraStep);
+    // step that pins the view to the character's evaluated eye. It is installed
+    // as a module of this sample's own making -- the engine has no seam a host
+    // reaches through any more, so the sample composes what it wants and reads
+    // the placement error if the anchor is gone.
+    if (auto installed = engine->InstallModule(ZHLN::Module {
+            .name       = "BSPMurderDronesFirstPerson",
+            .frameSteps = kFirstPersonCameraStep,
+        });
+        !installed) {
+        ZHLN::LogError("[BSPSample] first-person camera step not placed: {}", ZHLN::ToString(installed.error()));
+    }
 
 #if defined(ZHLN_HAS_FONTS)
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {

@@ -48,7 +48,7 @@ void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcep
 
     accumulator = std::min(accumulator, TargetDt * 4.0f);
 
-    const auto& character = engine.GetCharacterStepHooks();
+    const auto& character = engine.GetPhysicsSubstepHooks();
 
     {
         ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");

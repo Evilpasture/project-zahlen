@@ -25,14 +25,11 @@ if(NOT TARGET simdjson::simdjson)
         "simdjson is not provisioned; run 'git submodule update --init extern/simdjson'.")
 endif()
 
-file(GLOB ZHLN_JSON_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_JSON_SOURCES
+    JSON.cpp
 )
 
-if(ZHLN_JSON_SOURCES)
-    target_sources(zahlen_serialization PRIVATE ${ZHLN_JSON_SOURCES})
-endif()
+target_sources(zahlen_serialization PRIVATE ${ZHLN_JSON_SOURCES})
 
 # simdjson is an implementation detail of JSON.cpp -- JSON.hpp exposes an opaque
 # reader and never includes <simdjson.h> -- so the library stays PRIVATE and

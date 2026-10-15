@@ -15,7 +15,6 @@ set(TARGET_NAME zahlen_scripting_lua)
 
 add_library(${TARGET_NAME} STATIC
     LuaScriptRuntime.cpp
-    DataModelBindings.cpp
     Scripting.cpp
     ScriptingABI.cpp
 )
@@ -33,16 +32,20 @@ target_link_libraries(${TARGET_NAME} PUBLIC
 # Scripting.cpp dispatches SpawnTerrain into the terrain extra (ZHLN::Terrain
 # spawners left the core factory) and edits IK::TwoBoneIKComponent chains for
 # the AddIKChain/SetIKTarget commands (the component moved to extensions/Animation
-# with its solver). The SetupRagdoll command authors the biped through
-# gameplay/RagdollAuthoring, and InitPlayer installs the third-person rig from
+# with its solver); InitPlayer installs the third-person rig from
 # extensions/Camera. The declarations arrive through the extensions include root
 # published by zahlen_scripting; the definitions live in these domains.
+#
+# No gameplay/ target is linked here, and none may be added: SetupRagdoll was
+# the one command that reached into gameplay/RagdollAuthoring, and it is now a
+# command that module contributes by name through ScriptCommandRegistry. The
+# DataModel bindings moved to gameplay/ProjectLight/LuaBindings. Between them
+# those two links were what made this target and the gameplay layer circular.
+# configure/check_layer_dag.py is what keeps them from coming back.
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_terrain
     zahlen_animation
     zahlen_camera
-    zahlen_ragdoll_authoring
-    zahlen_datamodel
 )
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT
@@ -166,11 +169,12 @@ zahlen_compile_fennel(${TARGET_NAME} COMPILED_SCRIPT_LUA_FILES
 
 # Static, non-Fennel script files are linked (or copied on Windows) alongside
 # the compiled ones so the tree the runtime sees is complete.
-file(GLOB_RECURSE STATIC_SCRIPT_FILES
-    LIST_DIRECTORIES false
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.lua"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.sh"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/*.txt"
+# The scripts that ship as files rather than compiled Fennel: linked into the
+# build tree on POSIX, copied on Windows. Listed, not discovered -- a script
+# that stops being linked is a visible removal from this list rather than a file
+# the build quietly stopped carrying.
+set(STATIC_SCRIPT_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/fennel.lua"
 )
 
 set(STATIC_SCRIPT_SYMLINKS "")

@@ -19,9 +19,18 @@
 
 set(TARGET_NAME zahlen_bsp)
 
-file(GLOB ZHLN_BSP_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_BSP_SOURCES
+    BSPGeometry.cpp
+    BSPImporter.cpp
+    BSPInteraction.cpp
+    BSPLighting.cpp
+    BSPRead.cpp
+    BSPScene.cpp
+    SourceVFS.cpp
+    StudioModelImporter.cpp
+    StudioModelLoader.cpp
+    VMTParser.cpp
+    VTFDecoder.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -33,9 +42,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_BSP_SOURCES)
-    target_sources(${TARGET_NAME} PRIVATE ${ZHLN_BSP_SOURCES})
-endif()
+target_sources(${TARGET_NAME} PRIVATE ${ZHLN_BSP_SOURCES})
 
 # Core is a public dependency: <BSP/BSPImporter.hpp> names ZHLN::ModelPrefab,
 # RenderContext and AssetManager in its signatures, and <BSP/BSPScene.hpp>

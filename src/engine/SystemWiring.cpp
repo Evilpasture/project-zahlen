@@ -22,7 +22,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FileSystem/FileWatcher.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -143,25 +143,40 @@ void TransformHistory(Engine& engine, float , FrameContext& ) {
 
 }
 
-void BuildFrameScheduler(Engine& engine) {
-    using Phase     = FramePhase;
-    auto& scheduler = engine.GetFrameScheduler();
+// Core's own steps, and the names modules anchor to.
+//
+// This runs once per engine, not once per scene: the plan a module composed into
+// has to survive a scene rebuild, and clearing it here is what used to leave a
+// module with no anchor and append its steps where they did not belong. The
+// names below are the plan's public vocabulary -- a module placing itself
+// relative to one of these is depending on this function, so a rename here is a
+// breaking change to every module that anchored to it, reported as
+// FramePlanError::AnchorMissing rather than absorbed.
+void BuildCoreFramePlan(Engine& engine) {
+    using Phase = FramePhase;
+    auto& plan  = engine.GetFramePlan();
 
-    scheduler.Clear();
-    scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
-    scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
-    scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
-    scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
-    scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
-    scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
-    scheduler.Add(Phase::Simulation, "SceneCleanup", Steps::CleanupScene);
-    scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
-    scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
-    scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
-    scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
-    scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
+    // A core step that cannot be placed is a programming error in this function,
+    // not a composition problem to return to a caller: the names are literals,
+    // duplicated only by a careless edit here.
+    const auto require = [](std::expected<void, FramePlanError> placed) -> void {
+        if (!placed) {
+            ZHLN::LogError("[Engine] core frame plan rejected a step: {}", ToString(placed.error()));
+        }
+    };
 
-    engine.ApplyFrameSchedulerExtensions(scheduler);
+    require(plan.Append(Phase::UI, "HostUICallback", Steps::HostUICallback));
+    require(plan.Append(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload));
+    require(plan.Append(Phase::Physics, "PhysicsSystem", Steps::Physics));
+    require(plan.Append(Phase::Gameplay, "GameplayModule", Steps::Gameplay));
+    require(plan.Append(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph));
+    require(plan.Append(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback));
+    require(plan.Append(Phase::Simulation, "SceneCleanup", Steps::CleanupScene));
+    require(plan.Append(Phase::Camera, "CameraSystems", Steps::Camera));
+    require(plan.Append(Phase::Camera, "LODSystem", Steps::LOD));
+    require(plan.Append(Phase::Visibility, "RenderGraph", Steps::RenderGraph));
+    require(plan.Append(Phase::Present, "RenderSystem", Steps::Present));
+    require(plan.Append(Phase::History, "TransformHistory", Steps::TransformHistory));
 }
 
 void BuildSystemGraphs(Engine& engine) {
@@ -185,7 +200,16 @@ void BuildSystemGraphs(Engine& engine) {
     renderGraph.AddSystem<&DecalSystem::Update>();
     renderGraph.AddSystem<&LightingSystem::Update>();
 
-    engine.ApplySystemGraphsExtensions(updateGraph, renderGraph);
+    // Every module the application installed contributes its nodes here, in
+    // install order, and each one's signature-derived hazards are what order
+    // them against core's. Nothing a module declared survives into this loop as
+    // a callback the engine did not ask for: the modules themselves are the
+    // record, and GetInstalledModules is what this reads.
+    for (const Module& module: engine.GetInstalledModules()) {
+        if (module.addGraphSystems != nullptr) {
+            module.addGraphSystems(updateGraph, renderGraph);
+        }
+    }
 
     updateGraph.Compile();
     renderGraph.Compile();
@@ -211,8 +235,11 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
 
     engine.SeedSceneFontAtlas(reg);
 
+    // The graphs are rebuilt per scene; the frame plan is not. A scene reset
+    // clears the registry and rebuilds the graphs, and both are scene state --
+    // the timeline is composition state, installed once by the application, and
+    // rebuilding it per scene was how a replayed module step could land twice.
     BuildSystemGraphs(engine);
-    BuildFrameScheduler(engine);
     return true;
 }
 

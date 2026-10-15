@@ -49,6 +49,14 @@ endfunction()
 # may consume Core, while src/, include/, and modules/ must never consume them.
 zhln_run_governance_check("check_core_layer_boundary.py")
 
+# The other edge of that DAG: nothing below gameplay/ may consume it, in the
+# sources or in the build graph. The check above stops Core from reaching outward;
+# this one stops the reusable layers from reaching up, which is what made the
+# scripting extension and the ragdoll authoring module circular -- Scripting.cpp
+# included RagdollAuthoring.hpp while zahlen_ragdoll_authoring could only be
+# built under a host that linked the scripting runtime.
+zhln_run_governance_check("check_layer_dag.py")
+
 # Tests may only include public headers. src/ is private implementation.
 zhln_run_governance_check("check_tests_public_api.py")
 

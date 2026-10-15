@@ -13,9 +13,8 @@
 
 set(TARGET_NAME zahlen_fallback_scene)
 
-file(GLOB ZHLN_FALLBACK_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_FALLBACK_SOURCES
+    FallbackScene.cpp
 )
 
 add_library(${TARGET_NAME} STATIC ${ZHLN_FALLBACK_SOURCES})

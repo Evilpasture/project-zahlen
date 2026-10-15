@@ -1,6 +1,14 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+# This list is exhaustive on purpose -- nothing here globs. A source the list
+# does not name is not compiled, and that failure mode is quiet: the symbols it
+# should have defined stay undefined, the shared library still links (undefined
+# symbols are allowed there), and only the callers that happen to sit in an
+# archive linked into an executable report them. configure/
+# check_source_registration.py is what makes forgetting one a configure error
+# instead of a link error in someone else's target.
+
 set(RAW_ENGINE_SOURCES
     Log.cpp
     diagnostics/CrashHandler.cpp
@@ -30,6 +38,8 @@ set(RAW_ENGINE_SOURCES
     system/SceneResources.cpp
     system/SceneCleanupSystem.cpp
     CommandLine.cpp
+    FramePlan.cpp
+    ScriptCommandRegistry.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp

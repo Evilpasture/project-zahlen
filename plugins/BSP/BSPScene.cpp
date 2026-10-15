@@ -121,7 +121,6 @@ auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const Impo
     }
     return EngineTripletFromQuat(qEngine);
 }
-
 auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const ImportOptions& options) -> Scene::Scene {
     Scene::Scene scene;
     scene.name = std::string(virtualPath);

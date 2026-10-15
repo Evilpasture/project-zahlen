@@ -39,8 +39,6 @@ auto Engine::GetRegistry() -> ECS::Registry& {
     static ECS::Registry reg;
     return reg;
 }
-void Engine::AddSystemGraphsExtension(SystemGraphsExtension) {
-}
 } // namespace ZHLN
 
 namespace {

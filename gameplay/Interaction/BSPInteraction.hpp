@@ -3,9 +3,21 @@
 
 #pragma once
 
+// gameplay/Interaction/BSPInteraction.hpp
+//
+// The gameplay half of the map's interactive entities: what a door *does*, and
+// the runtime dispatch that makes it do it.
+//
+// The format half -- class names, spawnflag bits, key names, the 0x1B output
+// separators, the movedir sentinels -- moved down to plugins/BSP (see
+// <BSP/BSPInteraction.hpp>, which is where DescribeInteractiveEntities lives).
+// It had to: a plugin may not include a gameplay header, so the file that
+// *decodes a map* can live below this layer and the file that *builds
+// DoorComponent* cannot. This header is the seam between them, and every
+// caller keeps the same one-function entry point it always had.
+
 #include "InteractionComponents.hpp"
 #include <BSP/BSPGeometry.hpp>
-#include <BSP/BSPRead.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
 #include <Zahlen/Scene.hpp>
@@ -42,9 +54,16 @@ void FireEntityInput(
 // Evaluates and fires entity outputs for a specific event ("OnPressed", "OnOpen", etc.)
 void FireEntityOutputs(ECS::Registry& registry, Entity entity, std::string_view event, ZHLN::Optional<AudioContext&> audio = std::nullopt);
 
-// Reads BSPEntity keyvalues from map.entities and attaches DoorComponent,
-// ButtonComponent, TriggerComponent, EntityConnectionComponent, and
-// BSPEntityMetadataComponent to corresponding spawned entities.
+// Translates a map's interactive entities into this layer's components:
+// DoorComponent, ButtonComponent, TriggerComponent, EntityConnectionComponent
+// and BSPEntityMetadataComponent on the entities the instantiator already
+// spawned, plus one lightweight entity per info_teleport_destination.
+//
+// No parsing happens here. The map is described once by
+// BSP::DescribeInteractiveEntities, and this turns each record into components
+// -- which is where the game's own defaults live (a door's 100 unit/s, a
+// button's 3 s reset, a trigger's 0.2 s re-arm), because those are rules of
+// this game, not conventions of the file format.
 void InitializeBSPEntities(ECS::Registry& registry, const BSP::BSPMap& map, const Scene::Instance& instance, const BSP::ImportOptions& options = {});
 
 } // namespace Interaction

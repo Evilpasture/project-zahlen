@@ -13,6 +13,7 @@
 #include "CharacterComponents.hpp"
 #include "CharacterMovement.hpp"
 #include "PlayerInput.hpp"
+#include <Zahlen/GameModule.hpp>
 
 namespace ZHLN {
 
@@ -29,6 +30,10 @@ namespace Character {
 // Install this BEFORE any layer whose systems read MovementComponent
 // (Interaction finds the player through it): its external-writes anchor
 // must be registered ahead of those readers for hazard analysis.
+// The module as a value: what the host installs, and what a host that wants to
+// report a placement failure installs itself instead of calling Install.
+auto Describe() -> Module;
+
 void Install(Engine& engine);
 
 } // namespace Character

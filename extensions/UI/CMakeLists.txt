@@ -18,9 +18,8 @@
 
 set(TARGET_NAME zahlen_ui_schema)
 
-file(GLOB ZHLN_UI_SCHEMA_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_UI_SCHEMA_SOURCES
+    UITree.cpp
 )
 
 add_library(${TARGET_NAME} STATIC ${ZHLN_UI_SCHEMA_SOURCES})

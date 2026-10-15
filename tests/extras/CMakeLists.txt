@@ -362,8 +362,10 @@ zahlen_register_extras_test(${TARGET_NAME})
 
 # --- LuaJIT / DataModel Integration Suite ---
 # Exercises the DataModel adapter through the existing scripting runtime and
-# proves that Lua userdata refer to the same C++ Instance graph.
-if(TARGET zahlen_scripting_lua)
+# proves that Lua userdata refer to the same C++ Instance graph. The adapter
+# itself lives in gameplay/ProjectLight/LuaBindings, so the target that owns it
+# is what this links.
+if(TARGET zahlen_project_light_lua)
     set(TARGET_NAME TestLuaDataModel)
     add_executable(${TARGET_NAME} TestLuaDataModel.cpp)
 
@@ -373,9 +375,11 @@ if(TARGET zahlen_scripting_lua)
         CXX_EXTENSIONS OFF
     )
 
+    # The bindings live in gameplay/ProjectLight/LuaBindings now, so the test
+    # links the target that owns them rather than reaching for the two halves
+    # and re-assembling the adapter itself.
     target_link_libraries(${TARGET_NAME} PRIVATE
-        zahlen_scripting_lua
-        zahlen_datamodel
+        zahlen_project_light_lua
     )
 
     target_include_directories(${TARGET_NAME} PRIVATE

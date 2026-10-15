@@ -422,6 +422,11 @@ zahlen_enable_reflection(zshader)
 zahlen_enable_reflection(HostBlitSwapchain)
 
 if(ZHLN_BUILD_EXTRAS)
+    # Every target in this tree names its sources. Nothing is discovered by
+    # glob, anywhere: the build is the list of what is real, and a file the
+    # build does not list is a file the compiler never sees -- which is a
+    # fact about the build, not something a script should be inspecting for.
+    #
     # Keep the optional layers distinct in both the source tree and build graph.
     # Plugins establish the shared serializer first; extensions then provide the
     # reusable runtime/network systems; gameplay composes those targets. Lua's
@@ -429,8 +434,16 @@ if(ZHLN_BUILD_EXTRAS)
     add_subdirectory(plugins)
     add_subdirectory(extensions)
     add_subdirectory(gameplay)
-    if(TARGET zahlen_scripting AND TARGET zahlen_datamodel)
+    if(TARGET zahlen_scripting)
         add_subdirectory(extensions/Scripting/Lua)
+    endif()
+
+    # ProjectLight's Lua bindings are gameplay-owned sources (the adapter needs
+    # the DataModel *and* the Lua runtime), so they are configured here, after
+    # both: which order directories are configured in is the composition's
+    # business, which layer may depend on which is the layer DAG's.
+    if(TARGET zahlen_scripting_lua AND TARGET zahlen_datamodel)
+        add_subdirectory(gameplay/ProjectLight/LuaBindings)
     endif()
 
     # UITOML's public surface names GUI::UINode, so serialization publishes the
@@ -463,6 +476,16 @@ if(ZHLN_BUILD_EXTRAS)
     if(TARGET zahlen_scripting_lua)
         target_link_libraries(zahlen PRIVATE zahlen_scripting_lua)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
+    endif()
+
+    # The ragdoll authoring module used to arrive as a link dependency of the
+    # scripting runtime, which is what made SetupRagdoll a scripting-layer
+    # command. It is now a module the application installs, so it is the
+    # application that links it -- the same shape every other gameplay module
+    # has below.
+    if(TARGET zahlen_ragdoll_authoring)
+        target_link_libraries(zahlen PRIVATE zahlen_ragdoll_authoring)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_RAGDOLL_AUTHORING=1)
     endif()
 
     if(TARGET zahlen_editor)

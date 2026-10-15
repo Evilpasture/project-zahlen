@@ -26,13 +26,16 @@
 
 set(TARGET_NAME zahlen_gltf)
 
-file(GLOB ZHLN_GLTF_MODULES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
+# Module interface units, named.
+set(ZHLN_GLTF_MODULES
+    glTF.cppm
 )
-file(GLOB ZHLN_GLTF_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+
+# The ordinary translation units of this target, named.
+set(ZHLN_GLTF_SOURCES
+    GLTFImporter.cpp
+    TangentGenerator.cpp
+    glTF.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -47,21 +50,17 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_GLTF_MODULES)
-    set_source_files_properties(${ZHLN_GLTF_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+set_source_files_properties(${ZHLN_GLTF_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-    target_sources(${TARGET_NAME}
-        PUBLIC
-            FILE_SET CXX_MODULES
-            TYPE CXX_MODULES
-            BASE_DIRS ${PROJECT_SOURCE_DIR}/plugins
-            FILES ${ZHLN_GLTF_MODULES}
-    )
-endif()
+target_sources(${TARGET_NAME}
+    PUBLIC
+        FILE_SET CXX_MODULES
+        TYPE CXX_MODULES
+        BASE_DIRS ${PROJECT_SOURCE_DIR}/plugins
+        FILES ${ZHLN_GLTF_MODULES}
+)
 
-if(ZHLN_GLTF_SOURCES)
-    target_sources(${TARGET_NAME} PRIVATE ${ZHLN_GLTF_SOURCES})
-endif()
+target_sources(${TARGET_NAME} PRIVATE ${ZHLN_GLTF_SOURCES})
 
 # The cgltf implementation. PRIVATE, and exactly one target in the tree compiles
 # it: a second copy is a duplicate definition at link time, which is why

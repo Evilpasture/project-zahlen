@@ -7,6 +7,7 @@
 #include "TerrainComponents.hpp"
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 
 namespace ZHLN {
@@ -49,6 +50,10 @@ class TerrainSystem {
 // Composition-root entry point: registers TerrainComponent and contributes
 // the TerrainSystem update-graph node through the engine's extension seam
 // (replayed on every graph rebuild, so it survives scene resets).
+// The module as a value: what the host installs, and what a host that wants to
+// report a placement failure installs itself instead of calling Install.
+auto Describe() -> Module;
+
 void Install(Engine& engine);
 
 } // namespace Terrain

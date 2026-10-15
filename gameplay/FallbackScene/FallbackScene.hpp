@@ -13,6 +13,7 @@
 #pragma once
 
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <cstdint>
 #include <string_view>
 
@@ -83,12 +84,16 @@ class DefaultPreset {
     static inline bool  s_PopupVisible = true;
 };
 
-// Composition-root entry point: re-inserts the "DefaultPreset" frame step at
-// its original position (after GameplayModule, before the simulation graph)
-// through the FrameSchedulerExtension seam -- replayed on every schedule
-// rebuild -- and subscribes the ReleaseFor teardown hook. Without Install
-// the frame never engages fallback detection and a boot failure leaves the
-// empty default scene on screen.
+// Composition-root entry point: installs the module Describe() returns, whose
+// step list places "DefaultPreset" at its original position (after
+// GameplayModule, before the simulation graph) and whose teardown hook releases
+// the preset's parked entity handles. Without Install the frame never engages
+// fallback detection and a boot failure leaves the empty default scene on
+// screen.
+// The module as a value: what the host installs, and what a host that wants to
+// report a placement failure installs itself instead of calling Install.
+auto Describe() -> Module;
+
 void Install(Engine& engine);
 
 } // namespace FallbackScene

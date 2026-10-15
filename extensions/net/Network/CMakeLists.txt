@@ -24,13 +24,17 @@
 
 set(TARGET_NAME zahlen_network)
 
-file(GLOB ZHLN_NETWORK_MODULES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
+# Module interface units, named.
+set(ZHLN_NETWORK_MODULES
+    Network.cppm
+    Wire.cppm
 )
-file(GLOB ZHLN_NETWORK_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+
+# The ordinary translation units of this target, named.
+set(ZHLN_NETWORK_SOURCES
+    NetworkClient.cpp
+    NetworkReplicator.cpp
+    Wire.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -42,21 +46,17 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_NETWORK_MODULES)
-    set_source_files_properties(${ZHLN_NETWORK_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+set_source_files_properties(${ZHLN_NETWORK_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-    target_sources(${TARGET_NAME}
-        PUBLIC
-            FILE_SET CXX_MODULES
-            TYPE CXX_MODULES
-            BASE_DIRS ${PROJECT_SOURCE_DIR}/extensions/net
-            FILES ${ZHLN_NETWORK_MODULES}
-    )
-endif()
+target_sources(${TARGET_NAME}
+    PUBLIC
+        FILE_SET CXX_MODULES
+        TYPE CXX_MODULES
+        BASE_DIRS ${PROJECT_SOURCE_DIR}/extensions/net
+        FILES ${ZHLN_NETWORK_MODULES}
+)
 
-if(ZHLN_NETWORK_SOURCES)
-    target_sources(${TARGET_NAME} PRIVATE ${ZHLN_NETWORK_SOURCES})
-endif()
+target_sources(${TARGET_NAME} PRIVATE ${ZHLN_NETWORK_SOURCES})
 
 # Core is a public dependency: Wire.cppm's global module fragment includes
 # <Zahlen/Core/Reflection.hpp> and <Zahlen/Error.hpp>, and NetworkReplicator.cpp

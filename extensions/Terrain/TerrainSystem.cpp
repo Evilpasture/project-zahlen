@@ -7,6 +7,8 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -273,17 +275,29 @@ namespace {
 // they come into view and records them on the components. So it is a *render*
 // graph system -- the simulation graph's bundle has no RenderContext, which is
 // what the admission gate says when this is registered on the wrong one. The
-// render graph runs before RenderSystem presents (SystemWiring's FrameScheduler
-// order), so the bake lands in the same frame it was requested.
+// render graph runs before the core "RenderSystem" step (SystemWiring's core
+// plan order), so the bake lands in the same frame it was requested.
 void AddSystems(SimGraph& /*updateGraph*/, RenderGraph& renderGraph) {
     renderGraph.AddSystem<&TerrainSystem::Update>();
 }
 
 } // namespace
 
+auto Describe() -> Module {
+    return Module{
+        .name = "Terrain",
+        // No frame steps and no components of its own: the terrain is ECS data
+        // the factory spawns and this module bakes meshes for, so its whole
+        // contribution is the render-graph node above.
+        .addGraphSystems = &AddSystems,
+    };
+}
+
 void Install(Engine& engine) {
     TerrainSystem::RegisterCleanup(engine);
-    engine.AddSystemGraphsExtension(&AddSystems);
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[Terrain] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN::Terrain

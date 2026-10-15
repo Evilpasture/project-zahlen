@@ -7,7 +7,8 @@ namespace ZHLN {
 
 class Engine;
 
-void BuildFrameScheduler(Engine& engine);
+// Core's own frame steps. Runs once per engine; see the definition.
+void BuildCoreFramePlan(Engine& engine);
 void BuildSystemGraphs(Engine& engine);
 
 auto InitializeDefaultScene(Engine& engine) -> bool;

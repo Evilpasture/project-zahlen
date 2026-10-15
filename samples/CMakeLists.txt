@@ -7,9 +7,18 @@ if(NOT ZHLN_BUILD_SAMPLES)
     return()
 endif()
 
-file(GLOB SAMPLE_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+# Sample translation units, named. The loop below derives each target name from
+# the file name, so this list *is* the sample set: adding a sample is adding a
+# line here, and the per-sample optional-target mapping further down is keyed by
+# the same names. Nothing in this tree is discovered by glob.
+set(SAMPLE_SOURCES
+    BSPMurderDronesSample.cpp
+    CDNMapSample.cpp
+    DeviceLostRecoverySample.cpp
+    FidelityHarness.cpp
+    GlTFInspectorSample.cpp
+    ProceduralAnimationSample.cpp
+    RemoteGLBSample.cpp
 )
 
 # Which optional-layer targets each sample consumes (imports, includes, or installs),

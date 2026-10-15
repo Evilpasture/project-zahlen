@@ -87,7 +87,12 @@ void ApplyTwoBoneIK(
 
 void Install(Engine& engine) {
     engine.GetRegistry().RegisterComponent<TwoBoneIKComponent>();
-    engine.SetBonePosePostProcessor(&ApplyTwoBoneIK);
+    // Contributed to the pipeline, not installed into a slot on the engine: the
+    // animation system walks every contributed processor, and this one no longer
+    // has to be the only modifier in the world. It also no longer has to be
+    // installed before the graphs are built -- the pipeline is reached by
+    // reference, so an install from the first frame works.
+    engine.GetPosePostProcessors().Add(&ApplyTwoBoneIK);
 }
 
 } // namespace ZHLN::IK

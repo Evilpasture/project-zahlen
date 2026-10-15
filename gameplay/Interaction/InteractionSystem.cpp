@@ -9,6 +9,8 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/SceneResources.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -485,10 +487,7 @@ void AddSystems(SimGraph& updateGraph, RenderGraph& /*renderGraph*/) {
     updateGraph.AddSystem<&ButtonMovementSystem::Update>();
 }
 
-} // namespace
-
-void Install(Engine& engine) {
-    auto& reg = engine.GetRegistry();
+void RegisterComponents(ECS::Registry& reg) {
     reg.RegisterComponent<ItemBaseComponent>();
     reg.RegisterComponent<PickupComponent>();
     reg.RegisterComponent<UsableComponent>();
@@ -499,8 +498,22 @@ void Install(Engine& engine) {
     reg.RegisterComponent<EntityConnectionComponent>();
     reg.RegisterComponent<BSPEntityMetadataComponent>();
     reg.RegisterComponent<TeleportDestinationComponent>();
+}
 
-    engine.AddSystemGraphsExtension(&AddSystems);
+} // namespace
+
+auto Describe() -> Module {
+    return Module{
+        .name               = "Interaction",
+        .registerComponents = &RegisterComponents,
+        .addGraphSystems    = &AddSystems,
+    };
+}
+
+void Install(Engine& engine) {
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[Interaction] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN::Interaction

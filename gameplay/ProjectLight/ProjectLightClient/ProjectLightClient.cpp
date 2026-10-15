@@ -22,7 +22,8 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -586,14 +587,30 @@ void LightClientEngineTeardown(Engine& engine) {
     installed.erase(found);
 }
 
-void AddLightClientFrameSteps(FrameScheduler& scheduler) {
-    if (!scheduler.InsertAfter("ScriptAndShaderReload", FramePhase::Input, "ProjectLightNetworkPoll", &LightClientPrePhysicsStep)) {
-        scheduler.Add(FramePhase::Input, "ProjectLightNetworkPoll", &LightClientPrePhysicsStep);
-    }
-    if (!scheduler.InsertAfter("PhysicsSystem", FramePhase::Physics, "ProjectLightNetworkSend", &LightClientPostPhysicsStep)) {
-        scheduler.Add(FramePhase::Physics, "ProjectLightNetworkSend", &LightClientPostPhysicsStep);
-    }
-}
+// The client's two frame steps, declared.
+//
+// Polling sits after hot-reload dispatch so the frame that receives a snapshot
+// is the frame that can act on it, and the send sits after the physics step so
+// what leaves is the state the physics just settled on. Both used to be
+// inserted by a callback whose fallback appended them at the end of the frame
+// when their anchor was missing -- a network poll after present, which is a
+// whole frame of latency and a silent one.
+constexpr ModuleStep kFrameSteps[] = {
+    {
+        .phase     = FramePhase::Input,
+        .name      = "ProjectLightNetworkPoll",
+        .run       = &LightClientPrePhysicsStep,
+        .placement = StepPlacement::After,
+        .anchor    = "ScriptAndShaderReload",
+    },
+    {
+        .phase     = FramePhase::Physics,
+        .name      = "ProjectLightNetworkSend",
+        .run       = &LightClientPostPhysicsStep,
+        .placement = StepPlacement::After,
+        .anchor    = "PhysicsSystem",
+    },
+};
 
 } // namespace
 
@@ -2182,11 +2199,24 @@ void ClientSession::OnEngineTeardown(Engine& engine) noexcept {
     ResetSceneBindings(engine);
 }
 
+auto DescribeClient() -> Module {
+    return Module{
+        .name          = "ProjectLightClient",
+        .frameSteps    = kFrameSteps,
+        .sceneCleanup  = &LightClientSceneCleanup,
+        .teardown      = &LightClientEngineTeardown,
+    };
+}
+
 void InstallClient(Engine& engine, ClientSession& session) {
+    // The session is process state the engine is not allowed to own (it is the
+    // application's, and it outlives the engine on the editor's restart path),
+    // so the binding is registered here and the module's hooks look it up.
     InstalledSessions().sessions[&engine] = &session;
-    engine.AddFrameSchedulerExtension(&AddLightClientFrameSteps);
-    engine.AddSceneCleanupPass(&LightClientSceneCleanup);
-    engine.AddTeardownHook(&LightClientEngineTeardown);
+    if (auto installed = engine.InstallModule(DescribeClient()); !installed) {
+        LogError("[ProjectLight][lifecycle] module install failed: {}", ToString(installed.error()));
+        return;
+    }
     Log("[ProjectLight][lifecycle] client frame polling, scene-cleanup, and teardown hooks installed.");
 }
 

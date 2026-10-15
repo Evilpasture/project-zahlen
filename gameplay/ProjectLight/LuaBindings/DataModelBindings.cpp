@@ -1,13 +1,21 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// extensions/Scripting/Lua/DataModelBindings.cpp
+// gameplay/ProjectLight/LuaBindings/DataModelBindings.cpp
 //
 // The DataModel-facing Roblox-style surface sits on the existing LuaJIT state.
 // It is deliberately an adapter: Instance userdata retain the canonical C++
 // objects, while value userdata and event connections are Lua-boundary details.
+//
+// This file used to live in extensions/Scripting/Lua/. It is ProjectLight's
+// binding to the Lua runtime, not the runtime's knowledge of ProjectLight --
+// the runtime is generic and Core owns the IScriptRuntime seam it implements,
+// while the object graph being exposed belongs to this gameplay module. Moving
+// it here is what lets zahlen_scripting_lua stop linking zahlen_datamodel, and
+// it is the same boundary configure/check_layer_dag.py enforces: a layer below
+// never names a layer above.
 
-#include <Scripting/Lua/DataModelBindings.hpp>
+#include <LuaBindings/DataModelBindings.hpp>
 
 #include <DataModel/DataModel.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>

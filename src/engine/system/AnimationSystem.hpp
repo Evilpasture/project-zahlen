@@ -78,7 +78,7 @@ class ZHLN_API AnimationSystem {
                                   const Components::HierarchyComponent, const Components::MeshComponent,
                                   Components::MorphTargetComponent&, Components::TransformComponent&> query,
                        ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
-                       BonePosePostProcessor postProcessor, ECS::Local<ScratchStorage> scratchStorage);
+                       ECS::Res<PosePostProcessorPipeline> posePostProcessors, ECS::Local<ScratchStorage> scratchStorage);
 
   private:
     void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;

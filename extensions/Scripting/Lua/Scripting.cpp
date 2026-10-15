@@ -8,10 +8,16 @@
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/ArticulationSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
-#include <CharacterController/CharacterComponents.hpp>
+// NOTE: no gameplay/ header belongs here. This file is the engine's script
+// host, and it reaches the domains that extend it by *name*, through the
+// engine's ScriptCommandRegistry -- see ZHLN_RegisterModuleCommand below and
+// configure/check_layer_dag.py, which fails the build if a gameplay/ include
+// comes back. The includes above are extensions/, which this layer is allowed
+// to compose; the ones that were gameplay/ (RagdollAuthoring) moved to the
+// module that owns the verb.
 #include <Animation/IK.hpp>
 #include <Camera/TargetCamera.hpp>
-#include <RagdollAuthoring/RagdollAuthoring.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
@@ -34,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
 #include <limits>
@@ -171,9 +178,6 @@ struct SpawnPrefabArgs {
     int       isAnimated;
     uint32_t  maxCount;
     uint64_t* outEntities;
-};
-struct SetupRagdollArgs {
-    uint64_t playerEntity;
 };
 struct CreateBoxArgs {
     float hx, hy, hz;
@@ -411,6 +415,11 @@ using CommandHandler = std::function<uint64_t(ZHLN::Engine*, const void*)>;
 static std::vector<CommandHandler>                    s_JumpTable;
 static std::unordered_map<std::string_view, uint32_t> s_StringToIntMap;
 
+// Names of commands modules contributed, owned here so the string_views the map
+// above and each forwarder capture stay valid. A deque and not a vector: the
+// views have to survive the container growing.
+static std::deque<std::string> s_ModuleCommandNames;
+
 static void RegisterCmd(std::string_view name, CommandHandler handler) {
     auto id = static_cast<uint32_t>(s_JumpTable.size());
     s_JumpTable.push_back(std::move(handler));
@@ -571,18 +580,6 @@ void RegisterCreativeWorkCommands() {
             }
 
             return e.Pack();
-        })
-    );
-
-    RegisterCmd(
-        "SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
-            // Ragdoll authoring is a gameplay-layer concern: the procedural
-            // biped generator resolves the rig and authors the parts, and the
-            // core articulation system only executes the result.
-            const bool built = ZHLN::RagdollAuthoring::BuildHumanoidBipedRagdoll(
-                ZHLN::Entity::Unpack(a.playerEntity), engine->GetRegistry(), engine->GetPhysicsContext(), engine->GetArticulationSystem()
-            );
-            return built ? 1u : 0u;
         })
     );
 
@@ -1286,6 +1283,46 @@ ZHLN_STATIC_API uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine_handle, uint32
         return 0;
     }
     return s_JumpTable[cmdID](reinterpret_cast<ZHLN::Engine*>(engine_handle), args);
+}
+
+ZHLN_STATIC_API uint32_t ZHLN_RegisterModuleCommand(const char* cmdName) {
+    if (cmdName == nullptr) {
+        return 0xFFFFFFFFu;
+    }
+    RegisterFFICommands();
+
+    const std::string_view view(cmdName);
+    if (auto it = s_StringToIntMap.find(view); it != s_StringToIntMap.end()) {
+        return it->second;
+    }
+
+    // The name has to outlive the map entry that keys on it, and the map keys
+    // on a string_view. A deque is what makes that safe: its elements keep
+    // their addresses across push_back, so the view stays valid for the process
+    // even though the map itself rehashes.
+    auto& owned = s_ModuleCommandNames.emplace_back(view);
+    const std::string_view stableName(owned);
+
+    const uint32_t id = static_cast<uint32_t>(s_JumpTable.size());
+    s_JumpTable.push_back([stableName](ZHLN::Engine* engine, const void* args) -> uint64_t {
+        if (engine == nullptr) {
+            return 0;
+        }
+        // A module the host did not install is not an error the command can
+        // report through its return value, so it is reported once through the
+        // log; the script-visible answer is the same as any other no-op.
+        const auto result = engine->GetScriptCommands().Invoke(*engine, stableName, args);
+        if (!result.has_value()) {
+            ZHLN::LogWarning(
+                "[Scripting] command '{}' has no installed provider on this engine; returning 0.", stableName
+            );
+            return 0;
+        }
+        return *result;
+    });
+
+    s_StringToIntMap.emplace(stableName, id);
+    return id;
 }
 
 } // extern "C"

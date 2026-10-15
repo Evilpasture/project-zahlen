@@ -16,7 +16,10 @@
 #include "BSPGeometry.hpp"
 #include "BSPRead.hpp"
 #include <Zahlen/Scene.hpp>
+#include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace ZHLN::BSP {
 

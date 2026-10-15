@@ -7,15 +7,14 @@
 # branch are gameplay policy, not render substrate: core keeps the minimal
 # Camera, CameraComponent and CameraSystem. This target owns the rig's
 # component and system and contributes its frame step through the engine's
-# FrameSchedulerExtension seam, before the core "CameraSystems" step.
+# frame-plan step Describe() declares, before the core "CameraSystems" step.
 #
 # Public headers are reached as <Camera/...>.
 
 set(TARGET_NAME zahlen_camera)
 
-file(GLOB ZHLN_CAMERA_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_CAMERA_SOURCES
+    TargetCamera.cpp
 )
 
 add_library(${TARGET_NAME} STATIC ${ZHLN_CAMERA_SOURCES})

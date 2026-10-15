@@ -194,7 +194,7 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                                         const Components::HierarchyComponent, const Components::MeshComponent,
                                         Components::MorphTargetComponent&, Components::TransformComponent&> query,
                              ECS::Registry& registry, ECS::ResMut<PoseUploadQueue> poseUploads, FrameDt frameDt,
-                             BonePosePostProcessor postProcessor, ECS::Local<ScratchStorage> scratchStorage) {
+                             ECS::Res<PosePostProcessorPipeline> posePostProcessors, ECS::Local<ScratchStorage> scratchStorage) {
     scratchStorage->ResetForUpdate();
 
     const float dt = frameDt.value;
@@ -375,8 +375,11 @@ void AnimationSystem::Update(ECS::Query<Components::AnimatorComponent&, const Co
                 static_cast<void>(GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n)));
             }
 
-            if (postProcessor != nullptr) {
-                postProcessor(registry, rootEntity, prefab, localTransforms, worldTransforms);
+            // The pipeline is a service, so a build with none installed is the
+            // empty list rather than a null check: an absent modifier is the
+            // same statement as a modifier that does nothing.
+            if (!posePostProcessors->IsEmpty()) {
+                posePostProcessors->Apply(registry, rootEntity, prefab, localTransforms, worldTransforms);
             }
 
             for (Entity childEnt: allMeshEntities) {

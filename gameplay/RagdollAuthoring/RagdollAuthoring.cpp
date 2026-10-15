@@ -6,6 +6,7 @@
 
 #include "engine/system/ArticulationSystem.hpp"
 #include "Zahlen/Components.hpp"
+#include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
 #include "Zahlen/ModelPrefab.hpp"
 #include "Zahlen/SkeletalAnimation.hpp"
@@ -104,6 +105,56 @@ auto BuildHumanoidBipedRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsCon
 
     auto parts = AuthorHumanoidParts(*targetSkeleton, pc);
     return articulation.AttachRagdoll(rootEntity, reg, pc, *targetSkeleton, parts, jointOffset);
+}
+
+// The verb, contributed by name.
+//
+// This body used to be a command in extensions/Scripting/Lua/Scripting.cpp,
+// which meant the generic scripting layer included
+// <RagdollAuthoring/RagdollAuthoring.hpp> and linked a gameplay module: the
+// script host had to compile against a domain it does not own, and the domain
+// could not exist without the script host. Both halves of that are gone now.
+// The scripting layer resolves a *name*; this module is what knows the name
+// means a biped ragdoll.
+namespace {
+
+auto SetupRagdollCommand(Engine& engine, const void* args) -> uint64_t {
+    if (args == nullptr) {
+        return 0;
+    }
+    const auto& a = *static_cast<const SetupRagdollArgs*>(args);
+
+    // Ragdoll authoring is a gameplay-layer concern: the procedural biped
+    // generator resolves the rig and authors the parts, and the core
+    // articulation system only executes the result.
+    const bool built = BuildHumanoidBipedRagdoll(
+        Entity::Unpack(a.playerEntity), engine.GetRegistry(), engine.GetPhysicsContext(), engine.GetArticulationSystem()
+    );
+    return built ? 1u : 0u;
+}
+
+} // namespace
+
+void RegisterScriptCommands(ScriptCommandRegistry& commands) {
+    if (!commands.Add(ScriptCommand {.name = "SetupRagdoll", .invoke = &SetupRagdollCommand})) {
+        // Either the name is empty, the function is null, or another module
+        // already claimed "SetupRagdoll" -- the last of which is the one worth
+        // knowing about.
+        LogError("[RagdollAuthoring] could not contribute the 'SetupRagdoll' script command.");
+    }
+}
+
+auto Describe() -> Module {
+    return Module{
+        .name                   = "RagdollAuthoring",
+        .registerScriptCommands = &RegisterScriptCommands,
+    };
+}
+
+void Install(Engine& engine) {
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[RagdollAuthoring] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 } // namespace ZHLN::RagdollAuthoring

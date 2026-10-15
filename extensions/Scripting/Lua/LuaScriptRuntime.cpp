@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <Scripting/Lua/LuaScriptRuntime.hpp>
+#include <Scripting/Lua/ScriptingABI.h>
 #include <Scripting/ScriptBinderRegistry.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -25,6 +26,17 @@ namespace {
 // for these instead of naming them, so the convention lives with the runtime
 // that actually understands the files.
 constexpr std::array<std::string_view, 2> kBootScriptPaths {"scripts/boot.lua", "scripts/boot.fnl"};
+
+// What a module-contributed command needs from this runtime: a jump-table id,
+// so a script can cache it like any built-in command's. The interner the engine
+// holds is a bare function pointer and has no way to reach this runtime's
+// tables, so the ABI call is what it goes through -- and the name is copied
+// because the ABI's entry point takes a C string while the registry deals in
+// views.
+auto InternModuleCommandName(std::string_view name) -> uint32_t {
+    const std::string owned(name);
+    return ZHLN_RegisterModuleCommand(owned.c_str());
+}
 
 int LuaBridge_Log(lua_State* L) {
     lua_Debug ar;
@@ -149,6 +161,14 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
         return;
     }
     _initialized = true;
+
+    // Every verb a module contributed becomes addressable from a script here.
+    // Order does not matter either way: a registry that already holds commands
+    // re-interns them when the interner arrives (ScriptCommandRegistry::
+    // SetInterner), and one that gains them later interns each on Add.
+    if (engine != nullptr) {
+        engine->GetScriptCommands().SetInterner(&InternModuleCommandName);
+    }
 
     // The runtime, not a process-global C ABI, supplies the engine to the
     // bootstrap module. Lua keeps this lightuserdata only for the lifetime of

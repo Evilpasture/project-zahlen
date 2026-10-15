@@ -119,6 +119,9 @@ struct BSPEntity {
     [[nodiscard]] auto FindVector(std::string_view key, float out[3]) const noexcept -> bool;
     [[nodiscard]] auto FindFloat(std::string_view key) const noexcept -> std::optional<float>;
     [[nodiscard]] auto FindInt(std::string_view key) const noexcept -> std::optional<int32_t>;
+    // spawnflags is a bit field and Source writes it unsigned; decimal values
+    // above INT32_MAX would truncate through FindInt.
+    [[nodiscard]] auto FindUInt(std::string_view key) const noexcept -> std::optional<uint32_t>;
 };
 
 // One static prop instance recovered from LUMP_GAMELUMP ('sprp').

@@ -135,6 +135,44 @@ short include such as `#include <json/JSON.hpp>` are caught. CMake links remain
 explicit: the composition roots in `app/`, samples, tests, and host tools may
 select the targets they use, while Core targets must not depend on them.
 
+`configure/check_layer_dag.py` enforces the edge *between* the optional layers
+that has to point one way: nothing under `plugins/` or `extensions/` may include
+a `gameplay/` header or **link** a `gameplay/` target. `gameplay/` is written
+against the reusable layers, so the reverse edge is circular in effect -- the
+layer below cannot be built or run without the domain layer above it. The check
+exists because that edge really was crossed: `Scripting.cpp` called
+`RagdollAuthoring::BuildHumanoidBipedRagdoll` and its target linked
+`zahlen_ragdoll_authoring` and `zahlen_datamodel`. Both are gone; the mechanism
+that replaced them is below.
+
+The `plugins/` ↔ `extensions/` edges are deliberately *not* restricted: UITOML is
+a plugin that names `GUI::UINode` from `extensions/UI`, and the network
+extensions build on the plugin serializers. Those are design decisions, not
+accidents, and a rule against them would fail the existing composition.
+
+### Inverting an edge: how gameplay reaches a generic layer
+
+The scripting layer must be able to run a module's script command without
+knowing the module exists, and a gameplay module must be able to contribute one
+without the scripting layer existing. `Zahlen/ScriptCommandRegistry.hpp` is the
+seam:
+
+1. **Core declares the shape.** `ScriptCommand { name, invoke }` and a registry
+   that resolves a name; `Engine::GetScriptCommands()` hands it out. Core names
+   no domain.
+2. **The module provides the value.** `RagdollAuthoring::RegisterScriptCommands`
+   adds `"SetupRagdoll"` and the argument struct it reads, which is its own ABI
+   with the scripts that call it.
+3. **The host connects them.** The module arrives through `Engine::InstallModule`
+   and the registry interns its name through whatever script runtime is
+   installed (`ScriptCommandRegistry::SetInterner`), so the script side caches an
+   id like any built-in command's.
+
+A name no installed module provides is a no-op that yields nothing rather than an
+error -- the same policy `GUI::ActionRegistry` uses for an action id no host
+bound. A host with no script runtime still holds the commands; it simply has no
+ids to give them.
+
 ### Targets and dependency order
 
 Each feature directory owns its sources and target. The directory hierarchy is
@@ -154,6 +192,7 @@ and optional third-party dependencies stay local to the owning target.
 | `zahlen_animation`, `zahlen_camera`, `zahlen_character_controller`, `zahlen_terrain`, `zahlen_ui_schema`, `zahlen_vfx` | `extensions/` | Reusable animation, camera, controller, terrain, UI, and VFX capabilities |
 | `zahlen_ragdoll_authoring` | `gameplay/RagdollAuthoring/` | Domain-specific humanoid ragdoll authoring |
 | `zahlen_scripting`, `zahlen_scripting_lua`, `zahlen_console`, `zahlen_editor` | `extensions/` | Lua-independent scripting support, optional LuaJIT runtime, console, and editor |
+| `zahlen_project_light_lua` | `gameplay/ProjectLight/LuaBindings/` | DataModel ↔ LuaJIT adapter; the only target where the two layers meet |
 | `zahlen_alife`, `zahlen_interaction`, `zahlen_fallback_scene` | `gameplay/` | Domain-specific simulation, interaction rules, and fallback game scene |
 | `zahlen_datamodel`, `zahlen_project_light_client` | `gameplay/ProjectLight/` | ProjectLight's stable-ID object graph and optional native client |
 
@@ -171,6 +210,13 @@ ProjectLight DataModel, and the Lua binding target is configured after that
 DataModel exists. `zahlen_serialization` publishes `zahlen_ui_schema` because
 `UITOML.hpp` names the UI schema in its public API. Other dependencies stay
 private where they are implementation details.
+
+The ProjectLight Lua bindings are a gameplay target configured from the root
+(`gameplay/ProjectLight/LuaBindings/`), not from `gameplay/`: the adapter links
+both the DataModel and the Lua runtime, so it can only be configured after both
+exist, and which order directories are configured in is the composition's
+business. `zahlen_scripting_lua` links no gameplay target at all, which is what
+lets a host take the scripting runtime without ProjectLight.
 
 ### What the boundary buys
 
@@ -301,7 +347,40 @@ Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across b
 
 ## 3. Frame Lifecycle & Execution Order
 
-Each frame executes in a strict, deterministic sequence:
+Each frame executes a **frame plan**: an ordered list of steps that core seeds
+with its own and that modules contribute to by declaration. `Engine::Tick`
+executes the plan and nothing else -- the engine holds no callbacks to replay and
+no ordering of its own beyond the steps `BuildCoreFramePlan` places.
+
+A module says what it wants to run and where, and never touches the schedule:
+
+```cpp
+// extensions/CharacterController/CharacterController.cpp
+constexpr ModuleStep kFrameSteps[] = {
+    {.phase = FramePhase::Input,        .name = "CharacterInput",       .run = &CharacterInputStep,
+     .placement = StepPlacement::Before, .anchor = "HostUICallback"},
+    {.phase = FramePhase::PlayerIntent, .name = "PlayerInputTranslate", .run = &PlayerIntentStep,
+     .placement = StepPlacement::After,  .anchor = "ScriptAndShaderReload"},
+};
+```
+
+The application installs the module (`engine.InstallModule(Character::Describe())`),
+and `FramePlan::Compose` places the steps against the anchor names -- all or
+nothing, reporting `FramePlanError::AnchorMissing` rather than appending a step
+somewhere it was not asked to be. A step whose anchor is missing is a composition
+error the host sees, not a schedule that is quietly wrong.
+
+Two consequences are worth stating, because they are what the design buys:
+
+* **The plan is composable, and its vocabulary is public.** Anchor names are the
+  contract between a module and core. A rename in `BuildCoreFramePlan` is a
+  breaking change, and it is reported rather than absorbed.
+* **The plan is not rebuilt with the scene.** `InitializeDefaultScene` rebuilds
+  the graphs because they are scene state; the timeline is composition state and
+  is built once. Rebuilding it per scene was how a replayed module step could
+  accumulate a second copy.
+
+The steps themselves still run in a strict, deterministic sequence:
 
 ```
 [ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Visual Interpolation ]
@@ -314,7 +393,7 @@ Each frame executes in a strict, deterministic sequence:
 2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
 5. **Gameplay Update**: The active gameplay driver (`--driver=scripted`, `cpp`, or `hybrid`) executes the update ticks. A scripted driver runs the optional scripting runtime (Fennel/LuaJIT); a C++ driver loads a native `.so`/`.dll`.
-6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching gameplay systems are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
+6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching modules are installed, Interaction and Terrain nodes contributed through the `Module` the application installed; `BuildSystemGraphs` walks `Engine::GetInstalledModules()` and asks each one for its systems).
 7. **Render Graph Execution**:
    * `CullingSystem`: Performs frustum culling on main and shadow viewports.
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.

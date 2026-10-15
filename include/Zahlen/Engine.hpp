@@ -12,7 +12,10 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/PoseUploads.hpp>
+#include <Zahlen/ScriptCommandRegistry.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/WindowInput.hpp>
@@ -52,29 +55,35 @@ class SystemGraph;
 class EntityCommandBuffer;
 }
 
-class FrameScheduler;
-
 class ArticulationSystem;
 
 class ZHLN_API Engine {
   public:
     using UICallback = std::function<void(Engine&)>;
 
-    using FrameSchedulerExtension = void (*)(FrameScheduler&);
-
-    using SystemGraphsExtension = void (*)(SimGraph& updateGraph, RenderGraph& renderGraph);
-
-    struct CharacterStepHooks {
-        void (*preStep)(Engine&, float dt) = nullptr;
-        void (*postStep)(Engine&)          = nullptr;
+    // What runs around every fixed-timestep substep PhysicsSystem takes, inside
+    // its accumulator loop and not once per frame.
+    //
+    // This is the physics lifecycle's extension point, which is why it is not
+    // named after the one extension that uses it: the engine knows "between
+    // substeps", not "characters". It is also why it cannot be a declared
+    // FramePlan step. A step runs once per frame, at whatever frame dt arrived;
+    // this runs per 1/60 s substep with the *fixed* dt, which is the whole point
+    // for the character integration that uses it -- steering integrated at the
+    // variable frame rate would make the controller's determinism depend on
+    // present timing. Anything that only needs per-frame granularity belongs in
+    // the plan instead.
+    struct PhysicsSubstepHooks {
+        void (*preStep)(Engine&, float fixedDt) = nullptr;
+        void (*postStep)(Engine&)               = nullptr;
     };
 
-    using FreeCamSpeedQuery = std::optional<float> (*)(ECS::Registry&, Entity target);
-
-    using TeardownHook = void (*)(Engine&);
+    // The hooks GameModule.hpp declares, spelled here too because they are part
+    // of this class's own API. Same types either way.
+    using TeardownHook = ZHLN::TeardownHook;
     // Bulk extension systems run while marked components still exist. `all`
     // selects scene teardown rather than just PendingDestroy entities.
-    using SceneCleanupPass = void (*)(Engine&, bool all);
+    using SceneCleanupPass = ZHLN::SceneCleanupPass;
 
     using DeviceLostCallback = std::function<void(Engine&)>;
 
@@ -134,7 +143,7 @@ class ZHLN_API Engine {
     // Register an extra bulk cleanup system once per Engine, not per entity.
     [[nodiscard]] auto AddSceneCleanupPass(SceneCleanupPass pass) -> bool;
     void RunSceneCleanupPasses(bool all);
-    [[nodiscard]] auto GetFrameScheduler() -> FrameScheduler&;
+
     // Simulation-produced skinning poses, drained once per frame by RenderSystem.
     auto               GetPoseUploads() -> PoseUploadQueue&;
     auto               GetArticulationSystem() -> ArticulationSystem&;
@@ -154,22 +163,50 @@ class ZHLN_API Engine {
 
     void AddDeviceLostCallback(DeviceLostCallback callback);
 
+    // --- Composition ---------------------------------------------------------
+    //
+    // What a module contributes arrives here, because installing one is an act
+    // the application performs -- not something a module does to the engine on
+    // its way past. Installing:
+    //
+    //   * composes the module's declared frame steps into the frame plan, which
+    //     is all-or-nothing and reports FramePlanError::AnchorMissing rather
+    //     than placing a step somewhere it was not asked to be;
+    //   * registers the module's components (idempotent; families survive a
+    //     scene reset);
+    //   * records the module, so its graph systems, scene cleanup, teardown and
+    //     script verbs are applied by the engine-owned lifecycle that needs them
+    //     and so the composition can be reported.
+    //
+    // A failure leaves nothing half-applied: the plan is untouched and no
+    // components are registered.
+    [[nodiscard]] auto InstallModule(const Module& module) -> std::expected<void, FramePlanError>;
 
-    void AddFrameSchedulerExtension(FrameSchedulerExtension ext);
+    // What the application installed, in install order. Read-only: the engine
+    // keeps these as the record of the composition, not as a registry of
+    // callbacks to replay.
+    [[nodiscard]] auto GetInstalledModules() const noexcept -> std::span<const Module>;
 
-    void AddSystemGraphsExtension(SystemGraphsExtension ext);
+    // The non-const form may build core's steps on first use, so it is the one
+    // accessor here that is not noexcept; the const form reads what exists.
+    [[nodiscard]] auto GetFramePlan() -> FramePlan&;
+    [[nodiscard]] auto GetFramePlan() const noexcept -> const FramePlan&;
 
-    void ApplyFrameSchedulerExtensions(FrameScheduler& scheduler);
-    void ApplySystemGraphsExtensions(SimGraph& updateGraph, RenderGraph& renderGraph);
+    // Module-contributed script verbs. The registry is engine state because the
+    // engine is what a dispatch has in hand; it is empty in a host that installs
+    // no modules, and a C++-only host still reaches the verbs it does hold.
+    [[nodiscard]] auto GetScriptCommands() noexcept -> ScriptCommandRegistry&;
+    [[nodiscard]] auto GetScriptCommands() const noexcept -> const ScriptCommandRegistry&;
 
-    void               SetCharacterStepHooks(CharacterStepHooks hooks);
-    [[nodiscard]] auto GetCharacterStepHooks() const noexcept -> const CharacterStepHooks&;
+    void               SetPhysicsSubstepHooks(PhysicsSubstepHooks hooks);
+    [[nodiscard]] auto GetPhysicsSubstepHooks() const noexcept -> const PhysicsSubstepHooks&;
 
-    void               SetBonePosePostProcessor(BonePosePostProcessor processor);
-    [[nodiscard]] auto GetBonePosePostProcessor() const noexcept -> BonePosePostProcessor;
-
-    void               SetFreeCamSpeedQuery(FreeCamSpeedQuery query);
-    [[nodiscard]] auto GetFreeCamSpeedQuery() const noexcept -> FreeCamSpeedQuery;
+    // The pose pipeline's inbound edge, and the counterpart of GetPoseUploads
+    // below: the engine owns the queue poses leave through, so it owns the list
+    // modifiers contribute to as well. A module appends its processor at install
+    // time; the animation system walks the list through the services bundle, by
+    // reference, so an install after the graphs exist still takes effect.
+    [[nodiscard]] auto GetPosePostProcessors() -> PosePostProcessorPipeline&;
 
     void AddTeardownHook(TeardownHook hook);
 
@@ -190,14 +227,22 @@ class ZHLN_API Engine {
 
     void SeedSceneFontAtlas(ECS::Registry& reg);
 
-    using ExtensionInstaller = void (*)(Engine&);
+    // The composition root's install pass, run once the engine exists and before
+    // the first scene. It names the modules the engine runs with; the engine
+    // cannot name them itself (ARCHITECTURE.md 1.2).
+    using ModuleInstaller = void (*)(Engine&);
 
-    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ExtensionInstaller installExtensions = nullptr)
+    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ModuleInstaller installModules = nullptr)
         -> std::expected<void, ErrorCode>;
 
   private:
     // Build the service bundles and the two typed graphs on first use.
     void EnsureSystemGraphs();
+
+    // Core's own frame steps, placed once. Not a scene-reset concern: the plan a
+    // module composed into has to survive a scene rebuild, and rebuilding it per
+    // scene is what used to accumulate duplicate steps.
+    void EnsureFramePlan();
 
     auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
 

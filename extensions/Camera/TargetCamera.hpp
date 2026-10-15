@@ -17,6 +17,7 @@
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <optional>
 
 namespace ZHLN {
@@ -66,21 +67,28 @@ class TargetCameraSystem {
     TargetCameraSystem& operator=(const TargetCameraSystem&) = delete;
     TargetCameraSystem& operator=(TargetCameraSystem&&)      = default;
 
-    // @p speedQuery reports the tracked entity's configured free-cam base
-    // speed; signature is Engine::FreeCamSpeedQuery. Null (the default for
-    // direct/test callers) or a nullopt answer keeps the 12 m/s default.
-    void Update(
-        ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity) = nullptr
-    ) noexcept;
+    // The rig's orbit speed is this component's own state (see
+    // TargetCameraComponent::stiffness and the entity's follow speed). It used to
+    // take a `speedQuery` parameter — a function pointer the engine held and
+    // handed out — and the body opened with `(void)speedQuery;`: the hook fed a
+    // parameter nothing read. Deleted rather than redesigned, because the
+    // behaviour it was meant to provide (share the tracked entity's speed) has a
+    // component-shaped answer if it is ever wanted: the field belongs on the
+    // target entity, where a camera rig can read it, not on Engine.
+    void Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept;
 };
 
-// Composition-root entry point: registers TargetCameraComponent and
-// contributes the rig's frame step through the FrameSchedulerExtension seam,
-// inserted before the core "CameraSystems" step so it runs first. The step
-// also re-seeds the boot camera's component when a scene reset replaced the
-// default camera (core no longer creates any camera rig). Call once after
-// Engine::Create; the seam replays the contribution on every schedule
-// rebuild.
+// Composition-root entry point: registers TargetCameraComponent and installs
+// the module Describe() returns, whose frame step is placed before the core
+// "CameraSystems" step so it runs first. The step also re-seeds the boot
+// camera's component when a scene reset replaced the default camera (core no
+// longer creates any camera rig). Call once after Engine::Create. The plan is
+// composed once and is not rebuilt with the scene, so a second install reports
+// a duplicate step instead of registering a second copy of it.
+// The module as a value: registers TargetCameraComponent and declares the rig's
+// frame step, placed before core's "CameraSystems". See TargetCamera.cpp.
+auto Describe() -> Module;
+
 void Install(Engine& engine);
 
 } // namespace CameraRig

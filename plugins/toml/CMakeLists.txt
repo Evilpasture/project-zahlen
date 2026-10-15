@@ -19,11 +19,8 @@
 # this header names GUI::UINode in its signatures. The GUI implementation
 # (zahlen_gui) is not needed to compile or link this.
 
-file(GLOB ZHLN_TOML_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+set(ZHLN_TOML_SOURCES
+    TOML.cpp
 )
 
-if(ZHLN_TOML_SOURCES)
-    target_sources(zahlen_serialization PRIVATE ${ZHLN_TOML_SOURCES})
-endif()
+target_sources(zahlen_serialization PRIVATE ${ZHLN_TOML_SOURCES})

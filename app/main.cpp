@@ -74,6 +74,9 @@
 #if defined(ZHLN_HAS_FREECAM)
 #include <FreeCam/FreeCam.hpp>
 #endif
+#if defined(ZHLN_HAS_RAGDOLL_AUTHORING)
+#include <RagdollAuthoring/RagdollAuthoring.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -90,16 +93,24 @@
 namespace {
 
 // The native host runs with the gameplay layers that moved out of core.
-// Installs them after Engine::Create and before InitializeDefaultScene; each
-// Install registers its components and contributes its systems through the
-// engine's extension seam, which replays across scene resets. A build with
-// ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs bare.
 //
-// Order matters: the character controller declares the external-writes
-// anchor for MovementComponent, and the interaction system reads it, so the
-// anchor must be registered first for hazard analysis to point the right way.
-// Terrain installs last so its update-graph node appends after Interaction's,
-// reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
+// This is the composition root, and the list below *is* the composition: each
+// Install applies a Module -- the components it owns, the frame steps it
+// declares, the graph systems it adds -- and the engine keeps what it was
+// given rather than a list of callbacks to replay. Nothing here reaches into
+// the engine's schedule: a module's steps are placed by name against core's,
+// and a step whose anchor is gone is reported instead of appended somewhere
+// else. A build with ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs
+// bare.
+//
+// Order matters for the graphs: the character controller declares the
+// external-writes anchor for MovementComponent, and the interaction system
+// reads it, so the anchor must be registered first for hazard analysis to point
+// the right way. Terrain installs last so its update-graph node appends after
+// Interaction's, reproducing the core wiring's Audio → Interaction → Particle →
+// Terrain order. Order does *not* matter for the frame steps any more -- they
+// anchor to core's step names -- so a host may install these in any order it
+// likes and get the same timeline.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_FONTS)
     // Fonts are first-class assets with an AssetID: load the baked font into
@@ -147,6 +158,13 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
 #endif
 #if defined(ZHLN_HAS_FREECAM)
     ZHLN::FreeCam::Install(engine);
+#endif
+#if defined(ZHLN_HAS_RAGDOLL_AUTHORING)
+    // Contributes the "SetupRagdoll" script verb by name and nothing else: no
+    // frame steps, no components, no graph systems. A host that installs no
+    // script runtime gets the same no-op module. This is what used to be a
+    // link-time dependency of the scripting runtime on a gameplay module.
+    ZHLN::RagdollAuthoring::Install(engine);
 #endif
 }
 

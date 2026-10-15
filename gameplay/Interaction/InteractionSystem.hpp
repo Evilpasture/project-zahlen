@@ -6,6 +6,7 @@
 #include "InteractionComponents.hpp"
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/ecs/SystemParameters.hpp>
 
@@ -69,6 +70,10 @@ class ButtonMovementSystem {
 // Composition-root entry point: registers the interaction components with
 // the engine's registry and contributes InteractionSystem, DoorMovementSystem,
 // and ButtonMovementSystem to the update graph.
+// The module as a value: what the host installs, and what a host that wants to
+// report a placement failure installs itself instead of calling Install.
+auto Describe() -> Module;
+
 void Install(Engine& engine);
 
 } // namespace Interaction

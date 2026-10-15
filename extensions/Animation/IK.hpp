@@ -6,8 +6,10 @@
 // Analytic two-bone IK: an animation *modifier* on top of core's skeletal
 // hierarchy transforms. Core keeps the pose pipeline and GPUJoint; this extra
 // owns the solver, the chain component and the pose post-processor that the
-// skinning pipeline calls between pose evaluation and joint upload (installed
-// through Engine::SetBonePosePostProcessor -- see Install below).
+// skinning pipeline calls between pose evaluation and joint upload. It is
+// contributed to Engine::GetPosePostProcessors() rather than installed into a
+// slot -- see Install below, and PosePostProcessorPipeline for why the pipeline
+// is a list Core owns instead of a graph node.
 #pragma once
 
 // clang-format off
@@ -66,8 +68,9 @@ void ApplyTwoBoneIK(
     ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::span<JPH::Mat44> worldTransforms
 );
 
-// Composition-root entry point: registers TwoBoneIKComponent and installs
-// ApplyTwoBoneIK as the engine's bone-pose post-processor. Without this,
+// Composition-root entry point: registers TwoBoneIKComponent and contributes
+// ApplyTwoBoneIK to the pose pipeline, alongside whatever other modifiers the
+// host installed. Without this,
 // TwoBoneIKComponent entities animate as authored -- IK is opt-in by design.
 void Install(Engine& engine);
 

@@ -11,6 +11,8 @@
 // (after the scene exists, or let the frame step seed the boot camera).
 #pragma once
 
+#include <Zahlen/GameModule.hpp>
+
 namespace ZHLN {
 
 class Engine;
@@ -31,6 +33,10 @@ struct FreeCamComponent {
     // down, so it sets this false and looks freely.
     bool  lookRequiresButton = true;
 };
+
+// The module as a value: what the host installs, and what a host that wants to
+// report a placement failure installs itself instead of calling Install.
+auto Describe() -> Module;
 
 void Install(Engine& engine);
 

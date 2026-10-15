@@ -10,6 +10,7 @@
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GameModule.hpp>
 #include <Zahlen/Render/Handles.hpp>
 #include <Zahlen/physics/PhysicsHandles.hpp>
 #include <array>
@@ -406,8 +407,13 @@ class ClientSession {
     std::unordered_map<uint64_t, ReplicatedObject>        m_objects;
 };
 
-// Installs frame-phase, scene-cleanup, and engine-teardown hooks. Call after
-// Engine::Create and before InitializeDefaultScene; app/ owns all wiring.
+// The module as a value: the client's two frame steps, the scene-cleanup pass
+// that rebinds the session after a scene reset, and the engine-teardown hook
+// that detaches it. InstallClient binds the session these hooks look up and then
+// installs this description, so a host that wants the placement error itself
+// reads the log.
+auto DescribeClient() -> Module;
+
 void InstallClient(Engine& engine, ClientSession& session);
 
 } // namespace ZHLN::ProjectLight

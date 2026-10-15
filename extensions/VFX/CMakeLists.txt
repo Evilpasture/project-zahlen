@@ -18,13 +18,16 @@
 
 set(TARGET_NAME zahlen_vfx)
 
-file(GLOB ZHLN_VFX_MODULES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
+# Module interface units, named.
+set(ZHLN_VFX_MODULES
+    CombatFX.cppm
+    Explosion.cppm
+    Lightning.cppm
 )
-file(GLOB ZHLN_VFX_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+
+# The ordinary translation units of this target, named.
+set(ZHLN_VFX_SOURCES
+    Lightning.cpp
 )
 
 add_library(${TARGET_NAME} STATIC)
@@ -36,21 +39,17 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_VFX_MODULES)
-    set_source_files_properties(${ZHLN_VFX_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+set_source_files_properties(${ZHLN_VFX_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
-    target_sources(${TARGET_NAME}
-        PUBLIC
-            FILE_SET CXX_MODULES
-            TYPE CXX_MODULES
-            BASE_DIRS ${PROJECT_SOURCE_DIR}/extensions
-            FILES ${ZHLN_VFX_MODULES}
-    )
-endif()
+target_sources(${TARGET_NAME}
+    PUBLIC
+        FILE_SET CXX_MODULES
+        TYPE CXX_MODULES
+        BASE_DIRS ${PROJECT_SOURCE_DIR}/extensions
+        FILES ${ZHLN_VFX_MODULES}
+)
 
-if(ZHLN_VFX_SOURCES)
-    target_sources(${TARGET_NAME} PRIVATE ${ZHLN_VFX_SOURCES})
-endif()
+target_sources(${TARGET_NAME} PRIVATE ${ZHLN_VFX_SOURCES})
 
 # Core is a public dependency: Lightning.cppm's exported LightningComponent
 # carries BufferHandle, MaterialID and Entity members, and CombatFX.cppm and

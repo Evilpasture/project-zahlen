@@ -6,7 +6,9 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FrameScheduler.hpp>
+#include <Zahlen/FramePlan.hpp>
+#include <Zahlen/GameModule.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
@@ -114,25 +116,40 @@ void FreeCamStep(Engine& engine, float dt, FrameContext&) {
     Apply(engine, dt);
 }
 
-void AddFrameStep(FrameScheduler& scheduler) {
-    for (const auto& step: scheduler.GetSteps()) {
-        if (std::string_view(step.name) == "FreeCamSystem") {
-            return;
-        }
-    }
-    if (!scheduler.InsertBefore("CameraSystems", FramePhase::Camera, "FreeCamSystem", &FreeCamStep)) {
-        scheduler.Add(FramePhase::Camera, "FreeCamSystem", &FreeCamStep);
-    }
+// Declared, and placed before the core "CameraSystems" step so the matrices it
+// projects come from the pose this step just wrote. The duplicate-name scan the
+// callback form needed is gone: FramePlan::Compose reports a second
+// "FreeCamSystem" as FramePlanError::DuplicateName.
+constexpr ModuleStep kFrameSteps[] = {
+    {
+        .phase     = FramePhase::Camera,
+        .name      = "FreeCamSystem",
+        .run       = &FreeCamStep,
+        .placement = StepPlacement::Before,
+        .anchor    = "CameraSystems",
+    },
+};
+
+void RegisterComponents(ECS::Registry& reg) {
+    reg.RegisterComponent<FreeCamTagComponent>();
+    reg.RegisterComponent<FreeCamComponent>();
+    reg.RegisterComponent<FreeCamOptOutComponent>();
 }
 
 } // namespace
 
+auto Describe() -> Module {
+    return Module{
+        .name               = "FreeCam",
+        .registerComponents = &RegisterComponents,
+        .frameSteps         = kFrameSteps,
+    };
+}
+
 void Install(Engine& engine) {
-    auto& reg = engine.GetRegistry();
-    reg.RegisterComponent<FreeCamTagComponent>();
-    reg.RegisterComponent<FreeCamComponent>();
-    reg.RegisterComponent<FreeCamOptOutComponent>();
-    engine.AddFrameSchedulerExtension(&AddFrameStep);
+    if (auto installed = engine.InstallModule(Describe()); !installed) {
+        LogError("[FreeCam] module install failed: {}", ToString(installed.error()));
+    }
 }
 
 void Attach(Engine& engine, float speed, bool lookRequiresButton) {

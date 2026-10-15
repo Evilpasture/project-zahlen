@@ -10,7 +10,7 @@
 #include "TestsFramework.hpp"
 
 #include <DataModel/DataModel.hpp>
-#include <Scripting/Lua/DataModelBindings.hpp>
+#include <LuaBindings/DataModelBindings.hpp>
 #include <Scripting/Lua/LuaScriptRuntime.hpp>
 
 #include <Jolt/Math/Vec3.h>
