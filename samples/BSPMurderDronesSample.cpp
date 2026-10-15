@@ -31,6 +31,7 @@
 #include <BSP/BSPImporter.hpp>
 #include <BSP/BSPRead.hpp>
 #include <BSP/BSPScene.hpp>
+#include <Benchmark/Viewer/BenchmarkViewer.hpp>
 #include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterController.hpp>
 #include <FreeCam/FreeCam.hpp>
@@ -213,6 +214,21 @@ bool g_mouseCaptured = false;
 // The frame's dt, for the UI callback's BeginFrame. The sample's own loop owns
 // the clock; the callback runs inside engine->Tick and has no clock of its own.
 float g_frameDt = 0.0f;
+
+// The logic benchmark panel (extensions/Benchmark). The HUD below is where it
+// is drawn: the F3 edge in the frame loop shows it, and DrawCrosshairHUD calls
+// its DrawPanel between the BeginFrame and EndFrame its own Clay frame already
+// opened, because a second GUI::Context frame in one tick would clear the first
+// one's geometry.
+//
+// A pointer rather than the object, because of what the viewer owns: a World,
+// and a World's teardown reaches the TaskSystem (PhysicsContext's destructor
+// waits on its job counter). TaskSystem::Scope's own rule -- declare it before
+// the resources that may schedule work while they are destroyed -- makes the
+// viewer a local of main(), inside that scope; static storage is exactly what
+// that rule forbids. It is attached lazily, on the first frame it draws, so a
+// session that never presses F3 never builds the benchmark's world.
+ZHLN::Bench::BenchmarkViewer* g_benchmarkViewer = nullptr;
 
 void SetMouseCaptured(ZHLN::Engine& engine, bool captured) {
     g_mouseCaptured = captured;
@@ -404,6 +420,23 @@ void DrawCrosshairHUD(ZHLN::Engine& engine) {
             },
             [&]() -> void { ui.Text(prompt, 16.0f, {0.92f, 0.96f, 1.0f, 1.0f}); }
         );
+    }
+
+    // The benchmark and telemetry panels, when F3 / F4 have shown them. They are
+    // second authors of this same frame, not a second frame: they append their
+    // boxes to the layout the crosshair above already opened, and the
+    // SetPendingUIData below publishes all of it.
+    //
+    // The viewer ticks here -- once per engine frame, whichever frame step calls
+    // it, which is why it is safe beside the loop's own F4 handling -- so its
+    // fixed-step drive and the frame-time window do not depend on the sample's
+    // frame rate. Ticking while the panels are hidden is what makes the first
+    // frame after F4 a populated panel.
+    if (g_benchmarkViewer != nullptr) {
+        g_benchmarkViewer->Tick(engine);
+        if (g_benchmarkViewer->IsVisible() || g_benchmarkViewer->IsTelemetryVisible()) {
+            g_benchmarkViewer->DrawPanels(ui, engine);
+        }
     }
 
     engine.SetPendingUIData(ui.EndFrame());
@@ -1172,6 +1205,9 @@ void PrintControlsBanner(std::string_view mapPath) {
     ZHLN::Log("                  The character waits where you left it; V puts the view back on it.");
     ZHLN::Log("  T             - Toggle the procedural third-person orbit rig (hold RMB to orbit; rig and head shown)");
     ZHLN::Log("                  First person keeps the free look and hides the imported head and hair.");
+    ZHLN::Log("  F3            - Toggle the logic benchmark panel (extensions/Benchmark; its own world, not this map)");
+    ZHLN::Log("  F4            - Toggle the frame telemetry panel (average FPS, 1%/0.1% frame-time lows, GPU stage timings)");
+    ZHLN::Log("                  Its Capture button writes one CSV row per frame under build/cache/captures/.");
     ZHLN::Log("  F             - Log what the crosshair is over");
     ZHLN::Log("  M             - Toggle mouse capture (release the cursor to use the window)");
     ZHLN::Log("  Escape        - Quit sample");
@@ -1779,6 +1815,12 @@ auto main(int argc, char* argv[]) -> int {
 
     PrintControlsBanner(mapPath.string());
 
+    // The benchmark panel's owner. Declared here, inside the TaskSystem scope
+    // and after the engine, so it is torn down before the scheduler retires --
+    // see the pointer's declaration at the top of this file.
+    ZHLN::Bench::BenchmarkViewer benchmarkViewer;
+    g_benchmarkViewer = &benchmarkViewer;
+
     // 10. Frame Loop
     //
     // The free-camera toggle lives here rather than in a frame step: it is a
@@ -1789,8 +1831,10 @@ auto main(int argc, char* argv[]) -> int {
     // controller extension freezes the character's intent off the same flag.
     bool freeCamKeyWasDown = false;
     bool captureKeyWasDown = false;
-    bool pickKeyWasDown    = false;
-    bool viewKeyWasDown    = false;
+    bool pickKeyWasDown      = false;
+    bool viewKeyWasDown      = false;
+    bool benchKeyWasDown     = false;
+    bool telemetryKeyWasDown = false;
 
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
@@ -1867,6 +1911,35 @@ auto main(int argc, char* argv[]) -> int {
                 );
             }
             captureKeyWasDown = captureKeyDown;
+        }
+
+        // F3 shows the logic benchmark panel. Edge-detected like the toggles
+        // around it, and the same raw key level: nothing in this sample
+        // captures the keyboard. The panel owns its own buttons -- start/stop,
+        // step, reset, add bodies -- so this is the whole binding.
+        {
+            const bool benchKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F3));
+            if (benchKeyDown && !benchKeyWasDown && g_benchmarkViewer != nullptr) {
+                g_benchmarkViewer->ToggleVisible();
+                ZHLN::Log(
+                    "[BSPSample] Logic benchmark panel {} (the benchmark's world is the panel's own; this map is untouched).",
+                    g_benchmarkViewer->IsVisible() ? "on" : "off"
+                );
+            }
+            benchKeyWasDown = benchKeyDown;
+        }
+
+        // F4 shows the frame telemetry panel: the host's own frames -- average
+        // FPS, the 1% and 0.1% frame-time lows -- above the GPU stage and CPU
+        // scope timings the engine's profiler records every frame. The panel
+        // owns its own buttons (capture, clear), so this is the whole binding.
+        {
+            const bool telemetryKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F4));
+            if (telemetryKeyDown && !telemetryKeyWasDown && g_benchmarkViewer != nullptr) {
+                g_benchmarkViewer->ToggleTelemetryVisible();
+                ZHLN::Log("[BSPSample] Frame telemetry panel {}.", g_benchmarkViewer->IsTelemetryVisible() ? "on" : "off");
+            }
+            telemetryKeyWasDown = telemetryKeyDown;
         }
 
         // F dumps what the crosshair is over. This is the diagnostic the sample

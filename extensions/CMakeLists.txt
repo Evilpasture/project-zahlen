@@ -8,6 +8,10 @@
 # The order below is intentional where one target publishes another's API.
 # CharacterController and Camera precede Animation; networking follows the
 # Plugins serializer so GitHub can use JSON; scripting precedes Console.
+#
+# Benchmark is last and depends on none of them: it links core and nothing
+# else, and its Viewer sub-target links the headless half, which is why one
+# add_subdirectory() covers both targets.
 add_subdirectory(FreeCam)
 add_subdirectory(CharacterController)
 add_subdirectory(Camera)
@@ -21,3 +25,5 @@ add_subdirectory(VFX)
 add_subdirectory(Scripting)
 add_subdirectory(Console)
 add_subdirectory(editor)
+
+add_subdirectory(Benchmark)

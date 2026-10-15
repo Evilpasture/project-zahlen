@@ -56,7 +56,14 @@ set(SAMPLE_SOURCES
 #                              view to the fly cam (<FreeCam/FreeCam.hpp>,
 #                              zahlen_freecam) and T to the third-person orbit rig
 #                              (<Camera/TargetCamera.hpp>, zahlen_camera) while the
-#                              character waits where it stood.
+#                              character waits where it stood. F3 shows the logic
+#                              benchmark panel
+#                              (<Benchmark/Viewer/BenchmarkViewer.hpp>,
+#                              zahlen_benchmark_viewer) inside the sample's own
+#                              HUD frame: the crosshair and the panel are one
+#                              Clay frame drawn by one callback. The viewer links
+#                              the headless zahlen_benchmark, which is the other
+#                              half of that extension.
 #   FidelityHarness            headless glTF-Render-Fidelity runner: imports
 #                              with ZHLN.glTF (zahlen_gltf), reads the Khronos
 #                              scenario JSONs with ZHLN::ReflectJSON
@@ -72,7 +79,7 @@ set(ZHLN_SAMPLE_OPTIONAL_TARGETS_RemoteGLBSample zahlen_gltf zahlen_remote_asset
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_CDNMapSample zahlen_gltf zahlen_cdn zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_DeviceLostRecoverySample zahlen_freecam)
 set(ZHLN_SAMPLE_OPTIONAL_TARGETS_FidelityHarness zahlen_gltf zahlen_serialization zahlen_asset_cooking)
-set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction zahlen_freecam zahlen_camera zahlen_animation zahlen_gltf)
+set(ZHLN_SAMPLE_OPTIONAL_TARGETS_BSPMurderDronesSample zahlen_bsp zahlen_character_controller zahlen_interaction zahlen_freecam zahlen_camera zahlen_animation zahlen_gltf zahlen_benchmark_viewer)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

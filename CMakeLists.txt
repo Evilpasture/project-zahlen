@@ -532,6 +532,20 @@ if(ZHLN_BUILD_EXTRAS)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
     endif()
 
+    # The logic benchmark. The viewer is what the app names -- it links the
+    # headless half itself -- and both halves of the extension reach the
+    # application through this one target: `zahlen --benchmark` runs the
+    # LogicBenchmark, and F3 hosts the viewer's panel in the app's window. The
+    # headless target is named too, because a --benchmark build must not depend
+    # on the viewer's CMakeLists having run first.
+    if(TARGET zahlen_benchmark)
+        target_link_libraries(zahlen PRIVATE zahlen_benchmark)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_BENCHMARK=1)
+        if(TARGET zahlen_benchmark_viewer)
+            target_link_libraries(zahlen PRIVATE zahlen_benchmark_viewer)
+        endif()
+    endif()
+
     if(TARGET zahlen_fonts)
         target_link_libraries(zahlen PRIVATE zahlen_fonts)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)

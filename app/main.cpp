@@ -74,6 +74,13 @@
 #if defined(ZHLN_HAS_FREECAM)
 #include <FreeCam/FreeCam.hpp>
 #endif
+#if defined(ZHLN_HAS_BENCHMARK)
+// The logic benchmark extension, both halves: the headless LogicBenchmark that
+// --benchmark runs, and the viewer that hosts the F3 panel. A build with
+// ZHLN_BUILD_EXTRAS=OFF has neither, which is why every use below is guarded.
+#include <Benchmark/Benchmark.hpp>
+#include <Benchmark/Viewer/BenchmarkViewer.hpp>
+#endif
 #if defined(ZHLN_HAS_RAGDOLL_AUTHORING)
 #include <RagdollAuthoring/RagdollAuthoring.hpp>
 #endif
@@ -82,9 +89,12 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <print>
 #include <string>
 #include <string_view>
@@ -167,6 +177,129 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     ZHLN::RagdollAuthoring::Install(engine);
 #endif
 }
+
+#if defined(ZHLN_HAS_BENCHMARK)
+
+// `zahlen --benchmark`: the headless half of extensions/Benchmark, run once
+// and reported.
+//
+// It builds no window, no device and no scene -- the benchmark owns a
+// standalone World -- which is what makes the flag usable on a machine with no
+// display and the number comparable across machines. Workload sizes come from
+// the environment so a CI job can pin them without a rebuild:
+//
+//   ZHLN_BENCH_ENTITIES=4000 ZHLN_BENCH_TICKS=20000 ./build/current/zahlen --benchmark
+//
+// The sizes below are the defaults: big enough that a tick is dominated by the
+// engine rather than by the timer's resolution, small enough that a workstation
+// finishes in a few seconds.
+inline constexpr size_t   kBenchmarkEntities = 2000;
+inline constexpr uint64_t kBenchmarkTicks    = 5000;
+
+[[nodiscard]] auto BenchmarkEnvU64(const char* name, uint64_t fallback) -> uint64_t {
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+    char*                    end    = nullptr;
+    const unsigned long long parsed = std::strtoull(value, &end, 10);
+    return (end != value) ? static_cast<uint64_t>(parsed) : fallback;
+}
+
+// Runs the workload and prints one report. False only when the benchmark's
+// world could not be created; the reason is logged by the extension itself.
+[[nodiscard]] auto RunLogicBenchmark() -> bool {
+    const auto entities = static_cast<size_t>(BenchmarkEnvU64("ZHLN_BENCH_ENTITIES", kBenchmarkEntities));
+    const auto ticks    = BenchmarkEnvU64("ZHLN_BENCH_TICKS", kBenchmarkTicks);
+
+    ZHLN::Bench::LogicBenchmark benchmark;
+    if (!benchmark.Initialize(entities)) {
+        return false;
+    }
+
+    // The fixed step a game loop would use; the reported cost is per call, so
+    // the value only decides how far the world moves between measurements.
+    constexpr float kFixedDt = 1.0f / 60.0f;
+    for (uint64_t tick = 0; tick < ticks; ++tick) {
+        benchmark.Step(kFixedDt);
+    }
+
+    const auto& metrics = benchmark.GetMetrics();
+    // Engine-only rate: measured tick time inverted. The wall rate below also
+    // carries whatever the host spent between Step() calls, and here that is
+    // the loop above and nothing else.
+    const double engineRate = metrics.avgTickTimeMs > 0.0f ? 1000.0 / static_cast<double>(metrics.avgTickTimeMs) : 0.0;
+    const double wallRate   = metrics.totalTimeSec > 0.0 ? static_cast<double>(metrics.totalTicks) / metrics.totalTimeSec : 0.0;
+
+    ZHLN::Log<ZHLN::LogChannel::StdOut>("[Bench] logic benchmark: {} entities, {} ticks", metrics.entityCount, metrics.totalTicks);
+    ZHLN::Log<ZHLN::LogChannel::StdOut>(
+        "[Bench] tick ms: avg {:.3f}  min {:.3f}  max {:.3f}  last {:.3f}", metrics.avgTickTimeMs, metrics.minTickTimeMs, metrics.maxTickTimeMs,
+        metrics.lastTickTimeMs
+    );
+    ZHLN::Log<ZHLN::LogChannel::StdOut>(
+        "[Bench] throughput: {:.0f} ticks/s engine-only, {:.0f} ticks/s wall ({:.2f} s total)", engineRate, wallRate, metrics.totalTimeSec
+    );
+    return true;
+}
+
+// F3 hosts the benchmark panel in the app's own window: the viewer half of the
+// same extension, with this app's loop as the host loop.
+//
+// The panel owns the UI frame on the frames it draws (UpdateAndRenderUI does
+// the BeginFrame/EndFrame round trip), so this callback is the whole UI story
+// while the panel is up. An app with a HUD of its own would draw that HUD in
+// this same callback and call the viewer's DrawPanel between its own BeginFrame
+// and EndFrame instead -- one Clay frame, two authors.
+[[nodiscard]] auto MakeBenchmarkOverlay() -> ZHLN::Engine::UICallback {
+    // Shared rather than captured by value: the UICallback is copied around by
+    // the engine, and the viewer is a single long-lived object (it owns the
+    // benchmark's world) that must not be duplicated.
+    struct OverlayState {
+        ZHLN::Bench::BenchmarkViewer viewer;
+        ZHLN::Clock                  clock;
+        bool                         panelKeyWasDown     = false;
+        bool                         telemetryKeyWasDown = false;
+    };
+    auto state = std::make_shared<OverlayState>();
+
+    return [state](ZHLN::Engine& engine) -> void {
+        // Raw level plus an edge, like the samples' toggles: no text field or
+        // console in this app captures the keyboard.
+        const auto input = engine.GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>();
+
+        const bool panelKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F3));
+        if (panelKeyDown && !state->panelKeyWasDown) {
+            state->viewer.ToggleVisible();
+            ZHLN::Log("[Bench] logic benchmark panel {}.", state->viewer.IsVisible() ? "on" : "off");
+        }
+        state->panelKeyWasDown = panelKeyDown;
+
+        // F4: the frame telemetry panel -- average FPS, the 1% / 0.1% frame-time
+        // lows, and the GPU stage timings the renderer records every frame. Its
+        // capture button writes the same numbers to a CSV under build/cache.
+        const bool telemetryKeyDown = input && input->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::F4));
+        if (telemetryKeyDown && !state->telemetryKeyWasDown) {
+            state->viewer.ToggleTelemetryVisible();
+            ZHLN::Log("[Bench] frame telemetry panel {}.", state->viewer.IsTelemetryVisible() ? "on" : "off");
+        }
+        state->telemetryKeyWasDown = telemetryKeyDown;
+
+        // One frame of bookkeeping whether or not anything is drawn: the frame
+        // window and the profiler rows stay warm, so pressing F3 or F4 shows a
+        // populated panel instead of one that starts on that frame. It is
+        // idempotent per engine frame, so UpdateAndRenderUI ticking again below
+        // is not a second sample, and it steps the benchmark only while that
+        // panel is visible -- a hidden panel is not a background load.
+        state->viewer.Tick(engine);
+
+        if (!state->viewer.IsVisible() && !state->viewer.IsTelemetryVisible()) {
+            return;
+        }
+        state->viewer.UpdateAndRenderUI(engine, state->clock.GetDeltaTime());
+    };
+}
+
+#endif // ZHLN_HAS_BENCHMARK
 
 #if defined(ZHLN_HAS_EDITOR)
 // WORLD EDITOR
@@ -625,6 +758,19 @@ auto main(int argc, char* argv[]) -> int {
 
             ZHLN::SetLogLevel(options.logLevel);
 
+            // A run mode, not a modifier: --benchmark takes the process, times
+            // the engine and exits, so it is answered before anything that
+            // would open a window or a scene.
+            if (options.benchmark) {
+#if defined(ZHLN_HAS_BENCHMARK)
+                return RunLogicBenchmark() ? std::expected<void, ZHLN::ErrorCode> {}
+                                           : std::unexpected(ZHLN::CommandLineError::InvalidValue);
+#else
+                ZHLN::Log("[Bench] --benchmark requested, but this build has no zahlen_benchmark extension (ZHLN_BUILD_EXTRAS=OFF).");
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+#endif
+            }
+
             if (options.launchEditor) {
 #if !defined(ZHLN_HAS_EDITOR)
                 ZHLN::Log("[WorldEditor] --editor requested, but this build has no native editor extra.");
@@ -675,8 +821,15 @@ auto main(int argc, char* argv[]) -> int {
 #endif
             }
 
-            // Runs the engine game loop and propagates any initialization/runtime Error
+            // Runs the engine game loop and propagates any initialization/runtime Error.
+            // The UI callback is the benchmark panel: F3 toggles it, and an app
+            // that never presses F3 draws exactly what it drew before (the
+            // callback returns without touching the UI frame while hidden).
+#if defined(ZHLN_HAS_BENCHMARK)
+            return ZHLN::Engine::Run(options, crashState, MakeBenchmarkOverlay(), &InstallGameplayExtras);
+#else
             return ZHLN::Engine::Run(options, crashState, nullptr, &InstallGameplayExtras);
+#endif
         })
         .transform([]() -> int {
             // Success path: mapped to EXIT_SUCCESS (0)
