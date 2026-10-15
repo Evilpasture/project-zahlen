@@ -7,7 +7,7 @@
 #include "Types.hpp"
 #include <Zahlen/Entity.hpp>
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Real.h>

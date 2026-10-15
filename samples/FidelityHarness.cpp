@@ -57,7 +57,7 @@
 #include <glTF/GLTFImporter.hpp>
 #include <json/JSONSchema.hpp>
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Vec3.h>
 
 #include <algorithm>

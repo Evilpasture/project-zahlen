@@ -90,6 +90,7 @@ zhln_run_governance_check("check_reflection_boundary.py")
 # only pass that can tell a macro apart from an enum constant (VK_SUCCESS vs
 # VK_FORMAT_R8G8B8A8_UNORM), which a regex cannot do.
 zhln_run_governance_check("check_macro_governance.py")
+zhln_run_governance_check("check_include_governance.py")
 
 add_custom_target(
   check_macro_expansions

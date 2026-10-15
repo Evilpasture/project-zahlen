@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 

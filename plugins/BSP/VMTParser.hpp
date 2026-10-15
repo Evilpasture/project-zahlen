@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Float4.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Error.hpp>

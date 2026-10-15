@@ -25,15 +25,7 @@
 //   ./build/p2996/samples/BSPMurderDronesSample
 //   ./build/p2996/samples/BSPMurderDronesSample import/engine_assets/maps/gm_murder_drones.bsp
 
-#if defined(_WIN32)
-// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
-// The modules this file imports reach them the same way, from their global
-// fragments, and a translation unit and the modules it imports have to agree on
-// the intrinsics' language linkage -- otherwise the import reports "conflicting
-// language linkage for imported declaration" for every intrinsic the module
-// declares. Same block as ProceduralAnimationSample.cpp's.
 #include <Zahlen/Core/Platform.hpp>
-#endif
 
 #include <BSP/BSPGeometry.hpp>
 #include <BSP/BSPImporter.hpp>
@@ -85,7 +77,7 @@ import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
 
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>

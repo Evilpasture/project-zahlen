@@ -45,7 +45,7 @@
 
 #pragma once
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/DVec3.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>

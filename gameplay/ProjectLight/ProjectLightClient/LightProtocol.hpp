@@ -5,7 +5,7 @@
 #pragma once
 
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <Zahlen/Core/AssetID.hpp>

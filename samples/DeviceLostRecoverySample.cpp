@@ -46,7 +46,7 @@
 #include <Fonts/Fonts.hpp>
 #endif
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 

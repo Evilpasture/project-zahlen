@@ -11,7 +11,7 @@
 #pragma once
 
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>

@@ -12,7 +12,7 @@
 #include <Zahlen/Meshlet.hpp>
 #include <Zahlen/Render/Render.hpp>
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>

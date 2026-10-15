@@ -13,12 +13,7 @@
 
 module;
 
-#if defined(_WIN32)
-// MinGW's windows.h declares x86 intrinsics; load it before Jolt's immintrin.h.
-#include <Zahlen/Core/Platform.hpp>
-#endif
-
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Camera.hpp>

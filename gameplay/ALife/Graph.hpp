@@ -5,7 +5,7 @@
 
 #include <Zahlen/Common.h>
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <cstddef>

@@ -9,7 +9,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Vertex.hpp>
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <array>
 #include <cstddef>

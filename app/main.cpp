@@ -14,7 +14,7 @@
 #endif
 #include "engine/system/GraphicsSettingsSync.hpp"
 // clang-format off
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 // clang-format on
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Zahlen/AssetManager.hpp>

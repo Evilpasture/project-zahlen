@@ -10,7 +10,7 @@
 // storage: script-facing Instance identities and parentage are stable, while
 // the adapter may bind renderable Instances to generation-safe ECS entities.
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Core/Reference.h>
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Core/Array.hpp>

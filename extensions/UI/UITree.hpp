@@ -27,7 +27,7 @@
 // The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
-#include <Jolt/Jolt.h>
+#include <Zahlen/Physics/Jolt.hpp>
 #include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/Optional.hpp>
