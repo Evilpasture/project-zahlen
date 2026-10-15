@@ -80,16 +80,20 @@ namespace {
 // One row's sparkline, from the metric's own history (oldest first, at most 100
 // samples). Each bar is the worst sample of its slice, so a spike survives the
 // downsample; bars older than the metric's first sample stay zero rather than
-// being invented, which is why a freshly seen stage's line starts on the right.
+// being invented, which is why a freshly seen stage's line starts on the right,
+// and `filled` carries how many bars are the metric's own so the panel can tell
+// that padding apart from a sample that measured zero.
 void FillSpark(FrameStageRow& row, const float* history, size_t historyCount) noexcept {
     const size_t bars = kStageSparkBars;
     row.spark.fill(0.0f);
+    row.filled = 0;
     if (history == nullptr || historyCount == 0) {
         return;
     }
 
     const size_t covered  = std::min(historyCount, bars);
     const size_t firstBar = bars - covered;
+    row.filled            = covered;
     for (size_t bar = 0; bar < covered; ++bar) {
         const size_t from = (bar * historyCount) / covered;
         const size_t to   = std::min(historyCount, std::max(from + 1, ((bar + 1) * historyCount) / covered));
@@ -291,32 +295,53 @@ auto FrameTelemetry::SlowestMean(float fraction) -> float {
 }
 
 auto FrameTelemetry::RingIndex(size_t age) const noexcept -> size_t {
-    const size_t oldest = (m_write + kWindowFrames - m_filled) % kWindowFrames;
-    return (oldest + age) % kWindowFrames;
+    // Walk back from the slot just written, which is the newest sample whatever
+    // m_write happens to be: a ring indexed from its oldest end would answer
+    // with the window's first samples once it fills, and the caller asking for
+    // the newest 128 would get the same 128 forever (see UpdateChart).
+    return (m_write + kWindowFrames - 1 - age) % kWindowFrames;
 }
 
 void FrameTelemetry::SampleStages() noexcept {
+    // Every row ages by this tick, and the metrics that took a new sample clear
+    // their own age as they are read (see AccumulateStage). That is what tells a
+    // stage that is steady -- a sample every frame, all of them equal -- from one
+    // that has stopped being submitted: only the second stops clearing it.
+    for (FrameStageRow& row: m_stages) {
+        ++row.quietTicks;
+    }
+
     CPUProfiler::IterateMetrics(&FrameTelemetry::StageCallback, this);
 
     // The split and the GPU total come from the whole table rather than from
     // this frame's callbacks: rows survive ticks, so a stage that did not report
     // this frame keeps its place in the panel -- with its last measurement --
     // instead of vanishing from it.
+    //
+    // What a row may not keep is its claim to be current. The profiler holds
+    // every metric it has ever seen, so a stage the frame graph has stopped
+    // including would otherwise sit in the table with a frozen number and go on
+    // adding that number to a total the panel calls this frame's cost. A quiet
+    // stage is not part of what the frame is paying.
     float total = 0.0f;
     for (size_t i = 0; i < m_gpuCount; ++i) {
-        total += m_stages[i].lastMs;
+        if (!m_stages[i].IsStale()) {
+            total += m_stages[i].lastMs;
+        }
     }
     m_snapshot.gpuTotalMs = total;
 }
 
-void FrameTelemetry::StageCallback(const char* name, float lastMs, float, const float* history, size_t historyCount, void* userData) noexcept {
+void FrameTelemetry::StageCallback(
+    const char* name, float lastMs, float, const float* history, size_t historyCount, uint64_t sampleCount, void* userData
+) noexcept {
     if (userData == nullptr || name == nullptr || name[0] == '\0') {
         return;
     }
-    static_cast<FrameTelemetry*>(userData)->AccumulateStage(name, lastMs, history, historyCount);
+    static_cast<FrameTelemetry*>(userData)->AccumulateStage(name, lastMs, history, historyCount, sampleCount);
 }
 
-void FrameTelemetry::AccumulateStage(std::string_view name, float lastMs, const float* history, size_t historyCount) noexcept {
+void FrameTelemetry::AccumulateStage(std::string_view name, float lastMs, const float* history, size_t historyCount, uint64_t sampleCount) noexcept {
     // The table is tens of rows and this runs once per metric per frame, so the
     // lookup is a binary search inside the metric's own run of rows: GPU stages
     // first, then CPU scopes, each alphabetical.
@@ -327,12 +352,23 @@ void FrameTelemetry::AccumulateStage(std::string_view name, float lastMs, const 
     const auto found      = std::lower_bound(blockBegin, blockEnd, name, ByName {});
 
     if (found != blockEnd && found->name == name) {
-        found->lastMs = lastMs;
-        FillSpark(*found, history, historyCount);
+        FrameStageRow& row = *found;
+
+        // The metric reported since the last tick -- its count grew -- which is
+        // what keeps the row current and what makes its measurement the one to
+        // draw. A metric that did not is left as it is, age and all.
+        if (row.samples != sampleCount) {
+            row.samples    = sampleCount;
+            row.quietTicks = 0;
+            row.lastMs     = lastMs;
+        }
+        FillSpark(row, history, historyCount);
         return;
     }
 
-    FrameStageRow& row = *m_stages.emplace(found, FrameStageRow {.name = std::string(name), .lastMs = lastMs, .gpuStage = gpu, .spark = {}});
+    FrameStageRow& row = *m_stages.emplace(
+        found, FrameStageRow {.name = std::string(name), .lastMs = lastMs, .gpuStage = gpu, .spark = {}, .samples = sampleCount, .quietTicks = 0}
+    );
     FillSpark(row, history, historyCount);
 
     if (gpu) {

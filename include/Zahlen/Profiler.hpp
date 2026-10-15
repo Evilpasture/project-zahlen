@@ -25,7 +25,16 @@ class ZHLN_API CPUProfiler {
   public:
     static void Record(std::string_view name, float timeMS) noexcept;
 
-    using MetricCallback = void (*)(const char* name, float cpuTimeMS, float rollingAverageMS, const float* history, size_t historyCount, void* userData);
+    // history holds the metric's most recent samples, oldest first, and
+    // historyCount how many of them are live -- at most 100, the ring's
+    // capacity. sampleCount is how many the metric has taken over its lifetime,
+    // which is the only one of the two that keeps moving for a metric that is
+    // still reporting once the ring is full: a consumer that needs to tell a
+    // metric that has gone quiet from one that is merely steady compares it
+    // between calls (the benchmark viewer's stage table does).
+    using MetricCallback = void (*)(
+        const char* name, float cpuTimeMS, float rollingAverageMS, const float* history, size_t historyCount, uint64_t sampleCount, void* userData
+    );
     static void IterateMetrics(MetricCallback callback, void* userData) noexcept;
 };
 

@@ -78,7 +78,7 @@ void CPUProfiler::IterateMetrics(MetricCallback callback, void* userData) noexce
             }
         }
 
-        callback(name.c_str(), cpuTime, rollingAvg, flatHistory.data(), limit, userData);
+        callback(name.c_str(), cpuTime, rollingAvg, flatHistory.data(), limit, static_cast<uint64_t>(count), userData);
     });
 }
 

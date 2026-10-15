@@ -65,6 +65,13 @@ namespace ZHLN::Bench {
 // slice, so a spike survives the downsample).
 inline constexpr size_t kStageSparkBars = 12;
 
+// Host frames a metric may go without reporting before its row counts as quiet.
+// Thirty frames is a second and a half at twenty fps: long enough that a stage
+// skipping a frame or two -- or a pass that runs on an alternate cadence -- does
+// not flicker between current and quiet, short enough that a stage the frame
+// graph has dropped stops being drawn as though it were still running.
+inline constexpr uint64_t kStageStaleTicks = 30;
+
 // One row of the profiler table: a GPU stage or a CPU scope, as the engine
 // last measured it.
 struct FrameStageRow {
@@ -83,9 +90,29 @@ struct FrameStageRow {
     bool gpuStage = true;
 
     // The metric's own recent history, oldest first, downsampled to
-    // kStageSparkBars bars, newest on the right. Bars older than the metric's
-    // first sample are zero.
+    // kStageSparkBars bars, newest on the right. `filled` counts the bars that
+    // came from the metric itself: the ones before it are an absence, which is
+    // not the same thing as a sample that measured zero, and the two are drawn
+    // as what they are rather than as the same bar.
     std::array<float, kStageSparkBars> spark {};
+    size_t                             filled = 0;
+
+    // The metric's own sample count as last seen, and how many ticks have gone
+    // by without it growing. The profiler holds every metric it has ever seen,
+    // so the row outlives the stage it describes and a metric that has stopped
+    // reporting still arrives here -- with the same samples, the same
+    // measurement, the same count. That count not moving is what says the row is
+    // history rather than a reading (see kStageStaleTicks), and it is the only
+    // thing that can: a steady stage takes a new sample every frame and its
+    // numbers never change, while a stage that has gone quiet takes none.
+    uint64_t samples    = 0;
+    uint64_t quietTicks = 0;
+
+    // True once the metric has been silent long enough that its number is
+    // history rather than a reading (see kStageStaleTicks).
+    [[nodiscard]] auto IsStale() const noexcept -> bool {
+        return quietTicks > kStageStaleTicks;
+    }
 };
 
 // One window's numbers, as the panel draws them.
@@ -102,7 +129,9 @@ struct FrameTelemetrySnapshot {
     float    frameMsLow01  = 0.0f; // mean of the window's slowest 0.1%, in ms
     // The GPU stages of the frame just sampled, summed. Passes the graph
     // submits concurrently overlap on the device, so this is a sum of stage
-    // spans rather than a span of the frame; see the note in the .cpp.
+    // spans rather than a span of the frame; see the note in the .cpp. Quiet
+    // stages are not part of it: a pass that stopped running is not part of
+    // what the device is being asked to do now.
     float    gpuTotalMs     = 0.0f;
     uint64_t clippedSamples = 0; // frames longer than kSampleCeilingMs, kept out of the window
 };
@@ -202,11 +231,12 @@ class ZHLN_STATIC_API FrameTelemetry {
   private:
     // The profiler callback: a static member, because CPUProfiler::IterateMetrics
     // takes a plain function pointer and this object arrives as its userData.
-    static void StageCallback(const char* name, float lastMs, float, const float* history, size_t historyCount, void* userData) noexcept;
+    static void
+        StageCallback(const char* name, float lastMs, float, const float* history, size_t historyCount, uint64_t sampleCount, void* userData) noexcept;
 
     // Appends one recovered metric to the table, or refreshes the row it
     // already has.
-    void AccumulateStage(std::string_view name, float lastMs, const float* history, size_t historyCount) noexcept;
+    void AccumulateStage(std::string_view name, float lastMs, const float* history, size_t historyCount, uint64_t sampleCount) noexcept;
 
     void SampleStages() noexcept;
     void RecordSample(float frameMs) noexcept;
@@ -243,6 +273,8 @@ class ZHLN_STATIC_API FrameTelemetry {
     // the panel and the CSV header read GPU-first without a second list.
     std::vector<FrameStageRow> m_stages;
     size_t                     m_gpuCount = 0;
+
+
 
     // The machine's counters: CPU and per-core usage and clocks, the GPU's
     // utilization and clock. Fed by Tick(), read by the panel and the capture.

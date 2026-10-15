@@ -69,6 +69,14 @@ inline constexpr float  kCoreSparkHeight   = 10.0f;
 inline constexpr float  kCoreSparkBarGap   = 1.0f;
 inline constexpr size_t kCoreSparkBars     = 12;
 
+// The smallest a row's sparkline scales to, in ms. Bars are drawn against the
+// row's own peak, so a row whose whole window sits at the noise floor -- a pass
+// that costs 0.00 ms -- would otherwise fill every bar to the top and read as
+// the busiest thing on the panel. Half a tenth of a millisecond is under the
+// measurement noise of a stage that ran, so anything under it is drawn small,
+// and anything above it still draws its spikes at their own scale.
+inline constexpr float kSparkFloorMs = 0.05f;
+
 // The card a line or a cell opens under the pointer. It carries what the panel
 // would otherwise print as a second line under every reading -- the window's
 // tails, the clock, the provenance -- so the panel keeps what a glance needs and
@@ -193,6 +201,10 @@ const JPH::Vec4 kSlowBarInk = {1.00f, 0.55f, 0.30f, 1.00f};
 const JPH::Vec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
 const JPH::Vec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
 const JPH::Vec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
+
+// A stage row the profiler has stopped hearing from: dimmer than the body ink,
+// so a frozen number reads as a number that is not about now.
+const JPH::Vec4 kStaleInk = {0.45f, 0.50f, 0.58f, 1.00f};
 
 // The machine section: a core cell's history bar, and the red a core at its
 // ceiling is drawn in.
@@ -612,26 +624,41 @@ void BenchmarkViewer::Impl::DrawStageRow(
     // a metric whose name is wider than its column then makes its row taller,
     // instead of drawing its second line over the row below. The name itself is
     // cut to the column first, so that is the backstop, not the plan.
+    // A row the profiler has stopped hearing from is drawn as history: its name
+    // and its number dimmed, because that number is the last one it had rather
+    // than what the frame is paying now (see FrameStageRow::IsStale).
+    const bool      stale    = row.IsStale();
+    const JPH::Vec4 rowInk   = stale ? kStaleInk : (row.gpuStage ? kBodyInk : kCpuNameInk);
+    const JPH::Vec4 valueInk = stale ? kStaleInk : kBodyInk;
+
+    // The row is one hover target, so its card opens wherever on it the pointer
+    // is rather than only over its number or its bars. Its id is past the bars'
+    // own run (0, 1 and 2 are the cells, 3.. the bars), so hovering a bar and
+    // hovering the row are the same element rather than two ids colliding.
+    const std::string_view rowId = TableId(prefix, column, index, kStageSparkBars + 4);
+
     ui.Box(
-        "", GUI::BoxConfig {.width = {.fixed = style.ColumnWidth()}, .gap = style.gap, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
+        rowId, GUI::BoxConfig {.width = {.fixed = style.ColumnWidth()}, .gap = style.gap, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
         [&]() -> void {
             ui.Box(
                 TableId(prefix, column, index, 0), GUI::BoxConfig {.width = {.fixed = style.nameWidth}, .alignCross = GUI::Alignment::Center},
-                [&]() -> void { ui.Text(FitToWidth(row.name, style.nameWidth, style.advance), style.fontSize, row.gpuStage ? kBodyInk : kCpuNameInk); }
+                [&]() -> void { ui.Text(FitToWidth(row.name, style.nameWidth, style.advance), style.fontSize, rowInk); }
             );
 
             ui.Box(
                 TableId(prefix, column, index, 1),
                 GUI::BoxConfig {.width = {.fixed = style.valueWidth}, .alignMain = GUI::Alignment::End, .alignCross = GUI::Alignment::Center},
-                [&]() -> void { ui.Text(std::format("{:.2f}", row.lastMs), style.fontSize, kBodyInk); }
+                [&]() -> void { ui.Text(std::format("{:.2f}", row.lastMs), style.fontSize, valueInk); }
             );
 
             // The sparkline is the metric's own history, scaled to the row's own
             // peak: the question a row answers is "is this metric spiking", and a
             // shared scale would flatten every stage that is not the heaviest one.
+            // The scale has a floor, so a row whose samples are all noise draws
+            // small bars rather than a full block that cannot move.
             const float bars    = static_cast<float>(row.spark.size());
             const float barWide = (style.sparkWidth - ((bars - 1.0f) * kSparkBarGap)) / bars;
-            float       peak    = 0.001f;
+            float       peak    = kSparkFloorMs;
             for (const float sample: row.spark) {
                 peak = std::max(peak, sample);
             }
@@ -646,12 +673,18 @@ void BenchmarkViewer::Impl::DrawStageRow(
                     .alignCross = GUI::Alignment::End,
                 },
                 [&]() -> void {
+                    // The bars before the metric's first sample are an absence,
+                    // not readings: drawn in the dim chart ink the core grid uses
+                    // for the same thing, so a row that is three frames old stops
+                    // looking like a row that has gone quiet.
+                    const size_t blank = row.spark.size() - std::min(row.filled, row.spark.size());
+
                     for (size_t bar = 0; bar < row.spark.size(); ++bar) {
-                        const float fill   = std::clamp(row.spark[bar] / peak, 0.0f, 1.0f);
-                        const float height = std::max(kMinBarHeight, fill * kStageSparkHeight);
+                        const float     fill   = std::clamp(row.spark[bar] / peak, 0.0f, 1.0f);
+                        const float     height = std::max(kMinBarHeight, fill * kStageSparkHeight);
+                        const JPH::Vec4 ink    = (bar < blank) ? kChartInk : (row.gpuStage ? kGpuSparkInk : kCpuSparkInk);
                         ui.BeginBox(
-                            TableId(prefix, column, index, 3 + bar),
-                            GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = row.gpuStage ? kGpuSparkInk : kCpuSparkInk}
+                            TableId(prefix, column, index, 3 + bar), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink}
                         );
                         ui.EndBox();
                     }
@@ -659,6 +692,30 @@ void BenchmarkViewer::Impl::DrawStageRow(
             );
         }
     );
+
+    // What the row is, and what its number does not say: the peak of the window
+    // the bars draw rather than only the sample it happens to end on, and -- when
+    // the profiler has stopped hearing from the metric -- how long it has been.
+    if (ui.IsPointerOver(rowId)) {
+        hover = HoverCard {.id = std::string(rowId), .lines = {}};
+
+        float windowPeak = 0.0f;
+        for (const float sample: row.spark) {
+            windowPeak = std::max(windowPeak, sample);
+        }
+
+        hover->lines.push_back(row.name);
+        if (row.filled > 0) {
+            hover->lines.push_back(
+                std::format("last {:.2f} ms   highest of the last {} frames {:.2f} ms", row.lastMs, row.filled, windowPeak)
+            );
+        } else {
+            hover->lines.push_back(std::format("last {:.2f} ms", row.lastMs));
+        }
+        if (stale) {
+            hover->lines.push_back(std::format("not reported for {} frames", row.quietTicks));
+        }
+    }
 }
 
 // The card the element under the pointer opens. It is built out of the panel's
