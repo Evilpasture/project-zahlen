@@ -26,15 +26,26 @@
 //     IterateMetrics had no caller at all. This is that reader -- one row per
 //     metric, classified as a GPU stage or a CPU scope from its name.
 //
+//   * The machine under the frames. A SystemTelemetry inside this one samples
+//     CPU usage and clocks -- machine-wide and per core -- and the GPU's
+//     utilization and clock from whatever the platform exposes, on its own
+//     four-per-second cadence. Its header names no platform and neither does
+//     this one: the counters arrive through a probe whose only platform files
+//     are translation units of this target.
+//
 // Capture writes one CSV row per frame (frame interval, throughput, GPU total,
-// every metric's value) under FS::Paths::CacheDir()/captures, so a run can be
-// analysed after the fact with the numbers the panel was showing while it ran.
+// the machine's counters, every metric's value) under
+// FS::Paths::CacheDir()/captures, so a run can be analysed after the fact with
+// the numbers the panel was showing while it ran. Hardware rows repeat the last
+// sample between hardware ticks -- the counters are read four times a second and
+// frames arrive faster -- which is what the time_s column is for.
 //
 // This measures host frames; LogicBenchmark measures the ticks the host asks
 // for. The split is deliberate -- see BenchmarkViewer.hpp for why the two share
 // a panel anyway.
 #pragma once
 
+#include <Benchmark/Viewer/SystemTelemetry.hpp>
 #include <Zahlen/Common.h>
 #include <array>
 #include <chrono>
@@ -140,6 +151,17 @@ class ZHLN_STATIC_API FrameTelemetry {
 
     [[nodiscard]] auto Snapshot() const noexcept -> const FrameTelemetrySnapshot&;
 
+    // The machine's own counters, sampled by the same Tick() on their own
+    // cadence. Exposed so a host can read them without the panel.
+    [[nodiscard]] auto System() noexcept -> SystemTelemetry&;
+    [[nodiscard]] auto System() const noexcept -> const SystemTelemetry&;
+
+    // The device the renderer draws on, as Vulkan names it, so the platform
+    // probe can match its GPU counters to that device rather than to whichever
+    // one it finds first. Forwarded to SystemTelemetry; the first non-empty name
+    // is the one that sticks.
+    void SetGpuNameHint(std::string_view vulkanDeviceName);
+
     // The last kChartFrames intervals, oldest first. Shorter than kChartFrames
     // until that many frames have been recorded.
     [[nodiscard]] auto ChartSamples() const noexcept -> std::span<const float>;
@@ -222,12 +244,17 @@ class ZHLN_STATIC_API FrameTelemetry {
     std::vector<FrameStageRow> m_stages;
     size_t                     m_gpuCount = 0;
 
+    // The machine's counters: CPU and per-core usage and clocks, the GPU's
+    // utilization and clock. Fed by Tick(), read by the panel and the capture.
+    SystemTelemetry m_system;
+
     // Capture state. m_captureColumns is the table's order at StartCapture:
     // columns are fixed for the file, so a metric that first reports mid-run is
     // not in it (see the .cpp).
     std::ofstream                         m_captureFile;
     std::filesystem::path                 m_capturePath;
     std::vector<std::string>              m_captureColumns;
+    std::vector<unsigned>                 m_captureCores; // the core columns of the file
     std::chrono::steady_clock::time_point m_captureStart {};
     uint64_t                              m_captureFrames     = 0;
     uint64_t                              m_captureSinceFlush = 0;

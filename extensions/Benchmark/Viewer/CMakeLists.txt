@@ -16,6 +16,15 @@
 # source file here rather than a target of its own because it is only ever
 # drawn by these panels: the logic benchmark is what a non-GUI consumer links.
 #
+# SystemTelemetry is the machine under the frames -- CPU usage and clocks, per
+# core as well as machine-wide, and the GPU's utilization and clock. Its header
+# names no platform and contains no syscall: the counters arrive through a probe
+# whose platform code lives entirely in translation units listed below, so the
+# header is what a portable consumer sees and never grows a #if. On Linux the
+# probe reads procfs, cpu frequency and the DRM counters, and drives NVML
+# through the engine's shared-library wrapper without ever including <nvml.h>;
+# elsewhere it reports that it has nothing to read.
+#
 # Public headers are reached as <Benchmark/Viewer/...>.
 
 set(TARGET_NAME zahlen_benchmark_viewer)
@@ -23,7 +32,17 @@ set(TARGET_NAME zahlen_benchmark_viewer)
 add_library(${TARGET_NAME} STATIC
     BenchmarkViewer.cpp
     FrameTelemetry.cpp
+    SystemTelemetry.cpp
+    SystemProbeLinux.cpp
+    SystemProbeUnavailable.cpp
 )
+
+# The two probe files are alternatives chosen by the platform, not by the build
+# system: exactly one of them is non-empty after preprocessing and the other
+# compiles to nothing. SystemProbeLinux.cpp defines the factory only under
+# __linux__; SystemProbeUnavailable.cpp defines the same factory only outside
+# it, and its probe states why there is nothing to read. Listing both is what
+# keeps a platform #if out of this file and out of the headers.
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26

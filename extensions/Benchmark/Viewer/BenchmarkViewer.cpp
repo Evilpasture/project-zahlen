@@ -6,12 +6,14 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/RenderContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/UIData.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -51,6 +53,43 @@ inline constexpr float kTableNameMin         = 70.0f;
 inline constexpr float kTableNameMax         = 150.0f;
 inline constexpr float kStageSparkHeight     = 12.0f;
 inline constexpr float kSparkBarGap          = 1.0f;
+
+// The machine section: a grid of per-core cells. Cells are as wide as the
+// content divided by how many fit across, and the number across is chosen from
+// the core count so a 20-core machine is five rows and a 128-thread one is
+// still about the same height -- narrowing the cells rather than growing the
+// panel. Past kCoreCellsMax the label in a cell no longer fits and the cell
+// becomes its own history alone.
+inline constexpr size_t kCoreGridRows      = 6; // rows aimed for before the grid widens
+inline constexpr size_t kCoreCellsMin      = 4;
+inline constexpr size_t kCoreCellsMax      = 10;
+inline constexpr float  kCoreCellFontSize  = 10.0f;
+inline constexpr float  kCoreCellGap       = 4.0f;
+inline constexpr float  kCoreSparkHeight   = 10.0f;
+inline constexpr float  kCoreSparkBarGap   = 1.0f;
+inline constexpr size_t kCoreSparkBars     = 12;
+
+// The card a line or a cell opens under the pointer. It carries what the panel
+// would otherwise print as a second line under every reading -- the window's
+// tails, the clock, the provenance -- so the panel keeps what a glance needs and
+// the rest is one hover away.
+inline constexpr float       kCardFontSize   = 11.0f;
+inline constexpr float       kCardLineHeight = 14.0f; // a line at that size, plus its gap
+inline constexpr float       kCardPadding    = 6.0f;
+inline constexpr float       kCardGap        = 4.0f;
+inline constexpr float       kCardOffsetX    = 0.5f; // the panel's left edge, and non-zero so the box floats
+inline constexpr const char* kHoverCardId    = "hovercard";
+
+// The panel's own element id: a card is placed against the element it belongs to
+// and against this, both as they were laid out in the last frame.
+inline constexpr const char* kTelemetryPanelId = "FrameTelemetryPanel";
+
+// Load levels for a core cell: green while there is headroom, amber as it fills,
+// red when it has none. A core cell is 12 px of screen and cannot carry a
+// legend, so the colour is the quick read and the number beside it is the exact
+// one.
+inline constexpr float kCoreLoadWarm = 50.0f;
+inline constexpr float kCoreLoadHot  = 85.0f;
 
 // The telemetry panel's widest case, used before the first frame has measured
 // one: two columns of the widest name column, plus its padding.
@@ -100,12 +139,26 @@ struct TableStyle {
 // ellipsis when anything was dropped. A text element wider than its box does not
 // clip -- Clay draws past the edge -- so a name column too narrow for its
 // content is a name drawn over the value beside it.
+// The slack every fit leaves. The advance is the atlas's average per character,
+// and a line of digits and capitals is wider than its average, so a line fitted
+// to its last character still overflows the box it is drawn in -- and a text that
+// overflows wraps, which puts the ".." on a line of its own and makes the
+// truncation look like a glitch rather than a cut. One character is enough to
+// cover the difference.
+inline constexpr float kFitSlackChars = 1.0f;
+
+// Whether a line drawn at this advance fits, asked before it is cut, so a caller
+// can lay a long line out twice instead of printing the end of it as "..".
+[[nodiscard]] auto FitsWidth(std::string_view text, float maxWidth, float advance) noexcept -> bool {
+    return advance <= 0.0f || maxWidth <= 0.0f || static_cast<float>(text.size()) <= (maxWidth / advance) - kFitSlackChars;
+}
+
 [[nodiscard]] auto FitToWidth(std::string_view text, float maxWidth, float advance) -> std::string {
     if (advance <= 0.0f || maxWidth <= 0.0f) {
         return std::string(text);
     }
 
-    const size_t fits = static_cast<size_t>(maxWidth / advance);
+    const size_t fits = static_cast<size_t>(std::max(0.0f, (maxWidth / advance) - kFitSlackChars));
     if (text.size() <= fits) {
         return std::string(text);
     }
@@ -141,6 +194,50 @@ const JPH::Vec4 kGpuSparkInk = {0.42f, 0.66f, 0.92f, 1.00f};
 const JPH::Vec4 kCpuSparkInk = {0.62f, 0.55f, 0.92f, 1.00f};
 const JPH::Vec4 kCpuNameInk  = {0.66f, 0.72f, 0.80f, 1.00f};
 
+// The machine section: a core cell's history bar, and the red a core at its
+// ceiling is drawn in.
+const JPH::Vec4 kCoreSparkInk = {0.36f, 0.78f, 0.68f, 1.00f};
+const JPH::Vec4 kHotInk       = {1.00f, 0.34f, 0.30f, 1.00f};
+
+// A hovered line's card: a shade apart from the panel it floats over, so it
+// reads as a card on top of the panel rather than as more panel.
+const JPH::Vec4 kCardInk = {0.10f, 0.11f, 0.14f, 0.98f};
+
+// The colour a usage reading is drawn in: a level, not a duration, so the same
+// value is always the same colour wherever it appears (a core cell, the
+// machine-wide line, the GPU line).
+[[nodiscard]] auto LoadInk(float percent) -> JPH::Vec4 {
+    if (percent >= kCoreLoadHot) {
+        return kHotInk;
+    }
+    return percent >= kCoreLoadWarm ? kSlowBarInk : kFastBarInk;
+}
+
+// One hardware series as the line the panel prints: the level now, the level
+// averaged, and the two tails of the window, all in the series' own unit --
+// percent as written, MHz divided down to GHz. The percentiles are labelled
+// rather than only shown, because a reader coming from the frame-time lows
+// above would otherwise read p99 as a mean of the busiest 1% of samples, which
+// is not what a hardware level means (see SystemTelemetry.hpp).
+//
+// The caller has already checked that the window has a summary to print: an
+// unsampled series is an empty optional, and there is no line to draw for it.
+[[nodiscard]] auto SeriesLine(std::string_view label, const HardwareSeries& series, float scale, int decimals, std::string_view unit) -> std::string {
+    // The 'f' is load-bearing: without a conversion type, a precision is a
+    // precision in the general presentation, which is the printf %g rule --
+    // shortest of fixed and scientific -- so 10.0 prints as "1e+01", 100.0 as
+    // "1e+02", and 4.00 GHz loses its zeros and prints as "4". Every number
+    // this panel prints is written plainly.
+    const auto at = [scale, decimals, unit](float value) -> std::string { return std::format("{:.{}f}{}", value / scale, decimals, unit); };
+
+    // An empty label is a caller that has already named the thing earlier on the
+    // line -- the GPU's device name, say -- so the numbers stand on their own
+    // and that caller spaces them.
+    return std::format(
+        "{}{}{}   avg {}   p1 {}   p99 {}", label, label.empty() ? "" : "  ", at(series.last), at(series.avg), at(series.p1), at(series.p99)
+    );
+}
+
 // A bar is this much of the chart at minimum, so an idle frame still leaves a
 // baseline to read the shape against.
 inline constexpr float kMinBarHeight = 2.0f;
@@ -155,6 +252,15 @@ inline constexpr float kChartScaleAverage = 2.5f;
 inline constexpr float kChartScaleLows    = 1.5f;
 
 } // namespace
+
+// One card, held between the section that sees the pointer over something and
+// the end of the panel, where it is drawn: a card drawn the moment it is decided
+// sits under every row below it. The panel draws it last, floating and out of the
+// layout flow, which is also what lets it be as tall as its lines need.
+struct HoverCard {
+    std::string              id;    // the element the pointer is over
+    std::vector<std::string> lines; // what it says, one entry per line
+};
 
 struct BenchmarkViewer::Impl {
     std::unique_ptr<LogicBenchmark> benchmark;
@@ -175,9 +281,17 @@ struct BenchmarkViewer::Impl {
     uint64_t lastFrameId = 0;
     bool     frameTicked = false;
 
+    // Whether the telemetry has been told which device the frames are drawn on.
+    // Set on the first frame that has a device name to give it.
+    bool gpuNameTaken = false;
+
     // Host-frame telemetry: the frame window, the profiler rows and the CSV
     // capture. Fed by Tick(), drawn by DrawTelemetryPanel().
     FrameTelemetry telemetry;
+
+    // The card the pointer is over, when it is over one: set by the section that
+    // owns the element, drawn by the panel once everything else is down.
+    std::optional<HoverCard> hover;
 
     size_t pendingEntities  = 250;
     bool   visible          = false;
@@ -204,8 +318,24 @@ struct BenchmarkViewer::Impl {
 
     void BuildTableStyles(ZHLN::Engine& engine, std::span<const FrameStageRow> gpu, std::span<const FrameStageRow> cpu);
 
+    // The per-character advance at another size, from the one the table measured
+    // off the atlas: a line measured at the wrong size is a line that either
+    // spills past the panel or is cut shorter than it had to be, and this panel
+    // draws at three sizes.
+    [[nodiscard]] auto AdvanceAt(float fontSize) const noexcept -> float {
+        return tableCpu.fontSize > 0.0f ? tableCpu.advance * (fontSize / tableCpu.fontSize) : (kFallbackAdvanceRatio * fontSize);
+    }
+
     void DrawBenchmarkPanel(GUI::Context& ui);
     void DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine);
+
+    // The machine under the frames: CPU usage and clock (machine-wide, then
+    // every core as a cell), and the GPU's utilization and clock. Reads the
+    // SystemTelemetry the frame telemetry owns; nothing here names a platform.
+    void DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters);
+    void DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters);
+    void DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters);
+    void DrawHoverCard(GUI::Context& ui, const ZHLN::Extent2D& viewport);
     void DrawFrameTimeChart(GUI::Context& ui, std::span<const float> samples, const FrameTelemetrySnapshot& stats);
     void DrawStageColumns(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix);
     void DrawStageColumn(GUI::Context& ui, std::span<const FrameStageRow> rows, const TableStyle& style, std::string_view prefix, size_t column);
@@ -531,6 +661,323 @@ void BenchmarkViewer::Impl::DrawStageRow(
     );
 }
 
+// The card the element under the pointer opens. It is built out of the panel's
+// own line builder, so a reading reads the same here as it does on the panel.
+//
+// It is drawn as the last child of the panel so that it is on top: floating, out
+// of the layout flow, and never clipped. Its anchor is the element's rect from
+// the frame before, because this frame's layout is not finished while it is being
+// built -- which costs a card one frame of latency on the frame an element is
+// first hovered, and nothing after that.
+void BenchmarkViewer::Impl::DrawHoverCard(GUI::Context& ui, const ZHLN::Extent2D& viewport) {
+    if (!hover) {
+        return;
+    }
+
+    const std::optional<GUI::Context::ElementRect> anchor = ui.GetLastFrameRect(hover->id);
+    const std::optional<GUI::Context::ElementRect> panel  = ui.GetLastFrameRect(kTelemetryPanelId);
+    if (!anchor || !panel) {
+        return; // the element is not in the last frame's tree yet
+    }
+
+    // As wide as the longest line needs and never wider than the panel's own
+    // content, so a card cannot spill past the panel's right edge.
+    const float advance = AdvanceAt(kCardFontSize);
+    float       longest = 0.0f;
+    for (const std::string& line: hover->lines) {
+        longest = std::max(longest, static_cast<float>(line.size()));
+    }
+
+    const float width  = std::min(telemetryContent, (longest * advance) + (kCardPadding * 2.0f));
+    const float height = (static_cast<float>(hover->lines.size()) * kCardLineHeight) + (kCardPadding * 2.0f);
+
+    // Level with the element, in the space to the left of the panel -- over the
+    // frames the panel is reporting on rather than over the panel itself. That
+    // is not only tidier: hovering is a rectangle test against last frame's
+    // layout, so a card lying across the panel's own rows would hand the hover
+    // to whichever row it covers the moment the pointer reached it. A window
+    // with no room beside the panel gets the card under the element instead.
+    const float beside = (panel->x - width - kCardGap) - panel->x; // negative: the panel's left
+    float       offsetX = beside;
+    float       offsetY = anchor->y - panel->y;
+
+    if ((panel->x + beside) < kPanelMargin) {
+        offsetX = kCardOffsetX;
+        offsetY = (anchor->y + anchor->height + kCardGap) - panel->y;
+    }
+
+    // Neither placement may leave the window: the card is clamped into the
+    // margin, top and bottom, whichever side it ended up on.
+    offsetY = std::clamp(
+        offsetY, kPanelMargin - panel->y, (static_cast<float>(viewport.height) - height - kPanelMargin) - panel->y
+    );
+
+    ui.Box(
+        kHoverCardId,
+        GUI::BoxConfig {
+            .width        = {.fixed = width},
+            .color        = kCardInk,
+            .cornerRadius = {4.0f, 4.0f, 4.0f, 4.0f},
+            .padding      = kCardPadding,
+            .gap          = 2.0f,
+            .direction    = GUI::Direction::Column,
+            // Any non-zero offset floats the box, which is what puts the card
+            // over the panel's neighbours rather than in its column.
+            .offsetX      = offsetX,
+            .offsetY      = offsetY,
+        },
+        [&]() -> void {
+            for (const std::string& line: hover->lines) {
+                ui.Text(FitToWidth(line, width - (kCardPadding * 2.0f), advance), kCardFontSize, kBodyInk);
+            }
+        }
+    );
+}
+
+void BenchmarkViewer::Impl::DrawHardwareSection(GUI::Context& ui, const SystemSnapshot& system, SystemTelemetry& counters) {
+    // Nothing was read, and the reason is the only useful thing left to draw. It
+    // is a note, not an error: a machine whose platform exposes no counters is
+    // running the frames perfectly well, and the frame numbers above are
+    // unaffected.
+    if (!system.unavailableReason.empty()) {
+        ui.Text(FitToWidth(std::format("Machine  {}", system.unavailableReason), telemetryContent, AdvanceAt(12.0f)), 12.0f, kCpuNameInk);
+        return;
+    }
+
+    // What was read and where it came from, then the readings themselves: one
+    // line each, carrying the value now and nothing else. The window behind that
+    // value -- its average, its tails, its clock -- is the card the line opens,
+    // which is where a panel stops being a column of numbers in three tenses.
+    const std::string_view backend = counters.BackendName();
+    {
+        const std::string_view id = TableId("hw", 0, 0, 0);
+        ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
+            ui.Text(FitToWidth(std::format("Machine  {}", backend.empty() ? std::string_view("no counters on this platform") : backend), telemetryContent, AdvanceAt(12.0f)), 12.0f, kTitleInk);
+        });
+        if (ui.IsPointerOver(id)) {
+            hover = HoverCard {
+                .id    = std::string(id),
+                .lines = {
+                    std::format("backend  {}", backend.empty() ? std::string("none compiled in for this platform") : std::string(backend)),
+                    std::format("{} samples over {:.0f} s of host frames", system.samples, system.windowSeconds),
+                    std::format("one reading every {} ms", SystemTelemetry::kSampleInterval.count()),
+                }
+            };
+        }
+    }
+
+    {
+        std::string line = "CPU";
+        if (system.cpuUsagePct) {
+            line.append(std::format("   usage {:.1f}%", system.cpuUsagePct->last));
+        }
+        if (system.cpuClockMHz) {
+            line.append(std::format("   clock {:.2f} GHz", system.cpuClockMHz->last / 1000.0f));
+        }
+
+        const std::string_view id = TableId("hw", 0, 1, 0);
+        ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
+            ui.Text(
+                FitToWidth(line, telemetryContent, AdvanceAt(12.0f)), 12.0f,
+                system.cpuUsagePct ? LoadInk(system.cpuUsagePct->last) : kCpuNameInk
+            );
+        });
+
+        if (ui.IsPointerOver(id) && (system.cpuUsagePct || system.cpuClockMHz)) {
+            hover = HoverCard {.id = std::string(id), .lines = {}};
+            if (system.cpuUsagePct) {
+                hover->lines.push_back(SeriesLine("cpu usage", *system.cpuUsagePct, 1.0f, 1, "%"));
+            }
+            if (system.cpuClockMHz) {
+                hover->lines.push_back(SeriesLine("cpu clock", *system.cpuClockMHz, 1000.0f, 2, " GHz"));
+            }
+        }
+    }
+
+    const std::span<const CoreTelemetry> cores = counters.Cores();
+    if (!cores.empty()) {
+        DrawCoreGrid(ui, cores, counters);
+    }
+
+    // The GPU's own counters. Unavailable is a line rather than a blank: on a
+    // machine whose driver exposes no utilization or clock -- an integrated GPU,
+    // or a vendor the probe could not match -- the panel says which it was.
+    if (system.gpuUsagePct || system.gpuClockMHz) {
+        // The device, its load and its clock on one line when they fit: the name
+        // is what the reading is about. On a card whose name is the whole retail
+        // model they do not fit, and the readings move to their own line rather
+        // than being cut off beside the name -- one extra line is cheap, a load
+        // printed as ".." is not a reading.
+        const std::string name = system.gpuName.empty() ? std::string("device unknown") : system.gpuName;
+
+        std::string readings;
+        if (system.gpuUsagePct) {
+            readings.append(std::format("   usage {:.1f}%", system.gpuUsagePct->last));
+        }
+        if (system.gpuClockMHz) {
+            readings.append(std::format("   clock {:.2f} GHz", system.gpuClockMHz->last / 1000.0f));
+        }
+
+        const std::string      all     = std::format("GPU  {}{}", name, readings);
+        const float            advance = AdvanceAt(12.0f);
+        const JPH::Vec4        ink     = system.gpuUsagePct ? LoadInk(system.gpuUsagePct->last) : kTitleInk;
+        const std::string_view id      = TableId("hw", 0, 2, 0);
+
+        ui.Box(id, GUI::BoxConfig {.direction = GUI::Direction::Column}, [&]() -> void {
+            if (FitsWidth(all, telemetryContent, advance)) {
+                ui.Text(all, 12.0f, ink);
+            } else {
+                ui.Text(FitToWidth(std::format("GPU  {}", name), telemetryContent, advance), 12.0f, kTitleInk);
+                ui.Text(FitToWidth(std::format("GPU{}", readings), telemetryContent, AdvanceAt(11.0f)), 11.0f, ink);
+            }
+        });
+
+        if (ui.IsPointerOver(id)) {
+            hover = HoverCard {.id = std::string(id), .lines = {}};
+            if (system.gpuUsagePct) {
+                hover->lines.push_back(SeriesLine("gpu usage", *system.gpuUsagePct, 1.0f, 1, "%"));
+            }
+            if (system.gpuClockMHz) {
+                hover->lines.push_back(SeriesLine("gpu clock", *system.gpuClockMHz, 1000.0f, 2, " GHz"));
+            }
+        }
+    } else {
+        const std::string_view reason =
+            system.gpuUnavailableReason.empty() ? std::string_view("no utilization or clock counters are exposed on this machine")
+                                                : std::string_view(system.gpuUnavailableReason);
+        ui.Text(FitToWidth(std::format("GPU counters  {}", reason), telemetryContent, AdvanceAt(11.0f)), 11.0f, kCpuNameInk);
+    }
+}
+
+void BenchmarkViewer::Impl::DrawCoreGrid(GUI::Context& ui, std::span<const CoreTelemetry> cores, SystemTelemetry& counters) {
+    if (cores.empty()) {
+        return;
+    }
+
+    // How many cells fit across is what the core count decides, not a constant:
+    // the grid aims for kCoreGridRows rows and widens from there, so a thread
+    // count far past a desktop's makes shorter cells rather than a taller panel.
+    const size_t cells     = std::clamp((cores.size() + kCoreGridRows - 1) / kCoreGridRows, kCoreCellsMin, kCoreCellsMax);
+    const float  cellWidth = (telemetryContent - (kCoreCellGap * static_cast<float>(cells - 1))) / static_cast<float>(cells);
+
+    // The advance at the cell's font size: a cell that trusts a ratio instead
+    // draws its label over its neighbour's.
+    const float advance = AdvanceAt(kCoreCellFontSize);
+
+    for (size_t start = 0; start < cores.size(); start += cells) {
+        const size_t count = std::min(cells, cores.size() - start);
+        ui.Box(
+            TableId("cgrid", 0, start, 0),
+            GUI::BoxConfig {.width = {.fixed = telemetryContent}, .gap = kCoreCellGap, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Start},
+            [&]() -> void {
+                for (size_t i = 0; i < count; ++i) {
+                    DrawCoreCell(ui, cores[start + i], start + i, cellWidth, advance, counters);
+                }
+            }
+        );
+    }
+
+    // A core whose clock the platform does not expose keeps its clock series
+    // invalid rather than reporting a zero, which is a real clock reading on a
+    // parked core. Worth one line, because it changes what the cells mean.
+    size_t withClock = 0;
+    size_t withUsage = 0;
+    for (const CoreTelemetry& core: cores) {
+        withClock += core.clockMHz ? 1u : 0u;
+        withUsage += core.usagePct ? 1u : 0u;
+    }
+
+    if (withUsage < cores.size() || (withClock > 0 && withClock < cores.size())) {
+        std::string note = std::format("{} cores   {} reporting usage", cores.size(), withUsage);
+        if (withClock > 0 && withClock < cores.size()) {
+            note.append(std::format("   {} with a clock", withClock));
+        }
+        ui.Text(FitToWidth(note, telemetryContent, AdvanceAt(10.0f)), 10.0f, kCpuNameInk);
+    }
+}
+
+void BenchmarkViewer::Impl::DrawCoreCell(GUI::Context& ui, const CoreTelemetry& core, size_t cell, float cellWidth, float advance, SystemTelemetry& counters) {
+    const std::string_view id = TableId("core", 0, cell, 0);
+
+    ui.Box(
+        id,
+        GUI::BoxConfig {.width = {.fixed = cellWidth}, .gap = 2.0f, .direction = GUI::Direction::Column, .alignCross = GUI::Alignment::Start},
+        [&]() -> void {
+            // "c07 91% 2.13G" -- the core, its usage now, and its clock -- is
+            // what a cell says when it is wide enough to say it; below that the
+            // history alone is drawn, because a truncated number is worse than
+            // no number.
+            const bool withLabel = core.usagePct.has_value() && (11.0f * advance) <= cellWidth;
+            if (withLabel) {
+                ui.Box(
+                    TableId("core", 0, cell, 1),
+                    GUI::BoxConfig {.width = {.fixed = cellWidth}, .gap = 3.0f, .direction = GUI::Direction::Row, .alignCross = GUI::Alignment::Center},
+                    [&]() -> void {
+                        ui.Text(std::format("c{:02}", core.index), kCoreCellFontSize, kCpuNameInk);
+                        ui.Text(std::format("{:.0f}%", core.usagePct->last), kCoreCellFontSize, LoadInk(core.usagePct->last));
+                        if (core.clockMHz) {
+                            ui.Text(std::format("{:.2f}G", core.clockMHz->last / 1000.0f), kCoreCellFontSize, kCpuNameInk);
+                        }
+                    }
+                );
+            }
+
+            // The history, on the machine's own scale rather than the core's:
+            // these bars are read against each other -- which core has been
+            // pinned -- and a per-core scale would draw an idle core and a
+            // saturated one as the same shape.
+            // A view into the core's window, oldest first, and shorter than the
+            // cell while the window is still filling: the bars before it are the
+            // floor, not readings.
+            const std::span<const float> history = counters.CoreUsageHistory(core.index, kCoreSparkBars);
+            const size_t                 blank   = kCoreSparkBars - history.size();
+
+            const float bars    = static_cast<float>(kCoreSparkBars);
+            const float barWide = (cellWidth - ((bars - 1.0f) * kCoreSparkBarGap)) / bars;
+
+            ui.Box(
+                TableId("core", 0, cell, 2),
+                GUI::BoxConfig {
+                    .width      = {.fixed = cellWidth},
+                    .height     = {.fixed = kCoreSparkHeight},
+                    .gap        = kCoreSparkBarGap,
+                    .direction  = GUI::Direction::Row,
+                    .alignCross = GUI::Alignment::End,
+                },
+                [&]() -> void {
+                    for (size_t bar = 0; bar < kCoreSparkBars; ++bar) {
+                        const float     sample = bar < blank ? 0.0f : history[bar - blank];
+                        const float     fill   = std::clamp(sample / 100.0f, 0.0f, 1.0f);
+                        const float     height = std::max(kMinBarHeight, fill * kCoreSparkHeight);
+                        // A bar before this core's first sample is a floor, not a
+                        // reading: drawn dim so a young machine does not look
+                        // idle and busy at once.
+                        const JPH::Vec4 ink = bar < blank ? kChartInk : LoadInk(sample);
+                        ui.BeginBox(TableId("core", 0, cell, 3 + bar), GUI::BoxConfig {.width = {.fixed = barWide}, .height = {.fixed = height}, .color = ink});
+                        ui.EndBox();
+                    }
+                }
+            );
+        }
+    );
+
+    // The pointer over a cell opens this core's window: the same card the
+    // machine's own lines open, for the core it is on. A cell has no room for
+    // three tenses of a number, and the panel has no room for twelve of them.
+    if (ui.IsPointerOver(id)) {
+        hover = HoverCard {.id = std::string(id), .lines = {}};
+        if (core.usagePct) {
+            hover->lines.push_back(SeriesLine(std::format("core {:02} usage", core.index), *core.usagePct, 1.0f, 1, "%"));
+        }
+        if (core.clockMHz) {
+            hover->lines.push_back(SeriesLine("clock", *core.clockMHz, 1000.0f, 2, " GHz"));
+        }
+        if (hover->lines.empty()) {
+            hover.reset(); // a core with neither series has nothing to open
+        }
+    }
+}
+
 void BenchmarkViewer::Impl::ToggleCapture() {
     if (telemetry.IsCapturing()) {
         telemetry.StopCapture();
@@ -548,6 +995,7 @@ void BenchmarkViewer::Impl::ToggleCapture() {
 
 void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& engine) {
     const FrameTelemetrySnapshot&        stats    = telemetry.Snapshot();
+    SystemTelemetry&                     system   = telemetry.System();
     const std::span<const float>         chart    = telemetry.ChartSamples();
     const std::span<const FrameStageRow> stages   = telemetry.Stages();
     const size_t                         gpuCount = telemetry.GpuStageCount();
@@ -576,6 +1024,8 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
             .offsetY      = kPanelMargin,
         },
         [&]() -> void {
+            hover.reset(); // this frame's card is set by whatever the pointer is over
+
             ui.Text("Frame Telemetry  (host frames)", 16.0f, kTitleInk);
 
             // Three short lines rather than two long ones: at 13 px these are 27
@@ -605,15 +1055,29 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
                 }
             });
 
+            // What the capture button writes, for the pointer that asks: the
+            // button is named for the file, and the file's path is not worth a
+            // line of the panel for the rest of the session.
+            const std::string_view captureLabel = telemetry.IsCapturing() ? std::string_view("Stop capture") : std::string_view("Capture CSV");
+            if (ui.IsPointerOver(captureLabel)) {
+                hover = HoverCard {
+                    .id    = std::string(captureLabel),
+                    .lines = {"one CSV row per frame: the frame columns, then the machine columns", "written under build/cache/captures/"}
+                };
+            }
+
             if (telemetry.IsCapturing()) {
                 ui.Text(std::format("capturing {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kFastBarInk);
             } else if (!telemetry.CapturePath().empty()) {
                 ui.Text(
                     std::format("last capture {}   ({} frames)", telemetry.CapturePath().filename().string(), telemetry.CapturedFrames()), 11.0f, kCpuNameInk
                 );
-            } else {
-                ui.Text("capture writes one CSV row per frame under build/cache/captures", 11.0f, kCpuNameInk);
             }
+
+            // The machine the frames ran on, between the host's own numbers and
+            // the profiler's tables: the frame text above says how fast, these
+            // say what the machine was busy with while it was fast.
+            DrawHardwareSection(ui, system.Snapshot(), system);
 
             ui.Text(std::format("GPU  {:.2f} ms total   ({} stages)", stats.gpuTotalMs, gpuCount), 13.0f, kTitleInk);
             DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
@@ -629,6 +1093,9 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
                     }
                 });
             }
+
+            // Last of all, so that it is on top of everything above it.
+            DrawHoverCard(ui, viewport);
         }
     );
 }
@@ -701,6 +1168,21 @@ void BenchmarkViewer::Tick(ZHLN::Engine& engine) {
     }
     m_impl->frameTicked = true;
     m_impl->lastFrameId = frameId;
+
+    // Which device the frames are being drawn on, told to the telemetry before
+    // it has taken its first sample: the platform probe matches its GPU counters
+    // to that device rather than to whichever adapter the machine lists first,
+    // and the probe reads the name when it is built, on that first sample. Taken
+    // once -- RenderContext::GetInfo assembles its struct on each call, and the
+    // device does not change under a running viewer -- but retried until a name
+    // actually appears, so a host that ticked before its device was up is still
+    // matched on the frame it comes up.
+    if (!m_impl->gpuNameTaken) {
+        if (const std::string_view device = engine.GetRenderContext().GetInfo().gpuName; !device.empty()) {
+            m_impl->gpuNameTaken = true;
+            m_impl->telemetry.SetGpuNameHint(device);
+        }
+    }
 
     // The telemetry first: its frame interval is the host's frame, and the
     // benchmark's substeps below are a cost inside it.

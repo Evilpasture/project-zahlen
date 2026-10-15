@@ -3,6 +3,7 @@
 
 // extensions/Benchmark/Viewer/FrameTelemetry.cpp
 #include <Benchmark/Viewer/FrameTelemetry.hpp>
+#include <optional>
 #include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <algorithm>
@@ -20,6 +21,18 @@
 namespace ZHLN::Bench {
 
 namespace {
+
+// One field of a series, for a CSV cell that has to be a number: the file's
+// header says what a zero means in each of these columns, and zero is what an
+// unanswered series writes.
+[[nodiscard]] auto Reading(const std::optional<HardwareSeries>& series, float HardwareSeries::*member) noexcept -> float {
+    return series ? (*series).*member : 0.0f;
+}
+
+// One series' most recent reading.
+[[nodiscard]] auto LastReading(const std::optional<HardwareSeries>& series) noexcept -> float {
+    return Reading(series, &HardwareSeries::last);
+}
 
 // GPU stages are recorded under their reflected enumerator name -- MainPass1,
 // TAA, VolumetricLightInject -- while every CPU ScopedTimer in the tree is
@@ -139,6 +152,11 @@ void FrameTelemetry::Tick() {
 
     SampleStages();
 
+    // The machine's counters, on their own cadence: this is a no-op on the
+    // frames between hardware samples -- four a second, against however fast
+    // the host's frames arrive.
+    m_system.Tick();
+
     // After the stages: the row carries this frame's GPU total.
     if (IsCapturing()) {
         WriteCaptureRow(frameMs);
@@ -146,6 +164,7 @@ void FrameTelemetry::Tick() {
 }
 
 void FrameTelemetry::Reset() {
+    m_system.Reset();
     m_write        = 0;
     m_filled       = 0;
     m_sinceStats   = 0;
@@ -160,6 +179,18 @@ void FrameTelemetry::Reset() {
 
 auto FrameTelemetry::Snapshot() const noexcept -> const FrameTelemetrySnapshot& {
     return m_snapshot;
+}
+
+auto FrameTelemetry::System() noexcept -> SystemTelemetry& {
+    return m_system;
+}
+
+auto FrameTelemetry::System() const noexcept -> const SystemTelemetry& {
+    return m_system;
+}
+
+void FrameTelemetry::SetGpuNameHint(std::string_view vulkanDeviceName) {
+    m_system.SetGpuNameHint(vulkanDeviceName);
 }
 
 auto FrameTelemetry::ChartSamples() const noexcept -> std::span<const float> {
@@ -340,6 +371,13 @@ auto FrameTelemetry::StartCapture(const std::filesystem::path& path) -> bool {
         m_captureColumns.push_back(row.name);
     }
 
+    // The core columns are named for the cores the machine reports right now; a
+    // machine whose core count changes mid-run does not grow columns.
+    m_captureCores.clear();
+    for (const CoreTelemetry& core: m_system.Cores()) {
+        m_captureCores.push_back(core.index);
+    }
+
     m_captureStart      = std::chrono::steady_clock::now();
     m_captureFrames     = 0;
     m_captureSinceFlush = 0;
@@ -349,9 +387,18 @@ auto FrameTelemetry::StartCapture(const std::filesystem::path& path) -> bool {
                      "# frame_ms: the host's frame interval. fps: 1000 / frame_ms.\n"
                      "# gpu_total_ms: this frame's GPU stage timings summed -- passes the graph submits\n"
                      "# concurrently overlap on the device, so it is a sum of spans, not a span of the frame.\n"
+                     "# cpu_* / gpu_* : the machine's counters, read four times a second, so these repeat the\n"
+                     "# last hardware sample between reads. _p1 / _p99 are the tails of the hardware window (a\n"
+                     "# value at that percentile, not a mean); clocks are MHz.\n"
+                     "# cNN_pct / cNN_mhz: one logical CPU's last usage and clock, 0 when the platform does not\n"
+                     "# expose that core's clock.\n"
                      "# Every column after that is one profiler metric's most recent measurement, in ms: a metric\n"
                      "# that did not run this frame repeats its last value rather than dropping the cell.\n";
-    m_captureFile << "frame,time_s,frame_ms,fps,gpu_total_ms";
+    m_captureFile << "frame,time_s,frame_ms,fps,gpu_total_ms,cpu_pct,cpu_p1,cpu_p99,cpu_clk_mhz,cpu_clk_p1,cpu_clk_p99,gpu_pct,gpu_p1,"
+                     "gpu_p99,gpu_clk_mhz,gpu_clk_p1,gpu_clk_p99";
+    for (const unsigned core: m_captureCores) {
+        m_captureFile << std::format(",c{:02}_pct,c{:02}_mhz", core, core);
+    }
     for (const std::string& column: m_captureColumns) {
         m_captureFile << ',' << Quoted(column);
     }
@@ -373,16 +420,59 @@ void FrameTelemetry::StopCapture() {
         snapshot.frames, snapshot.windowSeconds, snapshot.avgFps, snapshot.frameMsAvg, snapshot.frameMsMin, snapshot.frameMsMax, snapshot.frameMsLow1,
         snapshot.frameMsLow01, snapshot.clippedSamples, kSampleCeilingMs
     );
+
+    // The machine, when it answered: the same numbers the panel draws, so a
+    // capture read months later does not need the panel to be interpreted.
+    const SystemSnapshot& system = m_system.Snapshot();
+    if (const std::string_view backend = m_system.BackendName(); !backend.empty()) {
+        m_captureFile << std::format("# hardware: {} ({} samples, {:.0f} s window)\n", backend, system.samples, system.windowSeconds);
+    }
+    if (system.cpuUsagePct) {
+        m_captureFile << std::format(
+            "# cpu: usage avg {:.1f}% p1 {:.1f}% p99 {:.1f}%   clock avg {:.0f} MHz p1 {:.0f} p99 {:.0f}\n",
+            Reading(system.cpuUsagePct, &HardwareSeries::avg), Reading(system.cpuUsagePct, &HardwareSeries::p1), Reading(system.cpuUsagePct, &HardwareSeries::p99),
+            Reading(system.cpuClockMHz, &HardwareSeries::avg), Reading(system.cpuClockMHz, &HardwareSeries::p1), Reading(system.cpuClockMHz, &HardwareSeries::p99)
+        );
+    }
+    if (system.gpuUsagePct || system.gpuClockMHz) {
+        m_captureFile << std::format(
+            "# gpu: {}  usage avg {:.1f}% p1 {:.1f}% p99 {:.1f}%   clock avg {:.0f} MHz p1 {:.0f} p99 {:.0f}\n", system.gpuName,
+            Reading(system.gpuUsagePct, &HardwareSeries::avg), Reading(system.gpuUsagePct, &HardwareSeries::p1), Reading(system.gpuUsagePct, &HardwareSeries::p99),
+            Reading(system.gpuClockMHz, &HardwareSeries::avg), Reading(system.gpuClockMHz, &HardwareSeries::p1), Reading(system.gpuClockMHz, &HardwareSeries::p99)
+        );
+    } else if (!system.gpuUnavailableReason.empty()) {
+        m_captureFile << std::format("# hardware note: {}\n", system.gpuUnavailableReason);
+    }
     m_captureFile.flush();
     m_captureFile.close();
     m_captureColumns.clear();
+    m_captureCores.clear();
 }
 
 void FrameTelemetry::WriteCaptureRow(float frameMs) noexcept {
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_captureStart).count();
     const float  fps     = frameMs > 0.0f ? 1000.0f / frameMs : 0.0f;
 
-    std::string line = std::format("{},{:.6f},{:.4f},{:.2f},{:.4f}", m_captureFrames, seconds, frameMs, fps, m_snapshot.gpuTotalMs);
+    const SystemSnapshot& system = m_system.Snapshot();
+    std::string           line   = std::format(
+        "{},{:.6f},{:.4f},{:.2f},{:.4f},{:.2f},{:.2f},{:.2f},{:.0f},{:.0f},{:.0f},{:.2f},{:.2f},{:.2f},{:.0f},{:.0f},{:.0f}", m_captureFrames, seconds,
+        frameMs, fps, m_snapshot.gpuTotalMs, Reading(system.cpuUsagePct, &HardwareSeries::last), Reading(system.cpuUsagePct, &HardwareSeries::p1),
+        Reading(system.cpuUsagePct, &HardwareSeries::p99), Reading(system.cpuClockMHz, &HardwareSeries::last), Reading(system.cpuClockMHz, &HardwareSeries::p1),
+        Reading(system.cpuClockMHz, &HardwareSeries::p99), Reading(system.gpuUsagePct, &HardwareSeries::last), Reading(system.gpuUsagePct, &HardwareSeries::p1),
+        Reading(system.gpuUsagePct, &HardwareSeries::p99), Reading(system.gpuClockMHz, &HardwareSeries::last), Reading(system.gpuClockMHz, &HardwareSeries::p1),
+        Reading(system.gpuClockMHz, &HardwareSeries::p99)
+    );
+
+    // One pair of cells per core column, in the header's order.
+    const std::span<const CoreTelemetry> cores = m_system.Cores();
+    for (const unsigned core: m_captureCores) {
+        const CoreTelemetry* row = (core < cores.size() && cores[core].index == core) ? &cores[core] : nullptr;
+        if (row == nullptr) {
+            line.append(",0,0");
+            continue;
+        }
+        std::format_to(std::back_inserter(line), ",{:.2f},{:.0f}", LastReading(row->usagePct), LastReading(row->clockMHz));
+    }
 
     // One cell per column, in the header's order. A column whose metric has left
     // the table leaves an empty cell rather than shifting the rest of the row.
