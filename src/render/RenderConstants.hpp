@@ -75,6 +75,12 @@ enum class Stage : uint8_t {
     // absence. These twelve were in that state; the ray-traced lighting stack is
     // most of the GPU's work on this class of hardware and none of it was
     // visible. Stage count must stay <= 64 (see GpuProfiler).
+    //
+    // The templated pass families (AtrousDenoisePass, FullscreenPass,
+    // ComputePass) now assert this lookup at compile time, through
+    // Passes::Detail::kNameProfilesAsStage, so renaming an instantiation fails
+    // the build instead of silently dropping its timing row. Hand-written
+    // passes still rely on this list being kept current by hand.
     OpaqueSceneCopy,
     GTAO,
     DdgiRayTrace,

@@ -62,7 +62,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float  centerDepth  = LinearizeDepth(depth, frame.invProj);
     float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
     float  centerLuma   = KarisLuma(centerValue.rgb);
-    float  lumaTol      = max(pc.phiLuma, 1e-4f);
+    float  lumaTol      = max(pc.phiLuma, 1e-4f); // Karis space: [0, 1); phiLuma is a tolerance on that scale
 
     int   step     = int(max(pc.stepSize, 1u));
     float depthTol = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);

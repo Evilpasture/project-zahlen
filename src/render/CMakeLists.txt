@@ -2,6 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
+# The renderer's translation units. The templated pass families -- the à-trous
+# denoisers, the fullscreen AA nodes and the single-dispatch compute passes --
+# are header-only by design (AtrousDenoisePass.hpp, FullscreenPass.hpp,
+# ComputePass.hpp and their domain descriptor headers) and deliberately do not
+# appear here; every instantiation is compiled through RenderGraphBuild.hpp and
+# pipelines/ComputeSimPipeline.cpp. Shader hot-reload registration lives in
+# init/RenderInitPostProcess.cpp and is unaffected by pass file layout.
 set(RAW_RENDER_SOURCES
     GpuAbi.cpp
     GpuPack.cpp
@@ -44,10 +51,7 @@ set(RAW_RENDER_SOURCES
     features/VolumetricFogSystem.cpp
     features/ShadowAtlas.cpp
     passes/SceneDraw.cpp
-    passes/aa/FXAAPass.cpp
-    passes/aa/MLAAPass.cpp
     passes/aa/SMAAPasses.cpp
-    passes/aa/TAAPass.cpp
     passes/culling/ClusterCullingPass.cpp
     passes/culling/HiZGeneratePass.cpp
     passes/forward/ForwardPass.cpp
@@ -58,26 +62,12 @@ set(RAW_RENDER_SOURCES
     passes/gbuffer/GBufferResolvePass.cpp
     passes/gbuffer/ViewmodelPass.cpp
     passes/lighting/ClusteredLightingPass.cpp
-    passes/lighting/GtaoPass.cpp
-    passes/lighting/RtShadowPass.cpp
-    passes/lighting/ShadowDenoisePass.cpp
-    passes/lighting/RtrHalfTracePass.cpp
-    passes/lighting/RtrDenoisePass.cpp
-    passes/lighting/RtgiHalfTracePass.cpp
-    passes/lighting/RtgiDenoisePass.cpp
     passes/lighting/RtgiCompositePass.cpp
-    passes/lighting/DdgiRayTracePass.cpp
-    passes/lighting/DdgiUpdateAtlasPass.cpp
     passes/lighting/ShadowPass.cpp
     passes/lighting/ReflectionInputs.cpp
     passes/postprocess/BloomPass.cpp
-    passes/postprocess/HdrDenoisePass.cpp
     passes/simulation/MeshParticleUpdatePass.cpp
     passes/simulation/ParticleUpdatePass.cpp
-    passes/volumetric/VolumetricFogInjectPass.cpp
-    passes/volumetric/VolumetricIntegrationPass.cpp
-    passes/volumetric/VolumetricLightInjectPass.cpp
-    passes/volumetric/VolumetricTemporalPass.cpp
 )
 
 zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})

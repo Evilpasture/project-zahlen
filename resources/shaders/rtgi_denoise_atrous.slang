@@ -59,6 +59,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float  depthTol     = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
     const float2 centerUV       = (float2(centerFullCoord) + 0.5f) / float2(frame.screenResolution);
     const float3 centerWorldPos = ReconstructWorldPos(centerUV, depthRaw, frame.invViewProj);
+    // Karis space: [0, 1); phiLuma is a tolerance on that scale, not on HDR luma.
     float  lumaTol      = max(pc.phiLuma, 1e-4f);
     int    step         = int(max(pc.stepSize, 1u));
 

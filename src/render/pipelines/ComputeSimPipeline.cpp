@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ComputeSimPipeline.hpp"
+#include "../passes/ComputePass.hpp"
 #include "../passes/culling/ClusterCullingPass.hpp"
 #include "../passes/simulation/MeshParticleUpdatePass.hpp"
 #include "../passes/simulation/ParticleUpdatePass.hpp"
-#include "../passes/volumetric/VolumetricFogInjectPass.hpp"
-#include "../passes/volumetric/VolumetricIntegrationPass.hpp"
-#include "../passes/volumetric/VolumetricLightInjectPass.hpp"
-#include "../passes/volumetric/VolumetricTemporalPass.hpp"
+#include "../passes/volumetric/VolumetricPasses.hpp"
 #include "graph/RenderGraph.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Log.hpp>
@@ -44,9 +42,11 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
     RebuildClusterBounds(impl, cmd, fIdx);
 
     auto computeGraph = Vk::MakePassPack(
-                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl}, Passes::VolumetricFogInjectPass {.frame = impl},
-                            Passes::VolumetricLightInjectPass {.frame = impl}, Passes::VolumetricIntegrationPass {.frame = impl},
-                            Passes::VolumetricTemporalPass {.frame = impl},
+                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
+                            Passes::ComputePass<Passes::VolumetricFogInjectDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricLightInjectDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricIntegrationDesc> {.frame = impl},
+                            Passes::ComputePass<Passes::VolumetricTemporalDesc> {.frame = impl},
                             Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt},
                             Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt}
     )

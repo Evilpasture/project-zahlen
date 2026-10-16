@@ -58,11 +58,14 @@ inline constexpr float kMissingTextureDim          = 0.25f;
 // exposure and contributes to bloom instead of stopping at the bloom threshold.
 inline constexpr float kSourceEmissionHdrScale     = 4.0f;
 
-auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true) -> TextureHandle {
+auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<const std::byte> bytes, bool isSRGB = true, bool sourceNormal = false) -> TextureHandle {
     // 1. Try VTF first
     if (bytes.size() >= 4 && std::memcmp(bytes.data(), "VTF\0", 4) == 0) {
         auto vtfExp = DecodeVTF(bytes);
         if (vtfExp.has_value()) {
+            if (sourceNormal) {
+                ConvertSourceNormalInPlace(*vtfExp);
+            }
             auto texRes = ctx.CreateTexture(name, vtfExp->rgba8, Extent2D {vtfExp->width, vtfExp->height}, isSRGB);
             if (texRes.has_value()) {
                 return *texRes;
@@ -93,53 +96,29 @@ auto LoadTextureFromBytes(RenderContext& ctx, std::string_view name, std::span<c
 // materials in a shipped map use (every cubemap-patched surface), so the
 // resolver follows it instead of treating the patch as the material.
 auto LoadMaterialVmt(const SourceVFS& vfs, std::string_view materialName) -> std::optional<VMTMaterial> {
-    for (int depth = 0; depth < 4; ++depth) {
-        const auto vmtPath = vfs.ResolveMaterial(materialName);
-        if (!vmtPath.has_value()) {
-            return std::nullopt;
-        }
-        const auto vmtBytes = vfs.ReadFile(*vmtPath);
-        if (!vmtBytes.has_value() || vmtBytes->empty()) {
-            return std::nullopt;
-        }
-        const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
-        const auto             vmtMatExp = ParseVMT(vmtText);
-        if (!vmtMatExp.has_value()) {
-            return std::nullopt;
-        }
-        if (vmtMatExp->shader != "patch") {
-            return std::optional<VMTMaterial>(*vmtMatExp);
-        }
-        // `include` points at the real material; the patch's own `replace`
-        // block overlays it, so merge the patch's parameters on top of the
-        // parent's rather than dropping either.
-        const auto include = vmtMatExp->Find("include");
-        if (!include || include->empty()) {
-            return std::optional<VMTMaterial>(*vmtMatExp);
-        }
-        std::string parent(*include);
-        if (!parent.ends_with(".vmt")) {
-            parent += ".vmt";
-        }
-        const auto parentBytes = vfs.ReadFile(parent);
-        if (!parentBytes.has_value() || parentBytes->empty()) {
-            return std::nullopt;
-        }
-        const std::string_view parentText(reinterpret_cast<const char*>(parentBytes->data()), parentBytes->size());
-        const auto             parentExp = ParseVMT(parentText);
-        if (!parentExp.has_value()) {
-            return std::nullopt;
-        }
-        VMTMaterial merged = *parentExp;
-        for (const auto& [key, value]: vmtMatExp->parameters) {
-            if (key == "include" || key == "replace") {
-                continue;
-            }
-            merged.parameters[key] = value;
-        }
-        return merged;
+    const auto vmtPath = vfs.ResolveMaterial(materialName);
+    if (!vmtPath.has_value()) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    const auto vmtBytes = vfs.ReadFile(*vmtPath);
+    if (!vmtBytes.has_value() || vmtBytes->empty()) {
+        return std::nullopt;
+    }
+    const std::string_view vmtText(reinterpret_cast<const char*>(vmtBytes->data()), vmtBytes->size());
+    const auto             resolved = ResolveVmtMaterial(
+        vmtText,
+        [&vfs](std::string_view includePath) -> std::optional<std::string> {
+            const auto includeBytes = vfs.ReadFile(std::string(includePath));
+            if (!includeBytes.has_value() || includeBytes->empty()) {
+                return std::nullopt;
+            }
+            return std::string(reinterpret_cast<const char*>(includeBytes->data()), includeBytes->size());
+        }
+    );
+    if (!resolved.has_value()) {
+        return std::nullopt;
+    }
+    return std::optional<VMTMaterial>(std::move(*resolved));
 }
 
 // Measured Rec.709 luma of a material's base texture, or -1 when it cannot be
@@ -295,13 +274,14 @@ auto ResolveMaterialDesc(RenderContext& ctx, const SourceVFS& vfs, const Materia
         }
     }
 
-    // Resolve normal/bump map
+    // Resolve normal/bump map. The `true` at the end routes the pixels through
+    // the DXT5nm swizzle: Source bumpmaps are not straight RGB normals.
     if (!material.bumpMap.empty()) {
         const auto bumpPath = vfs.ResolveTexture(material.bumpMap);
         if (bumpPath.has_value()) {
             const auto bumpBytes = vfs.ReadFile(*bumpPath);
             if (bumpBytes.has_value()) {
-                desc.normalMap = LoadTextureFromBytes(ctx, material.bumpMap, *bumpBytes, false);
+                desc.normalMap = LoadTextureFromBytes(ctx, material.bumpMap, *bumpBytes, false, true);
             }
         }
     }
@@ -799,6 +779,18 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
 }
 
 auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc& desc) -> void {
+    // 0. Source materials are dielectrics: $basetexture is diffuse colour and
+    // $envmap/$phong add a specular highlight on top, not metalness. MaterialDesc
+    // defaults metallic to 1.0 and the glTF importer always writes the factor,
+    // so this path is the one that must write it too: the opaque shaders shade
+    // diffuse as albedo * (1 - metallic), and the default erased the diffuse
+    // term of every imported surface -- flat grey metal instead of painted
+    // walls. Roughness follows the material's specular vocabulary: $phong is
+    // the glossiest, $envmap the varnished-studio look, and a plain
+    // LightmappedGeneric is a matte wall.
+    desc.metallic  = 0.0f;
+    desc.roughness = vmt.Has("$phong") ? 0.45f : (vmt.Has("$envmap") ? 0.60f : 0.85f);
+
     // 1. Unlit by construction. UnlitGeneric has no lighting path at all --
     // the albedo goes straight to the framebuffer -- and Source's white lamp
     // panels (lights/white and friends) would land at luma 1.0, exactly the
