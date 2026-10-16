@@ -72,7 +72,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},
-        Passes::GtaoPass {.impl = self, .pc = pc}, Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.frame = self},
+        Passes::GtaoPass {.frame = self, .pc = pc}, Passes::DdgiRayTracePass {.frame = self}, Passes::DdgiUpdateAtlasPass {.frame = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
         Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::RtrHalfTracePass {.impl = self},
         Passes::RtgiHalfTracePass {.impl = self}, Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self},

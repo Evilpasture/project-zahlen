@@ -2,30 +2,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/GtaoPass.hpp"
+#include "PassPayloads.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
 
 void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
-    const int giMode = impl.settings.post.mode;
+    const int giMode = frame.settings.post.mode;
     if (giMode != 3 && giMode != 4) {
         return;
     }
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    const uint32_t fIdx = impl.presenter.frameIndex;
+    const uint32_t fIdx = frame.presenter.frameIndex;
 
-    const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::Gtao>(
-        impl.postProcess.GtaoHeapBindings(),
-        Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget)),
-        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer)),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ao))
+    const Vk::HeapBlockBase block = frame.heapManager.WriteHeapParameters<Shaders::Gtao>(
+        frame.postProcess.GtaoHeapBindings(), Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget)),
+        Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
+        Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]), Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ao))
     );
 
-    const auto& fullExt = impl.presenter.depthTarget.extent;
+    const auto&             fullExt = frame.presenter.depthTarget.extent;
     const GtaoPushConstants push {
-        .halfRes     = {impl.graphResources.ao.extent.width, impl.graphResources.ao.extent.height},
+        .halfRes     = {frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height},
         .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
         .time        = pc.camPos.w,
         .aoRadius    = pc.aoRadius,
@@ -35,9 +34,9 @@ void GtaoPass::operator()(VkCommandBuffer cmd) const noexcept {
         .invViewProj = pc.invViewProj,
         .viewProj    = pc.viewProj,
     };
-    impl.postProcess.Gtao().DispatchHeapIndexedThreads<Shaders::Modules::GtaoCS>(
-        cmd, block, impl.graphResources.ao.extent.width, impl.graphResources.ao.extent.height, 1, push
+    frame.postProcess.Gtao().DispatchHeapIndexedThreads<Shaders::Modules::GtaoCS>(
+        cmd, block, frame.graphResources.ao.extent.width, frame.graphResources.ao.extent.height, 1, push
     );
 }
 
-}
+} // namespace ZHLN::Passes

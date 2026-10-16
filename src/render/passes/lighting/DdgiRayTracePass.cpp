@@ -15,31 +15,27 @@ struct DdgiTracePushConstants {
 static_assert(GpuAbi::ScenePassPayload<DdgiTracePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void DdgiRayTracePass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t fIdx   = impl.presenter.frameIndex;
-    const bool     wantRT = impl.settings.rayTracing.enableDiffuseGI ||
-                            (impl.settings.rayTracing.enableReflections && impl.settings.post.enableRTR != 0) ||
-                            impl.settings.rayTracing.enableShadows;
-    if (!impl.ctx.RayTracingSupported() || !wantRT || impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
+    const auto fIdx = frame.presenter.frameIndex;
+    if (!frame.ctx.RayTracingSupported() ||
+        !(frame.settings.rayTracing.enableDiffuseGI || (frame.settings.rayTracing.enableReflections && frame.settings.post.enableRTR != 0) ||
+          frame.settings.rayTracing.enableShadows) ||
+        frame.settings.environment.fullBright != 0 || frame.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    const Vk::AsAddressWrite tlas {
-        .address = impl.frames.tlasAddresses[fIdx].Get()
-    };
-    const Vk::HeapBlockBase block = impl.heapManager.WriteHeapParameters<Shaders::DdgiTrace>(
-        impl.postProcess.DdgiTraceHeapBindings(),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"g_instances">(impl.frames.instanceDataBuffers[fIdx]),
-        Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(impl.graphResources.ddgiIrradiance)),
-        Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance)),
-        Vk::Slot<"outRays">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.ddgiRays)),
-        Vk::Slot<"tlas">(tlas)
+    const Vk::AsAddressWrite tlas {.address = frame.frames.tlasAddresses[fIdx].Get()};
+    const auto               block = frame.heapManager.WriteHeapParameters<Shaders::DdgiTrace>(
+        frame.postProcess.DdgiTraceHeapBindings(), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
+        Vk::Slot<"g_instances">(frame.frames.instanceDataBuffers[fIdx]),
+        Vk::Slot<"texDdgiIrradiance">(Vk::Assume<Vk::ComputeRead<Res_DdgiIrradiance>>(frame.graphResources.ddgiIrradiance)),
+        Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ComputeRead<Res_DdgiDistance>>(frame.graphResources.ddgiDistance)),
+        Vk::Slot<"outRays">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.ddgiRays)), Vk::Slot<"tlas">(tlas)
     );
 
-    const uint32_t totalProbes  = impl.graphResources.ddgiRays.extent.width;
-    const uint32_t raysPerProbe = impl.graphResources.ddgiRays.extent.height;
+    const auto totalProbes  = frame.graphResources.ddgiRays.extent.width;
+    const auto raysPerProbe = frame.graphResources.ddgiRays.extent.height;
 
     const DdgiTracePushConstants push {
         .totalProbes    = totalProbes,
@@ -47,9 +43,7 @@ void DdgiRayTracePass::operator()(VkCommandBuffer cmd) const noexcept {
         .maxRayDistance = 24.0f,
         ._pad           = 0u,
     };
-    impl.postProcess.DdgiTrace().DispatchHeapIndexedThreads<Shaders::Modules::DdgiTraceCS>(
-        cmd, block, totalProbes, raysPerProbe, 1, push
-    );
+    frame.postProcess.DdgiTrace().DispatchHeapIndexedThreads<Shaders::Modules::DdgiTraceCS>(cmd, block, totalProbes, raysPerProbe, 1, push);
 }
 
-}
+} // namespace ZHLN::Passes

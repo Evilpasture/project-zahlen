@@ -7,24 +7,20 @@
 namespace ZHLN::Passes {
 
 void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    const uint32_t fIdx = frame.presenter.frameIndex;
-
-    const bool rtrActive =
+    const auto fIdx = frame.presenter.frameIndex;
+    const auto lightVariant =
         (frame.settings.rayTracing.enableReflections || frame.settings.rayTracing.enableShadows || frame.settings.rayTracing.enableDiffuseGI) &&
-        frame.ctx.RayTracingSupported();
-    const uint32_t lightVariant = rtrActive ? 1 : 0;
+                frame.ctx.RayTracingSupported() ?
+            1 :
+            0;
 
-    const Vk::HeapBlockBase block = post.lighting.WriteHeapParameters<Shaders::Lighting>(
-        frame.heapManager,
-        Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
+    const auto block = post.lighting.WriteHeapParameters<Shaders::Lighting>(
+        frame.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::FragmentAndComputeRead<Res_SceneColor>>(frame.graphResources.sceneColor)),
         Vk::Slot<"texDepth">(Vk::Assume<Vk::FragmentAndComputeRead<Res_Depth>>(frame.presenter.depthTarget)),
         Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::FragmentAndComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer)),
-        Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx]),
-        Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
-        Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)),
-        Vk::Slot<"ltc_mat">(post.ltcMat),
-        Vk::Slot<"ltc_amp">(post.ltcAmp),
-        Vk::Slot<"clusterGrid">(frame.frames.clusterGridBuffers[fIdx]),
+        Vk::Slot<"lights">(frame.frames.lightStorageBuffers[fIdx]), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx]),
+        Vk::Slot<"shadowMap">(Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(frame.graphResources.shadowMap)), Vk::Slot<"ltc_mat">(post.ltcMat),
+        Vk::Slot<"ltc_amp">(post.ltcAmp), Vk::Slot<"clusterGrid">(frame.frames.clusterGridBuffers[fIdx]),
         Vk::Slot<"clusterIndexList">(frame.frames.lightIndexListBuffers[fIdx]),
         Vk::Slot<"shadowAtlas">(frame.graphResources.shadowAtlas.image.ViewInfo(VK_IMAGE_ASPECT_DEPTH_BIT)),
         Vk::Slot<"shadowTiles">(frame.frames.shadowTileBuffers[fIdx]),
@@ -40,4 +36,4 @@ void ClusteredLightingPass::operator()(Vk::RasterPassContextBase& ctx) const noe
     post.lighting.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(ctx.Cmd(), lightVariant, pc, block);
 }
 
-}
+} // namespace ZHLN::Passes
