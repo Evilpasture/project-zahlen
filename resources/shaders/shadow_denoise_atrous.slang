@@ -25,14 +25,32 @@ ConstantBuffer<FrameUniforms> frame;
 
 static const float WaveletKernel[5] = { 0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f };
 
+// Must match kShadowTraceDivisor in TargetManager.hpp. This pass reads its own
+// signal (inShadow, texHistory) at the traced resolution and every geometric
+// guide (texDepth, texNormalRoughness, texVelocity) at native resolution, so
+// the two coordinate spaces have to be carried separately. Mapping the guides
+// with a nearest 2x is the same choice rtgi_denoise_atrous.slang makes.
+static const int kShadowTraceScale = 2;
+
+int2 FullResolutionPixel(int2 traceCoord) {
+    int2 fullSize = int2(frame.screenResolution);
+    return min(traceCoord * kShadowTraceScale, fullSize - 1);
+}
+
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    int2 fullSize = int2(frame.screenResolution);
-    if (any(tid.xy >= uint2(fullSize))) {
+    uint traceW, traceH;
+    inShadow.GetDimensions(traceW, traceH);
+    int2 traceSize = int2(traceW, traceH);
+    int2 fullSize  = int2(frame.screenResolution);
+
+    if (any(tid.xy >= uint2(traceSize))) {
         return;
     }
 
-    float depth = texDepth.Load(int3(tid.xy, 0)).r;
+    int2  centerFull = FullResolutionPixel(int2(tid.xy));
+
+    float depth = texDepth.Load(int3(centerFull, 0)).r;
     if (depth >= 1.0f) {
         outShadow[tid.xy] = 1.0f;
         return;
@@ -40,8 +58,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float  centerValue  = inShadow.Load(int3(tid.xy, 0)).r;
     float  centerDepth  = LinearizeDepth(depth, frame.invProj);
-    float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(tid.xy, 0)).xy * 2.0f - 1.0f);
-    float3 centerWorldPos = ReconstructWorldPos((float2(tid.xy) + 0.5f) / float2(fullSize), depth, frame.invViewProj);
+    float3 centerNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(centerFull, 0)).xy * 2.0f - 1.0f);
+    float3 centerWorldPos = ReconstructWorldPos((float2(centerFull) + 0.5f) / float2(fullSize), depth, frame.invViewProj);
 
     int   step     = int(max(pc.stepSize, 1u));
     float depthTol = max(pc.phiDepth, 1e-4f) * max(abs(centerDepth), 1e-3f);
@@ -53,18 +71,18 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     for (int y = -2; y <= 2; ++y) {
         for (int x = -2; x <= 2; ++x) {
-            int2 coord = int2(tid.xy) + int2(x, y) * step;
-            coord      = clamp(coord, int2(0, 0), fullSize - int2(1, 1));
+            int2 coord = clamp(int2(tid.xy) + int2(x, y) * step, int2(0, 0), traceSize - int2(1, 1));
+            int2 fullCoord = FullResolutionPixel(coord);
 
-            float sampleDepthRaw = texDepth.Load(int3(coord, 0)).r;
+            float sampleDepthRaw = texDepth.Load(int3(fullCoord, 0)).r;
             if (sampleDepthRaw >= 1.0f) {
                 continue;
             }
 
             float  sampleValue  = inShadow.Load(int3(coord, 0)).r;
-            float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(coord, 0)).xy * 2.0f - 1.0f);
+            float3 sampleNormal = UnpackNormalOctahedron(texNormalRoughness.Load(int3(fullCoord, 0)).xy * 2.0f - 1.0f);
 
-            float3 sampleWorldPos = ReconstructWorldPos((float2(coord) + 0.5f) / float2(fullSize), sampleDepthRaw, frame.invViewProj);
+            float3 sampleWorldPos = ReconstructWorldPos((float2(fullCoord) + 0.5f) / float2(fullSize), sampleDepthRaw, frame.invViewProj);
             float  planeDistance  = abs(dot(sampleWorldPos - centerWorldPos, centerNormal));
             float  wDepth  = exp(-planeDistance / depthTol);
             float wNormal = pow(saturate(dot(centerNormal, sampleNormal)), max(pc.phiNormal, 0.0f));
@@ -83,14 +101,14 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float filtered = (totalWeight > 1e-5f) ? (sum / totalWeight) : centerValue;
 
     if (pc.temporalWeight > 0.0f) {
-        float2 uv       = (float2(tid.xy) + 0.5f) / float2(fullSize);
-        float2 velocity = texVelocity.Load(int3(tid.xy, 0)).xy;
+        float2 uv       = (float2(centerFull) + 0.5f) / float2(fullSize);
+        float2 velocity = texVelocity.Load(int3(centerFull, 0)).xy;
         float2 prevUV   = uv - velocity - (frame.jitterParams.xy - frame.jitterParams.zw);
 
         if (all(prevUV >= 0.0f) && all(prevUV <= 1.0f) && !any(isnan(prevUV))) {
             float4 prevClip = mul(frame.prevUnjitteredViewProj, float4(centerWorldPos, 1.0f));
             if (prevClip.w > 0.1f && abs(prevClip.w - abs(centerDepth)) < max(0.25f, abs(centerDepth) * 0.1f)) {
-                float2 histCoord  = prevUV * float2(fullSize) - 0.5f;
+                float2 histCoord  = prevUV * float2(traceSize) - 0.5f;
                 int2   baseTap    = int2(floor(histCoord));
                 float2 fracTap    = frac(histCoord);
                 float  histSum    = 0.0f;
@@ -100,7 +118,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 for (int ty = 0; ty <= 1; ++ty) {
                     [unroll]
                     for (int tx = 0; tx <= 1; ++tx) {
-                        int2  tap       = clamp(baseTap + int2(tx, ty), int2(0, 0), fullSize - 1);
+                        int2  tap       = clamp(baseTap + int2(tx, ty), int2(0, 0), traceSize - 1);
                         float wBilinear = lerp(1.0f - fracTap.x, fracTap.x, float(tx)) *
                                           lerp(1.0f - fracTap.y, fracTap.y, float(ty));
                         histSum    += texHistory.Load(int3(tap, 0)).r * wBilinear;

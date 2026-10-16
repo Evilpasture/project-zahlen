@@ -57,6 +57,22 @@ inline constexpr float kTableNameMax         = 150.0f;
 inline constexpr float kStageSparkHeight     = 12.0f;
 inline constexpr float kSparkBarGap          = 1.0f;
 
+// Row pitch of the CPU scope table. Used to report how many of its rows fit in
+// the scroll area, which is the one thing about this panel whose length is not
+// a constant: it grows with the number of registered scopes.
+inline constexpr float kCpuRowPitch = 14.0f;
+
+// How much panel height is spent above the CPU table: title, the stat lines,
+// the chart, the buttons, the hardware grid and the GPU table. A measurement,
+// not a derivation -- Clay resolves child heights while laying out, and the
+// scroll area's height has to be known before that happens. If the rows above
+// ever grow, this is the constant that has to follow them.
+inline constexpr float kTelemetryTopReserve = 580.0f;
+
+// Floor for the scroll area, so a short window still leaves room for a few rows
+// instead of collapsing the table to nothing.
+inline constexpr float kCpuTableMinHeight = 96.0f;
+
 // The machine section: a grid of per-core cells. Cells are as wide as the
 // content divided by how many fit across, and the number across is chosen from
 // the core count so a 20-core machine is five rows and a 128-thread one is
@@ -1011,15 +1027,50 @@ void BenchmarkViewer::Impl::DrawTelemetryPanel(GUI::Context& ui, ZHLN::Engine& e
             DrawStageColumns(ui, stages.first(gpuCount), tableGpu, "g");
 
             if (stages.size() > gpuCount) {
-                ui.Text(std::format("CPU  ({} scopes)", stages.size() - gpuCount), 13.0f, kTitleInk);
+                const size_t cpuCount = stages.size() - gpuCount;
 
-                // One column: the scopes are named in prose, and the full width
-                // is what lets those names be drawn as written.
-                ui.Column(2.0f, [&]() -> void {
-                    for (size_t i = 0; i < stages.size() - gpuCount; ++i) {
-                        DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
+                // The scope table is the only part of this panel that has no
+                // natural bound, so it is the part that scrolls. Everything above
+                // it keeps the panel's top edge at a fixed place on screen; the
+                // table takes whatever height is left and clips the rest, which
+                // is what keeps the panel inside the viewport no matter how many
+                // scopes are registered.
+                const float cpuHeight =
+                    std::max(kCpuTableMinHeight, static_cast<float>(viewport.height) - kPanelMargin - kTelemetryTopReserve);
+
+                // Resolved from the previous frame, so on the first frame of the
+                // area's life the count is simply not reported yet.
+                const GUI::ScrollState scroll  = ui.GetScrollState("TelemetryCpuScopes");
+                const size_t           visible = static_cast<size_t>(scroll.containerH / kCpuRowPitch);
+
+                ui.Text(
+                    (scroll.Scrollable() && (visible > 0) && (visible < cpuCount))
+                        ? std::format("CPU  ({} scopes, ~{} shown - scroll)", cpuCount, visible)
+                        : std::format("CPU  ({} scopes)", cpuCount),
+                    13.0f, kTitleInk
+                );
+
+                // Rows go straight into the scroll area rather than into a
+                // ui.Column: BeginColumn sizes its height with grow, and a
+                // growing child inside a fixed-height scroll container reports a
+                // content height that is always at least the container's, which
+                // would make the area look scrollable when it is not.
+                ui.ScrollArea(
+                    "TelemetryCpuScopes",
+                    GUI::BoxConfig {
+                        .width     = {.grow = 1.0f},
+                        .height    = {.fixed = cpuHeight},
+                        .gap       = 2.0f,
+                        .direction = GUI::Direction::Column,
+                    },
+                    [&]() -> void {
+                        // One column: the scopes are named in prose, and the full
+                        // width is what lets those names be drawn as written.
+                        for (size_t i = 0; i < cpuCount; ++i) {
+                            DrawStageRow(ui, stages[gpuCount + i], tableCpu, "c", 0, i);
+                        }
                     }
-                });
+                );
             }
 
             // Last of all, so that it is on top of everything above it: out of

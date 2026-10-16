@@ -18,6 +18,17 @@ RaytracingAccelerationStructure tlas;
 Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
+// Must match kShadowTraceDivisor in TargetManager.hpp. outShadow is traced below
+// native resolution, so a dispatch coordinate names a trace texel while every
+// guide this shader reads is a native pixel. Tracing without that mapping makes
+// each trace texel hold the shadow of the native pixel at its own coordinate --
+// i.e. the top-left quadrant's shadow field, which the lighting pass then reads
+// back as if it covered the whole screen. The denoiser is handed a signal and a
+// set of guides describing different pixels, so its bilateral weights reject
+// every neighbour and the raw throwaway noise reaches the screen. Same mapping
+// as rtgi_half.slang.
+static const uint kShadowTraceScale = 2u;
+
 float TraceVisibility(float3 origin, float3 direction, float tMax) {
     RayDesc ray;
     ray.Origin    = origin;
@@ -34,17 +45,20 @@ float TraceVisibility(float3 origin, float3 direction, float tMax) {
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    if (any(tid.xy >= uint2(frame.screenResolution))) {
+    uint traceW, traceH;
+    outShadow.GetDimensions(traceW, traceH);
+    if (any(tid.xy >= uint2(traceW, traceH))) {
         return;
     }
 
-    float depth = texDepth.Load(int3(tid.xy, 0)).r;
+    uint2 fullPos = min(tid.xy * kShadowTraceScale, uint2(frame.screenResolution) - 1u);
+    float depth   = texDepth.Load(int3(fullPos, 0)).r;
     if (depth >= 1.0f) {
         outShadow[tid.xy] = 1.0f;
         return;
     }
 
-    float2 uv       = (float2(tid.xy) + 0.5f) / float2(frame.screenResolution);
+    float2 uv       = (float2(fullPos) + 0.5f) / float2(frame.screenResolution);
     float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
 
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
@@ -53,7 +67,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    float4 normRoughRaw = texNormalRoughness.Load(int3(tid.xy, 0));
+    float4 normRoughRaw = texNormalRoughness.Load(int3(fullPos, 0));
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
     float3 L            = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
 
@@ -73,7 +87,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float visibility = 0.0f;
     for (uint i = 0u; i < spp; ++i) {
-        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, tid.xy, frameIdx, i);
+        float4 u    = SampleBlueNoiseAt(blueNoiseTex, blueNoiseSampler, fullPos, frameIdx, i);
         float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
         float3 dir = SafeNormalize(L + right * disk.x + bitangent * disk.y, L);

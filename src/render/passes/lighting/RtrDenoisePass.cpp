@@ -56,15 +56,27 @@ void RtrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
         );
     };
 
+    // `denoiserPasses` is a quality tier, not a literal iteration count: the
+    // cheapest valid configuration still needs two dispatches, because a single
+    // pass would have to read and write the same image, and the frame swaps the
+    // written image into the history. Tier 2 and tier 3 previously ran the same
+    // three dispatches, so the top of the ladder was dead. Tier 3 now adds the
+    // step-8 pass; tier 2 is unchanged and stays the default.
     switch (passes) {
         case 1:
             Dispatch(rtrHalf, denoiseA, 1, temporalW);
             Dispatch(denoiseA, rtrHalf, 2, 0.0f);
             break;
-        default:
+        case 2:
             Dispatch(rtrHalf, denoiseA, 1, temporalW);
             Dispatch(denoiseA, denoiseB, 2, 0.0f);
             Dispatch(denoiseB, rtrHalf, 4, 0.0f);
+            break;
+        default:
+            Dispatch(rtrHalf, denoiseA, 1, temporalW);
+            Dispatch(denoiseA, denoiseB, 2, 0.0f);
+            Dispatch(denoiseB, denoiseA, 4, 0.0f);
+            Dispatch(denoiseA, rtrHalf, 8, 0.0f);
             break;
     }
 }

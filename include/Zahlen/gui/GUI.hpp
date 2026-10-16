@@ -56,6 +56,32 @@ struct UISettingsComponent {
     FontAtlas     fontAtlas;
 };
 
+// Appearance of the bar drawn by Context::BeginScrollArea. Widths and heights
+// are in pixels, matching the units Clay lays out in.
+struct ScrollBarStyle {
+    float     width           = 6.0f;
+    float     minThumb        = 20.0f;
+    float     margin          = 2.0f;
+    JPH::Vec4 trackColor      = {1.0f, 1.0f, 1.0f, 0.06f};
+    JPH::Vec4 thumbColor      = {1.0f, 1.0f, 1.0f, 0.30f};
+    JPH::Vec4 thumbHoverColor = {1.0f, 1.0f, 1.0f, 0.55f};
+};
+
+// Resolved from the previous frame's layout. scrollY is <= 0, matching the
+// convention Clay uses for its scroll containers.
+struct ScrollState {
+    float scrollY    = 0.0f;
+    float contentH   = 0.0f;
+    float containerH = 0.0f;
+
+    [[nodiscard]] auto Overflow() const noexcept -> float {
+        return contentH - containerH;
+    }
+    [[nodiscard]] auto Scrollable() const noexcept -> bool {
+        return Overflow() > 0.5f;
+    }
+};
+
 struct TextBounds {
     float              minX = 0.0f;
     float              maxX = 0.0f;
@@ -123,6 +149,32 @@ class ZHLN_API Context {
         content();
         EndColumn();
     }
+
+    // A vertically scrollable region. Content that overflows the box's height is
+    // clipped, reachable by the mouse wheel, and reachable by dragging the bar
+    // drawn flush against the box's right edge.
+    //
+    // `id` is mandatory: the scroll position is keyed on the element id and
+    // survives across frames, so an empty id would give a container that resets
+    // to the top every frame.
+    void BeginScrollArea(std::string_view id, const BoxConfig& cfg = {}, const ScrollBarStyle& style = {}) noexcept;
+    void EndScrollArea() noexcept;
+
+    template <typename Fn>
+        requires std::invocable<Fn>
+    void ScrollArea(std::string_view id, const BoxConfig& cfg, const ScrollBarStyle& style, Fn&& content) {
+        BeginScrollArea(id, cfg, style);
+        content();
+        EndScrollArea();
+    }
+
+    template <typename Fn>
+        requires std::invocable<Fn>
+    void ScrollArea(std::string_view id, const BoxConfig& cfg, Fn&& content) {
+        ScrollArea(id, cfg, ScrollBarStyle {}, content);
+    }
+
+    [[nodiscard]] auto GetScrollState(std::string_view id) const noexcept -> ScrollState;
 
     void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
     auto Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept

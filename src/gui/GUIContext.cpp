@@ -36,6 +36,12 @@ struct WidgetState {
     uint64_t lastActiveFrame = 0;
     TextEdit::Caret caret = {};
     int32_t highlightIndex = 0;
+    // Scrollbar drag anchor: where the pointer was when the drag started, and
+    // what the scroll position was at that moment. Both are needed because a
+    // drag sets an absolute position rather than accumulating deltas -- that
+    // keeps the thumb under the cursor even when a frame is dropped.
+    float dragOriginY      = 0.0f;
+    float dragOriginScroll = 0.0f;
 };
 
 struct Context::Impl {
@@ -59,6 +65,13 @@ struct Context::Impl {
     TextEdit::ClipboardSink clipboard = {};
 
     std::deque<std::string> stringArena;
+
+    struct ScrollFrame {
+        std::string    id;
+        uint64_t       key   = 0;
+        ScrollBarStyle style;
+    };
+    std::vector<ScrollFrame> scrollStack;
 
     std::vector<VertexPosition>   uiPositions;
     std::vector<VertexSurface>    uiSurfaces;
@@ -454,6 +467,143 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
 void Context::EndBox() noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     Clay__CloseElement();
+}
+
+void Context::BeginScrollArea(std::string_view id, const BoxConfig& cfg, const ScrollBarStyle& style) noexcept {
+    if (_impl == nullptr) {
+        return;
+    }
+
+    BoxConfig scrolled = cfg;
+    scrolled.clipVertical = true;
+
+    _impl->scrollStack.push_back(
+        Impl::ScrollFrame {.id = std::string(id), .key = (static_cast<uint64_t>(Hash32(id)) << 32) | 0x0005u, .style = style}
+    );
+
+    BeginBox(id, scrolled);
+}
+
+void Context::EndScrollArea() noexcept {
+    if ((_impl == nullptr) || (_impl->clayContext == nullptr)) {
+        return;
+    }
+    if (_impl->scrollStack.empty()) {
+        EndBox();
+        return;
+    }
+
+    const Impl::ScrollFrame frame = _impl->scrollStack.back();
+    _impl->scrollStack.pop_back();
+
+    if (!frame.id.empty()) {
+        Clay_SetCurrentContext(_impl->clayContext);
+
+        Clay_String clayId {};
+        clayId.length               = static_cast<int32_t>(frame.id.size());
+        clayId.chars                = frame.id.data();
+        const Clay_ElementId elemId = Clay_GetElementIdWithIndex(clayId, static_cast<uint32_t>(Hash32(frame.id)));
+
+        // Previous frame's measurements. Hit testing and thumb geometry are both
+        // derived from them, so the bar the user can grab is the bar that was
+        // drawn, rather than a rect that has moved since.
+        const Clay_ScrollContainerData scroll = Clay_GetScrollContainerData(elemId);
+        const float                    contentH   = scroll.contentDimensions.height;
+        const float                    containerH = scroll.scrollContainerDimensions.height;
+        const float                    overflow   = contentH - containerH;
+
+        if (scroll.found && scroll.config.vertical && (scroll.scrollPosition != nullptr) && (overflow > 0.5f) && (containerH > 1.0f)) {
+            const ScrollBarStyle& bar    = frame.style;
+            const float           trackH = std::max(containerH - (2.0f * bar.margin), 1.0f);
+            const float           thumbH = std::min(trackH, std::max(bar.minThumb, trackH * (containerH / contentH)));
+            const float           travel = trackH - thumbH;
+
+            float* const scrollY = &scroll.scrollPosition->y;
+
+            const auto  input = _impl->registry.GetSingleton<Components::InputStateComponent>();
+            const float mx    = input ? input->mouseX : -1.0f;
+            const float my    = input ? input->mouseY : -1.0f;
+            const bool  down  = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
+
+            auto& drag = _impl->GetState(frame.key, _impl->currentFrame);
+
+            // scrollContainerDimensions carries sizes only, so the container's
+            // origin has to come from the element's bounding box. Testing hover
+            // against a container-relative x would put the grab zone at the same
+            // offset from the screen's left edge instead of the panel's.
+            const Clay_ElementData containerBox = Clay_GetElementData(elemId);
+            const float           fraction      = std::clamp(-*scrollY / overflow, 0.0f, 1.0f);
+            const float           thumbX        = containerBox.boundingBox.x + containerBox.boundingBox.width - bar.margin - bar.width;
+            const float           thumbY        = containerBox.boundingBox.y + bar.margin + (fraction * travel);
+            const bool            overThumb     = (mx >= thumbX) && (mx <= (thumbX + bar.width)) && (my >= thumbY) && (my <= (thumbY + thumbH));
+
+            if (!down) {
+                drag.isDragging = false;
+            } else if (drag.isDragging && (travel > 0.0f)) {
+                const float dy = my - drag.dragOriginY;
+                *scrollY       = std::clamp(drag.dragOriginScroll - (dy * (overflow / travel)), -overflow, 0.0f);
+            } else if (overThumb && !drag.isPressed) {
+                drag.isDragging       = true;
+                drag.dragOriginY      = my;
+                drag.dragOriginScroll = *scrollY;
+            }
+            drag.isPressed = down;
+
+            const bool  hot   = drag.isDragging || overThumb;
+            const float drawY = std::clamp(-*scrollY / overflow, 0.0f, 1.0f) * travel;
+
+            // Track and thumb are floating children of the scroll container, so
+            // they neither contribute to its content size (Clay counts floating
+            // children in floatingChildrenCount, not children.length) nor scroll
+            // with the content. CLAY_CLIP_TO_ATTACHED_PARENT keeps them inside
+            // the container's scissor; the default, CLAY_CLIP_TO_NONE, would
+            // leave them unclipped.
+            const auto EmitBar = [&](float y, float h, const JPH::Vec4& color) -> void {
+                Clay_ElementDeclaration decl = {
+                    .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(bar.width), .height = CLAY_SIZING_FIXED(h)}},
+                    .backgroundColor = ToClayColor(color),
+                    .cornerRadius    = {bar.width * 0.5f, bar.width * 0.5f, bar.width * 0.5f, bar.width * 0.5f}
+                };
+                decl.floating = {
+                    .offset       = {-(bar.margin + bar.width), bar.margin + y},
+                    .zIndex       = 2,
+                    .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_TOP, .parent = CLAY_ATTACH_POINT_RIGHT_TOP},
+                    .attachTo     = CLAY_ATTACH_TO_PARENT,
+                    .clipTo       = CLAY_CLIP_TO_ATTACHED_PARENT
+                };
+                Clay__OpenElement();
+                Clay__ConfigureOpenElement(decl);
+                Clay__CloseElement();
+            };
+
+            EmitBar(0.0f, trackH, bar.trackColor);
+            EmitBar(drawY, thumbH, hot ? bar.thumbHoverColor : bar.thumbColor);
+        }
+    }
+
+    EndBox();
+}
+
+auto Context::GetScrollState(std::string_view id) const noexcept -> ScrollState {
+    ScrollState state;
+    if ((_impl == nullptr) || (_impl->clayContext == nullptr) || id.empty()) {
+        return state;
+    }
+    Clay_SetCurrentContext(_impl->clayContext);
+
+    Clay_String clayId {};
+    clayId.length               = static_cast<int32_t>(id.size());
+    clayId.chars                = id.data();
+    const Clay_ScrollContainerData scroll =
+        Clay_GetScrollContainerData(Clay_GetElementIdWithIndex(clayId, static_cast<uint32_t>(Hash32(id))));
+
+    if (!scroll.found) {
+        return state;
+    }
+    state.scrollY    = (scroll.scrollPosition != nullptr) ? scroll.scrollPosition->y : 0.0f;
+    state.contentH   = scroll.contentDimensions.height;
+    state.containerH = scroll.scrollContainerDimensions.height;
+    return state;
 }
 
 void Context::BeginRow(float gap, float padding) noexcept {

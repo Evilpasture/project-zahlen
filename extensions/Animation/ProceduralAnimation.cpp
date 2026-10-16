@@ -29,6 +29,7 @@ module;
 #include <iterator>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -1315,13 +1316,30 @@ struct SkinBinding {
 
     SkinBinding best;
     size_t      bestScore = 0;
+    size_t      considered = 0;
+    size_t      skipped    = 0;
     auto        consider  = [&](Entity entity) {
         auto mesh = registry.Get<Components::SkeletalMeshComponent>(entity);
         if (!mesh || mesh->skeletonIndex < 0 || mesh->skeletonIndex >= static_cast<int32_t>(prefab->skeletons.size())) {
             return;
         }
         const Skeleton& skeleton = prefab->skeletons[static_cast<size_t>(mesh->skeletonIndex)];
-        const size_t    score    = ScoreSkeletonForProceduralPose(skeleton);
+
+        // Scoring is O(joints x name matching) and a pure function of the
+        // skeleton, so a part that shares its skeleton with the incumbent cannot
+        // change the winner: an equal score fails `score > bestScore`, which is
+        // the only way `best` is replaced. A character is normally one skeleton
+        // spread over many parts -- UziProc.glb is 259 parts on one skin -- and
+        // without this guard discovery re-scores that one skeleton for every
+        // part, every frame. That is a cost proportional to the part count,
+        // which is what made it look like a fixed toll on the frame.
+        if (best.skeleton == &skeleton) {
+            ++skipped;
+            return;
+        }
+
+        ++considered;
+        const size_t score = ScoreSkeletonForProceduralPose(skeleton);
         if (best.skeletalMesh == nullptr || score > bestScore) {
             best      = {.skeletalMesh = &*mesh, .skeleton = &skeleton};
             bestScore = score;
@@ -1334,6 +1352,18 @@ struct SkinBinding {
         if (hierarchy && hierarchy->parent == root) {
             consider(entity);
         }
+    }
+
+    // Once, on the first discovery of this rig: the part count is a property of
+    // the model, so if the redundancy is not what is being claimed here, this is
+    // the line that says so.
+    static bool reported = false;
+    if (!reported && (considered + skipped) > 1) {
+        reported = true;
+        ZHLN::Log(
+            "[ProceduralAnimation] FindSkinBinding: scored {} distinct skeleton(s) and skipped {} part(s) sharing one, out of {} considered.",
+            considered, skipped, considered + skipped
+        );
     }
     return best;
 }
@@ -1877,6 +1907,13 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
     auto& physics  = *physicsRes;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
+        // Everything between the loop entry and the first stage below: the
+        // component fetches, FindSkinBinding, the rig rebuild, and the
+        // velocity/rotation math. Held in an optional so it can be stopped where
+        // the stages begin -- the declarations below are this iteration's and
+        // cannot be hoisted out of the loop body to close a scope around them.
+        std::optional<ZHLN::ScopedTimer> preambleTimer(std::in_place, "PA Stage: Entity preamble");
+
         auto gait             = registry.Get<ProceduralLocomotionComponent>(entity);
         auto hair             = registry.Get<HairStrandsComponent>(entity);
         auto config           = registry.Get<ProceduralAnimationConfigComponent>(entity);
@@ -2059,27 +2096,40 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         gait->previousRootRotation   = rootRotation;
         gait->orientationInitialized = true;
 
-        // Smoothly interpolate gait parameters (stride, bounce, sway, etc.)
-        // before evaluation so the stride clock and foot trajectories see the
-        // blended values instead of snapping between presets.
-        Animation::BlendGaitParameters(*gait, dt);
+        preambleTimer.reset();
 
-        // Advance the stride wheel before sampling locomotion clips so the two
-        // authored reach keys and their interpolated pass pose stay phase locked.
-        if (gaitEnabled || locomotionSyncEnabled) {
-            Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
-        }
-        if (animator && tracks) {
-            SynchronizeLocomotionTrack(*animator, *tracks, movement ? &*movement : nullptr, *gait, horizontalSpeed, dt);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Gait and tracks");
+
+            // Smoothly interpolate gait parameters (stride, bounce, sway, etc.)
+            // before evaluation so the stride clock and foot trajectories see the
+            // blended values instead of snapping between presets.
+            Animation::BlendGaitParameters(*gait, dt);
+
+            // Advance the stride wheel before sampling locomotion clips so the two
+            // authored reach keys and their interpolated pass pose stay phase locked.
+            if (gaitEnabled || locomotionSyncEnabled) {
+                Animation::EvaluateGait(*gait, velocityLocal, angularVelocity, dt);
+            }
+            if (animator && tracks) {
+                SynchronizeLocomotionTrack(*animator, *tracks, movement ? &*movement : nullptr, *gait, horizontalSpeed, dt);
+            }
         }
 
-        ApplyAuthoredPose(animator ? &*animator : nullptr, config ? &*config : nullptr, *boneMap, dt);
-        if (childOfEnabled) {
-            ProceduralAnimation::CaptureChildOfPoseDeltas(*boneMap);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Authored pose");
+            ApplyAuthoredPose(animator ? &*animator : nullptr, config ? &*config : nullptr, *boneMap, dt);
         }
-        ProceduralAnimation::CaptureFingerPoseDeltas(*boneMap);
-        ResolveForwardKinematics(*boneMap);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Capture deltas and FK");
+            if (childOfEnabled) {
+                ProceduralAnimation::CaptureChildOfPoseDeltas(*boneMap);
+            }
+            ProceduralAnimation::CaptureFingerPoseDeltas(*boneMap);
+            ResolveForwardKinematics(*boneMap);
+        }
         if (hasKneeConstraints || boneMap->preserveAuthoredHierarchy) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Authored anchors");
             // Capture the exact authored semantic relations before procedural
             // model-space passes. Stage 7 restores these moving anchors.
             ProceduralAnimation::CaptureAuthoredConstraintPoseDeltas(*boneMap);
@@ -2092,11 +2142,13 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             gait->pelvisBob     = 0.0f;
         }
         if (accelerationEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Acceleration tilt");
             Animation::ApplyAccelerationTilt(*gait, boneMap->modelTransforms.data(), *boneMap);
         }
 
         // Stage 3: terrain contact, pelvis reach correction, and two-bone IK.
         if (ikEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Leg grounding");
             const Physics::BodyHandle ignoredHandle          = physicsComponent ? physicsComponent->physicsHandle : Physics::BodyHandle {};
             const float               legIKWeight            = config ? config->legIKWeight : 1.0f;
             const float               pelvisDropWeight       = config ? config->pelvisDropWeight : 1.0f;
@@ -2126,6 +2178,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // Stage 4: authored upper-body channels win by default. Procedural arm
         // swing/look-at only fill groups not keyed by the active GLB track.
         if (upperBodyEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Upper body");
             const AuthoredUpperBodyCoverage coverage      = FindAuthoredUpperBodyCoverage(animator ? &*animator : nullptr, *boneMap);
             const bool                      forceLayering = config && config->layerUpperBodyOverAuthoredChannels;
             const bool                      applyArmSwing = forceLayering || !coverage.arms;
@@ -2141,6 +2194,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // Stage 4.5: item driver, inertial/obstacle dynamics, upper-body reach,
         // constrained arm IK, wrist limits, and procedural grasp.
         if (itemHandlingEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Item handling");
             const size_t        gripCount       = std::min(itemHandling->gripCount, itemHandling->grips.size());
             const CharacterBone primaryHandBone = itemHandling->grips[0].assignedLimb == CharacterBone::HandL ? CharacterBone::HandL : CharacterBone::HandR;
             const RigNodeIndex  primaryHandNode = boneMap->nodeIndices[BoneSlot(primaryHandBone)];
@@ -2254,6 +2308,9 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
 
         // Stage 5: worker-fiber XPBD secondary motion.
         if (hair && secondaryMotionEnabled) {
+            // The whole secondary-motion stage. The XPBD solve keeps its own timer
+            // below, so extraction is this total minus that one.
+            ZHLN::ScopedTimer stageTimer("PA Stage: Secondary motion");
             const RigNodeIndex headNode          = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             const bool         hasHead           = IsValidRigNode(headNode, boneMap->nodeCount);
             const JPH::Vec3    headModelPosition = hasHead ? boneMap->modelTransforms[headNode].GetTranslation() : JPH::Vec3(0.0f, 1.60f, 0.0f);
@@ -2297,6 +2354,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // footwear; the SupSpine -> Chest -> Neck -> Head chain and detached
         // hands carry their imported subtrees.
         if (childOfEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Child-of constraints");
             ProceduralAnimation::ApplyChildOfConstraints(
                 *boneMap, handChildOfEnabled, chestChildOfEnabled, neckChildOfEnabled, headChildOfEnabled, footAttachmentsEnabled
             );
@@ -2305,6 +2363,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // again afterward; at rest, the original Forearm -> Hand relationship
         // remains authoritative and cannot be neutralized by item state.
         if (itemHandlingEnabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Hand constraint IK");
             const size_t gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 const Animation::GripPoint& grip = itemHandling->grips[gripIndex];
@@ -2319,7 +2378,10 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                 );
             }
         }
-        ProceduralAnimation::ApplyFingerRelationConstraints(*boneMap);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Finger relations");
+            ProceduralAnimation::ApplyFingerRelationConstraints(*boneMap);
+        }
         if (itemHandlingEnabled) {
             std::array<bool, 2> curledHands {false, false};
             const size_t        gripCount = std::min(itemHandling->gripCount, itemHandling->grips.size());
@@ -2336,8 +2398,11 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
                 );
             }
         }
-        CaptureLocalPose(*boneMap);
-        ResolveForwardKinematics(*boneMap);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Recover local and FK");
+            CaptureLocalPose(*boneMap);
+            ResolveForwardKinematics(*boneMap);
+        }
         boneMap->poseValid = true;
         ++boneMap->poseVersion;
         if (poseOverride) {
@@ -2349,6 +2414,7 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // translation remains immediate so forward movement cannot pull the
         // camera behind the body.
         if (firstPerson && firstPerson->enabled) {
+            ZHLN::ScopedTimer stageTimer("PA Stage: First-person camera");
             const RigNodeIndex headNode = boneMap->nodeIndices[BoneSlot(CharacterBone::Head)];
             if (IsValidRigNode(headNode, boneMap->nodeCount)) {
                 const JPH::Mat44& headModel      = boneMap->modelTransforms[headNode];
@@ -2444,20 +2510,28 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
             }
         };
 
-        // Upload the best semantic skeleton first so its generic motor target is
-        // always published even when another part shares the same joint offset.
-        uploadSkin(skin.skeletalMesh);
-        if (auto selfMesh = registry.Get<Components::SkeletalMeshComponent>(entity)) {
-            uploadSkin(&*selfMesh);
-        }
-        for (Entity childEntity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
-            const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
-            if (hierarchy && hierarchy->parent == entity) {
-                if (auto childMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity)) {
-                    uploadSkin(&*childMesh);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Skinning palette");
+
+            // Upload the best semantic skeleton first so its generic motor target is
+            // always published even when another part shares the same joint offset.
+            uploadSkin(skin.skeletalMesh);
+            if (auto selfMesh = registry.Get<Components::SkeletalMeshComponent>(entity)) {
+                uploadSkin(&*selfMesh);
+            }
+            for (Entity childEntity: registry.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
+                const auto hierarchy = registry.Get<Components::HierarchyComponent>(childEntity);
+                if (hierarchy && hierarchy->parent == entity) {
+                    if (auto childMesh = registry.Get<Components::SkeletalMeshComponent>(childEntity)) {
+                        uploadSkin(&*childMesh);
+                    }
                 }
             }
         }
+
+        // From here to the end of the iteration: the palette and attachment
+        // change detection and the loop tail. Destructs on the closing brace.
+        ZHLN::ScopedTimer tailTimer("PA Stage: Entity tail");
 
         const size_t previousPaletteCount     = boneMap->synchronizedSkinPaletteCount;
         boneMap->synchronizedSkinPaletteCount = uploadedPaletteCount;
@@ -2468,7 +2542,10 @@ void ProceduralAnimationSystem(ECS::Registry& registry, FrameDt frameDt, ECS::Re
         // Non-skinned child entities are attachments, not palette consumers.
         // Publish their evaluated node TRS before core TransformSystem runs.
         const size_t previousAttachmentCount = boneMap->synchronizedAttachmentCount;
-        boneMap->synchronizedAttachmentCount = ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
+        {
+            ZHLN::ScopedTimer stageTimer("PA Stage: Attachments");
+            boneMap->synchronizedAttachmentCount = ProceduralAnimation::SyncNonSkinnedAttachments(registry, entity, *boneMap);
+        }
         if (boneMap->poseVersion == 1 || previousAttachmentCount != boneMap->synchronizedAttachmentCount) {
             ZHLN::Log("[ProceduralAnimation] Entity {} synchronized {} non-skinned node attachments.", entity.index, boneMap->synchronizedAttachmentCount);
         }

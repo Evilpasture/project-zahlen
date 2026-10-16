@@ -56,15 +56,27 @@ void ShadowDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
         );
     };
 
+    // `denoiserPasses` is a quality tier, not a literal iteration count: the
+    // cheapest valid configuration still needs two dispatches, because a single
+    // pass would have to read and write the same image, and the frame swaps the
+    // written image into the history. Tier 2 and tier 3 previously ran the same
+    // three dispatches, so the top of the ladder was dead. Tier 3 now adds the
+    // step-8 pass; tier 2 is unchanged and stays the default.
     switch (passes) {
         case 1:
             Dispatch(shadowMask, denoiseA, 1, temporalW);
             Dispatch(denoiseA, shadowMask, 2, 0.0f);
             break;
-        default:
+        case 2:
             Dispatch(shadowMask, denoiseA, 1, temporalW);
             Dispatch(denoiseA, denoiseB, 2, 0.0f);
             Dispatch(denoiseB, shadowMask, 4, 0.0f);
+            break;
+        default:
+            Dispatch(shadowMask, denoiseA, 1, temporalW);
+            Dispatch(denoiseA, denoiseB, 2, 0.0f);
+            Dispatch(denoiseB, denoiseA, 4, 0.0f);
+            Dispatch(denoiseA, shadowMask, 8, 0.0f);
             break;
     }
 }

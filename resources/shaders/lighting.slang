@@ -268,7 +268,30 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
 #ifndef DISABLE_RTR
     if (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 160.0f) {
-        float rtrShadow = texRtShadowMask.SampleLevel(pointSampler, input.uv, 0).r;
+        // texRtShadowMask is traced and denoised below native resolution, so it
+        // has to be filtered up. Filtering by hand keeps this off the heap
+        // sampler table -- and the previous point sample was the direct cause of
+        // shadow crawl, since one texel of a temporally accumulated mask was
+        // being handed to a full-resolution pixel.
+        float2 maskDims;
+        texRtShadowMask.GetDimensions(maskDims.x, maskDims.y);
+        float2 maskCoord = input.uv * maskDims - 0.5f;
+        int2   maskBase  = int2(floor(maskCoord));
+        float2 maskFrac  = frac(maskCoord);
+        float  maskSum    = 0.0f;
+        float  maskWeight = 0.0f;
+        [unroll]
+        for (int maskY = 0; maskY <= 1; ++maskY) {
+            [unroll]
+            for (int maskX = 0; maskX <= 1; ++maskX) {
+                int2  tap  = clamp(maskBase + int2(maskX, maskY), int2(0, 0), int2(maskDims) - 1);
+                float wBil = lerp(1.0f - maskFrac.x, maskFrac.x, float(maskX)) *
+                             lerp(1.0f - maskFrac.y, maskFrac.y, float(maskY));
+                maskSum    += texRtShadowMask.Load(int3(tap, 0)).r * wBil;
+                maskWeight += wBil;
+            }
+        }
+        float rtrShadow = (maskWeight > 1e-5f) ? (maskSum / maskWeight) : 1.0f;
         if (viewDepth < 80.0f) {
             shadow = rtrShadow;
         } else {

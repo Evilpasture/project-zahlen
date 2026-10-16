@@ -34,10 +34,18 @@ using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLO
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_RtShadowMask    = Vk::GraphImage<"RtShadowMask", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_RtShadowHistory = Vk::GraphImage<"RtShadowHistory", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_ShadowDenoiseA  = Vk::GraphImage<"ShadowDenoiseA", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_ShadowDenoiseB  = Vk::GraphImage<"ShadowDenoiseB", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
+// The RT GI, RT reflection and RT shadow chains all trace and filter below
+// native resolution; the shadow chain was the last one still running at full
+// resolution, which is why ShadowDenoise cost more than the shadow trace it
+// filters. Kept as one constant because the shaders hard-code the inverse as
+// kShadowTraceScale, and a mismatch between the two silently misaligns the
+// depth and normal taps against the filtered signal.
+inline constexpr uint32_t kShadowTraceDivisor = 2;
+
+using Res_RtShadowMask    = Vk::GraphImage<"RtShadowMask", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, kShadowTraceDivisor>;
+using Res_RtShadowHistory = Vk::GraphImage<"RtShadowHistory", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, kShadowTraceDivisor>;
+using Res_ShadowDenoiseA  = Vk::GraphImage<"ShadowDenoiseA", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, kShadowTraceDivisor>;
+using Res_ShadowDenoiseB  = Vk::GraphImage<"ShadowDenoiseB", VK_FORMAT_R16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, kShadowTraceDivisor>;
 using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
 using Res_RtrHistory    = Vk::GraphImage<"RtrHistory", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;
 using Res_RtgiHalf       = Vk::GraphImage<"RtgiHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 2>;

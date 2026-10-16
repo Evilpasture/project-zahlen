@@ -66,6 +66,27 @@ enum class Stage : uint8_t {
     SmaaBlend,
     Blit,
     Viewmodel,
+
+    // Every pass the graph names must appear here or it is never timed.
+    // WriteScopeStart resolves the pass name with Reflect::StringToEnum<Stage>
+    // and writes no timestamp when the lookup fails, so a pass missing from this
+    // enum runs with no query, no row, and no entry in gpu_total_ms -- silently,
+    // because "the pass is not profiled" and "the pass did not run" are the same
+    // absence. These twelve were in that state; the ray-traced lighting stack is
+    // most of the GPU's work on this class of hardware and none of it was
+    // visible. Stage count must stay <= 64 (see GpuProfiler).
+    OpaqueSceneCopy,
+    GtaoAo,
+    DdgiRayTrace,
+    DdgiUpdateAtlas,
+    RtShadow,
+    ShadowDenoise,
+    RtrHalfTrace,
+    RtgiHalfTrace,
+    RtrDenoise,
+    RtgiDenoise,
+    RtgiComposite,
+    HdrDenoise,
 };
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
