@@ -7,11 +7,10 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "../VkError.hpp"
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
-
-#include "../VkError.hpp"
 
 namespace ZHLN {
 
@@ -24,7 +23,7 @@ struct Color4 {
 namespace ZHLN::Vk {
 
 enum class VulkanCallError : uint8_t {
-    VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
+    VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed"> {}) = 1,
 };
 
 [[nodiscard]] auto WaitIdle(VkDevice device) noexcept -> std::expected<void, ErrorCode>;
@@ -47,34 +46,37 @@ struct ScopedScissor {
 };
 
 void CopyImageToBuffer(
-    VkCommandBuffer cmd,
-    VkImage srcImage,
-    VkBuffer dstBuffer,
-    VkExtent2D extent,
-    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    VkCommandBuffer    cmd,
+    VkImage            srcImage,
+    VkBuffer           dstBuffer,
+    VkExtent2D         extent,
+    VkImageLayout      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT
 ) noexcept;
 
+void CopyImage(VkCommandBuffer cmd, VkImage srcImage, VkImageLayout srcLayout, VkImage dstImage, VkImageLayout dstLayout, VkExtent3D extent) noexcept;
+
 template <size_t RegionCount>
 [[nodiscard]] constexpr auto CreateCopyRegions(
-    VkDeviceSize baseOffset,
-    VkDeviceSize regionSize,
-    VkExtent3D extent,
-    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-    uint32_t mipLevel = 0,
-    uint32_t baseArrayLayer = 0
+    VkDeviceSize       baseOffset,
+    VkDeviceSize       regionSize,
+    VkExtent3D         extent,
+    VkImageAspectFlags aspect         = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t           mipLevel       = 0,
+    uint32_t           baseArrayLayer = 0
 ) noexcept -> std::array<VkBufferImageCopy2, RegionCount> {
     std::array<VkBufferImageCopy2, RegionCount> regions {};
     for (uint32_t i = 0; i < RegionCount; ++i) {
         regions[i] = VkBufferImageCopy2 {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-            .bufferOffset = baseOffset + i * regionSize,
-            .imageSubresource = {
-                .aspectMask = aspect,
-                .mipLevel = mipLevel,
-                .baseArrayLayer = baseArrayLayer + i,
-                .layerCount = 1,
-            },
+            .sType        = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
+            .bufferOffset = baseOffset + (i * regionSize),
+            .imageSubresource =
+                {
+                    .aspectMask     = aspect,
+                    .mipLevel       = mipLevel,
+                    .baseArrayLayer = baseArrayLayer + i,
+                    .layerCount     = 1,
+                },
             .imageExtent = extent,
         };
     }
@@ -82,31 +84,31 @@ template <size_t RegionCount>
 }
 
 template <size_t RegionCount>
-    requires (RegionCount != std::dynamic_extent)
+    requires(RegionCount != std::dynamic_extent)
 inline void CopyBufferToImage(
-    VkCommandBuffer cmd,
-    VkBuffer srcBuffer,
-    VkImage dstImage,
+    VkCommandBuffer                                  cmd,
+    VkBuffer                                         srcBuffer,
+    VkImage                                          dstImage,
     std::span<const VkBufferImageCopy2, RegionCount> regions,
-    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    VkImageLayout                                    layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 ) noexcept {
     const VkCopyBufferToImageInfo2 info {
-        .sType = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-        .srcBuffer = srcBuffer,
-        .dstImage = dstImage,
+        .sType          = VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+        .srcBuffer      = srcBuffer,
+        .dstImage       = dstImage,
         .dstImageLayout = layout,
-        .regionCount = static_cast<uint32_t>(RegionCount),
-        .pRegions = regions.data(),
+        .regionCount    = static_cast<uint32_t>(RegionCount),
+        .pRegions       = regions.data(),
     };
     vkCmdCopyBufferToImage2(cmd, &info);
 }
 
 inline void CopyBufferToImage(
-    VkCommandBuffer cmd,
-    VkBuffer srcBuffer,
-    VkImage dstImage,
+    VkCommandBuffer           cmd,
+    VkBuffer                  srcBuffer,
+    VkImage                   dstImage,
     const VkBufferImageCopy2& region,
-    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    VkImageLayout             layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 ) noexcept {
     const std::span<const VkBufferImageCopy2, 1> regions {&region, 1};
     CopyBufferToImage<1>(cmd, srcBuffer, dstImage, regions, layout);
@@ -119,20 +121,13 @@ template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t;
 
 void GenerateMipmaps(
-    VkCommandBuffer cmd,
-    VkImage image,
-    uint32_t width,
-    uint32_t height,
+    VkCommandBuffer       cmd,
+    VkImage               image,
+    uint32_t              width,
+    uint32_t              height,
     VkPipelineStageFlags2 shaderReadStage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
 ) noexcept;
-void GenerateMipmaps(
-    VkCommandBuffer cmd,
-    VkImage image,
-    uint32_t width,
-    uint32_t height,
-    uint32_t mipLevels,
-    VkPipelineStageFlags2 shaderReadStage
-) noexcept;
+void GenerateMipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width, uint32_t height, uint32_t mipLevels, VkPipelineStageFlags2 shaderReadStage) noexcept;
 
 } // namespace ZHLN::Vk
 

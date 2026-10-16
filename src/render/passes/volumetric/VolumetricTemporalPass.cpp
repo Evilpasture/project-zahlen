@@ -17,18 +17,17 @@ static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
 static_assert(GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void VolumetricTemporalPass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t fIdx = impl.presenter.frameIndex;
+    const auto fIdx = frame.presenter.frameIndex;
 
-    const Vk::HeapBlockBase block = impl.fog.Temporal().WriteHeapParameters<Shaders::VolumetricTemporal>(
-        impl.heapManager,
-        Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(impl.graphResources.voxelIntegrated)),
-        Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(impl.graphResources.voxelHistory)),
-        Vk::Slot<"outVoxelIntegratedResolved">(Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(impl.graphResources.voxelResolved)),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+    const auto block = frame.fog.Temporal().WriteHeapParameters<Shaders::VolumetricTemporal>(
+        frame.heapManager, Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(frame.graphResources.voxelIntegrated)),
+        Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(frame.graphResources.voxelHistory)),
+        Vk::Slot<"outVoxelIntegratedResolved">(Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(frame.graphResources.voxelResolved)),
+        Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
     );
     const VolumetricTemporalPushConstants temporalPC = {};
 
-    impl.fog.Temporal().DispatchHeap<Shaders::Modules::VolumetricTemporalCS>(cmd, block, temporalPC);
+    frame.fog.Temporal().DispatchHeap<Shaders::Modules::VolumetricTemporalCS>(cmd, block, temporalPC);
 }
 
-}
+} // namespace ZHLN::Passes

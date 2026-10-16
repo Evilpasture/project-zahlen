@@ -8,15 +8,15 @@
 namespace ZHLN::Passes {
 
 void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    PassContext passCtx(cmd, impl);
-    const auto  sceneVp = impl.EffectiveViewport();
+    PassContext passCtx(cmd, frame);
+    const auto  sceneVp = frame.EffectiveViewport();
 
-    const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(impl.graphResources.transNormalBuffer);
-    const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(impl.graphResources.transAnisotropyBuffer);
-    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(impl.graphResources.transSheenBuffer);
-    const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(impl.graphResources.transDepthBuffer);
+    const auto norm_att  = Vk::Assume<Vk::ColorWrite<Res_TransNorm>>(frame.graphResources.transNormalBuffer);
+    const auto aniso_att = Vk::Assume<Vk::ColorWrite<Res_TransAnisotropy>>(frame.graphResources.transAnisotropyBuffer);
+    const auto sheen_att = Vk::Assume<Vk::ColorWrite<Res_TransSheen>>(frame.graphResources.transSheenBuffer);
+    const auto depth_att = Vk::Assume<Vk::DepthStencilWrite<Res_TransDepth>>(frame.graphResources.transDepthBuffer);
 
     Vk::DynamicPass(norm_att.Extent())
         .Viewport(sceneVp)
@@ -25,24 +25,16 @@ void TranslucentPrePass::operator()(VkCommandBuffer cmd) const noexcept {
         .AddColor(sheen_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorSheen)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < impl.queues.Draws().size(); ++i) {
-                const auto& drawCmd = impl.queues.Draws()[i];
-
-                if (!IsForwardOnly(drawCmd.instanceData.flags)) {
+            for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
+                const auto& drawCmd = frame.queues.Draws()[i];
+                if (!IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
-
-                if (drawCmd.prePassMaterial == nullptr || drawCmd.prePassMaterial->pipeline == VK_NULL_HANDLE) {
-                    continue;
-                }
-
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(
-                    passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive(), drawCmd.prePassMaterial->pipeline
-                );
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive(), drawCmd.prePassMaterial->pipeline);
             }
         });
 }
 
-}
+} // namespace ZHLN::Passes

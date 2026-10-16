@@ -11,27 +11,26 @@ namespace ZHLN::Passes {
 namespace {
 
 void RecordGpuCulled(
-    PassContext& passCtx, CullingResources& cull, const CsgResources& csg, const MeshParticlePipelines& particles,
-    std::span<const GroupRange> groups, uint32_t drawCount, const GBufferTargets& in
+    PassContext&                 passCtx,
+    CullingResources&            cull,
+    const CsgResources&          csg,
+    const MeshParticlePipelines& particles,
+    std::span<const GroupRange>  groups,
+    uint32_t                     drawCount,
+    const GBufferTargets&        in
 ) noexcept {
-    VkCommandBuffer cmd = passCtx.Cmd();
-    auto&           ctx = passCtx.ctx;
-    const uint32_t  frameIndex = ctx.presenter.frameIndex;
+    using enum Vk::BarrierStage;
+    using enum Vk::BarrierAccess;
+    auto* const    cmd        = passCtx.Cmd();
+    auto&          ctx        = passCtx.ctx;
+    const uint32_t frameIndex = ctx.presenter.frameIndex;
 
-    Vk::BufferBarrier(
-        cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
-        Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
-    );
+    Vk::BufferBarrier(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Compute | Indirect, ShaderWrite | IndirectRead, Clear, TransferWrite);
+    Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex]);
+    Vk::BufferBarrier(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Transfer, TransferWrite, Compute, ShaderWrite | ShaderRead);
 
-    Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex], 0, 0u);
-
-    Vk::BufferBarrier(
-        cmd, ctx.frames.indirectCommandsBuffersPass2[frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
-        Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
-    );
-
-    const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-    const auto     sceneVp = ctx.EffectiveViewport();
+    const auto             hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+    const auto             sceneVp = ctx.EffectiveViewport();
     const CullingConstants pc {
         .viewProj       = ctx.unjittered_view_proj,
         .hizScreenSize  = {sceneVp.width, sceneVp.height},
@@ -39,7 +38,7 @@ void RecordGpuCulled(
         .drawCount      = drawCount,
         .passIndex      = 1,
     };
-    const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
+    const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
         cull.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[frameIndex]),
         Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[frameIndex]),
         Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
@@ -48,8 +47,6 @@ void RecordGpuCulled(
     );
     cull.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(cmd, block, drawCount, 1, 1, pc);
 
-    using enum Vk::BarrierStage;
-    using enum Vk::BarrierAccess;
     Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
     Vk::DynamicPass(in.sceneColor.Extent())
@@ -85,8 +82,8 @@ void RecordGpuCulled(
 }
 
 void RecordCpuCulled(PassContext& passCtx, const CsgResources& csg, const MeshParticlePipelines& particles, const GBufferTargets& in) noexcept {
-    VkCommandBuffer cmd = passCtx.Cmd();
-    auto&           ctx = passCtx.ctx;
+    auto* const cmd = passCtx.Cmd();
+    const auto& ctx = passCtx.ctx;
 
     Vk::DynamicPass(in.sceneColor.Extent())
         .Viewport(ctx.EffectiveViewport())
@@ -115,17 +112,14 @@ void GBufferResolvePass::operator()(VkCommandBuffer cmd) const noexcept {
         return;
     }
 
-    const ZHLN::Array<GroupRange> groups = BuildGroupRanges(frame);
-
-    const bool useGpuCulling  = cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling() && !frame.MeshShadingActive();
-
-    const GBufferTargets in = GBufferSceneTargets(frame);
-    if (useGpuCulling) {
+    const auto groups = BuildGroupRanges(frame);
+    const auto in     = GBufferSceneTargets(frame);
+    if (cull.cullingPass.pipeline.Valid() && frame.frames.indirectCommandsBuffers[frame.presenter.frameIndex].Valid() &&
+        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !frame.MeshShadingActive()) {
         RecordGpuCulled(passCtx, cull, csg, particles, groups, drawCount, in);
     } else {
         RecordCpuCulled(passCtx, csg, particles, in);
     }
 }
 
-}
+} // namespace ZHLN::Passes

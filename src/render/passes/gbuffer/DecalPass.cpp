@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/gbuffer/DecalPass.hpp"
+#include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -17,7 +18,7 @@ struct DecalPushConstants {
 static_assert(GpuAbi::ScenePassPayload<DecalPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    auto cmd = ctx.Cmd();
+    auto* const cmd = ctx.Cmd();
     if (!decals.pass.Valid() || frame.queues.Decals().empty()) {
         return;
     }
@@ -27,7 +28,7 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     PassContext passCtx(cmd, frame);
     passCtx.encoder.BindPipeline(decals.pass.Get());
 
-    const JPH::Mat44 invViewProj = frame.unjittered_view_proj.Inversed();
+    const auto invViewProj = frame.unjittered_view_proj.Inversed();
 
     for (const auto& decalCmd: frame.queues.Decals()) {
         const DecalPushConstants decalPC {
@@ -44,4 +45,4 @@ void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

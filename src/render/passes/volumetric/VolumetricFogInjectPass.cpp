@@ -31,17 +31,15 @@ static_assert(sizeof(VolumetricFogPushConstants) == 80);
 static_assert(GpuAbi::ScenePassPayload<VolumetricFogPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void VolumetricFogInjectPass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t fIdx = impl.presenter.frameIndex;
+    const auto fIdx = frame.presenter.frameIndex;
 
-    const Vk::HeapBlockBase block = impl.fog.FogInject().WriteHeapParameters<Shaders::VolumetricFogInject>(
-        impl.heapManager,
-        Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(impl.graphResources.voxelMedia)),
-        Vk::Slot<"noiseTexture">(impl.fog.NoiseWrite()),
-        Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+    const auto block = frame.fog.FogInject().WriteHeapParameters<Shaders::VolumetricFogInject>(
+        frame.heapManager, Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(frame.graphResources.voxelMedia)),
+        Vk::Slot<"noiseTexture">(frame.fog.NoiseWrite()), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
     );
 
     const VolumetricFogPushConstants fogPC = {};
-    impl.fog.FogInject().DispatchHeap<Shaders::Modules::VolumetricFogInjectCS>(cmd, block, fogPC);
+    frame.fog.FogInject().DispatchHeap<Shaders::Modules::VolumetricFogInjectCS>(cmd, block, fogPC);
 }
 
-}
+} // namespace ZHLN::Passes

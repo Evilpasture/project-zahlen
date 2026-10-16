@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/aa/AntiAliasingResources.hpp"
 
 namespace ZHLN::Passes {
 
@@ -28,4 +29,4 @@ struct SmaaBlendPass: Vk::RenderPass<"SmaaBlend", Vk::ShaderRead<Res_HdrSceneCol
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

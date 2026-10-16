@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "../RenderInternal.hpp"
+#include "../FrameContext.hpp"
 #include <functional>
 #include <tuple>
 #include <type_traits>
@@ -18,8 +18,7 @@ struct FullscreenPassArgs {
 };
 
 template <typename Push, typename... Slots>
-[[nodiscard]] constexpr auto MakeFullscreenPassArgs(Push&& push, Slots&&... slots) noexcept
-    -> FullscreenPassArgs<std::decay_t<Push>, std::decay_t<Slots>...> {
+[[nodiscard]] constexpr auto MakeFullscreenPassArgs(Push&& push, Slots&&... slots) noexcept -> FullscreenPassArgs<std::decay_t<Push>, std::decay_t<Slots>...> {
     return {
         .push  = std::forward<Push>(push),
         .slots = std::tuple<std::decay_t<Slots>...> {std::forward<Slots>(slots)...},
@@ -29,36 +28,19 @@ template <typename Push, typename... Slots>
 template <typename Declared, Vk::ShaderProgram... Modules>
 struct FullscreenPassRecorder {
     template <typename LayoutT, typename Prepare>
-    static void Record(
-        RenderFrameContext&                  impl,
-        VkCommandBuffer                        cmd,
-        Vk::FullscreenPass<LayoutT>&           pass,
-        Prepare&&                              prepare
-    ) noexcept {
-        RecordCustom(
-            impl, cmd, pass, std::forward<Prepare>(prepare),
-            [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); }
-        );
+    static void Record(RenderFrameContext& impl, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare) noexcept {
+        RecordCustom(impl, cmd, pass, std::forward<Prepare>(prepare), [](auto&, VkCommandBuffer, auto&& execute) noexcept { execute(); });
     }
 
     template <typename LayoutT, typename Prepare, typename Draw>
-    static void RecordCustom(
-        RenderFrameContext&                  impl,
-        VkCommandBuffer                        cmd,
-        Vk::FullscreenPass<LayoutT>&           pass,
-        Prepare&&                              prepare,
-        Draw&&                                 draw
-    ) noexcept {
+    static void RecordCustom(RenderFrameContext& impl, VkCommandBuffer cmd, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
         if (!pass.pipeline.Valid()) {
             return;
         }
 
-        auto args = std::invoke(std::forward<Prepare>(prepare));
-        const Vk::HeapBlockBase block = std::apply(
-            [&impl, &pass](const auto&... slots) noexcept {
-                return pass.template WriteHeapParameters<Declared>(impl.heapManager, slots...);
-            },
-            args.slots
+        const auto args  = std::invoke(std::forward<Prepare>(prepare));
+        const auto block = std::apply(
+            [&impl, &pass](const auto&... slots) noexcept { return pass.template WriteHeapParameters<Declared>(impl.heapManager, slots...); }, args.slots
         );
 
         const auto execute = [&]() noexcept { pass.template ExecuteHeap<Modules...>(cmd, args.push, block); };
@@ -66,4 +48,4 @@ struct FullscreenPassRecorder {
     }
 };
 
-}
+} // namespace ZHLN::Passes

@@ -44,11 +44,9 @@ void RecordComputeFrame(RenderContext::Impl& impl, VkCommandBuffer cmd, float dt
     RebuildClusterBounds(impl, cmd, fIdx);
 
     auto computeGraph = Vk::MakePassPack(
-                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl},
-                            Passes::VolumetricFogInjectPass {.impl = impl},
-                            Passes::VolumetricLightInjectPass {.impl = impl},
-                            Passes::VolumetricIntegrationPass {.impl = impl},
-                            Passes::VolumetricTemporalPass {.impl = impl},
+                            Passes::ClusterCullingPass {.cull = impl.culling, .frame = impl}, Passes::VolumetricFogInjectPass {.frame = impl},
+                            Passes::VolumetricLightInjectPass {.frame = impl}, Passes::VolumetricIntegrationPass {.frame = impl},
+                            Passes::VolumetricTemporalPass {.frame = impl},
                             Passes::ParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt},
                             Passes::MeshParticleUpdatePass {.particles = impl.particleUpdate, .frame = impl, .dt = dt}
     )
@@ -86,9 +84,9 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     }
 
     const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
-    auto submitted = Vk::QueueSubmit(
-        impl.ctx.ComputeQueue(), std::move(*executable), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE,
-        impl.presenter.sync.ComputeTimeline(slot), signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+    auto           submitted   = Vk::QueueSubmit(
+        impl.ctx.ComputeQueue(), std::move(*executable), VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue,
+        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
     );
 
     if (!submitted) [[unlikely]] {
@@ -105,4 +103,4 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     return {};
 }
 
-}
+} // namespace ZHLN::Pipelines

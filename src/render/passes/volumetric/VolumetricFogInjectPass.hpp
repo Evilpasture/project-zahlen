@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
 #include "graph/RenderGraph.hpp"
 
 namespace ZHLN::Passes {
 
 struct VolumetricFogInjectPass: Vk::RenderPass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>> {
-    RenderFrameContext&   impl;
+    RenderFrameContext& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

@@ -10,60 +10,51 @@ namespace ZHLN::Passes {
 namespace {
 
 struct SmaaPushConstants {
-    float rtMetrics[4];
+    JPH::Float4 rtMetrics;
 };
 static_assert(GpuAbi::ScenePassPayload<SmaaPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
-[[nodiscard]] auto MetricsOf(VkExtent2D extent) noexcept -> SmaaPushConstants {
+[[nodiscard]] auto MetricsOf(VkExtent2D extent) noexcept {
     return SmaaPushConstants {
-        .rtMetrics = {1.0f / static_cast<float>(extent.width), 1.0f / static_cast<float>(extent.height), static_cast<float>(extent.width),
-                      static_cast<float>(extent.height)}
+        .rtMetrics = {
+            1.0f / static_cast<float>(extent.width), 1.0f / static_cast<float>(extent.height), static_cast<float>(extent.width),
+            static_cast<float>(extent.height)
+        }
     };
 }
 
 } // namespace
 
 void SmaaEdgePass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(
-        frame, ctx.Cmd(), aa.smaaEdge, [&]() {
-            const auto& inputColor = frame.graphResources.hdrSceneColor;
+    FullscreenPassRecorder<Shaders::SmaaEdge, Shaders::Modules::SmaaEdgeVS>::Record(frame, ctx.Cmd(), aa.smaaEdge, [&]() {
+        const auto& inputColor = frame.graphResources.hdrSceneColor;
 
-            return MakeFullscreenPassArgs(
-                MetricsOf(inputColor.extent),
-                Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
-            );
-        }
-    );
+        return MakeFullscreenPassArgs(MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)));
+    });
 }
 
 void SmaaWeightPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(
-        frame, ctx.Cmd(), aa.smaaWeight, [&]() {
-            const auto& areaInfo   = frame.textureManager.ViewInfo(frame.postProcess.SmaaAreaTexture());
-            const auto& searchInfo = frame.textureManager.ViewInfo(frame.postProcess.SmaaSearchTexture());
+    FullscreenPassRecorder<Shaders::SmaaWeight, Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>::Record(frame, ctx.Cmd(), aa.smaaWeight, [&]() {
+        const auto& areaInfo   = frame.textureManager.ViewInfo(frame.postProcess.SmaaAreaTexture());
+        const auto& searchInfo = frame.textureManager.ViewInfo(frame.postProcess.SmaaSearchTexture());
 
-            return MakeFullscreenPassArgs(
-                MetricsOf(frame.graphResources.smaaWeightTarget.extent),
-                Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)),
-                Vk::Slot<"areaTex">(areaInfo),
-                Vk::Slot<"searchTex">(searchInfo)
-            );
-        }
-    );
+        return MakeFullscreenPassArgs(
+            MetricsOf(frame.graphResources.smaaWeightTarget.extent),
+            Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(frame.graphResources.smaaEdgeTarget)), Vk::Slot<"areaTex">(areaInfo),
+            Vk::Slot<"searchTex">(searchInfo)
+        );
+    });
 }
 
 void SmaaBlendPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-    FullscreenPassRecorder<Shaders::SmaaBlend, Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>::Record(
-        frame, ctx.Cmd(), aa.smaaBlend, [&]() {
-            const auto& inputColor = frame.graphResources.hdrSceneColor;
+    FullscreenPassRecorder<Shaders::SmaaBlend, Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>::Record(frame, ctx.Cmd(), aa.smaaBlend, [&]() {
+        const auto& inputColor = frame.graphResources.hdrSceneColor;
 
-            return MakeFullscreenPassArgs(
-                MetricsOf(inputColor.extent),
-                Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
-                Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(frame.graphResources.smaaWeightTarget))
-            );
-        }
-    );
+        return MakeFullscreenPassArgs(
+            MetricsOf(inputColor.extent), Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
+            Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(frame.graphResources.smaaWeightTarget))
+        );
+    });
 }
 
-}
+} // namespace ZHLN::Passes

@@ -28,40 +28,34 @@ template <typename T>
 void SubmitDrawInstanced(
     Vk::CommandEncoder& encoder,
     const DrawCommand&  drawCmd,
-    uint32_t            instanceIdx,
+    const uint32_t      instanceIdx,
     const T&            pushConstants,
-    bool                meshShadingActive,
+    const bool          meshShadingActive,
     VkPipeline          pipelineOverride = VK_NULL_HANDLE
 ) noexcept {
-    const auto* nativeMat = drawCmd.material;
-
-    const bool doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
+    const auto* nativeMat   = drawCmd.material;
+    const auto  doubleSided = (drawCmd.instanceData.flags & (1U << 9U)) != 0;
     encoder.SetCullMode(doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
 
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
-            {.pipeline    = nativeMat->meshPipeline,
-             .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount),
-             .groupCountY = 1,
-             .groupCountZ = 1},
+            {.pipeline = nativeMat->meshPipeline, .groupCountX = TaskGroupCount(drawCmd.instanceData.meshletCount), .groupCountY = 1, .groupCountZ = 1},
             pushConstants
         );
         return;
     }
 
     auto* pipeline = pipelineOverride;
-    if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr) {
+    if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr && nativeMat->pipeline != VK_NULL_HANDLE) {
         pipeline = nativeMat->pipeline;
-    }
-    if (pipeline == VK_NULL_HANDLE) {
+    } else {
         return;
     }
 
-    const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
+    const auto vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
     encoder.DrawInstanced<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
-        {.pipeline = pipeline, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
-        pushConstants
+        {.pipeline = pipeline, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx}, pushConstants
     );
 }
 
@@ -77,4 +71,4 @@ using GBufferTargets = SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
 
 [[nodiscard]] auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange>;
 
-}
+} // namespace ZHLN::Passes

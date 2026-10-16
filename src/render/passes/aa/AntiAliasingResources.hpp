@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "Rendering.hpp"
 #include "pipeline/FullscreenPass.hpp"
 
 namespace ZHLN {

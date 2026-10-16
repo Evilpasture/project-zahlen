@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Rendering.hpp"
+#include "features/PostProcessFeature.hpp"
 
 namespace ZHLN {
 

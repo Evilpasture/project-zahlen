@@ -9,13 +9,9 @@ void OpaqueSceneCopyPass::operator()(VkCommandBuffer cmd) const noexcept {
     const auto& src = impl.graphResources.hdrSceneColor;
     const auto& dst = impl.graphResources.transLightingTarget;
 
-    VkImageCopy region {};
-    region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.srcSubresource.layerCount = 1;
-    region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.dstSubresource.layerCount = 1;
-    region.extent                    = {src.extent.width, src.extent.height, 1};
-    vkCmdCopyImage(cmd, src.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    const VkExtent3D extent {src.extent.width, src.extent.height, 1};
+
+    Vk::CopyImage(cmd, src.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, extent);
 
     if (dst.mipLevels > 1) {
         Vk::GenerateMipmaps(cmd, dst.image.Handle(), dst.extent.width, dst.extent.height);
@@ -26,4 +22,4 @@ void OpaqueSceneCopyPass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

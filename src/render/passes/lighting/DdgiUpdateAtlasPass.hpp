@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
 #include "graph/RenderGraph.hpp"
 
 namespace ZHLN::Passes {
 
-struct DdgiUpdateAtlasPass: Vk::RenderPass<
-                                "DdgiUpdateAtlas", Vk::ComputeRead<Res_DdgiRays>, Vk::ComputeWrite<Res_DdgiIrradiance>, Vk::ComputeWrite<Res_DdgiDistance>> {
-    RenderFrameContext&   impl;
+struct DdgiUpdateAtlasPass:
+    Vk::RenderPass<"DdgiUpdateAtlas", Vk::ComputeRead<Res_DdgiRays>, Vk::ComputeWrite<Res_DdgiIrradiance>, Vk::ComputeWrite<Res_DdgiDistance>> {
+    RenderFrameContext& frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

@@ -12,9 +12,9 @@ namespace ZHLN::Passes {
 namespace {
 
 struct ParticleRenderPushConstants {
-    VkDeviceAddress particleBufferAddr;
+    VkDeviceAddress          particleBufferAddr;
     Slang::ParticleAlignment alignment;
-    uint32_t        textureIndex;
+    uint32_t                 textureIndex;
 };
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
@@ -46,11 +46,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
             for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
 
-                if (!IsForwardOnly(drawCmd.instanceData.flags)) {
-                    continue;
-                }
-
-                if (drawCmd.material->pipeline == VK_NULL_HANDLE) {
+                if (!IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
@@ -61,7 +57,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
             if (forward.particles.Valid() && !ctx.queues.ParticleEmitters().empty()) {
                 for (const auto& emitter: ctx.queues.ParticleEmitters()) {
-                    auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer);
+                    const auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer);
                     if (!buffer) {
                         continue;
                     }
@@ -73,32 +69,19 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
                     };
 
                     passCtx.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
-                        {.pipeline      = forward.particles.Get(),
-                         .vertexCount   = 6,
-                         .instanceCount = emitter.maxParticles,
-                         .firstVertex   = 0,
-                         .firstInstance = 0},
-                        pc
+                        {.pipeline = forward.particles.Get(), .vertexCount = 6, .instanceCount = emitter.maxParticles, .firstVertex = 0, .firstInstance = 0}, pc
                     );
                 }
             }
 
             if (forward.line.Valid() && ctx.activeLineVertexCount > 0) {
-                const LinePushConstants pc = {
-                    .viewProj            = ctx.current_view_proj,
-                    .vertexBufferAddress = ctx.frames.lineVboAddresses[ctx.presenter.frameIndex]
-                };
+                const LinePushConstants pc = {.viewProj = ctx.current_view_proj, .vertexBufferAddress = ctx.frames.lineVboAddresses[ctx.presenter.frameIndex]};
 
                 passCtx.encoder.DrawInstanced<Shaders::Modules::DebugLineVS, Shaders::Modules::DebugLinePS>(
-                    {.pipeline      = forward.line.Get(),
-                     .vertexCount   = ctx.activeLineVertexCount,
-                     .instanceCount = 1,
-                     .firstVertex   = 0,
-                     .firstInstance = 0},
-                    pc
+                    {.pipeline = forward.line.Get(), .vertexCount = ctx.activeLineVertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = 0}, pc
                 );
             }
         });
 }
 
-}
+} // namespace ZHLN::Passes

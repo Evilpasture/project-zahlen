@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
+#include "PassPayloads.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/forward/ForwardResources.hpp"
 
 namespace ZHLN::Passes {
 
@@ -11,9 +13,9 @@ struct ForwardPass: Vk::RenderPass<"Forward", Vk::ColorWrite<Res_HdrSceneColor>,
     using PushConstants = ObjectConstants;
 
     const ForwardResources& forward;
-    RenderFrameContext&      frame;
+    RenderFrameContext&     frame;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

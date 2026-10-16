@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/gbuffer/DecalResources.hpp"
 
 namespace ZHLN::Passes {
 
@@ -14,4 +15,4 @@ struct DecalPass: Vk::RenderPass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::Col
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

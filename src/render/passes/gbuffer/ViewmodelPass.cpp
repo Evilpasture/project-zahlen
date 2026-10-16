@@ -8,25 +8,19 @@
 namespace ZHLN::Passes {
 
 void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
-    bool hasViewmodelDraws = false;
-    for (const auto& drawCmd: impl.queues.Draws()) {
-        if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None && !IsForwardOnly(drawCmd.instanceData.flags)) {
-            hasViewmodelDraws = true;
-            break;
-        }
-    }
-
-    if (!hasViewmodelDraws) {
+    using enum DrawFlags;
+    const auto& draws = frame.queues.Draws();
+    if (!std::ranges::any_of(draws, [](const auto& drawCmd) { return (drawCmd.flags & Viewmodel) != None && !IsForwardOnly(drawCmd.instanceData.flags); })) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    PassContext passCtx(cmd, impl);
-    const GBufferTargets in = GBufferSceneTargets(impl);
+    PassContext passCtx(cmd, frame);
+    const auto  in = GBufferSceneTargets(frame);
 
     Vk::DynamicPass(in.sceneColor.Extent())
-        .Viewport(impl.EffectiveViewport())
+        .Viewport(frame.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -36,21 +30,17 @@ void ViewmodelPass::operator()(VkCommandBuffer cmd) const noexcept {
         .AddColor(in.sheen, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < impl.queues.Draws().size(); ++i) {
-                const auto& drawCmd = impl.queues.Draws()[i];
+            for (size_t i = 0; i < frame.queues.Draws().size(); ++i) {
+                const auto& drawCmd = frame.queues.Draws()[i];
 
-                if ((drawCmd.flags & DrawFlags::Viewmodel) == DrawFlags::None || IsForwardOnly(drawCmd.instanceData.flags)) {
-                    continue;
-                }
-
-                if (drawCmd.material->pipeline == VK_NULL_HANDLE) {
+                if ((drawCmd.flags & Viewmodel) == None || IsForwardOnly(drawCmd.instanceData.flags) || drawCmd.material->pipeline == VK_NULL_HANDLE) {
                     continue;
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, impl.MeshShadingActive());
+                SubmitDrawInstanced(passCtx.encoder, drawCmd, static_cast<uint32_t>(i), push, frame.MeshShadingActive());
             }
         });
 }
 
-}
+} // namespace ZHLN::Passes

@@ -105,8 +105,8 @@ struct RenderFrameContext {
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
-    bool     enableMeshShading = true;
-    bool     rtHistoryValid    = false;
+    bool enableMeshShading = true;
+    bool rtHistoryValid    = false;
     // DDGI atlas texels are indexed by probe coordinate, so moving the grid
     // changes the world position represented by every texel. Track that
     // separately from FrameUniforms (which is rebuilt from FrameData each

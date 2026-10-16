@@ -24,25 +24,27 @@ auto UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool m
 }
 
 void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D extent) noexcept {
-    VkCommandBuffer cmd = passCtx.Cmd();
-    auto&           ctx = passCtx.ctx;
+    auto* const cmd = passCtx.Cmd();
+    const auto& ctx = passCtx.ctx;
 
     auto* const stencilWritePipeline = csg.write.Get();
     if (ctx.queues.CsgDraws().empty() || stencilWritePipeline == VK_NULL_HANDLE) {
         return;
     }
 
-    ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
+    const ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
 
     for (const auto& csgCmd: ctx.queues.CsgDraws()) {
         Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
-            const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(passCtx.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline);
+            SubmitDrawInstanced(
+                passCtx.encoder, cutter.draw, cutter.instanceIdx, ObjectConstants {.instanceId = cutter.instanceIdx, .isShadowPass = 0},
+                ctx.MeshShadingActive(), stencilWritePipeline
+            );
         }
 
-        auto activePipeline = csg.difference.Get();
+        auto* activePipeline = csg.difference.Get();
         if (!csgCmd.cutters.empty() && csgCmd.cutters[0].operation == CSGOperation::Intersection) {
             activePipeline = csg.intersection.Get();
         }
@@ -50,8 +52,10 @@ void DrawCSGMeshes(PassContext& passCtx, const CsgResources& csg, VkExtent3D ext
             return;
         }
 
-        const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline);
+        SubmitDrawInstanced(
+            passCtx.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, ObjectConstants {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0},
+            ctx.MeshShadingActive(), activePipeline
+        );
     }
 }
 
@@ -62,55 +66,47 @@ void Draw3DParticles(PassContext& passCtx, const MeshParticlePipelines& particle
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto*      pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
-        const auto gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
-        const auto gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
+        const auto* const pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
+        const auto        gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const auto        gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
         if ((pBuf == nullptr) || !gpuMesh || !gpuMat) {
             continue;
         }
 
-        auto* posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
-        auto* frameMesh   = ctx.geometry.Resolve(gpuMesh->tangentFrameBuffer);
-        auto* surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
-        auto* iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
-        if (posMesh == nullptr) {
+        const auto* const posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
+        const auto* const frameMesh   = ctx.geometry.Resolve(gpuMesh->tangentFrameBuffer);
+        const auto* const surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
+        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        if (posMesh == nullptr || frameMesh == nullptr || surfaceMesh == nullptr || iboMesh == nullptr) {
             continue;
         }
 
-        MeshParticleRenderPush rpc = {
-            .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
-            .posAddress          = posMesh->vboAddress.Get(),
-            .baseColorFactor =
-                JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
-            .emissiveFactor =
-                JPH::Float4 {gpuMat->emissiveFactor[0], gpuMat->emissiveFactor[1], gpuMat->emissiveFactor[2], gpuMat->emissiveFactor[3]},
-            .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress.Get() : 0,
-            .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
-            .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
-            .indexCount          = gpuMesh->indexCount,
-            .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
-            .normalIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
-            .pbrIdx              = ctx.textureManager.GetBindlessIndex(gpuMat->pbrMap),
-            .emissiveIdx         = ctx.textureManager.GetBindlessIndex(gpuMat->emissiveMap),
-            .roughness           = gpuMat->roughnessFactor,
-            .metallic            = gpuMat->metallicFactor,
-            .alphaCutoff         = gpuMat->alphaCutoff,
-            .alphaMode           = gpuMat->alphaMode,
-            .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
-            .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
-            .unlit               = gpuMat->unlit ? 1u : 0u
-        };
-
-        uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
+        auto drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
-            {.pipeline      = particles.render.Get(),
-             .vertexCount   = drawVertexCount,
-             .instanceCount = emitter.maxParticles,
-             .firstVertex   = 0,
-             .firstInstance = 0},
-            rpc
+            {.pipeline = particles.render.Get(), .vertexCount = drawVertexCount, .instanceCount = emitter.maxParticles, .firstVertex = 0, .firstInstance = 0},
+            MeshParticleRenderPush {
+                .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
+                .posAddress          = posMesh->vboAddress.Get(),
+                .baseColorFactor     = {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
+                .emissiveFactor      = {gpuMat->emissiveFactor[0], gpuMat->emissiveFactor[1], gpuMat->emissiveFactor[2], gpuMat->emissiveFactor[3]},
+                .tangentFrameAddress = (frameMesh != nullptr) ? frameMesh->vboAddress.Get() : 0,
+                .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
+                .iboAddress          = (iboMesh != nullptr) ? iboMesh->vboAddress.Get() : 0,
+                .indexCount          = gpuMesh->indexCount,
+                .albedoIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->albedoMap),
+                .normalIdx           = ctx.textureManager.GetBindlessIndex(gpuMat->normalMap),
+                .pbrIdx              = ctx.textureManager.GetBindlessIndex(gpuMat->pbrMap),
+                .emissiveIdx         = ctx.textureManager.GetBindlessIndex(gpuMat->emissiveMap),
+                .roughness           = gpuMat->roughnessFactor,
+                .metallic            = gpuMat->metallicFactor,
+                .alphaCutoff         = gpuMat->alphaCutoff,
+                .alphaMode           = gpuMat->alphaMode,
+                .samplerCodes0       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 0),
+                .samplerCodes1       = PackMaterialSamplerAddresses(gpuMat->textureSamplers, 8),
+                .unlit               = gpuMat->unlit ? 1u : 0u
+            }
         );
     }
 }
@@ -122,26 +118,25 @@ void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& pa
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto*      pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
-        const auto gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
-        const auto gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
+        const auto* const pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer);
+        const auto        gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const auto        gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
         if ((pBuf == nullptr) || !gpuMesh || !gpuMat) {
             continue;
         }
 
-        auto* posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
-        auto* surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
-        auto* iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
-        if (posMesh == nullptr) {
+        const auto* const posMesh     = ctx.geometry.Resolve(gpuMesh->posBuffer);
+        const auto* const surfaceMesh = ctx.geometry.Resolve(gpuMesh->surfaceBuffer);
+        const auto* const iboMesh     = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer) : nullptr;
+        if (posMesh == nullptr || surfaceMesh == nullptr || iboMesh == nullptr) {
             continue;
         }
 
-        MeshParticleRenderPush rpc = {
+        const MeshParticleRenderPush rpc = {
             .particleBufferAddr  = ctx.BufferAddress(pBuf->buffer.Handle()),
             .posAddress          = posMesh->vboAddress.Get(),
-            .baseColorFactor =
-                JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
+            .baseColorFactor     = JPH::Float4 {gpuMat->baseColorFactor[0], gpuMat->baseColorFactor[1], gpuMat->baseColorFactor[2], gpuMat->baseColorFactor[3]},
             .emissiveFactor      = {},
             .tangentFrameAddress = 0,
             .surfaceAddress      = (surfaceMesh != nullptr) ? surfaceMesh->vboAddress.Get() : 0,
@@ -163,11 +158,7 @@ void Draw3DParticleShadows(PassContext& passCtx, const MeshParticlePipelines& pa
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
         passCtx.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
-            {.pipeline      = particles.shadow.Get(),
-             .vertexCount   = drawVertexCount,
-             .instanceCount = emitter.maxParticles,
-             .firstVertex   = 0,
-             .firstInstance = 0},
+            {.pipeline = particles.shadow.Get(), .vertexCount = drawVertexCount, .instanceCount = emitter.maxParticles, .firstVertex = 0, .firstInstance = 0},
             rpc
         );
     }
@@ -186,25 +177,26 @@ auto GBufferSceneTargets(RenderFrameContext& impl) noexcept -> GBufferTargets {
     };
 }
 
-auto BuildGroupRanges(const RenderFrameContext& impl) -> ZHLN::Array<GroupRange> {
-    const auto   drawCount = static_cast<uint32_t>(impl.queues.Draws().size());
+auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange> {
+    using enum DrawFlags;
+    const auto              drawCount = static_cast<uint32_t>(frame.queues.Draws().size());
     ZHLN::Array<GroupRange> groups;
     groups.reserve((drawCount + 15) / 16);
 
     VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        const auto&       drawCmd = impl.queues.Draws()[i];
+        const auto&       drawCmd = frame.queues.Draws()[i];
         const auto* const drawMat = drawCmd.material;
 
-        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || drawMat->pipeline == VK_NULL_HANDLE) {
+        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & Viewmodel) != None || drawMat->pipeline == VK_NULL_HANDLE) {
             currentPipeline = VK_NULL_HANDLE;
             continue;
         }
 
         const VkCullModeFlags cullMode = (drawCmd.instanceData.flags & (1U << 9U)) != 0 ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
         if (groups.empty() || drawMat->pipeline != currentPipeline || groups.back().cullMode != cullMode) {
-            groups.push_back(GroupRange {.material = drawMat, .start = i, .count = 1, .cullMode = cullMode});
+            groups.push_back({.material = drawMat, .start = i, .count = 1, .cullMode = cullMode});
             currentPipeline = drawMat->pipeline;
         } else {
             groups.back().count++;
@@ -214,4 +206,4 @@ auto BuildGroupRanges(const RenderFrameContext& impl) -> ZHLN::Array<GroupRange>
     return groups;
 }
 
-}
+} // namespace ZHLN::Passes

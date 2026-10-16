@@ -18,17 +18,17 @@
 #include "passes/gbuffer/GBufferResolvePass.hpp"
 #include "passes/gbuffer/ViewmodelPass.hpp"
 #include "passes/lighting/ClusteredLightingPass.hpp"
+#include "passes/lighting/DdgiRayTracePass.hpp"
+#include "passes/lighting/DdgiUpdateAtlasPass.hpp"
 #include "passes/lighting/GtaoPass.hpp"
 #include "passes/lighting/ReflectionPass.hpp"
 #include "passes/lighting/RtShadowPass.hpp"
-#include "passes/lighting/ShadowDenoisePass.hpp"
-#include "passes/lighting/RtrHalfTracePass.hpp"
-#include "passes/lighting/RtrDenoisePass.hpp"
-#include "passes/lighting/RtgiHalfTracePass.hpp"
-#include "passes/lighting/RtgiDenoisePass.hpp"
 #include "passes/lighting/RtgiCompositePass.hpp"
-#include "passes/lighting/DdgiRayTracePass.hpp"
-#include "passes/lighting/DdgiUpdateAtlasPass.hpp"
+#include "passes/lighting/RtgiDenoisePass.hpp"
+#include "passes/lighting/RtgiHalfTracePass.hpp"
+#include "passes/lighting/RtrDenoisePass.hpp"
+#include "passes/lighting/RtrHalfTracePass.hpp"
+#include "passes/lighting/ShadowDenoisePass.hpp"
 #include "passes/lighting/ShadowPass.hpp"
 #include "passes/postprocess/BloomPass.hpp"
 #include "passes/postprocess/TonemapBlitPass.hpp"
@@ -55,9 +55,9 @@ using ScenePushConstants = Slang::ScenePassPushConstants;
         .giIntensity = settings.post.giIntensity,
         .giSamples   = settings.post.giSamples,
         .enableSSR   = settings.post.enableSSR,
-        .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows))
-                           ? settings.post.enableRTR
-                           : 0,
+        .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows)) ?
+                           settings.post.enableRTR :
+                           0,
         ._pad        = {},
     };
 }
@@ -68,15 +68,15 @@ template <AAMode Mode, typename GetSwapchainImageT>
     using TranslucentReflectionPass = Passes::ReflectionPass<Passes::TranslucentSurface, Res_TransLighting, "TransReflection">;
 
     auto core = Vk::MakePassPack(
-        Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self}, Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
-        Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self}, Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.impl = self},
-        Passes::TranslucentPrePass {.impl = self}, Passes::GtaoPass {.impl = self, .pc = pc},
-        Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.impl = self},
+        Passes::ShadowPass {.particles = self.meshParticles, .frame = self}, Passes::GBufferBasePass {.cull = self.culling, .frame = self},
+        Passes::HiZGeneratePass {.cull = self.culling, .frame = self},
+        Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
+        Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},
+        Passes::GtaoPass {.impl = self, .pc = pc}, Passes::DdgiRayTracePass {.impl = self}, Passes::DdgiUpdateAtlasPass {.frame = self},
         Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
-        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc},
-        Passes::RtrHalfTracePass {.impl = self}, Passes::RtgiHalfTracePass {.impl = self},
-        Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self}, Passes::RtgiCompositePass {.impl = self},
-        OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
+        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::RtrHalfTracePass {.impl = self},
+        Passes::RtgiHalfTracePass {.impl = self}, Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self},
+        Passes::RtgiCompositePass {.impl = self}, OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.impl = self}
     );
 
@@ -88,22 +88,26 @@ template <AAMode Mode, typename GetSwapchainImageT>
         } else if constexpr (Mode == AAMode::MLAA) {
             return Vk::MakePassPack(Passes::MLAAPass {.aa = self.antiAliasing, .frame = self});
         } else if constexpr (Mode == AAMode::SMAA) {
-            return Vk::MakePassPack(Passes::SmaaEdgePass {.aa = self.antiAliasing, .frame = self}, Passes::SmaaWeightPass {.aa = self.antiAliasing, .frame = self}, Passes::SmaaBlendPass {.aa = self.antiAliasing, .frame = self});
+            return Vk::MakePassPack(
+                Passes::SmaaEdgePass {.aa = self.antiAliasing, .frame = self}, Passes::SmaaWeightPass {.aa = self.antiAliasing, .frame = self},
+                Passes::SmaaBlendPass {.aa = self.antiAliasing, .frame = self}
+            );
         } else {
             return Vk::MakePassPack();
         }
     }();
 
     auto blit = Vk::MakePassPack(
-        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {.post = self.post, .frame = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)}
+        Passes::TonemapBlitPass<Mode, std::decay_t<GetSwapchainImageT>> {
+            .post = self.post, .frame = self, .getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchain)
+        }
     );
 
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
 template <AAMode Mode>
-using SceneGraphFor = decltype(BuildFrameGraph<Mode>(
-    std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()
-));
+using SceneGraphFor =
+    decltype(BuildFrameGraph<Mode>(std::declval<RenderContext::Impl&>(), std::declval<const ScenePushConstants&>(), std::declval<SwapchainImage (*)()>()));
 
 } // namespace ZHLN::RenderGraphDetail
