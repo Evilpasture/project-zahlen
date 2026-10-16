@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/simulation/ParticleUpdateResources.hpp"
 
 namespace ZHLN::Passes {
 
 struct ParticleUpdatePass: Vk::RenderPass<"ParticleUpdate"> {
     const ParticleUpdateResources& particles;
     RenderFrameContext&            frame;
-    float                           dt;
+    float                          dt;
 
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

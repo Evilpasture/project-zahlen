@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "RenderInternal.hpp"
+#include "FrameContext.hpp"
+#include "TargetManager.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/SceneDrawResources.hpp"
 
 namespace ZHLN::Passes {
 
@@ -14,4 +16,4 @@ struct ShadowPass: Vk::RenderPass<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, V
     void operator()(VkCommandBuffer cmd) const noexcept;
 };
 
-}
+} // namespace ZHLN::Passes

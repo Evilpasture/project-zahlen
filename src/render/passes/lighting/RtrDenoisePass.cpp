@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/lighting/RtrDenoisePass.hpp"
+#include "PassPayloads.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -16,43 +17,37 @@ namespace {
         .phiLuma        = 2.0f,
         .temporalWeight = temporalWeight,
         .maxRoughness   = 0.4f,
-        ._pad           = {0u, 0u},
     };
 }
 
 } // namespace
 
 void RtrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t fIdx   = impl.presenter.frameIndex;
-    const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
-    if (!impl.ctx.RayTracingSupported() || !impl.settings.rayTracing.enableReflections || !impl.settings.post.enableRTR || passes == 0 ||
-        impl.settings.environment.fullBright != 0 || impl.frames.tlasAddresses[fIdx] == nullptr) {
+    const auto fIdx   = frame.presenter.frameIndex;
+    const auto passes = frame.settings.rayTracing.denoiserPasses;
+    if (!frame.ctx.RayTracingSupported() || !frame.settings.rayTracing.enableReflections || !frame.settings.post.enableRTR || passes == 0 ||
+        frame.settings.environment.fullBright != 0 || frame.frames.tlasAddresses[fIdx] == nullptr) {
         return;
     }
 
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    const auto rtrHalf  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtrHalf);
-    const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtgiDenoiseA);
-    const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.rtgiDenoiseB);
-    const auto history  = Vk::Assume<Vk::ComputeRead<Res_RtrHistory>>(impl.graphResources.rtrHistory);
-    const auto velocity = Vk::Assume<Vk::ComputeRead<Res_Velocity>>(impl.graphResources.velocityBuffer);
-    const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget);
-    const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer);
+    const auto rtrHalf  = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtrHalf);
+    const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtgiDenoiseA);
+    const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.rtgiDenoiseB);
+    const auto history  = Vk::Assume<Vk::ComputeRead<Res_RtrHistory>>(frame.graphResources.rtrHistory);
+    const auto velocity = Vk::Assume<Vk::ComputeRead<Res_Velocity>>(frame.graphResources.velocityBuffer);
+    const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget);
+    const auto normal   = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
 
-    const float temporalW = impl.rtHistoryValid ? 0.85f : 0.0f;
+    const float temporalW = frame.rtHistoryValid ? 0.85f : 0.0f;
 
-    Vk::ComputeChain atrousChain(impl.heapManager, cmd);
-    const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
+    Vk::ComputeChain atrousChain(frame.heapManager, cmd);
+    const auto       Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, float tempWeight) noexcept {
         atrousChain.Step<Shaders::RtgiDenoise>(
-            impl.postProcess.RtgiDenoise(), impl.postProcess.RtgiDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize, tempWeight),
-            Vk::Slot<"inColor">(src),
-            Vk::Slot<"texDepth">(depth),
-            Vk::Slot<"texNormalRoughness">(normal),
-            Vk::Slot<"texHistory">(history),
-            Vk::Slot<"texVelocity">(velocity),
-            Vk::Slot<"outColor">(dst),
-            Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+            frame.postProcess.RtgiDenoise(), frame.postProcess.RtgiDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize, tempWeight), Vk::Slot<"inColor">(src),
+            Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(normal), Vk::Slot<"texHistory">(history), Vk::Slot<"texVelocity">(velocity),
+            Vk::Slot<"outColor">(dst), Vk::Slot<"frame">(frame.frames.frameUniformBuffers[fIdx])
         );
     };
 
@@ -81,4 +76,4 @@ void RtrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

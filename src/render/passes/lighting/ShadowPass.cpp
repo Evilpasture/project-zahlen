@@ -16,16 +16,13 @@ namespace {
 struct ShadowTilePush {
     JPH::Mat44 viewProj;
 };
-static_assert(
-    GpuAbi::ScenePassPayload<ShadowTilePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared"
-);
+static_assert(GpuAbi::ScenePassPayload<ShadowTilePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 constexpr uint32_t kCascadeSlot    = 0;
 constexpr uint32_t kFirstAtlasSlot = 1;
 
 [[nodiscard]] constexpr auto IndirectOffsetForSlot(uint32_t slot) noexcept -> uint32_t {
-    return slot == kCascadeSlot ? 0
-                                : kGpuCullingMaxInstances + (slot - kFirstAtlasSlot) * ShadowRenderer::kAtlasInstancesPerLight;
+    return slot == kCascadeSlot ? 0 : kGpuCullingMaxInstances + (slot - kFirstAtlasSlot) * ShadowRenderer::kAtlasInstancesPerLight;
 }
 
 } // namespace
@@ -43,7 +40,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 
     auto mapped = ctx.shadows.IndirectCommands(frameIndex).Map(ctx.allocator);
-    if (!mapped) return;
+    if (!mapped) {
+        return;
+    }
     auto* indirectCmdsBase = mapped->As<VkDrawIndirectCommand>();
 
     const auto placements = ctx.shadowAtlas.Placements();
@@ -65,9 +64,9 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             anyMovedCaster     = skinned || morphed || !(drawCmd.instanceData.prevWorld == drawCmd.instanceData.world);
         }
 
-        const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
-        const JPH::Vec3 meshPos    = drawCmd.instanceData.world.GetTranslation();
-        const float     radius     = drawCmd.instanceData.cullRadius;
+        const uint32_t  vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
+        const JPH::Vec3 meshPos     = drawCmd.instanceData.world.GetTranslation();
+        const float     radius      = drawCmd.instanceData.cullRadius;
 
         bool inAnyCascade = false;
         for (uint32_t c = 0; c < TargetManager::kCascades; ++c) {
@@ -77,7 +76,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             }
         }
         if (inAnyCascade) {
-            const uint32_t writeIdx = IndirectOffsetForSlot(kCascadeSlot) + passDrawCounts[kCascadeSlot];
+            const uint32_t writeIdx    = IndirectOffsetForSlot(kCascadeSlot) + passDrawCounts[kCascadeSlot];
             indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
             passDrawCounts[kCascadeSlot]++;
         }
@@ -95,13 +94,13 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
             const auto& light = ctx.mappedLights[static_cast<size_t>(placement.lightIndex)];
 
             const JPH::Vec3 lightPos {light.position};
-            const float   distToLightSq = (meshPos - lightPos).LengthSq();
-            const float   maxRange      = light.range + radius;
+            const float     distToLightSq = (meshPos - lightPos).LengthSq();
+            const float     maxRange      = light.range + radius;
             if (distToLightSq > maxRange * maxRange) {
                 continue;
             }
 
-            const uint32_t writeIdx = IndirectOffsetForSlot(slot) + passDrawCounts[slot];
+            const uint32_t writeIdx    = IndirectOffsetForSlot(slot) + passDrawCounts[slot];
             indirectCmdsBase[writeIdx] = {.vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = i};
             passDrawCounts[slot]++;
         }
@@ -110,7 +109,7 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     {
         const bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 
-        const bool multiviewMesh = ctx.ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
+        const bool multiviewMesh     = ctx.ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
             return f.multiviewMeshShader == VK_TRUE;
         });
         const bool useMeshShadowPath = ctx.MeshShadingActive() && multiviewMesh && ctx.shadows.CascadeMeshPipeline() != VK_NULL_HANDLE;
@@ -169,10 +168,12 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 
     if (ctx.shadows.AtlasPipeline() != VK_NULL_HANDLE && !placements.empty()) {
-        const auto atlasImage = Vk::ImageSlice {
-            ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.AtlasView(),
-            VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT
-        }.Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
+        const auto atlasImage =
+            Vk::ImageSlice {
+                ctx.graphResources.shadowAtlas.image.Handle(), ctx.targets.AtlasView(),
+                VkExtent2D {TargetManager::kShadowAtlasSize, TargetManager::kShadowAtlasSize}, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT
+            }
+                .Assume<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>();
 
         const auto tiles = ctx.shadowAtlas.Tiles();
 
@@ -184,43 +185,35 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
                     if (placement.tileBase < 0) {
                         continue;
                     }
-                    const uint32_t drawCount = passDrawCounts[kFirstAtlasSlot + p];
+                    const auto drawCount = passDrawCounts[kFirstAtlasSlot + p];
 
                     if (placement.cached && !anyMovedCaster) {
                         continue;
                     }
 
-                    const uint32_t tileBase = static_cast<uint32_t>(placement.tileBase);
-                    const uint32_t faces    = std::min<uint32_t>(placement.faceCount, ShadowAtlas::kPointFaces);
+                    const auto tileBase = static_cast<uint32_t>(placement.tileBase);
+                    const auto faces    = std::min<uint32_t>(placement.faceCount, ShadowAtlas::kPointFaces);
 
                     for (uint32_t face = 0; face < faces; ++face) {
                         const uint32_t tileIndex = tileBase + face;
                         if (tileIndex >= tiles.size()) {
                             break;
                         }
-                        const ShadowTile           tile = tiles[tileIndex];
+                        const ShadowTile            tile = tiles[tileIndex];
                         const ShadowAtlas::TileRect rect = ShadowAtlas::TileRectOf(tile);
 
-                        const VkClearAttachment clearAttachment {
-                            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                            .colorAttachment = 0,
-                            .clearValue      = {.depthStencil = {.depth = ShadowRenderer::kShadowClearDepth, .stencil = 0}},
-                        };
-                        const VkClearRect clearRect {
-                            .rect           = {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)},
-                                               .extent = {rect.size, rect.size}},
-                            .baseArrayLayer = 0,
-                            .layerCount     = 1,
-                        };
-                        vkCmdClearAttachments(cmd, 1, &clearAttachment, 1, &clearRect);
+                        Vk::ClearAttachment(
+                            cmd, VK_IMAGE_ASPECT_DEPTH_BIT, VkExtent2D {rect.size, rect.size}, VkClearValue {.depthStencil = {.depth = 1.0f, .stencil = 0}}
+                        );
 
                         if (drawCount == 0) {
                             continue;
                         }
 
                         passCtx.encoder.SetViewport(
-                            VkViewport {static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.size),
-                                        static_cast<float>(rect.size), 0.0f, 1.0f}
+                            VkViewport {
+                                static_cast<float>(rect.x), static_cast<float>(rect.y), static_cast<float>(rect.size), static_cast<float>(rect.size), 0.0f, 1.0f
+                            }
                         );
                         passCtx.encoder.SetScissor(
                             VkRect2D {.offset = {static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y)}, .extent = {rect.size, rect.size}}
@@ -240,4 +233,4 @@ void ShadowPass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

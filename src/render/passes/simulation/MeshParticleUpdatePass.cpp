@@ -23,19 +23,16 @@ void MeshParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
 
     for (const auto& emitter: frame.queues.MeshParticleEmitters()) {
         auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
-        if (!buffer) {
+        if (buffer == nullptr) {
             continue;
         }
 
         const MeshParticleComputePush pushPC = {
-            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()),
-            .particleCount      = emitter.maxParticles,
-            .deltaTime          = dt,
-            .p                  = emitter.params
+            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()), .particleCount = emitter.maxParticles, .deltaTime = dt, .p = emitter.params
         };
 
         particles.mesh.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, pushPC);
     }
 }
 
-}
+} // namespace ZHLN::Passes

@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "Rendering.hpp"
+#include "features/PostProcessFeature.hpp"
 
 namespace ZHLN {
 
 struct ParticleUpdateResources {
-    Vk::DynamicComputePass particles;
-    Vk::DynamicComputePass mesh;
+    Vk::DynamicComputePass particles {};
+    Vk::DynamicComputePass mesh {};
 };
 
 } // namespace ZHLN

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "passes/postprocess/HdrDenoisePass.hpp"
+#include "PassPayloads.hpp"
 #include <ShaderBindings.hpp>
 
 namespace ZHLN::Passes {
@@ -15,32 +16,27 @@ namespace {
 } // namespace
 
 void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
-    const uint32_t passes = impl.settings.rayTracing.denoiserPasses;
-    const bool     active = impl.ctx.RayTracingSupported() && passes > 0 &&
-                            (impl.settings.rayTracing.enableShadows || impl.settings.rayTracing.enableReflections);
-    if (!active) {
+    using namespace Shaders;
+    const auto passes = frame.settings.rayTracing.denoiserPasses;
+
+    if (!frame.ctx.RayTracingSupported() || passes <= 0 || (!frame.settings.rayTracing.enableShadows && !frame.settings.rayTracing.enableReflections)) {
         return;
     }
-    impl.BindHeapsAndPushFrame(cmd);
+    frame.BindHeapsAndPushFrame(cmd);
 
-    const uint32_t fIdx = impl.presenter.frameIndex;
+    const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.hdrSceneColor);
+    const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.denoiseA);
+    const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(frame.graphResources.denoiseB);
+    const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(frame.ActivePresentation().depthTarget);
+    const auto norm     = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(frame.graphResources.normalRoughnessBuffer);
 
-    const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.hdrSceneColor);
-    const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.denoiseA);
-    const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(impl.graphResources.denoiseB);
-    const auto depth    = Vk::Assume<Vk::ComputeRead<Res_Depth>>(impl.ActivePresentation().depthTarget);
-    const auto norm     = Vk::Assume<Vk::ComputeRead<Res_NormRough>>(impl.graphResources.normalRoughnessBuffer);
-
-    Vk::ComputeChain atrousChain(impl.heapManager, cmd);
+    Vk::ComputeChain atrousChain(frame.heapManager, cmd);
 
     const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
-        atrousChain.Step<Shaders::HdrDenoise>(
-            impl.postProcess.HdrDenoise(), impl.postProcess.HdrDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize),
-            Vk::Slot<"inColor">(src),
-            Vk::Slot<"texDepth">(depth),
-            Vk::Slot<"texNormalRoughness">(norm),
-            Vk::Slot<"outColor">(dst),
-            Vk::Slot<"frame">(impl.frames.frameUniformBuffers[fIdx])
+        atrousChain.Step<HdrDenoise>(
+            frame.postProcess.HdrDenoise(), frame.postProcess.HdrDenoiseHeapBindings(), dst.Extent(), Atrous(stepSize), Vk::Slot<"inColor">(src),
+            Vk::Slot<"texDepth">(depth), Vk::Slot<"texNormalRoughness">(norm), Vk::Slot<"outColor">(dst),
+            Vk::Slot<"frame">(frame.frames.frameUniformBuffers[frame.presenter.frameIndex])
         );
     };
 
@@ -69,4 +65,4 @@ void HdrDenoisePass::operator()(VkCommandBuffer cmd) const noexcept {
     }
 }
 
-}
+} // namespace ZHLN::Passes

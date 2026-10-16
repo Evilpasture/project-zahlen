@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "GBufferSurface.hpp"
 #include "RenderInternal.hpp"
 #include "graph/RenderGraph.hpp"
 #include "passes/aa/FXAAPass.hpp"
@@ -73,11 +74,11 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},
         Passes::GtaoPass {.frame = self, .pc = pc}, Passes::DdgiRayTracePass {.frame = self}, Passes::DdgiUpdateAtlasPass {.frame = self},
-        Passes::RtShadowPass {.impl = self}, Passes::ShadowDenoisePass {.impl = self},
-        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::RtrHalfTracePass {.impl = self},
-        Passes::RtgiHalfTracePass {.impl = self}, Passes::RtrDenoisePass {.impl = self}, Passes::RtgiDenoisePass {.impl = self},
-        Passes::RtgiCompositePass {.impl = self}, OpaqueReflectionPass {.impl = self, .pc = pc}, TranslucentReflectionPass {.impl = self, .pc = pc},
-        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.impl = self}
+        Passes::RtShadowPass {.frame = self}, Passes::ShadowDenoisePass {.frame = self},
+        Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::RtrHalfTracePass {.frame = self},
+        Passes::RtgiHalfTracePass {.frame = self}, Passes::RtrDenoisePass {.frame = self}, Passes::RtgiDenoisePass {.frame = self},
+        Passes::RtgiCompositePass {.frame = self}, OpaqueReflectionPass {.frame = self, .pc = pc}, TranslucentReflectionPass {.frame = self, .pc = pc},
+        Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self}, Passes::BloomPass {.frame = self}
     );
 
     auto aa = [&] {

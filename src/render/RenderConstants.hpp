@@ -76,7 +76,7 @@ enum class Stage : uint8_t {
     // most of the GPU's work on this class of hardware and none of it was
     // visible. Stage count must stay <= 64 (see GpuProfiler).
     OpaqueSceneCopy,
-    GtaoAo,
+    GTAO,
     DdgiRayTrace,
     DdgiUpdateAtlas,
     RtShadow,

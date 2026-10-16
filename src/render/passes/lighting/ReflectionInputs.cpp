@@ -5,25 +5,27 @@
 
 namespace ZHLN::Passes {
 
-auto GatherReflectionInputs(RenderFrameContext& impl) noexcept -> ReflectionInputs {
+auto GatherReflectionInputs(RenderFrameContext& frame) noexcept -> ReflectionInputs {
     return ReflectionInputs {
-        .prefiltered = Vk::ImageWrite {impl.iblPayload.prefilteredInfo},
-        .visualSky   = Vk::ImageWrite {impl.iblPayload.visualSkyInfo.image != VK_NULL_HANDLE ? impl.iblPayload.visualSkyInfo :
-                                      impl.textureManager.ViewInfo(kFallbackBlackTextureIndex)},
-        .brdfLut     = Vk::ImageWrite {impl.iblPayload.brdfLutInfo},
-        .blueNoise   = Vk::ImageWrite {impl.textureManager.ViewInfo(impl.blueNoiseTexIdx)},
-        .tlas =
-            Vk::AsAddressWrite {
-                .address = (impl.ctx.RayTracingSupported() && impl.frames.tlasAddresses[impl.presenter.frameIndex] != nullptr) ?
-                               impl.frames.tlasAddresses[impl.presenter.frameIndex].Get() :
-                               0
-            }
+        .prefiltered = Vk::ImageWrite {frame.iblPayload.prefilteredInfo},
+        .visualSky =
+            Vk::ImageWrite {
+                frame.iblPayload.visualSkyInfo.image != VK_NULL_HANDLE ? frame.iblPayload.visualSkyInfo :
+                                                                         frame.textureManager.ViewInfo(kFallbackBlackTextureIndex)
+            },
+        .brdfLut   = Vk::ImageWrite {frame.iblPayload.brdfLutInfo},
+        .blueNoise = Vk::ImageWrite {frame.textureManager.ViewInfo(frame.blueNoiseTexIdx)},
+        .tlas      = Vk::AsAddressWrite {
+                 .address = (frame.ctx.RayTracingSupported() && frame.frames.tlasAddresses[frame.presenter.frameIndex] != nullptr) ?
+                                frame.frames.tlasAddresses[frame.presenter.frameIndex].Get() :
+                                0
+        }
     };
 }
 
-auto ReflectionVariant(RenderFrameContext& impl) noexcept -> uint32_t {
-    const bool rtrActive = impl.settings.rayTracing.enableReflections && impl.ctx.RayTracingSupported();
-    return (impl.settings.post.enableSSR ? 1u : 0u) | (rtrActive ? 2u : 0u);
+auto ReflectionVariant(RenderFrameContext& frame) noexcept -> uint32_t {
+    const bool rtrActive = frame.settings.rayTracing.enableReflections && frame.ctx.RayTracingSupported();
+    return (frame.settings.post.enableSSR ? 1u : 0u) | (rtrActive ? 2u : 0u);
 }
 
-}
+} // namespace ZHLN::Passes

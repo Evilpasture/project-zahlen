@@ -11,8 +11,8 @@
 //   giMode 0: SH ambient only (the baseline)
 //   giMode 1: stochastic sample AO (inline in the lighting pass)
 //   giMode 2: SSGI gather (replaces occlusion with gathered indirect light)
-//   giMode 3: GTAO via the dedicated half-resolution GtaoAo pass
-//   giMode 4: GTAO via the dedicated half-resolution GtaoAo pass (alternate)
+//   giMode 3: GTAO via the dedicated half-resolution GTAO pass
+//   giMode 4: GTAO via the dedicated half-resolution GTAO pass (alternate)
 //
 // Methodology: every mode renders a window of consecutive frames that are
 // averaged channel-by-channel before measurement. The AO slices are
@@ -74,7 +74,9 @@ struct LumaField {
     int                 height = 0;
     std::vector<double> v;
 
-    [[nodiscard]] bool Valid() const noexcept { return width > 0 && height > 0 && !v.empty(); }
+    [[nodiscard]] bool Valid() const noexcept {
+        return width > 0 && height > 0 && !v.empty();
+    }
 };
 
 [[nodiscard]] LumaField MakeLumaField(const RgbImage& img) {
@@ -82,8 +84,8 @@ struct LumaField {
     if (!img.Valid()) {
         return out;
     }
-    out.width  = img.width;
-    out.height = img.height;
+    out.width      = img.width;
+    out.height     = img.height;
     const size_t n = static_cast<size_t>(img.width) * static_cast<size_t>(img.height);
     out.v.resize(n);
     for (size_t p = 0; p < n; ++p) {
@@ -158,9 +160,8 @@ struct AoDeltaStats {
 void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaStats& s) {
     char line[224];
     std::snprintf(
-        line, sizeof(line),
-        "    %-2d %-19s meanLuma=%8.2f meanDelta=%+8.3f minDelta=%+8.2f dark%%=%7.3f bright%%=%7.3f stdDelta=%7.3f",
-        mode, name, meanLuma, s.meanDelta, s.minDelta, s.darkPct, s.brightPct, s.stdDelta
+        line, sizeof(line), "    %-2d %-19s meanLuma=%8.2f meanDelta=%+8.3f minDelta=%+8.2f dark%%=%7.3f bright%%=%7.3f stdDelta=%7.3f", mode, name, meanLuma,
+        s.meanDelta, s.minDelta, s.darkPct, s.brightPct, s.stdDelta
     );
     ZHLN::Println("{}", line);
 }
@@ -197,8 +198,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
     }
 
     ZHLN::PrefabFactory::CreatePlane(
-        engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f},
-        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
+        engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
     );
 
     auto makeMat = [&](float gray) {
@@ -229,10 +229,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
         sunEnt,
         ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 40.0f, 30.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({45.0f, 0.0f, 0.0f})},
         ZHLN::Components::LightComponent {
-            .type      = ZHLN::LightType::Sun,
-            .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
-            .intensity = 220.0f,
-            .direction = JPH::Vec3(0.0f, 0.6f, 0.8f).Normalized()
+            .type = ZHLN::LightType::Sun, .color = JPH::Vec3(1.0f, 1.0f, 1.0f), .intensity = 220.0f, .direction = JPH::Vec3(0.0f, 0.6f, 0.8f).Normalized()
         }
     );
 
@@ -241,10 +238,10 @@ void BuildAoScene(ZHLN::Engine& engine) {
         return;
     }
     ZHLN::Camera& cam = camComp->camera;
-    cam.position = JPH::Vec3(0.0f, 2.5f, 8.0f);
-    cam.yaw      = -90.0f;
-    cam.pitch    = -12.0f;
-    cam.fov      = 60.0f;
+    cam.position      = JPH::Vec3(0.0f, 2.5f, 8.0f);
+    cam.yaw           = -90.0f;
+    cam.pitch         = -12.0f;
+    cam.fov           = 60.0f;
 }
 
 void SetGiMode(ZHLN::Engine& engine, int mode) {
@@ -307,7 +304,7 @@ struct AmbientOcclusionTestSuite {
                 {3, "GTAO (mode 3)", "headless_ao_mode3_gtao.ppm"},
                 {4, "GTAO (mode 4)", "headless_ao_mode4_gtao_alt.ppm"},
             }};
-            constexpr uint32_t kAveragedFrames = 8;
+            constexpr uint32_t               kAveragedFrames = 8;
 
             std::array<RgbImage, runs.size()>  averages {};
             std::array<LumaField, runs.size()> fields {};
@@ -382,9 +379,7 @@ struct AmbientOcclusionTestSuite {
             for (size_t i = 1; i < runs.size(); ++i) {
                 stats[i] = DeltaStats(baseline, fields[i], -2.0);
                 PrintReportRow(runs[i].mode, runs[i].name, MeanLumaOf(fields[i]), stats[i]);
-                WriteAmplifiedDiff(
-                    std::string("headless_ao_diff_mode") + std::to_string(runs[i].mode) + ".ppm", averages[0], averages[i]
-                );
+                WriteAmplifiedDiff(std::string("headless_ao_diff_mode") + std::to_string(runs[i].mode) + ".ppm", averages[0], averages[i]);
             }
 
             const AoDeltaStats noise = DeltaStats(baseline, repeatField, -2.0);
@@ -531,7 +526,7 @@ struct AmbientOcclusionTestSuite {
             );
 
             const double peak = std::max(std::abs(radiusStats.minDelta), std::abs(radiusStats.maxDelta));
-            bool ok           = ZHLN::Test::ExpectGt(std::abs(radiusStats.meanDelta), 0.01);
+            bool         ok   = ZHLN::Test::ExpectGt(std::abs(radiusStats.meanDelta), 0.01);
             ok &= ZHLN::Test::ExpectGt(peak, 0.5);
             // ...and neither setting may black the frame out.
             ok &= ZHLN::Test::ExpectGt(meanBig, 1.0);

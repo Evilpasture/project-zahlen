@@ -26,19 +26,16 @@ void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
             continue;
         }
         auto* buffer = frame.geometry.Resolve(emitter.gpuBuffer);
-        if (!buffer) {
+        if (buffer == nullptr) {
             continue;
         }
 
         const ComputePushConstants particlePC = {
-            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()),
-            .particleCount      = emitter.maxParticles,
-            .deltaTime          = dt,
-            .p                  = emitter.params
+            .particleBufferAddr = frame.ctx.BufferAddress(buffer->buffer.Handle()), .particleCount = emitter.maxParticles, .deltaTime = dt, .p = emitter.params
         };
 
         particles.particles.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(cmd, emitter.maxParticles, 1, 1, particlePC);
     }
 }
 
-}
+} // namespace ZHLN::Passes
