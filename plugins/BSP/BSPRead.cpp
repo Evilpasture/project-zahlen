@@ -495,10 +495,22 @@ auto ParseBsp(std::span<const std::byte> bytes) -> std::expected<BSPMap, ErrorCo
         return std::unexpected(res.error());
     }
 
+    // The bake: VRAD's luxel radiance. HDR first when it carries data (v20+
+    // compiles), exactly as the face lumps are chosen above; empty is legal
+    // and simply leaves BSPBakeField with nothing to fit.
+    const LumpEntry* lightingLump = &lump(Lump::Lighting);
+    if (lump(Lump::LightingHDR).filelen > 0) {
+        lightingLump = &lump(Lump::LightingHDR);
+    }
+    if (lightingLump->filelen > 0) {
+        if (auto res = ReadLumpArray<ColorRGBExp32>(bytes, *lightingLump); res) {
+            map.lighting = std::move(*res);
+        }
+    }
+
     if (auto res = ReadLumpArray<DTexInfo>(bytes, lump(Lump::TexInfo)); !res) {
         return std::unexpected(res.error());
-    } else {
-        map.texInfos = std::move(*res);
+    } else {        map.texInfos = std::move(*res);
     }
     if (auto res = ReadLumpArray<DTexData>(bytes, lump(Lump::TexData)); !res) {
         return std::unexpected(res.error());

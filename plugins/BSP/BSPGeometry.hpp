@@ -73,6 +73,17 @@ struct ImportOptions {
     // BSPLighting.hpp's EnforceLightingFloor.
     bool enforceLightingFloor = true;
 
+    // Ingest VRAD's compiled luxel radiance (LUMP_LIGHTING) as a radiance
+    // field fitted into the engine's carriers -- an AmbientTerm plus a budget
+    // of virtual point lights -- instead of a lightmap multiply that would
+    // fight the PBR and RT pipeline. See BSPBakeField.hpp. Off restores
+    // pre-bake import exactly (the lump is still parsed; it is simply unused).
+    bool ingestVradBake = true;
+    // VPLs kept from the bake's bright population, ranked by cluster energy.
+    uint32_t bakeVplBudget = 96;
+    // Damping of bake VPLs against the map's real lights and the DDGI pass.
+    float bakeVplWeight = 0.5f;
+
     // Restrict the import to one submodel (index into BSPMap::models); -1
     // imports every model not listed in skipModels. Interactive brush
     // entities (func_door, func_button, ...) get their own prefab per
@@ -192,6 +203,8 @@ struct ImportStats {
     uint32_t emissiveFaces = 0;           // faces on a self-illuminated material (lamp panels, screens, signs)
     uint32_t emissiveSurfaces = 0;        // area-light proxies produced from them (after clustering and the cap)
     uint32_t emissiveDroppedCap = 0;      // proxies dropped because maxEmissiveLights was reached
+    uint32_t bakeLuxels = 0;              // VRAD bake samples decoded by BSPBakeField
+    uint32_t bakeVpls = 0;                // virtual point lights fitted from the bake's bright population
 };
 
 // Exhaustive bookkeeping for the lighting pass, mirroring ImportStats' role for

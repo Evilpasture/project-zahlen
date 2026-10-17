@@ -76,7 +76,7 @@ enum class Lump : uint32_t {
     LeafMinDistToWater          = 46,
     FaceMacroTextureInfo        = 47,
     DispTris                    = 48,
-    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR (ignored by the runtime importer)
+    LightingHDR                 = 53, // v20+: LUMP_LIGHTING_HDR, HDR luxel radiance; preferred over Lighting when present
     FacesHDR                    = 58, // v20+: LUMP_FACES_HDR, face list whose lightofs address LightingHDR
     Count                       = 64
 };
@@ -141,10 +141,20 @@ struct DTexData {
     int32_t viewHeight;
 };
 
+// LUMP_LIGHTING / LUMP_LIGHTING_HDR: one luxel of baked VRAD light, in the
+// same 0..255 x 2^exponent brightness family as the `_light` entity keys.
+struct ColorRGBExp32 {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    int8_t  exponent;
+};
+
 // LUMP_FACES: the mainline (version 19-21) face. Lightmap offsets and extents
-// remain in the packed record for format compatibility; runtime import ignores them.
-// On-disk order after origFace is firstPrimID, numPrims -- the classic header
-// spells the pair the other way round, so keep this order when porting from memory.
+// stay live data: BSPBakeField reads them back against the lighting lump to
+// recover VRAD's radiance per surface. On-disk order after origFace is
+// firstPrimID, numPrims -- the classic header spells the pair the other way
+// round, so keep this order when porting from memory.
 struct DFace {
     uint16_t planenum;
     int8_t   side;

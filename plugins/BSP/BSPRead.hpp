@@ -170,6 +170,10 @@ struct BSPMap {
     std::vector<DGameLump>   gameLumps;
     std::vector<StaticProp>  staticProps;
 
+    // LUMP_LIGHTING (or LUMP_LIGHTING_HDR when it carries data): VRAD's baked
+    // radiance, one ColorRGBExp32 per luxel per style, addressed by
+    // DFace::lightofs. Empty on maps compiled without a bake.
+    std::vector<ColorRGBExp32> lighting;
 };
 
 // Parses a whole .bsp image. Strict on the container (ident, version window,

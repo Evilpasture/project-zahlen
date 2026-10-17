@@ -12,6 +12,7 @@
 
 #include "BSPGeometry.hpp"
 
+#include "BSPBakeField.hpp"
 #include "BSPLighting.hpp"
 
 #include <algorithm>
@@ -1024,6 +1025,23 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
         diagnostics.totalEmissiveIntensity = 0.0f;
         for (size_t i = before; i < result.lights.size(); ++i) {
             diagnostics.totalEmissiveIntensity += result.lights[i].intensity;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // VRAD bake ingestion: fit LUMP_LIGHTING's radiance field into the
+    // engine's carriers (BSPBakeField.hpp). The fit lands before the floor
+    // guarantee so a map lighted only by its bake is still a lit map.
+    // ------------------------------------------------------------------
+    if (options.ingestVradBake && options.gatherLights && !map.lighting.empty()) {
+        const BakeField field = BuildBakeField(map, options, options.bakeVplBudget, options.bakeVplWeight);
+        if (field.hasBake) {
+            result.ambient      = field.ambient;
+            result.stats.bakeLuxels = field.sampleCount;
+            for (const BspPointLight& vpl: field.vpls) {
+                result.lights.push_back(vpl);
+            }
+            result.stats.bakeVpls = static_cast<uint32_t>(field.vpls.size());
         }
     }
 
