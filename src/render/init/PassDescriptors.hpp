@@ -30,12 +30,13 @@ template <typename LayoutT>
     Vk::VertexStageSource           vs,
     Vk::FragmentStageSource         ps,
     std::initializer_list<VkFormat> colorFormats,
-    bool                            additive = false
+    bool                            additive = false,
+    const Vk::HeapMappingBundle*    extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeap(
             self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-            additive, &self->pipelineBinaries
+            additive, &self->pipelineBinaries, extraMappings
         );
     });
 }
@@ -48,12 +49,13 @@ template <typename LayoutT>
     Vk::FragmentStageSource               ps,
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
-    bool                                  additive = false
+    bool                                  additive = false,
+    const Vk::HeapMappingBundle*          extraMappings = nullptr
 ) noexcept -> std::expected<void, ErrorCode> {
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         return pass.BuildHeapVariants(
             self->ctx.Device(), self->heapManager, shaders.View(), colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
-            Vk::HeapLifecycle::Frame, additive, &self->pipelineBinaries
+            Vk::HeapLifecycle::Frame, additive, &self->pipelineBinaries, extraMappings
         );
     });
 }

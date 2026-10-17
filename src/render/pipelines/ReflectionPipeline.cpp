@@ -17,6 +17,12 @@ void ReflectionPipeline::Dispatch(
     const uint32_t                 fIdx   = impl.presenter.frameIndex;
     const Passes::ReflectionInputs inputs = Passes::GatherReflectionInputs(impl);
 
+    // The Set-1 scene mappings resolve through push-address sources: the frame
+    // addresses must be in the push range before the draw (the decal pass does
+    // the same), and the heap tables behind scene.materialSamplers /
+    // scene.globalTextures bind here with them.
+    impl.BindHeapsAndPushFrame(ctx.Cmd());
+
     const auto block = pass.WriteHeapParameters<Shaders::Reflection>(
         impl.heapManager, Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(impl.graphResources.sceneColor)), Vk::Slot<"texDepth">(surface.depth),
         Vk::Slot<"texNormalRoughness">(surface.normals), Vk::Slot<"texEnvMap">(inputs.prefiltered), Vk::Slot<"texSkyEquirect">(inputs.visualSky),

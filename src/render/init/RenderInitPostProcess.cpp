@@ -95,12 +95,12 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
             this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionVS>(),
-            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+            Vk::MakeStageSource<Shaders::Modules::ReflectionPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, false, &sceneSet1HeapMappings
         );
     }
     return BuildPassVariants(
         this, reflectionPipeline.pass, Vk::MakeStageSource<Shaders::Modules::ReflectionNortVS>(),
-        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        Vk::MakeStageSource<Shaders::Modules::ReflectionNortPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos, false, &sceneSet1HeapMappings
     );
 }
 

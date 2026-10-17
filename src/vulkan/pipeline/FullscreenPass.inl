@@ -16,7 +16,8 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     uint32_t                        indexPushOffset,
     HeapLifecycle                   lifecycle,
     bool                            additive,
-    PipelineBinaryStore*              binaries
+    PipelineBinaryStore*              binaries,
+    const HeapMappingBundle*        extraMappings
 ) noexcept {
 
     if (!layoutInstance.Build(device, shaders)) {
@@ -27,10 +28,26 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
         return std::unexpected(built.error());
     }
 
+    // The pass's set-0 mappings, plus any shared bundle the module's other
+    // sets need (Set-1 scene block). Extras for undeclared variables are
+    // legal; missing ones are not (VUID-...-11312).
+    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
+    mergedEntries.insert(mergedEntries.end(), heapBindings.entries.begin(), heapBindings.entries.end());
+    if (extraMappings != nullptr) {
+        mergedEntries.insert(mergedEntries.end(), extraMappings->entries.begin(), extraMappings->entries.end());
+    }
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
+        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+        .pNext        = nullptr,
+        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
+        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
+    };
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = mergedEntries.empty() ? heapBindings.GetInfo() : &mergedInfo;
+
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
                        .Binaries(binaries)
-                       .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
+                       .HeapMappings(mappings, mappings)
                        .ColorFormats(colorFormats)
                        .NoDepth()
                        .CullNone();
@@ -56,7 +73,8 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     uint32_t                              indexPushOffset,
     HeapLifecycle                         lifecycle,
     bool                                  additive,
-    PipelineBinaryStore*                    binaries
+    PipelineBinaryStore*                    binaries,
+    const HeapMappingBundle*              extraMappings
 ) noexcept {
 
     if (!layoutInstance.Build(device, shaders)) {
@@ -67,6 +85,20 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
         return std::unexpected(built.error());
     }
 
+    // Same set-0 + shared-bundle merge as BuildHeap above.
+    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
+    mergedEntries.insert(mergedEntries.end(), heapBindings.entries.begin(), heapBindings.entries.end());
+    if (extraMappings != nullptr) {
+        mergedEntries.insert(mergedEntries.end(), extraMappings->entries.begin(), extraMappings->entries.end());
+    }
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
+        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
+        .pNext        = nullptr,
+        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
+        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
+    };
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = mergedEntries.empty() ? heapBindings.GetInfo() : &mergedInfo;
+
     pipelines.clear();
     pipelines.reserve(specInfos.size());
 
@@ -74,7 +106,7 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
         auto builder = PipelineBuilder {}
                            .Shaders(shaders)
                            .Binaries(binaries)
-                           .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
+                           .HeapMappings(mappings, mappings)
                            .ColorFormats(colorFormats)
                            .Specialization(&spec)
                            .NoDepth()

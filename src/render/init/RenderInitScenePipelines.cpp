@@ -188,7 +188,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
 
     std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
     mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
-    mergedEntries.insert(mergedEntries.end(), decalSceneHeapMappings.entries.begin(), decalSceneHeapMappings.entries.end());
+    mergedEntries.insert(mergedEntries.end(), sceneSet1HeapMappings.entries.begin(), sceneSet1HeapMappings.entries.end());
     const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
         .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
         .pNext        = nullptr,

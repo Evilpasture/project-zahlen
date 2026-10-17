@@ -26,7 +26,14 @@ struct FullscreenPass {
         uint32_t                        indexPushOffset,
         HeapLifecycle                   lifecycle,
         bool                            additive = false,
-        PipelineBinaryStore*              binaries = nullptr
+        PipelineBinaryStore*              binaries = nullptr,
+        // Extra mappings merged into both stages' pMappings (e.g. the scene
+        // block's Set-1 bindings when the module references `scene`): every
+        // shader variable needs a mapping under
+        // VUID-VkGraphicsPipelineCreateInfo-flags-11312, and extras for
+        // variables a variant does not declare are legal (the decal pass has
+        // carried one from day one).
+        const HeapMappingBundle*      extraMappings = nullptr
     ) noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildHeapVariants(
@@ -38,7 +45,8 @@ struct FullscreenPass {
         uint32_t                              indexPushOffset,
         HeapLifecycle                         lifecycle,
         bool                                  additive = false,
-        PipelineBinaryStore*                    binaries = nullptr
+        PipelineBinaryStore*                    binaries = nullptr,
+        const HeapMappingBundle*            extraMappings = nullptr
     ) noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

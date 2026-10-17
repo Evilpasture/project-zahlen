@@ -182,12 +182,25 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                             .BindlessTextureArray(0, 12, textureManager.BindlessBaseSlot())
                             .Build();
 
-    decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-                                 .Sampler(1, 0, globalSamplerSlot)
-                                 .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-                                 .SamplerArray(1, 11, materialSamplerBaseSlot)
-                                 .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
-                                 .Build();
+    // The scene block's Set-1 mapping, complete: any heap pass whose module
+    // references `scene` while its own set is Set 0 merges this bundle at
+    // pipeline build (the decal pass since day one, the reflection pass since
+    // its sky fill reads scene.lights & co). Layout is GlobalSceneRegistry.
+    sceneSet1HeapMappings = Vk::HeapMappingBuilder(heapManager)
+                                .Sampler(1, 0, globalSamplerSlot)
+                                .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
+                                .StorageBufferAddress(1, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
+                                .StorageBufferAddress(1, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
+                                .StorageBufferAddress(1, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
+                                .StorageBufferAddress(1, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
+                                .StorageBufferAddress(1, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
+                                .SampledImage(1, 7, iblPrefilteredSlot)
+                                .SampledImage(1, 8, iblBrdfLutSlot)
+                                .Sampler(1, 9, clampSamplerSlot)
+                                .SampledImage(1, 10, transLightingSlot)
+                                .SamplerArray(1, 11, materialSamplerBaseSlot)
+                                .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
+                                .Build();
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {

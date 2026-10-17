@@ -154,7 +154,9 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::ReflectedLayout bindlessLayout;
 
     Vk::HeapMappingBundle sceneHeapMappings;
-    Vk::HeapMappingBundle decalSceneHeapMappings;
+    // GlobalSceneRegistry at Set 1 (see BuildSceneHeapMappings): merged into
+    // any heap pass whose module references `scene` at Set 1 (decal, sky fill).
+    Vk::HeapMappingBundle sceneSet1HeapMappings;
     Vk::HeapMappingBundle decalHeapMappings;
 
     // Depth reduction, the GPU draw cull, and the two cluster passes: one
