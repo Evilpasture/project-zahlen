@@ -56,8 +56,16 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            globalSamplerConfig =
-                Vk::SamplerConfig::LinearRepeat().WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy).WithLodRange(0.0F, 0.0F);
+            // Mip chains are generated on upload (Upload2DDesc::generateMips),
+            // and the LOD range must let the sampler use them: clamping to
+            // LOD 0 forced every minified texel through mip 0 at full
+            // anisotropy -- the worst-case fetch pattern for the gbuffer, and
+            // shimmer at distance instead of filtered textures. The Blender
+            // Cycles reference renders the fidelity goldens come from mip-map
+            // properly, so the clamp was a deviation from them as well.
+            globalSamplerConfig = Vk::SamplerConfig::LinearRepeat()
+                                      .WithAnisotropy(ctx.PhysicalInfo().properties.properties.limits.maxSamplerAnisotropy)
+                                      .WithLodRange(0.0F, VK_LOD_CLAMP_NONE);
             clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
 
             return InitSceneHeaps(globalSamplerConfig, clampSamplerConfig);

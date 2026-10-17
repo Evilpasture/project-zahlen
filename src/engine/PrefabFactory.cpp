@@ -109,7 +109,11 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, ZHLN::O
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false);
+    // No mip chain: the atlas packs glyphs side by side, so a generated mip
+    // averages neighbours into each other and any sampled LOD above zero
+    // smears text together. Single-level also pins the sampler at mip 0 no
+    // matter the LOD range the scene sampler uses.
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", {asset->atlasWidth, asset->atlasHeight}, rgbaPixels, false, false);
 
     FontAtlas& font     = uiSettings->fontAtlas;
     font                = FontAtlas {};

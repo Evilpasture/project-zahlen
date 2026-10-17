@@ -50,9 +50,9 @@ class TextureManager {
         return _bindlessBaseSlot;
     }
 
-    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+    [[nodiscard]] auto Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+    [[nodiscard]] auto UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true)
         -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto UploadCube(const void* const* faceData, uint32_t size) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto AdoptTexture(Vk::Image image, VkImageViewCreateInfo viewInfo, uint32_t width, uint32_t height)
@@ -65,7 +65,7 @@ class TextureManager {
     void RetireAll() noexcept;
     void Reset();
 
-    [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips = true) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto Adopt(Vk::Image image, VkImageViewCreateInfo viewInfo) -> std::expected<uint32_t, ErrorCode>;
     void BeginFrame(uint32_t frameIndex) noexcept;
     void ReleaseSlot(uint32_t bindlessIndex) noexcept;

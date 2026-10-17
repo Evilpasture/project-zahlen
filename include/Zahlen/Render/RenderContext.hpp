@@ -172,7 +172,7 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto CreateTexture(std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
     // A name gives repeat uploads a stable identity and deduplicates identical pixels.
     [[nodiscard]] auto
-        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true) -> std::expected<TextureHandle, ErrorCode>;
+        CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB = true, bool generateMips = true) -> std::expected<TextureHandle, ErrorCode>;
     [[nodiscard]] auto CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode>;
     template <typename T, size_t SpanExtent>
         requires std::is_trivially_copyable_v<T>
@@ -214,7 +214,7 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] auto
         BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<TextureHandle, ErrorCode>;
-    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true);
+    [[nodiscard]] TextureHandle CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB = true, bool generateMips = true);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 

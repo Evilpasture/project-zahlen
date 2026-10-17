@@ -82,8 +82,10 @@ inline constexpr float kAmbientBrightnessLadder = 30.0f;
 // is EvaluateSH(N, frame.sh), and frame.sh integrates the sky gradient, so a
 // black sky is a black scene. This is the rule that fires on a map whose VRAD
 // output was replaced -- the light_environment is still there, but its ambient
-// lane is often zero once the bake is gone.
-inline constexpr float kAmbientFloorRadiance = 0.004f;
+// lane is often zero once the bake is gone. The floor has to be a *visible*
+// night ambient: at 0.004 the level only read as navigable while imported
+// surfaces still self-glowed, and removing that wash left the night maps black.
+inline constexpr float kAmbientFloorRadiance = 0.02f;
 
 // A directional term dimmer than this makes every outdoor surface read as dusk.
 inline constexpr float kSunFloorIntensity = 12.0f;

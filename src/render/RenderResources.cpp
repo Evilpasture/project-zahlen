@@ -614,13 +614,13 @@ auto RenderContext::CreateTexture(std::span<const std::byte> rgba, Extent2D exte
     return _impl->textureManager.UploadUnnamed(rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
 }
 
-auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB)
+auto RenderContext::CreateTexture(std::string_view name, std::span<const std::byte> rgba, Extent2D extent, bool isSRGB, bool generateMips)
     -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t pixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (pixels == 0 || pixels > std::numeric_limits<size_t>::max() / 4 || rgba.size() != static_cast<size_t>(pixels) * 4) {
         return std::unexpected(TextureDataError::InvalidPixels);
     }
-    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB));
+    return _impl->textureManager.Upload(name, rgba.data(), extent.width, extent.height, Rgba8Format(isSRGB), generateMips);
 }
 
 auto RenderContext::CreateTextureCube(std::array<std::span<const std::byte>, 6> faces, uint32_t faceSize) -> std::expected<TextureHandle, ErrorCode> {
@@ -987,13 +987,13 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
     return _impl->BakeProceduralTexture(width, height, variantIdx, scale, randomness, 0.0f);
 }
 
-auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB) -> TextureHandle {
+auto RenderContext::CreateProceduralTexture(std::string_view name, Extent2D extent, std::span<const uint32_t> pixels, bool isSRGB, bool generateMips) -> TextureHandle {
     const uint64_t expectedPixels = static_cast<uint64_t>(extent.width) * extent.height;
     if (expectedPixels == 0 || expectedPixels != pixels.size()) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' has an invalid extent or texel count.", name);
         return TextureHandle::Invalid;
     }
-    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB);
+    const auto uploaded = CreateTexture(name, std::as_bytes(pixels), extent, isSRGB, generateMips);
     if (!uploaded) {
         ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, extent.width, extent.height, uploaded.error());
         return TextureHandle::Invalid;

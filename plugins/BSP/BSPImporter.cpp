@@ -122,8 +122,8 @@ auto LoadMaterialVmt(const SourceVFS& vfs, std::string_view materialName) -> std
 }
 
 // Measured Rec.709 luma of a material's base texture, or -1 when it cannot be
-// resolved or decoded. This is the most direct evidence a surface actually
-// emits: a lamp panel's VTF is a white sheet, a poster's is not.
+// resolved or decoded. Sets how brightly an emissive-by-construction shader
+// class glows from its own art; it is never evidence that a lit surface emits.
 auto TextureLuma(const SourceVFS& vfs, const VMTMaterial& vmt) -> float {
     if (vmt.baseTexture.empty()) {
         return -1.0f;
@@ -743,10 +743,16 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
     //   2. The shader class itself: UnlitGeneric / Sprite / Cable / Beam /
     //      MonitorScreen are emissive by construction, whatever the keyvalues
     //      say, and they are the classes a map's lamp panels and screens use.
-    //   3. The measured luminance of the base texture, for the materials that
-    //      author neither. A white panel on a dark wall is the case this
-    //      catches -- the mapper never wrote a keyvalue, and the panel still
-    //      has to glow.
+    //   3. The measured luminance of the base texture, for the emissive-by-
+    //      construction classes of rule 2 that author neither keyvalue. Their
+    //      albedo IS the emission, so its brightness sets the term -- a screen
+    //      shows its own picture.
+    //
+    // An ordinary lit material (LightmappedGeneric and kin) with no $selfillum
+    // does not emit, whatever its texture looks like. A white poster is lit
+    // paint, not a lamp: reading bright albedo as intent to glow added white
+    // emission on top of the lighting of every pale wall and sign in imported
+    // maps, which is what bleached them.
     //
     // The term is emitted in the material's own colour, and `emissiveFactorScale`
     // stays at 1.0 on the prefabs so Source's authored linear values survive to
@@ -757,12 +763,11 @@ auto ResolveVmtEmission(const SourceVFS& vfs, const VMTMaterial& vmt) -> VmtEmis
     VmtEmission emission;
     if (selfIllumStrength >= 0.0f) {
         emission.strength = selfIllumStrength * std::max(shaderStrength, 0.35f);
-    } else {
-        // No authored emission, so the surface emits only as much as its own
-        // base texture is bright. Measured lazily: decoding a .vtf is not free
-        // and the authored case above never needs it. A white panel on a dark
-        // wall is the case this catches -- the mapper never wrote a keyvalue,
-        // and the panel still has to glow.
+    } else if (shaderStrength >= 1.0f) {
+        // No authored emission, but the shader class is emissive by
+        // construction (the 1.0 band of ShaderEmissiveStrength). Measured
+        // lazily: decoding a .vtf is not free and the authored case above
+        // never needs it.
         const float textureLuma = vmt.baseTexture.empty() ? -1.0f : TextureLuma(vfs, vmt);
         if (textureLuma > 0.0f) {
             emission.strength = textureLuma * shaderStrength;
@@ -811,15 +816,28 @@ auto ApplyVmtLighting(const SourceVFS& vfs, const VMTMaterial& vmt, MaterialDesc
         return;
     }
 
+    // Emissive *and* unlit by construction: UnlitGeneric and the sprite-family
+    // classes put their albedo straight into the framebuffer (the lighting
+    // pass renders an unlit surface as albedo + emissive). An additive emissive
+    // factor on top of that counts the picture twice, and at the HDR gain below
+    // it whites the panel out completely -- the art survives only as a ghost
+    // under flat white. Their unlit path IS the emission; only a lit emissive
+    // surface ($selfillum on LightmappedGeneric, MonitorScreen) gets the
+    // additive term.
+    if (ShaderNameIn(vmt.shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
+        desc.unlit = true;
+        return;
+    }
+
     const float luma  = std::max(Rec709Luma(emission.tint), kEmissiveStrengthEpsilon);
     const float scale = emission.strength * kSourceEmissionHdrScale / luma;
     desc.emissive     = JPH::Float4(emission.tint.GetX() * scale, emission.tint.GetY() * scale, emission.tint.GetZ() * scale, 1.0f);
 
-    // Emissive *and* unlit by construction: an UnlitGeneric that gets here is
-    // already flagged above, and the sprite/cable/beam classes only bypass the
-    // lighting model once they actually emit.
-    if (ShaderNameIn(vmt.shader, {"UnlitGeneric", "Sprite", "Cable", "Beam"})) {
-        desc.unlit = true;
+    // The additive term carries the surface's own art whenever the material
+    // builder did not already say so: a screen glows with its picture, not
+    // with a flat wash of its average colour.
+    if (desc.emissiveMap == TextureHandle::Invalid && desc.albedoMap != TextureHandle::Invalid) {
+        desc.emissiveMap = desc.albedoMap;
     }
 }
 

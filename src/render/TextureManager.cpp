@@ -45,9 +45,9 @@ auto TextureManager::ReserveBindlessRegion() -> std::expected<void, ErrorCode> {
     return {};
 }
 
-auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format) -> std::expected<uint32_t, ErrorCode> {
+auto TextureManager::Upload2D(const void* data, uint32_t width, uint32_t height, VkFormat format, bool generateMips) -> std::expected<uint32_t, ErrorCode> {
     return Vk::TextureUploader(_ctx, _allocator, _staging, _cmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = generateMips})
         .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
             const auto index = Adopt(std::move(tex.image), tex.viewInfo);
             if (index) {
@@ -71,15 +71,15 @@ auto TextureManager::UploadCube(const void* const* faceData, uint32_t size) -> s
         });
 }
 
-auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format) -> std::expected<TextureHandle, ErrorCode> {
-    return Upload2D(pixels, width, height, format).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
+auto TextureManager::UploadUnnamed(const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips) -> std::expected<TextureHandle, ErrorCode> {
+    return Upload2D(pixels, width, height, format, generateMips).transform([&](uint32_t slot) { return RegisterAnonymous(slot, format, width, height); });
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 
-auto TextureManager::Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format)
+auto TextureManager::Upload(std::string_view identifier, const void* pixels, uint32_t width, uint32_t height, VkFormat format, bool generateMips)
     -> std::expected<TextureHandle, ErrorCode> {
     const uint64_t id         = HashAssetID(identifier);
     const auto     handle     = static_cast<TextureHandle>(id);
@@ -119,7 +119,7 @@ auto TextureManager::Upload(std::string_view identifier, const void* pixels, uin
         return handle;
     }
 
-    auto uploaded = Upload2D(pixels, width, height, format);
+    auto uploaded = Upload2D(pixels, width, height, format, generateMips);
     if (!uploaded) {
         return std::unexpected(uploaded.error());
     }
