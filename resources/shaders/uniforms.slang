@@ -8,6 +8,14 @@ public enum LightType : uint {
     Sun = 4,
 };
 
+// TLAS instance-mask bits (RenderFrame.cpp assigns them per draw). The main
+// world and Source's background layer (3D-skybox scenery, DrawFlags::
+// Background) share one TLAS so each effect can choose what it sees: world
+// first, layer on miss is the two-world rule, and shadow rays see the world
+// only -- a skybox that could shadow the map is a skybox Source never had.
+public static const uint kRayMaskSkyboxLayer = 0x01u;
+public static const uint kRayMaskWorld       = 0x02u;
+
 // Shared by the particle emitter ABI and its render push constants.
 public enum ParticleAlignment : uint {
     CameraBillboard = 0,

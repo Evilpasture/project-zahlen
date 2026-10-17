@@ -239,14 +239,15 @@ enum class FaceDisposition : uint8_t { Render, CollisionOnly, Drop };
     return FaceDisposition::Render;
 }
 
-auto FindOrMakePart(ImportedMapData& result, std::string_view name) -> MaterialStreams& {
+auto FindOrMakePart(ImportedMapData& result, std::string_view name, bool skyboxLayer) -> MaterialStreams& {
     for (MaterialStreams& part: result.parts) {
-        if (part.materialName == name) {
+        if (part.materialName == name && part.skyboxLayer == skyboxLayer) {
             return part;
         }
     }
     result.parts.push_back(MaterialStreams {});
     result.parts.back().materialName = std::string(name);
+    result.parts.back().skyboxLayer  = skyboxLayer;
     return result.parts.back();
 }
 
@@ -907,21 +908,16 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
             // Skybox faces move from their compile cluster (around the
             // sky_camera, above the map) to their rendered world position
             // before any centroid/area work, so bake clusters, emissive
-            // proxies and bounds all see the placed geometry.
+            // proxies and bounds all see the placed geometry. Nothing is
+            // dropped: Source draws the whole miniscape and lets the world's
+            // shell occlude it, which the renderer reproduces by compositing
+            // these parts as a background layer behind the world's pixels.
             bool skyFace = false;
             if (sky.active) {
                 const JPH::Vec3 centroid = WindingCentroid(*winding);
                 const float    src[3] = {centroid.GetX(), centroid.GetY(), centroid.GetZ()};
                 skyFace = IsSkyboxPoint(sky, src);
                 if (skyFace) {
-                    // Content that lands inside the world volume is what
-                    // Source hides behind the map's shell; keeping it makes the
-                    // scenery bury into and overlap the play space.
-                    float placed[3];
-                    TransformSkyboxPoint(sky, src, placed);
-                    if (IsSkyboxHidden(sky, placed)) {
-                        continue;
-                    }
                     for (JPH::Vec3& corner: *winding) {
                         const float p[3] = {corner.GetX(), corner.GetY(), corner.GetZ()};
                         float       out[3];
@@ -987,6 +983,13 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
                 ++result.stats.helperFacesDropped;
                 continue;
             }
+            // The skybox miniscape is scenery, not world collision: Source's
+            // two-world split gives it no solid presence in the play space, so
+            // its tool faces never join the collision hull either.
+            if (skyFace && disposition == FaceDisposition::CollisionOnly) {
+                ++result.stats.helperFacesDropped;
+                continue;
+            }
             if (disposition == FaceDisposition::CollisionOnly && !options.buildColliders) {
                 ++result.stats.helperFacesDropped;
                 continue;
@@ -1000,7 +1003,9 @@ auto ImportMapGeometry(const BSPMap& map, const ImportOptions& options) -> Impor
 
 
             const std::string_view materialName = MaterialNameFor(map, face);
-            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ? result.collisionOnly : FindOrMakePart(result, std::string(materialName));
+            MaterialStreams& part = (disposition == FaceDisposition::CollisionOnly) ?
+                                       result.collisionOnly :
+                                       FindOrMakePart(result, std::string(materialName), skyFace);
             if (disposition == FaceDisposition::CollisionOnly && part.VertexCount() == 0) {
                 part.materialName = std::string(materialName); // informational only; the importer does not key off it
             }

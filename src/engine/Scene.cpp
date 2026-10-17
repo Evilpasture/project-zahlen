@@ -88,6 +88,8 @@ static_assert(
 
         .emissiveVirtualLights = entity.material.emissiveVirtualLights,
 
+        .drawFlags = entity.drawFlags,
+
         .roughness = entity.material.roughness,
         .metallic  = entity.material.metallic,
         .color     = JPH::Vec4::sLoadFloat4(&entity.material.baseColor)

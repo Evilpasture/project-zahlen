@@ -81,6 +81,11 @@ struct SpawnParams {
 
     bool emissiveVirtualLights = false;
 
+    // OR'd into every part's MeshComponent flags on spawn: lets a scene
+    // description route a whole prefab into a draw layer (e.g. the BSP
+    // skybox's props into DrawFlags::Background) without forking the asset.
+    DrawFlags drawFlags = DrawFlags::None;
+
     float     roughness = 0.5f;
     float     metallic  = 0.0f;
     JPH::Vec4 color     = {0.8f, 0.4f, 0.2f, -1.0f};

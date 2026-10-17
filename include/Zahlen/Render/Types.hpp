@@ -186,6 +186,13 @@ enum class DrawFlags : uint32_t {
     VisibleInShadow = 1 << 3,
     Hidden          = 1 << 4,
     Viewmodel       = 1 << 5,
+    // Background layer (Source's 3D-skybox world): never rasterized into the
+    // G-buffer or the shadow pass, but present in the TLAS under its own
+    // instance mask so the sky composite can trace it behind the main world.
+    // The map therefore keeps every pixel it covers no matter how close the
+    // background geometry sits -- the two-world rule Source enforces by
+    // rendering order, expressed as visibility instead.
+    Background = 1 << 6,
 };
 
 enum class CSGOperation : uint8_t { Difference = 0, Union = 1, Intersection = 2 };

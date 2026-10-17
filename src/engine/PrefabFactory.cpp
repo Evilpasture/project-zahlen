@@ -329,6 +329,8 @@ auto InstantiateMeshPart(
 
     Entity    e     = reg.Create();
     DrawFlags flags = DrawFlags::None;
+    flags |= part.drawFlags;
+    flags |= params.drawFlags;
     if (part.isSkinned && params.isAnimated) {
         flags |= DrawFlags::Skinned;
     }

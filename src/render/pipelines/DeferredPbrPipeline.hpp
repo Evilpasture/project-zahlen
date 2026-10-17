@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "../RenderInternal.hpp"
+#include "RenderInternal.hpp"
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
@@ -13,4 +13,4 @@ struct DeferredPbrPipeline {
     static void Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const SceneView& view, const GraphicsSettings& settings) noexcept;
 };
 
-}
+} // namespace ZHLN::Pipelines

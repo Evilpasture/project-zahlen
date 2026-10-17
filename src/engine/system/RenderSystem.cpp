@@ -204,6 +204,12 @@ void SubmitVisibleMeshes(Engine& engine, std::span<const Entity> mainVisible, st
         }
 
         DrawFlags drawFlags = meshComp->flags;
+        if ((drawFlags & DrawFlags::Background) != DrawFlags::None && !rc.GetInfo().rayTracingSupported) {
+            // No TLAS to composite the background layer behind the world:
+            // rasterize it as ordinary scenery rather than lose it outright.
+            drawFlags &= ~DrawFlags::Background;
+            drawFlags |= DrawFlags::VisibleInMain;
+        }
         if (inMain) {
             drawFlags |= DrawFlags::VisibleInMain;
         }

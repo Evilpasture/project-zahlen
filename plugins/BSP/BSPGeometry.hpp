@@ -125,6 +125,12 @@ struct MaterialStreams {
     // so those walls stop being invisible from the room side.
     bool forceDoubleSided = false;
 
+    // Source's 3D-skybox scenery. Faces land here placed (SkyboxTransform),
+    // and the stream is emitted as its own part per material so the instance
+    // can carry DrawFlags::Background -- the layer that composites behind the
+    // main world instead of racing it in the depth buffer.
+    bool skyboxLayer = false;
+
     [[nodiscard]] auto VertexCount() const noexcept -> uint32_t {
         return static_cast<uint32_t>(positions.size());
     }
@@ -303,10 +309,13 @@ struct SkyboxTransform {
     // the skybox cluster from the map below it. Derived per map; see .cpp.
     float zFloor    = 0.0f;
     float xyHalf    = 4096.0f;
-    // Source renders the skybox as a backdrop the world's shell occludes; in a
-    // single depth buffer the parts that land inside the world's volume
-    // interpenetrate it ("buried / overlapping"). Faces whose placed centroid
-    // falls in this hidden zone are dropped -- Source never shows them either.
+    // Source renders the skybox as a backdrop the world's shell occludes. The
+    // engine now composites it the same way (DrawFlags::Background behind the
+    // world's pixels), so geometry that lands inside the world's volume is
+    // kept -- Source keeps it too. The zone is still the guard for skybox
+    // LIGHT entities: without per-light layers a buried fixture would shine
+    // out of the terrain into the play space, which Source's two-world split
+    // never allows.
     float worldMin[3] = {0.0f, 0.0f, 0.0f};
     float worldMax[3] = {0.0f, 0.0f, 0.0f};
     float hiddenMargin = 512.0f;
@@ -314,8 +323,8 @@ struct SkyboxTransform {
 
 [[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform;
 [[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
-// A point in PLACED (transformed source) coordinates: inside the world volume
-// where skybox geometry would interpenetrate the map.
+// A point in PLACED (transformed source) coordinates: inside the world volume.
+// Guards skybox light entities only; geometry uses the background layer.
 [[nodiscard]] auto IsSkyboxHidden(const SkyboxTransform& t, const float placed[3]) noexcept -> bool;
 void TransformSkyboxPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept;
 void TransformSkyboxVector(const SkyboxTransform& t, const float v[3], float out[3]) noexcept; // rotate only

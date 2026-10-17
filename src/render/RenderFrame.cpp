@@ -197,7 +197,11 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd, std::span<const Skinned
                 return m;
             }(),
             .instanceCustomIndex                    = i,
-            .mask                                   = 0xFF,
+            // kRayMaskSkyboxLayer / kRayMaskWorld in uniforms.slang: the
+            // background layer shares the TLAS with the main world but under
+            // its own bit, so shadow rays can ignore it and the sky composite
+            // can trace it alone behind the world's pixels.
+            .mask                                   = ((drawCmd.flags & Background) != None) ? 0x01u : 0x02u,
             .instanceShaderBindingTableRecordOffset = 0,
             .flags                                  = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR,
             .accelerationStructureReference         = blasAddress.Get()

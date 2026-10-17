@@ -86,8 +86,15 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = lerp(50.0f, 16.0f, roughness);
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-    q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    // World first, background layer on miss (two-world rule): the map wins
+    // the reflection even where skybox scenery sits nearer the ray.
+    q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (q.Proceed()) {
+    }
+    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskSkyboxLayer, ray);
+        while (q.Proceed()) {
+        }
     }
     if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
         return;

@@ -8,6 +8,14 @@ namespace ZHLN::Passes {
 
 auto IsVisibleIn(DrawFlags flags, RenderPassType passType) noexcept -> bool {
     using enum DrawFlags;
+    // The background layer (Source's 3D-skybox world) is never rasterized: its
+    // only primary-visibility path is the sky composite's TLAS trace, which
+    // fills exactly the pixels the main world leaves empty. Rasterizing it
+    // would let a buried piece win the depth race against the surface it must
+    // hide behind -- the very overlap the layer exists to prevent.
+    if ((flags & Background) != None) {
+        return false;
+    }
     const bool hasMain   = (flags & VisibleInMain) != None;
     const bool hasShadow = (flags & VisibleInShadow) != None;
 
@@ -189,7 +197,8 @@ auto BuildGroupRanges(const RenderFrameContext& frame) -> ZHLN::Array<GroupRange
         const auto&       drawCmd = frame.queues.Draws()[i];
         const auto* const drawMat = drawCmd.material;
 
-        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & Viewmodel) != None || drawMat->pipeline == VK_NULL_HANDLE) {
+        if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & Viewmodel) != None || (drawCmd.flags & Background) != None ||
+            drawMat->pipeline == VK_NULL_HANDLE) {
             currentPipeline = VK_NULL_HANDLE;
             continue;
         }

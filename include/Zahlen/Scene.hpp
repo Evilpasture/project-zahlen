@@ -64,6 +64,9 @@ struct SceneEntity {
     // Source prop_physics "Start Asleep" behaviour.
     bool          startsAsleep = false;
     SceneMaterial material;
+    // Draw layer for the spawned mesh parts (see DrawFlags::Background): the
+    // BSP scene routes skybox entities here so they composite behind the world.
+    DrawFlags     drawFlags = DrawFlags::None;
 };
 
 struct SceneLight {

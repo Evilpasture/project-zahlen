@@ -75,6 +75,17 @@ constexpr int   kAoSamples = 24;
     return JPH::Vec3(a * kRadiansToDegrees, b * kRadiansToDegrees, c * kRadiansToDegrees);
 }
 
+// The sky_camera's own rotation as a quaternion (SkyboxTransform::rot is its
+// row-major AngleMatrix), so entity orientations can compose with it the way
+// Source parents skybox props to the sky_camera.
+[[nodiscard]] auto SkyboxRotationQuat(const SkyboxTransform& t) -> JPH::Quat {
+    const JPH::Mat44 basis(
+        JPH::Vec4(t.rot[0], t.rot[3], t.rot[6], 0.0f), JPH::Vec4(t.rot[1], t.rot[4], t.rot[7], 0.0f), JPH::Vec4(t.rot[2], t.rot[5], t.rot[8], 0.0f),
+        JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)
+    );
+    return basis.GetQuaternion();
+}
+
 } // namespace
 
 auto EngineEulerAnglesFromSourceAngles(JPH::Vec3 sourceAnglesDegrees, const ImportOptions& options) -> JPH::Vec3 {
@@ -222,16 +233,12 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // their derived ranges scale with the content.
         const bool      skyEntity = skybox.active && IsSkyboxPoint(skybox, originArr.data());
         float           skyScale  = 1.0f;
+        float           placed[3] = {originArr[0], originArr[1], originArr[2]};
         JPH::Vec3       origin(originArr[0], originArr[1], originArr[2]);
         if (skyEntity) {
-            float placed[3];
+            // Geometry and props ride the transform and composite as the
+            // background layer; only buried LIGHTS stay filtered below.
             TransformSkyboxPoint(skybox, originArr.data(), placed);
-            if (IsSkyboxHidden(skybox, placed)) {
-                // Fixture parked inside the world volume: Source never shows
-                // it (the map's shell occludes it) and a live light here would
-                // shine out of the terrain.
-                continue;
-            }
             origin   = JPH::Vec3(placed[0], placed[1], placed[2]);
             skyScale = skybox.scale;
         }
@@ -244,6 +251,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         // the .bsp does not carry.
         const LightEntityKind lightKind = ClassifyLightEntity(className);
         if (lightKind != LightEntityKind::NotALight) {
+            // Buried skybox fixtures stay filtered: Source lights only its own
+            // skybox world with them, and without per-light layers a light
+            // parked inside the world volume would shine out of the terrain
+            // into the play space. Every skybox light outside the volume rides
+            // the transform onto its scenery as before.
+            if (skyEntity && IsSkyboxHidden(skybox, placed)) {
+                continue;
+            }
             const SourceLightValue value = ParseSourceLightValue(entity);
             const SourceAttenuation atten = ParseSourceAttenuation(entity);
 
@@ -526,6 +541,18 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             prop.transform.rotation      = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
 
+            if (skyEntity) {
+                // Background scenery: Source's skybox world is non-solid and
+                // composites behind the map, so no physics and the same layer
+                // the skybox faces use. The prop's own rotation composes with
+                // the sky_camera's.
+                prop.drawFlags    = DrawFlags::Background;
+                prop.body         = Scene::BodyKind::None;
+                prop.startsAsleep = false;
+                const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(JPH::Vec3 {prop.transform.rotation}));
+                prop.transform.rotation  = {composed.GetX(), composed.GetY(), composed.GetZ()};
+            }
+
             scene.entities.push_back(std::move(prop));
             continue;
         }
@@ -541,19 +568,35 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             continue;
         }
 
+        // Static props authored inside the skybox cluster ride the transform
+        // with the rest of the miniscape (they used to spawn at raw compile
+        // coordinates, floating above the map) and composite as background
+        // layer scenery: no physics, Source's skybox world is non-solid.
+        const bool skyProp = skybox.active && IsSkyboxPoint(skybox, sp.origin.data());
+        JPH::Vec3  propOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
+        if (skyProp) {
+            float placed[3];
+            TransformSkyboxPoint(skybox, sp.origin.data(), placed);
+            propOrigin = JPH::Vec3(placed[0], placed[1], placed[2]);
+        }
+
         Scene::SceneEntity propEntity;
         propEntity.name   = "prop_static_" + std::to_string(propIdx);
         propEntity.shape  = Scene::ShapeKind::Prefab;
         propEntity.source = sp.modelName;
-        propEntity.body   = (options.buildColliders && sp.solid != 0) ? Scene::BodyKind::Static : Scene::BodyKind::None;
+        propEntity.body   = (options.buildColliders && sp.solid != 0 && !skyProp) ? Scene::BodyKind::Static : Scene::BodyKind::None;
 
-        const JPH::Vec3 spOrigin(sp.origin[0], sp.origin[1], sp.origin[2]);
-        const JPH::Vec3 enginePos = ConvertPosition(options, spOrigin);
+        const JPH::Vec3 enginePos = ConvertPosition(options, propOrigin);
         propEntity.transform.position = {enginePos.GetX(), enginePos.GetY(), enginePos.GetZ()};
 
         const JPH::Vec3 sourceAngles(sp.angles[0], sp.angles[1], sp.angles[2]);
         const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(sourceAngles, options);
         propEntity.transform.rotation = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
+        if (skyProp) {
+            propEntity.drawFlags = DrawFlags::Background;
+            const JPH::Vec3 composed = EngineTripletFromQuat(SkyboxRotationQuat(skybox) * Math::EulerDegreesToQuat(JPH::Vec3 {propEntity.transform.rotation}));
+            propEntity.transform.rotation = {composed.GetX(), composed.GetY(), composed.GetZ()};
+        }
 
         const float s = (sp.uniformScale > 0.0f) ? sp.uniformScale : 1.0f;
         propEntity.transform.scale = {s, s, s};

@@ -467,7 +467,15 @@ void AssemblePrefabParts(
         const float extentZ      = std::max(std::abs(part.boundsMin.z), std::abs(part.boundsMax.z));
         modelPart.boundingRadius = std::sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
 
-        if (options.buildColliders) {
+        // Skybox scenery composites behind the world (DrawFlags::Background)
+        // and, like Source's two-world skybox, has no solid presence in the
+        // play space -- its colliders would be invisible walls at the placed
+        // miniscape positions.
+        if (part.skyboxLayer) {
+            modelPart.drawFlags = DrawFlags::Background;
+        }
+
+        if (options.buildColliders && !part.skyboxLayer) {
             modelPart.meshCollider = Physics::CreateMeshShape(part.positions.data(), part.VertexCount(), part.indices.data(), part.IndexCount());
 
             const JPH::Vec3 localCenter(

@@ -175,7 +175,9 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
         ray.TMax      = 300.0f;
 
         RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
-        q.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+        // Main world only (kRayMaskWorld): background-layer scenery never
+        // shadows the map -- Source's two worlds do not share shadows.
+        q.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
         while (q.Proceed()) {
         }
 

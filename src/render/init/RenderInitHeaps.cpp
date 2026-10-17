@@ -235,7 +235,13 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig),
+        // The scene block's 3x3 wrap-mode table (InitSceneHeaps writes it into
+        // the offset-addressed sampler region); named here because the sky
+        // fill samples materials, and the contract wants every declared
+        // sampler of the block spelled. Not in this set's samplerSlots, so the
+        // write above never touches the global table.
+        Vk::SamplerSlot<"scene.materialSamplers">(defaultConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
