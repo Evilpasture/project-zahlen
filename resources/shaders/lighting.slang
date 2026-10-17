@@ -432,7 +432,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // metal look white even with physically correct exposure and no clearcoat.
     float3 kD_ambient = (1.0f - SpecularFresnelRoughness(NdotV, F0, f90, roughness)) * (1.0f - metallic);
     float sheenAttAmbient = SheenAlbedoScaling(sheenColor, sheenRaw.a, NdotV, NdotV);
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * ao * materialAo *
+    // Indirect light softens occlusion: the SH/GI term is a measured or
+    // gathered bounce field that already contains interreflection, so
+    // multiplying single-bounce AO in at full strength double-darkens
+    // enclosed rooms (small rooms crushed to a fraction of their baked
+    // level while open spaces matched). Half-strength AO keeps contact
+    // darkening without erasing the GI it is supposed to modulate.
+    float aoAmbient = lerp(1.0f, ao, 0.5f);
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * kD_ambient * aoAmbient * materialAo *
                       sheenAttAmbient * coatAtt + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }

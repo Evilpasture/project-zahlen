@@ -651,6 +651,7 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& assetMgr, const BSPMap& 
         modelLight.nodeIndex = static_cast<int32_t>(prefab->nodes.size()) - 1;
         modelLight.color     = light.color;
         modelLight.intensity = light.intensity;
+        modelLight.range     = light.range; // 0 expands to 1000 m in PrefabFactory -- bake VPLs must keep their 3-24 m reach or every cluster holds every VPL and the per-cluster cap drops them at random.
         modelLight.type      = light.type;
         if (light.type == LightType::Spot) {
             modelLight.innerConeAngle = light.innerConeRadians;

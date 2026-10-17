@@ -79,8 +79,9 @@ struct ImportOptions {
     // fight the PBR and RT pipeline. See BSPBakeField.hpp. Off restores
     // pre-bake import exactly (the lump is still parsed; it is simply unused).
     bool ingestVradBake = true;
-    // VPLs kept from the bake's bright population, ranked by cluster energy.
-    uint32_t bakeVplBudget = 96;
+    // VPLs kept from the bake's clusters, ranked by cluster energy with a
+    // spatial quota (BSPBakeField.hpp).
+    uint32_t bakeVplBudget = 384;
     // Damping of bake VPLs against the map's real lights and the DDGI pass.
     float bakeVplWeight = 0.5f;
 

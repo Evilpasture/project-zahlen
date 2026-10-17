@@ -9,17 +9,20 @@
 // only the path tracer sees. So the bake is decoded once, off-line, and
 // *fitted* into the engine's own light carriers instead:
 //
-//   1. an AmbientTerm -- the area-weighted mean radiance of the bake's FILL
-//      population (faces below the area-weighted p60 luma: indirect/sky
-//      bounce), encoded in the same irradiance = luma(color) x intensity
-//      convention that the scene light's ambient ladder already uses (and
-//      that frame.sh / the DDGI probe start state consume), and
-//   2. a set of virtual point lights -- compact voxel clusters of the
-//      bake's BRIGHT population (the direct image: sun and lamp bounce,
-//      which the real lights + DDGI already carry live, so it is fitted at
-//      reduced weight rather than folded into ambient), emitted as
-//      ordinary BspPointLights so the existing shading path shades them
-//      physically.
+//   1. an AmbientTerm -- the map's typical-surface level (area-weighted mean
+//      of the luma p30-p70 band: general visibility, robust to both the
+//      unlit tail and the direct-image tail), encoded in the same
+//      irradiance = luma(color) x intensity convention that the scene
+//      light's ambient ladder already uses (and that frame.sh / the DDGI
+//      probe start state consume), and
+//   2. a set of virtual point lights -- compact voxel clusters over the
+//      whole bake (the mid-luma mass is the bounce the punctual lights
+//      never provide: probe rays gather sun and emissive only), ranked by
+//      cluster energy with a spatial quota so interiors are never starved,
+//      emitted as ordinary BspPointLights so the existing shading path
+//      shades them physically. The bake's direct image is fitted at
+//      reduced weight (`vplWeight`) because the map's real lights already
+//      carry it live.
 //
 // What the bake cannot carry (view- and bounce-accurate direct occlusion)
 // is left to the real lights and ray tracing rather than faked twice.

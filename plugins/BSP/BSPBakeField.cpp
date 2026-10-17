@@ -34,8 +34,11 @@
 namespace ZHLN::BSP {
 namespace {
 
-constexpr float kFillQuantile          = 0.60F;   // lower-luma population = fill/ambient
+constexpr float kAmbientBandLow        = 0.30F;   // typical-surface band (area-weighted luma CDF)
+constexpr float kAmbientBandHigh       = 0.70F;
 constexpr float kVoxelMetres           = 2.0F;    // VPL clustering cell
+constexpr float kSpatialQuotaMetres    = 16.0F;   // VPL budget fairness region
+constexpr uint32_t kVplPerQuotaCell    = 4;       // round-robin rounds per fairness region
 constexpr float kAmbientReferenceLuma  = 0.34F;   // authored-ambient color luma convention
 constexpr float kUnitsToMetres         = 0.0254F;
 constexpr float kPi                    = 3.14159265358979323846F; // file-local, as BSPLighting.cpp
@@ -183,8 +186,12 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     field.hasBake = true;
 
     // ---------------------------------------------------------------------
-    // 2. Split: fill population -> ambient, bright population -> VPLs.
-    //    The boundary is the area-weighted p60 luma quantile.
+    // 2. Ambient: the map's TYPICAL-SURFACE level -- the area-weighted mean
+    //    of the luma p30-p70 band. The full mean is dominated by the map's
+    //    huge unlit tail (night terrain drags it to a fifth of the level a
+    //    typical room surface carries), and the p90+ tail is the direct
+    //    image the live lights already render. The middle band is what
+    //    "general visibility" means.
     // ---------------------------------------------------------------------
     std::vector<FaceRadiance> sorted = faces;
     std::sort(sorted.begin(), sorted.end(), [](const FaceRadiance& a, const FaceRadiance& b) { return a.luma < b.luma; });
@@ -192,30 +199,33 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     for (const FaceRadiance& f: sorted) {
         totalArea += f.areaSquareMetres;
     }
-    float        walkedArea = 0.0F;
-    float        fillCeiling = sorted.back().luma;
-    for (const FaceRadiance& f: sorted) {
-        walkedArea += f.areaSquareMetres;
-        if (walkedArea >= kFillQuantile * totalArea) {
-            fillCeiling = f.luma;
-            break;
-        }
-    }
+    float bandLoArea = kAmbientBandLow * totalArea;
+    float bandHiArea = kAmbientBandHigh * totalArea;
 
     float fillWeight = 0.0F;
     float fillSum[3] {0.0F, 0.0F, 0.0F};
-    for (const FaceRadiance& f: faces) {
-        if (f.luma > fillCeiling) {
+    float walkedArea = 0.0F;
+    for (const FaceRadiance& f: sorted) {
+        const float faceStart = walkedArea;
+        walkedArea += f.areaSquareMetres;
+        if (faceStart >= bandHiArea) {
+            break;
+        }
+        if (walkedArea <= bandLoArea) {
             continue;
         }
-        fillWeight += f.areaSquareMetres;
-        fillSum[0] += f.radiance[0] * f.areaSquareMetres;
-        fillSum[1] += f.radiance[1] * f.areaSquareMetres;
-        fillSum[2] += f.radiance[2] * f.areaSquareMetres;
+        // Faces straddling a band edge contribute their overlap with the band.
+        const float overlap = std::min(walkedArea, bandHiArea) - std::max(faceStart, bandLoArea);
+        if (overlap <= 0.0F) {
+            continue;
+        }
+        fillWeight += overlap;
+        fillSum[0] += f.radiance[0] * overlap;
+        fillSum[1] += f.radiance[1] * overlap;
+        fillSum[2] += f.radiance[2] * overlap;
     }
     if (fillWeight <= 0.0F) {
-        // Everything is bright: ambient still deserves the global mean so the
-        // fit degrades to "ambient-only" rather than nothing.
+        // Degenerate populations (a handful of faces): fall back to the mean.
         for (const FaceRadiance& f: faces) {
             fillWeight += f.areaSquareMetres;
             fillSum[0] += f.radiance[0] * f.areaSquareMetres;
@@ -237,18 +247,26 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     field.ambient.authored  = false;
 
     // ---------------------------------------------------------------------
-    // 3. Bright population -> voxel clusters -> VPLs via the emissive model.
+    // 3. Voxel clusters over ALL baked faces -> VPLs via the emissive model.
+    //
+    // Every baked face joins the clustering, not only the bright population:
+    // the mid-luma mass is the bounce the punctual lights never provide on
+    // their own (probe rays gather sun + emissive only), and interiors live
+    // there. The split above remains the ambient statistic only.
+    //
+    // Entity-light convention: light.color is hue (luma 1) and the level
+    // lives in intensity. The shading path multiplies `color * intensity`, so
+    // passing raw radiance as color would square the level.
     // ---------------------------------------------------------------------
     struct Cluster {
         JPH::Vec3 centroidSum {0.0F, 0.0F, 0.0F};
         float     radianceSum[3] {0.0F, 0.0F, 0.0F};
         float     areaSum = 0.0F;
-        float     weight  = 0.0F;
     };
     std::unordered_map<uint64_t, Cluster> clusters;
     clusters.reserve(faces.size() / 4 + 1);
 
-    const auto cellKey = [](const JPH::Vec3& p) -> uint64_t {
+    const auto voxelKey = [](const JPH::Vec3& p) -> uint64_t {
         const int64_t ix = static_cast<int64_t>(std::floor(p.GetX() / kVoxelMetres));
         const int64_t iy = static_cast<int64_t>(std::floor(p.GetY() / kVoxelMetres));
         const int64_t iz = static_cast<int64_t>(std::floor(p.GetZ() / kVoxelMetres));
@@ -256,21 +274,26 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     };
 
     for (const FaceRadiance& f: faces) {
-        if (f.luma <= fillCeiling || f.areaSquareMetres <= 0.0F) {
+        if (f.areaSquareMetres <= 0.0F) {
             continue;
         }
-        Cluster& cluster = clusters[cellKey(f.positionEngine)];
+        Cluster& cluster = clusters[voxelKey(f.positionEngine)];
         const float w = f.areaSquareMetres;
         cluster.centroidSum += f.positionEngine * w;
         cluster.radianceSum[0] += f.radiance[0] * w;
         cluster.radianceSum[1] += f.radiance[1] * w;
         cluster.radianceSum[2] += f.radiance[2] * w;
         cluster.areaSum += w;
-        cluster.weight += 1.0F;
     }
 
-    std::vector<BspPointLight> vpls;
-    vpls.reserve(clusters.size());
+    struct Candidate {
+        BspPointLight light;
+        float         energy = 0.0F; // uncapped brightness, for ranking
+        uint64_t      key    = 0;    // voxel key, deterministic tie-break
+        uint64_t      quota  = 0;    // coarse spatial-quota cell
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(clusters.size());
     for (const auto& [key, cluster]: clusters) {
         if (cluster.areaSum <= 0.0F) {
             continue;
@@ -278,39 +301,91 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         const JPH::Vec3 position  = cluster.centroidSum / cluster.areaSum;
         const JPH::Vec3 radiance {cluster.radianceSum[0] / cluster.areaSum, cluster.radianceSum[1] / cluster.areaSum,
                                   cluster.radianceSum[2] / cluster.areaSum};
+        const float level = std::max(Rec709Luma(radiance), 0.0F);
 
-        BspPointLight light;
-        light.name       = "bake_vpl";
-        light.className  = "bake_vpl";
-        light.position   = position;
-        light.color      = radiance;
-        light.fromEmissive = false; // fitted from the bake, not an emissive surface
+        Candidate out;
+        out.key          = key;
+        out.quota        = voxelKey(JPH::Vec3 {std::floor(position.GetX() / kSpatialQuotaMetres) * kSpatialQuotaMetres,
+                                                std::floor(position.GetY() / kSpatialQuotaMetres) * kSpatialQuotaMetres,
+                                                std::floor(position.GetZ() / kSpatialQuotaMetres) * kSpatialQuotaMetres});
+        out.light.name       = "bake_vpl";
+        out.light.className  = "bake_vpl";
+        out.light.position   = position;
+        out.light.direction  = JPH::Vec3 {0.0F, -1.0F, 0.0F};
+        out.light.color      = (level > 1e-4F) ? JPH::Vec3 {radiance.GetX() / level, radiance.GetY() / level, radiance.GetZ() / level}
+                                               : JPH::Vec3 {1.0F, 1.0F, 1.0F};
+        out.light.fromEmissive = false; // fitted from the bake, not an emissive surface
 
-        // Exactly EmissiveLightFor's equivalent-Source-brightness chain, with
-        // the cluster radiance standing in for surface luminance and
+        // Exactly EmissiveLightFor's equivalent-Source-brightness chain with
+        // the cluster level standing in for surface luminance and
         // bakeVplWeight standing in for the fixture damping (the map's real
-        // lights + DDGI carry the direct image; the VPL is the bake's echo of
-        // it).
-        const float equivalentBrightness =
-            Rec709Luma(radiance) * cluster.areaSum * kEmissiveSourceBrightnessPerSquareMetre * vplWeight;
-        light.intensity = std::max(equivalentBrightness * kSourceBrightnessToEngine, 0.0F);
-        if (light.intensity > kEmissiveMaxLightIntensity) {
-            light.intensity = kEmissiveMaxLightIntensity;
+        // lights carry the direct image; the VPL is the bake's echo of its
+        // bounce).
+        const float equivalentBrightness = level * cluster.areaSum * kEmissiveSourceBrightnessPerSquareMetre * vplWeight;
+        out.energy                       = equivalentBrightness * kSourceBrightnessToEngine;
+        out.light.intensity              = out.energy;
+        if (out.light.intensity > kEmissiveMaxLightIntensity) {
+            out.light.intensity = kEmissiveMaxLightIntensity;
         }
         const float characteristic = std::sqrt(std::max(cluster.areaSum, 1e-4F) / kPi);
-        light.range                = std::clamp(characteristic * kEmissiveRangeScale, kMinRangeMetres, kMaxRangeMetres);
-        light.radius               = std::clamp(characteristic, 0.02F, 2.0F);
-        light.castShadows          = false;
-        light.startsOn             = light.intensity > 0.0F;
-        if (light.startsOn) {
-            vpls.push_back(light);
+        out.light.range            = std::clamp(characteristic * kEmissiveRangeScale, kMinRangeMetres, kMaxRangeMetres);
+        out.light.radius           = std::clamp(characteristic, 0.02F, 2.0F);
+        out.light.castShadows      = false;
+        out.light.startsOn         = out.light.intensity > 0.0F;
+        if (out.light.startsOn) {
+            candidates.push_back(out);
         }
     }
 
-    std::sort(vpls.begin(), vpls.end(),
-              [](const BspPointLight& a, const BspPointLight& b) { return a.intensity > b.intensity; });
-    if (vpls.size() > vplBudget) {
-        vpls.resize(vplBudget);
+    // Rank by uncapped energy (the cap is a shading guard, not an ordering),
+    // with the voxel key as a deterministic tie-break. Then spend the budget
+    // spatially: the strongest clusters of every 8 m region first, so an
+    // interior is never starved by sun-saturated exteriors, then the global
+    // energy order for whatever budget remains.
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.energy != b.energy) {
+            return a.energy > b.energy;
+        }
+        return a.key < b.key;
+    });
+
+    // Breadth-first selection: group the (energy-sorted) candidates per quota
+    // region, then take rounds -- every region's strongest cluster first, then
+    // each region's second, and so on -- until the budget is spent. Regions
+    // are visited in order of their peak energy. This is what keeps an
+    // interior from being starved by sun-saturated exteriors: every region
+    // gets its floor of representatives before any region doubles up.
+    std::unordered_map<uint64_t, std::vector<size_t>> regions;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        regions[candidates[i].quota].push_back(i);
+    }
+    std::vector<uint64_t> regionOrder;
+    regionOrder.reserve(regions.size());
+    for (const auto& [key, list]: regions) {
+        regionOrder.push_back(key);
+    }
+    std::sort(regionOrder.begin(), regionOrder.end(), [&](uint64_t a, uint64_t b) {
+        const float ea = candidates[regions[a].front()].energy;
+        const float eb = candidates[regions[b].front()].energy;
+        if (ea != eb) {
+            return ea > eb;
+        }
+        return a < b;
+    });
+
+    std::vector<BspPointLight> vpls;
+    vpls.reserve(std::min<size_t>(candidates.size(), vplBudget));
+    for (uint32_t round = 0; round < kVplPerQuotaCell && vpls.size() < vplBudget; ++round) {
+        for (uint64_t key: regionOrder) {
+            const std::vector<size_t>& list = regions[key];
+            if (round >= list.size()) {
+                continue;
+            }
+            vpls.push_back(candidates[list[round]].light);
+            if (vpls.size() >= vplBudget) {
+                break;
+            }
+        }
     }
     field.vpls = std::move(vpls);
     return field;

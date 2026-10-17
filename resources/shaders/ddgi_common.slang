@@ -240,5 +240,10 @@ public float3 SampleDDGIOrSH(
         return shAmbient;
     }
     float3 ddgiIrr = SampleDDGIIrradiance(worldPos, N, V, ddgi, atlasIrradiance, atlasDistance, bilinearSampler);
-    return lerp(shAmbient, ddgiIrr, weight);
+    // Probe rays gather sun + emissive only (ddgi_trace.slang), so a probe in
+    // a punctual-lit interior is systematically darker than the scene's baked
+    // light level. The fitted SH ambient is the precomputed indirect floor:
+    // live GI refines it upward but may not erase it. Screen-space AO still
+    // darkens occluded regions against this floor.
+    return lerp(shAmbient, max(ddgiIrr, shAmbient), weight);
 }
