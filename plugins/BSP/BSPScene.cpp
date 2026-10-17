@@ -183,6 +183,14 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
         scene.environment.skyGround  = {sky.x * 0.35f, sky.y * 0.35f, sky.z * 0.35f};
     }
 
+    // Display calibration: VRAD radiance, entity brightness and the ambient
+    // ladder share one scale, and measured against the Source reference this
+    // engine's tonemap chain lands that scale kIngestLevelGain under Source's
+    // display (same scene, same bands). The ambient rides the same gain the
+    // light chokepoints do (kSourceBrightnessToEngine), through the renderer's
+    // own ambientExposure axis.
+    scene.environment.ambientExposure = kAmbientExposure * kIngestLevelGain;
+
     if (options.ambientOcclusion) {
         scene.environment.giMode    = 3;
         scene.environment.aoRadius  = kAoRadius;
@@ -195,6 +203,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
     // where the entity transform sits.
     const std::vector<InteractiveSubmodel> interactiveSubmodels = CollectInteractiveSubmodels(map, options);
 
+    // 3D skybox content (background scenery + its fixture lights) is compiled
+    // around the sky_camera above the map; the transform places it around the
+    // play boundaries the way Source renders the sky.
+    const SkyboxTransform skybox = MakeSkyboxTransform(map);
+
     for (const BSPEntity& entity: map.entities) {
         const std::string_view className = entity.Find("classname");
         if (className.empty()) {
@@ -203,7 +216,25 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
 
         const auto      originArr = entity.FindVector("origin").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
         const auto      anglesArr = entity.FindVector("angles").value_or(std::array<float, 3> {0.0f, 0.0f, 0.0f});
-        const JPH::Vec3 origin(originArr[0], originArr[1], originArr[2]);
+        // Skybox entities (fixture lights, props, beams) travel with the
+        // background scenery. Distances scale by skybox.scale, so lights carry
+        // scale^2 intensity (E = I/d^2 keeps the authored pool brightness) and
+        // their derived ranges scale with the content.
+        const bool      skyEntity = skybox.active && IsSkyboxPoint(skybox, originArr.data());
+        float           skyScale  = 1.0f;
+        JPH::Vec3       origin(originArr[0], originArr[1], originArr[2]);
+        if (skyEntity) {
+            float placed[3];
+            TransformSkyboxPoint(skybox, originArr.data(), placed);
+            if (IsSkyboxHidden(skybox, placed)) {
+                // Fixture parked inside the world volume: Source never shows
+                // it (the map's shell occludes it) and a live light here would
+                // shine out of the terrain.
+                continue;
+            }
+            origin   = JPH::Vec3(placed[0], placed[1], placed[2]);
+            skyScale = skybox.scale;
+        }
         JPH::Vec3       angles(anglesArr[0], anglesArr[1], anglesArr[2]);
 
         // ---- lights ------------------------------------------------------
@@ -258,7 +289,10 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             const JPH::Vec3 enginePosition = ConvertPosition(options, origin);
             light.position                 = {enginePosition.GetX(), enginePosition.GetY(), enginePosition.GetZ()};
             light.color                    = {value.rgba[0] / 255.0f, value.rgba[1] / 255.0f, value.rgba[2] / 255.0f};
-            light.intensity                = value.rgba[3] * kSourceBrightnessToEngine;
+            // Skybox fixtures: distances scale by skybox.scale, so intensity
+            // carries scale^2 to keep the authored pool brightness on the
+            // placed scenery (E = I/d^2).
+            light.intensity                = value.rgba[3] * kSourceBrightnessToEngine * skyScale * skyScale;
 
             const JPH::Vec3 engineAngles = EngineEulerAnglesFromSourceAngles(angles, options);
             light.rotation               = {engineAngles.GetX(), engineAngles.GetY(), engineAngles.GetZ()};
@@ -273,6 +307,12 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
                 const float yaw   = angles.GetY() * (3.14159265358979323846f / 180.0f);
                 const float cp    = std::cos(pitch);
                 direction         = JPH::Vec3(cp * std::cos(yaw), cp * std::sin(yaw), -std::sin(pitch));
+                if (skyEntity) {
+                    const float d[3] = {direction.GetX(), direction.GetY(), direction.GetZ()};
+                    float       out[3];
+                    TransformSkyboxVector(skybox, d, out);
+                    direction = JPH::Vec3(out[0], out[1], out[2]);
+                }
                 const JPH::Vec3 engineDirection = ConvertDirection(options, direction);
                 light.direction                 = {engineDirection.GetX(), engineDirection.GetY(), engineDirection.GetZ()};
 
@@ -294,8 +334,11 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             // concrete. The radius follows the same distance: it is the
             // renderer's specular/probe footprint, and a 5 cm point light
             // inside a 3 m lamp shade is what makes the highlight a dot.
-            const float engineIntensity = light.intensity;
-            light.range                 = AttenuationRangeMetres(atten, engineIntensity, options.unitScale);
+            // Derive the cutoff from the authored (mini-scale) intensity so the
+            // clamp bounds the authored pool, then let skybox content scale the
+            // distance with its scenery.
+            const float engineIntensity = value.rgba[3] * kSourceBrightnessToEngine;
+            light.range                 = AttenuationRangeMetres(atten, engineIntensity, options.unitScale) * skyScale;
             light.radius                = std::max(light.range * 0.05f, 0.05f);
 
             scene.lights.push_back(std::move(light));

@@ -27,14 +27,21 @@
 
 namespace ZHLN::BSP {
 
+// Display calibration for the whole ingested lighting field. VRAD luma, entity
+// `_light` brightness and the bake fit all share one radiance scale; measured
+// against the Source reference (same scene, same bands: gym floor 8.5x, wall
+// band 5.5x in display-linear), this engine's tonemap chain lands that scale
+// ~7x under the Source display. One gain, applied at the single brightness
+// chokepoint below, lifts lights, bake VPLs and (via the same constant family
+// in BSPScene) the ambient together so the Source balance is preserved.
+inline constexpr float kIngestLevelGain = 7.0f;
+
 // Source `_light` brightness (the 4th component, typically 150-300) is in
-// Source lighting units, not renderer intensity. Passed through raw, every
-// point/spot light lands ~30x too hot (intensity 200 against an engine
-// convention of single digits for point/spot lights and 3-28 for suns) and
-// blows the scene out to white. Dividing by ~30 calibrates a stock
-// brightness-200 room light to engine intensity ~6.7, matching the physical
-// inches->metres rescale (unitScale^2) and Source's authored brightness scale.
-inline constexpr float kSourceBrightnessToEngine = 1.0f / 30.0f;
+// Source lighting units, not renderer intensity. Dividing by ~30 calibrates a
+// stock brightness-200 room light to engine intensity ~6.7, matching the
+// physical inches->metres rescale (unitScale^2) and Source's authored
+// brightness scale; kIngestLevelGain then lifts the pair to display parity.
+inline constexpr float kSourceBrightnessToEngine = kIngestLevelGain / 30.0f;
 
 // Source is Z-up and measures in inches; the engine is Y-up (glTF convention)
 // and measures in metres. The default converts; unitScale lets a caller keep
@@ -277,6 +284,43 @@ struct ImportedMapData {
 // which is what makes it usable as an emissive gate. Exposed so the importer
 // adapter can run the same probe the geometry pass does.
 [[nodiscard]] auto TexDataReflectivityLuma(const BSPMap& map, const DFace& face) noexcept -> float;
+
+// Source's 3D skybox: background scenery compiled at 1/scale size around the
+// `sky_camera` entity, rendered by the engine at full size around the player's
+// eye. Importing it at its raw compile coordinates leaves the whole cluster
+// floating above the map (for gm_murder_drones: ~7k faces at source z 2500+,
+// 78 m over the play space) and parks its fixture lights in the void. The
+// transform maps skybox points into world space the way the engine draws the
+// sky: world = anchor + R * (p - skyOrigin) * scale, anchored at the player
+// start so the scenery surrounds the play boundaries. All source-space.
+struct SkyboxTransform {
+    bool  active = false;
+    float origin[3] = {0.0f, 0.0f, 0.0f}; // sky_camera origin
+    float anchor[3] = {0.0f, 0.0f, 0.0f}; // world point the sky_camera maps to
+    float rot[9]    = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // sky_camera angles
+    float scale     = 16.0f;
+    // Membership: near the sky_camera in X/Y and above the z gap that separates
+    // the skybox cluster from the map below it. Derived per map; see .cpp.
+    float zFloor    = 0.0f;
+    float xyHalf    = 4096.0f;
+    // Source renders the skybox as a backdrop the world's shell occludes; in a
+    // single depth buffer the parts that land inside the world's volume
+    // interpenetrate it ("buried / overlapping"). Faces whose placed centroid
+    // falls in this hidden zone are dropped -- Source never shows them either.
+    float worldMin[3] = {0.0f, 0.0f, 0.0f};
+    float worldMax[3] = {0.0f, 0.0f, 0.0f};
+    float hiddenMargin = 512.0f;
+};
+
+[[nodiscard]] auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform;
+[[nodiscard]] auto IsSkyboxPoint(const SkyboxTransform& t, const float p[3]) noexcept -> bool;
+// A point in PLACED (transformed source) coordinates: inside the world volume
+// where skybox geometry would interpenetrate the map.
+[[nodiscard]] auto IsSkyboxHidden(const SkyboxTransform& t, const float placed[3]) noexcept -> bool;
+void TransformSkyboxPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept;
+void TransformSkyboxVector(const SkyboxTransform& t, const float v[3], float out[3]) noexcept; // rotate only
+// A point already known to be skybox content: transform or copy through.
+void SkyboxMapPoint(const SkyboxTransform& t, const float p[3], float out[3]) noexcept;
 
 // One interactive brush submodel (func_door / func_button family) recovered
 // from the entity lump: its model index, whether the entity rotates about a

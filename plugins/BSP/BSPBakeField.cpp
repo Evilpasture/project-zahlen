@@ -135,6 +135,8 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
     std::vector<FaceRadiance> faces;
     faces.reserve(map.faces.size());
 
+    const SkyboxTransform skybox = MakeSkyboxTransform(map);
+
     for (const DFace& face: map.faces) {
         if (face.lightofs < 0 || face.texinfo < 0 || static_cast<size_t>(face.texinfo) >= map.texInfos.size()) {
             continue;
@@ -153,6 +155,16 @@ auto BuildBakeField(const BSPMap& map, const ImportOptions& options, uint32_t vp
         const FacePolygon poly = TraceFacePolygon(map, face);
         if (!poly.valid) {
             continue;
+        }
+        // 3D skybox content (see SkyboxTransform) is background scenery: its
+        // bake is authored at 1/scale size and would both skew the playable
+        // fit and spend VPL budget on the map's distant shell. Skip it here;
+        // the placed scenery is lit by its own lamp entities and the ambient.
+        {
+            const float c[3] = {poly.centroid[0], poly.centroid[1], poly.centroid[2]};
+            if (IsSkyboxPoint(skybox, c)) {
+                continue;
+            }
         }
 
         float sum[3] {0.0F, 0.0F, 0.0F};

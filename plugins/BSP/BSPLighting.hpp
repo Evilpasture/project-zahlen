@@ -109,7 +109,11 @@ inline constexpr float kEmissiveSourceBrightnessPerSquareMetre = 250.0f;
 // renderer's intensity/distance shadow-layer sort and blows out the frame.
 // A stock point/spot `light` lands at 6.67, so this is ~6 of them: clearly the
 // brightest thing in the room without being the only thing visible.
-inline constexpr float kEmissiveMaxLightIntensity = 40.0f;
+// Cap on every ingested light's intensity (emissive area proxies and bake VPLs
+// alike). Scaled with the ingest gain so the capped landscape keeps its shape
+// at the calibrated display level -- a fixed 40 would re-clamp the whole bright
+// band back to pre-gain darkness.
+inline constexpr float kEmissiveMaxLightIntensity = 40.0f * kIngestLevelGain;
 
 // An emissive face this close to an entity light is almost certainly the
 // housing of that light (gm_murder_drones: every lights/white and /white007
