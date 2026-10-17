@@ -186,21 +186,13 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode>
     }
     BuildDecalHeapMappings();
 
-    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
-    mergedEntries.insert(mergedEntries.end(), decalHeapMappings.entries.begin(), decalHeapMappings.entries.end());
-    mergedEntries.insert(mergedEntries.end(), sceneSet1HeapMappings.entries.begin(), sceneSet1HeapMappings.entries.end());
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
-        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-        .pNext        = nullptr,
-        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
-        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
-    };
+    const Vk::HeapMappingBundle merged = decalHeapMappings.MergedWith(sceneSet1HeapMappings);
 
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DecalVS>(), Vk::MakeStageSource<Shaders::Modules::DecalPS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {}
                 .Shaders(shaders.View())
-                .HeapMappings(&mergedInfo, &mergedInfo)
+                .HeapMappings(merged.GetInfo(), merged.GetInfo())
                 .ColorFormats(decalFormats)
                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT)
                 .DepthTest(true)

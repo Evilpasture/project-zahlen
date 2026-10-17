@@ -166,41 +166,31 @@ auto RenderContext::Impl::InitSceneHeaps(const Vk::SamplerConfig& globalSamplerV
 }
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
-    sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
-                            .Sampler(0, 0, globalSamplerSlot)
-                            .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-                            .StorageBufferAddress(0, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
-                            .StorageBufferAddress(0, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
-                            .StorageBufferAddress(0, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
-                            .StorageBufferAddress(0, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
-                            .StorageBufferAddress(0, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
-                            .SampledImage(0, 7, iblPrefilteredSlot)
-                            .SampledImage(0, 8, iblBrdfLutSlot)
-                            .Sampler(0, 9, clampSamplerSlot)
-                            .SampledImage(0, 10, transLightingSlot)
-                            .SamplerArray(0, 11, materialSamplerBaseSlot)
-                            .BindlessTextureArray(0, 12, textureManager.BindlessBaseSlot())
-                            .Build();
+    // One GlobalSceneRegistry layout, two descriptor sets: the scene block is
+    // addressable at Set 0 (its own heap passes) and Set 1 (shared into other
+    // passes' pMappings at pipeline build). Both mappings are complete;
+    // extras for undeclared variables are legal, missing ones are not
+    // (VUID-VkGraphicsPipelineCreateInfo-flags-11312).
+    const auto buildSceneBlock = [this](uint32_t set) {
+        return Vk::HeapMappingBuilder(heapManager)
+            .Sampler(set, 0, globalSamplerSlot)
+            .UniformBufferAddress(set, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
+            .StorageBufferAddress(set, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
+            .StorageBufferAddress(set, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
+            .StorageBufferAddress(set, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
+            .StorageBufferAddress(set, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
+            .StorageBufferAddress(set, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
+            .SampledImage(set, 7, iblPrefilteredSlot)
+            .SampledImage(set, 8, iblBrdfLutSlot)
+            .Sampler(set, 9, clampSamplerSlot)
+            .SampledImage(set, 10, transLightingSlot)
+            .SamplerArray(set, 11, materialSamplerBaseSlot)
+            .BindlessTextureArray(set, 12, textureManager.BindlessBaseSlot())
+            .Build();
+    };
 
-    // The scene block's Set-1 mapping, complete: any heap pass whose module
-    // references `scene` while its own set is Set 0 merges this bundle at
-    // pipeline build (the decal pass since day one, the reflection pass since
-    // its sky fill reads scene.lights & co). Layout is GlobalSceneRegistry.
-    sceneSet1HeapMappings = Vk::HeapMappingBuilder(heapManager)
-                                .Sampler(1, 0, globalSamplerSlot)
-                                .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-                                .StorageBufferAddress(1, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
-                                .StorageBufferAddress(1, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
-                                .StorageBufferAddress(1, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
-                                .StorageBufferAddress(1, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
-                                .StorageBufferAddress(1, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
-                                .SampledImage(1, 7, iblPrefilteredSlot)
-                                .SampledImage(1, 8, iblBrdfLutSlot)
-                                .Sampler(1, 9, clampSamplerSlot)
-                                .SampledImage(1, 10, transLightingSlot)
-                                .SamplerArray(1, 11, materialSamplerBaseSlot)
-                                .BindlessTextureArray(1, 12, textureManager.BindlessBaseSlot())
-                                .Build();
+    sceneHeapMappings     = buildSceneBlock(0);
+    sceneSet1HeapMappings = buildSceneBlock(1);
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
@@ -248,13 +238,7 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     );
     Vk::InitHeapPassSamplers<Shaders::Reflection>(
         heapManager, reflectionPipeline.pass.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig), Vk::SamplerSlot<"pointSampler">(pointConfig),
-        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig),
-        // The scene block's 3x3 wrap-mode table (InitSceneHeaps writes it into
-        // the offset-addressed sampler region); named here because the sky
-        // fill samples materials, and the contract wants every declared
-        // sampler of the block spelled. Not in this set's samplerSlots, so the
-        // write above never touches the global table.
-        Vk::SamplerSlot<"scene.materialSamplers">(defaultConfig)
+        Vk::SamplerSlot<"clampSampler">(clampConfig), Vk::SamplerSlot<"skySampler">(skyConfig), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseConfig)
     );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, antiAliasing.taa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, antiAliasing.fxaa.heapBindings, Vk::SamplerSlot<"smp">(defaultConfig));

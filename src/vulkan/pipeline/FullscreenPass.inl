@@ -31,18 +31,8 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     // The pass's set-0 mappings, plus any shared bundle the module's other
     // sets need (Set-1 scene block). Extras for undeclared variables are
     // legal; missing ones are not (VUID-...-11312).
-    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
-    mergedEntries.insert(mergedEntries.end(), heapBindings.entries.begin(), heapBindings.entries.end());
-    if (extraMappings != nullptr) {
-        mergedEntries.insert(mergedEntries.end(), extraMappings->entries.begin(), extraMappings->entries.end());
-    }
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
-        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-        .pNext        = nullptr,
-        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
-        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
-    };
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = mergedEntries.empty() ? heapBindings.GetInfo() : &mergedInfo;
+    const HeapMappingBundle merged = HeapMappingBundle::Merge(heapBindings, extraMappings);
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = merged.GetInfo();
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
@@ -86,18 +76,8 @@ std::expected<void, ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     }
 
     // Same set-0 + shared-bundle merge as BuildHeap above.
-    std::vector<VkDescriptorSetAndBindingMappingEXT> mergedEntries;
-    mergedEntries.insert(mergedEntries.end(), heapBindings.entries.begin(), heapBindings.entries.end());
-    if (extraMappings != nullptr) {
-        mergedEntries.insert(mergedEntries.end(), extraMappings->entries.begin(), extraMappings->entries.end());
-    }
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT mergedInfo = {
-        .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-        .pNext        = nullptr,
-        .mappingCount = static_cast<uint32_t>(mergedEntries.size()),
-        .pMappings    = mergedEntries.empty() ? nullptr : mergedEntries.data(),
-    };
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = mergedEntries.empty() ? heapBindings.GetInfo() : &mergedInfo;
+    const HeapMappingBundle merged = HeapMappingBundle::Merge(heapBindings, extraMappings);
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* mappings = merged.GetInfo();
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());

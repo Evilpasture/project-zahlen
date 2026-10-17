@@ -212,12 +212,16 @@ template <typename Set, typename Half, typename Program, typename... Slots, size
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
     using List = DeclaredList<Half, Program>;
     [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
+        // A write block spells only the bindings of the set it fills (Set 0).
+        // Declarations of the module's other sets are served by
+        // shared mapping bundles at pipeline build (VUID-...-11312), never by
+        // this per-pass slot list, so they must not be forced into it.
         (static_cast<void>(sizeof(DeclarationSpelledBy<
                                Set,
                                Half,
                                Program,
                                Declared...[Index]::binding,
-                               SpellsDeclaredSlot<Declared...[Index], Slots...>()
+                               (Declared...[Index]::set != 0) || SpellsDeclaredSlot<Declared...[Index], Slots...>()
                            >)), ...);
     }(std::type_identity<SlotsOfT<List>> {});
 }
