@@ -129,8 +129,12 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
                     continue;
 
                 float sampleRawDepth = texDepth.SampleLevel(pointSampler, uv_sample, 0).r;
-                if (sampleRawDepth >= 1.0f)
+                // AO marches world geometry only (the background band starts at
+                // kSkyDepthSplit), and in unbanded depth: clipPos.w below is a
+                // world-space projection.
+                if (sampleRawDepth >= kSkyDepthSplit)
                     continue;
+                sampleRawDepth /= kSkyDepthSplit;
 
                 float4 linClip = mul(frame.invProj, float4(0.0f, 0.0f, sampleRawDepth, 1.0f));
                 float diff     = clipPos.w - abs(linClip.z / linClip.w);
@@ -174,6 +178,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // [split, 1], 1 empty. ReconstructWorldPos undoes the band.
     if (depth >= 1.0f)
         discard;
+    // The background layer sits far outside every shadow cascade; its
+    // projectors land in clamped atlas texels and shadow the whole skybox.
+    // Source shades the 3D skybox with light_environment alone, unshadowed.
+    const bool isBackgroundLayer = depth >= kSkyDepthSplit;
 
     float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
     float3 emissive  = texEmissive.SampleLevel(pointSampler, input.uv, 0).rgb;
@@ -241,6 +249,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     needCascade  = !(ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth < 80.0f);
     rtrBlendBand = (ENABLE_RTR != 0 && pc.enableRTR != 0 && viewDepth >= 80.0f && viewDepth < 160.0f);
 #endif
+    // Background pixels take no cascade shadow (see isBackgroundLayer).
+    needCascade = needCascade && !isBackgroundLayer;
     if (needCascade) {
         uint cascadeIndex = 0;
         if (viewDepth > frame.cascadeSplits.x)

@@ -669,7 +669,9 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
             continue;
         }
 
-        float rayDepth = ndc_z_start + ndc_z_step * (float(i) + dither);
+        // The depth buffer holds banded depth (kSkyDepthSplit); the ray's NDC z
+        // is projected unbanded. Compare in the buffer's space.
+        float rayDepth = (ndc_z_start + ndc_z_step * (float(i) + dither)) * kSkyDepthSplit;
 
         float3 currentWS = ReconstructWorldPos(currentUV, rayDepth, invViewProj);
         float3 sampledWS = ReconstructWorldPos(currentUV, sampledDepth, invViewProj);

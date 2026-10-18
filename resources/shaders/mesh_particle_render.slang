@@ -87,9 +87,11 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID, uint
     float3 worldPos = rotatedPos + p.position.xyz;
 
     output.worldPos = worldPos;
-    output.pos      = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
-    output.currClip = output.pos;
-    output.prevClip = mul(scene.frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
+    output.pos       = mul(scene.frame.viewProj, float4(worldPos, 1.0f));
+    output.pos.z    *= kSkyDepthSplit; // world band (kSkyDepthSplit)
+    output.currClip  = output.pos;
+    output.prevClip  = mul(scene.frame.prevUnjitteredViewProj, float4(worldPos, 1.0f));
+    output.prevClip.z *= kSkyDepthSplit;
 
     uint cascadeIndex = clamp(viewId, 0u, 3u);
     output.shadowPos  = mul(scene.frame.lightSpaceMatrices[cascadeIndex], float4(worldPos, 1.0f));

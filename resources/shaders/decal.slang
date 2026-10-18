@@ -28,6 +28,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     float3 localPos = CubeVertices[CubeIndices[vertexID]];
     float4 worldPos = mul(pc.worldMatrix, float4(localPos, 1.0f));
     output.pos      = mul(scene.frame.viewProj, worldPos);
+    output.pos.z   *= kSkyDepthSplit; // world band (kSkyDepthSplit)
     return output;
 }
 
@@ -45,9 +46,13 @@ PSOutput PSMain(VSOutput input) {
     float2 uv = input.pos.xy / scene.frame.screenResolution;
 
     float depth = texDepth.SampleLevel(pointSampler, uv, 0).r;
-    if (depth >= 1.0f) {
+    // Decals project onto world depth only: the background layer lives in
+    // [kSkyDepthSplit, 1] and must never receive a decal.
+    if (depth >= kSkyDepthSplit) {
         discard;
     }
+    // Undo the world band before clipToLocal, which expects the unbanded clip.
+    depth /= kSkyDepthSplit;
 
     float4 clipPos = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
 
