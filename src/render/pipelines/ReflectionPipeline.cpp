@@ -37,9 +37,9 @@ void ReflectionPipeline::Dispatch(
         Vk::Slot<"texDdgiDistance">(Vk::Assume<Vk::ShaderRead<Res_DdgiDistance>>(impl.graphResources.ddgiDistance))
     );
 
-    // Typestate: TryGet proves the variant's bounds and validity, Create the
+    // Typestate: From proves the variant's bounds and validity, Create the
     // non-zero heap push -- ExecuteHeap cannot be reached with anything else.
-    if (const auto active = Vk::ActivePipeline::TryGet(pass.pipelines, Passes::ReflectionVariant(impl))) {
+    if (const auto active = Vk::ActivePipeline::From(pass.pipelines, Passes::ReflectionVariant(impl))) {
         if (const auto heap = Vk::BoundHeapPass::Create(pass.heapBindings.indexPushOffset, block.slot)) {
             pass.ExecuteHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(ctx, *active, *heap, pc);
         }

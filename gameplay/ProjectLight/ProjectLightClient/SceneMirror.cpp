@@ -687,9 +687,10 @@ void SceneMirror::UpdateLocalCharacterParts(Engine& engine, SceneMirrorState& st
     if (!movement) return;
 
     // `bodyState` rather than `state`: in this file `state` is the session view.
-    Physics::BodyStateSnapshot bodyState {};
     auto& physics = engine.GetPhysicsContext();
-    if (!physics.TryGetBodyState(state.localControllerBody, bodyState) || !bodyState.valid) return;
+    const auto bodyStateResult = physics.BodyState(state.localControllerBody);
+    if (!bodyStateResult || !bodyStateResult->valid) return;
+    const auto& bodyState = *bodyStateResult;
     const JPH::Vec3 rootPosition = bodyState.currentPosition;
     const JPH::Quat rootRotation = movement->orientation.Normalized();
     const JPH::Vec3 velocity = physics.GetCharacterVelocity(state.localControllerBody);

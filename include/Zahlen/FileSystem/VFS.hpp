@@ -77,7 +77,10 @@ class VirtualFileSystem {
 
   private:
     void ExecuteLoad(LoadRequest* req);
-    bool TryLoadFromDirectories(LoadRequest* req) const;
+    // Attempts a direct-directory load. The outcome travels in the request
+    // (success/outData/outSize) -- the single result channel ExecuteLoad and
+    // LoadSync already use. Currently declines every request.
+    void LoadFromDirectories(LoadRequest& req) const;
 
     struct PakArchive** _archives        = nullptr;
     size_t              _archiveCount    = 0;

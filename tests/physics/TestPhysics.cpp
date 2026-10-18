@@ -101,21 +101,21 @@ struct PhysicsTestSuite {
 
             // The public physics façade exposes the synchronized position without
             // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
-            JPH::RVec3 synchronizedPosition = JPH::RVec3::sZero();
-            ZHLN::Test::ExpectTrue(pc.TryGetBodyPosition(sphere, synchronizedPosition));
-            ZHLN::Test::ExpectLt(synchronizedPosition.GetY(), 9.0);
+            const auto synchronizedPosition = pc.BodyPosition(sphere);
+            ZHLN::Test::ExpectTrue(synchronizedPosition.has_value());
+            ZHLN::Test::ExpectLt(synchronizedPosition->GetY(), 9.0);
 
-            ZHLN::Physics::BodyStateSnapshot bodyState {};
-            ZHLN::Test::ExpectTrue(pc.TryGetBodyState(sphere, bodyState));
-            ZHLN::Test::ExpectLt(bodyState.currentPosition.GetY(), 9.0f);
-            ZHLN::Test::ExpectGt(bodyState.previousPosition.GetY(), bodyState.currentPosition.GetY());
+            const auto bodyState = pc.BodyState(sphere);
+            ZHLN::Test::ExpectTrue(bodyState.has_value());
+            ZHLN::Test::ExpectLt(bodyState->currentPosition.GetY(), 9.0f);
+            ZHLN::Test::ExpectGt(bodyState->previousPosition.GetY(), bodyState->currentPosition.GetY());
 
             // A queued body destruction invalidates the generation-safe lookup
             // once the following physics step has drained its command queue.
             pc.DestroyBody(sphere);
             pc.Step(1.0f / 60.0f);
-            ZHLN::Test::ExpectTrue(!pc.TryGetBodyPosition(sphere, synchronizedPosition));
-            ZHLN::Test::ExpectTrue(!pc.TryGetBodyState(sphere, bodyState));
+            ZHLN::Test::ExpectTrue(!pc.BodyPosition(sphere).has_value());
+            ZHLN::Test::ExpectTrue(!pc.BodyState(sphere).has_value());
 
             return {};
         }

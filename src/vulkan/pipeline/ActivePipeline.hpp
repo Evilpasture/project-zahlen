@@ -19,10 +19,10 @@ namespace ZHLN::Vk {
 // pattern CommandRecorder and ExecutableCommands already use.
 
 // A pipeline that has been built and validated. There is no way to construct
-// one except TryGet(), and no way to modify one afterwards.
+// one except From(), and no way to modify one afterwards.
 class ActivePipeline {
   public:
-    [[nodiscard]] static auto TryGet(const Pipeline& pipeline) noexcept -> std::optional<ActivePipeline> {
+    [[nodiscard]] static auto From(const Pipeline& pipeline) noexcept -> std::optional<ActivePipeline> {
         if (!pipeline.Valid()) {
             return std::nullopt;
         }
@@ -31,7 +31,7 @@ class ActivePipeline {
 
     // The variant at `index`, or nothing when the index is out of range or the
     // variant was never built: the bounds proof lives here, not in the draw.
-    [[nodiscard]] static auto TryGet(std::span<const Pipeline> variants, uint32_t index) noexcept -> std::optional<ActivePipeline> {
+    [[nodiscard]] static auto From(std::span<const Pipeline> variants, uint32_t index) noexcept -> std::optional<ActivePipeline> {
         if (index >= variants.size() || !variants[index].Valid()) {
             return std::nullopt;
         }

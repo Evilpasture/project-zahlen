@@ -61,7 +61,7 @@ struct FullscreenPassRecorder {
     static void RecordCustom(RenderFrameContext& impl, Vk::RasterPassContextBase& ctx, Vk::FullscreenPass<LayoutT>& pass, Prepare&& prepare, Draw&& draw) noexcept {
         // Record-time pruning: an unbuilt pass produces no ActivePipeline and
         // never reaches the draw; the draw itself holds the proof, not a flag.
-        const auto active = Vk::ActivePipeline::TryGet(pass.pipeline);
+        const auto active = Vk::ActivePipeline::From(pass.pipeline);
         if (!active) {
             return;
         }

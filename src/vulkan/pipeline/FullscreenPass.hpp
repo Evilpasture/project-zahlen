@@ -66,7 +66,7 @@ struct FullscreenPass {
     // Recorded draws take the proofs, not the raw state: `ctx` carries the
     // command buffer (references cannot be null), `active` a built pipeline,
     // `heap` a non-zero heap-index push. The three asserts this used to carry
-    // are unrepresentable here -- record-time factories (ActivePipeline::TryGet,
+    // are unrepresentable here -- record-time factories (ActivePipeline::From,
     // BoundHeapPass::Create) refuse to produce anything the draw cannot use.
     template <ShaderProgram... Modules, FullscreenPushPayload T>
     void ExecuteHeap(RasterPassContextBase& ctx, ActivePipeline active, BoundHeapPass heap, const T& pushData) const noexcept;

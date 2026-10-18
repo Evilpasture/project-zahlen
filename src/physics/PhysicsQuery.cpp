@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PhysicsWorld.hpp"
+#include <optional>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -42,25 +43,24 @@ class QueryFilter final: public JPH::BodyFilter {
     }
 };
 
-auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, Physics::BodyHandle& outHandle) -> bool {
+auto FindBodyHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID) -> std::optional<Physics::BodyHandle> {
     if (bodyID.IsInvalid()) {
-        [[unlikely]] return false;
+        [[unlikely]] return std::nullopt;
     }
 
     const uint64_t            rawData = world.bodyInterface->GetUserData(bodyID);
     const Physics::BodyHandle handle  = Physics::BodyHandle::Unpack(rawData);
 
     if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
-        [[unlikely]] return false;
+        [[unlikely]] return std::nullopt;
     }
 
     const Physics::SlotPredicate pred = Physics::GetSlotPredicate(world.LoadSlotState(handle.index));
 
     if (pred.isActive) {
-        outHandle = handle;
-        return true;
+        return handle;
     }
-    return false;
+    return std::nullopt;
 }
 
 }
@@ -89,7 +89,8 @@ auto PhysicsContext::Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float
 
     Physics::RaycastResult result {};
     if (hasHit) {
-        if (TryGetValidHandle(world, hit.mBodyID, result.handle)) {
+        if (const auto handle = FindBodyHandle(world, hit.mBodyID)) {
+            result.handle   = *handle;
             result.hasHit   = true;
             result.fraction = hit.mFraction;
             result.position = ray.GetPointOnRay(hit.mFraction);
@@ -146,7 +147,8 @@ void PhysicsContext::RaycastAll(
 
         for (const auto& hit: collector.mHits) {
             Physics::RaycastResult result {};
-            if (TryGetValidHandle(world, hit.mBodyID, result.handle)) {
+            if (const auto handle = FindBodyHandle(world, hit.mBodyID)) {
+                result.handle   = *handle;
                 result.hasHit   = true;
                 result.fraction = hit.mFraction;
                 result.position = ray.GetPointOnRay(hit.mFraction);
@@ -216,8 +218,7 @@ void PhysicsContext::RaycastAllPenetrations(
     hits.reserve(collector.mHits.size());
 
     for (const auto& hit: collector.mHits) {
-        Physics::BodyHandle handle {};
-        if (TryGetValidHandle(world, hit.mBodyID, handle)) {
+        if (const auto handle = FindBodyHandle(world, hit.mBodyID)) {
             JPH::BodyLockRead lock(*lockInterface, hit.mBodyID);
             if (lock.Succeeded()) {
                 JPH::RVec3 hitPos     = ray.GetPointOnRay(hit.mFraction);
@@ -235,9 +236,9 @@ void PhysicsContext::RaycastAllPenetrations(
             continue;
         }
 
-        const auto&  entryHit = hits[i];
-        Physics::BodyHandle handle {};
-        if (!TryGetValidHandle(world, entryHit.bodyID, handle)) {
+        const auto&       entryHit = hits[i];
+        const auto        handle   = FindBodyHandle(world, entryHit.bodyID);
+        if (!handle) {
             continue;
         }
 
@@ -245,9 +246,9 @@ void PhysicsContext::RaycastAllPenetrations(
 
         Physics::RaycastPenetrationResult res {};
         res.hasHit = true;
-        res.handle = handle;
+        res.handle = *handle;
 
-        uint32_t dense = world.slotToDense[handle.index];
+        uint32_t dense = world.slotToDense[handle->index];
         res.materialID = world.materialIDs[dense];
 
         if (!entryHit.isBackFace) {
@@ -331,7 +332,8 @@ auto PhysicsContext::Shapecast(
 
     Physics::ShapeCastResult result {};
     if (collector.HadHit()) {
-        if (TryGetValidHandle(world, collector.mHit.mBodyID2, result.handle)) {
+        if (const auto handle = FindBodyHandle(world, collector.mHit.mBodyID2)) {
+            result.handle       = *handle;
             result.hasHit       = true;
             result.fraction     = collector.mHit.mFraction;
             result.contactPoint = JPH::RVec3(collector.mHit.mContactPointOn2);
@@ -358,10 +360,9 @@ void PhysicsContext::OverlapSphere(JPH::RVec3Arg center, float radius, JPH::Arra
 
     query->CollideShape(shape, JPH::Vec3::sReplicate(1.0f), JPH::RMat44::sTranslation(center), {}, JPH::RVec3::sZero(), collector);
 
-    Physics::BodyHandle handle {};
     for (const auto& hit: collector.mHits) {
-        if (TryGetValidHandle(world, hit.mBodyID2, handle)) {
-            outResults.push_back(handle);
+        if (const auto handle = FindBodyHandle(world, hit.mBodyID2)) {
+            outResults.push_back(*handle);
         }
     }
 }
@@ -378,10 +379,9 @@ void PhysicsContext::OverlapAABB(JPH::RVec3Arg minBox, JPH::RVec3Arg maxBox, JPH
 
     query->CollideAABox(box, collector);
 
-    Physics::BodyHandle handle {};
     for (const auto& hitID: collector.mHits) {
-        if (TryGetValidHandle(world, hitID, handle)) {
-            outResults.push_back(handle);
+        if (const auto handle = FindBodyHandle(world, hitID)) {
+            outResults.push_back(*handle);
         }
     }
 }
@@ -402,9 +402,8 @@ void PhysicsContext::QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<Ph
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            Physics::BodyHandle handle {};
-            if (TryGetValidHandle(world, inBodyID, handle)) {
-                out.push_back(handle);
+            if (const auto handle = FindBodyHandle(world, inBodyID)) {
+                out.push_back(*handle);
             }
         }
     };
@@ -430,8 +429,7 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
         }
 
         void AddHit(const JPH::BodyID& inBodyID) override {
-            Physics::BodyHandle handle {};
-            if (TryGetValidHandle(world, inBodyID, handle)) {
+            if (const auto handle = FindBodyHandle(world, inBodyID)) {
                 JPH::BodyLockRead lock(world.system->GetBodyLockInterfaceNoLock(), inBodyID);
                 if (lock.Succeeded()) {
                     JPH::AABox bounds = lock.GetBody().GetWorldSpaceBounds();
@@ -439,7 +437,7 @@ void PhysicsContext::FrustumCull(const JPH::Mat44& viewProj, const Frustum& frus
                     float      radius = bounds.GetExtent().Length();
 
                     if (frustum.IsSphereVisible(center, radius)) {
-                        out.push_back(handle);
+                        out.push_back(*handle);
                     }
                 }
             }

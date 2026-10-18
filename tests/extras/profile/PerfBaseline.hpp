@@ -4,7 +4,7 @@
 // tests/extras/profile/PerfBaseline.hpp
 //
 // Performance baseline caching for TestPerformance / TestRenderPerformance,
-// built on the JSON extra (ReflectJSON::TryParse to read,
+// built on the JSON extra (ReflectJSON::Parse to read,
 // ReflectJSON::SerializeJSON to write), ZHLN::Mutex and ZHLN::Println.
 //
 // Every benchmark metric is recorded to perf-baseline.json at the PROJECT
@@ -14,7 +14,7 @@
 // fails the test via ZHLN::Test::VerifyBaseline (TestsFramework.hpp).
 //
 // Storage: one reflected struct (PerfBaselineFile below) serialised through
-// ReflectJSON::SerializeJSON and read back with ReflectJSON::TryParse --
+// ReflectJSON::SerializeJSON and read back with ReflectJSON::Parse --
 // the file format IS the struct declaration:
 // The machine key is hostname | Config.hpp Compiler | BuildType (+ " ASan"),
 // so different machines/toolchains/profiles keep independent baselines in
@@ -357,7 +357,7 @@ struct PerfBaselineFile {
     }
     const std::string text {(std::istreambuf_iterator<char> {file}), std::istreambuf_iterator<char> {}};
 
-    auto parsed = ReflectJSON::TryParse<PerfBaselineFile>(text, ReflectJSON::Options {.omitEmpty = true});
+    auto parsed = ReflectJSON::Parse<PerfBaselineFile>(text, ReflectJSON::Options {.omitEmpty = true});
     if (!parsed) {
         ZHLN::Println(stderr, "[perf-baseline] {} is malformed; starting a fresh baseline", path.string());
         return {};

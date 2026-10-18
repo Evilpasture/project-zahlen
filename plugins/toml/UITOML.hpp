@@ -14,7 +14,7 @@
 //     #include <UI/UITree.hpp>
 //     #include <toml/UITOML.hpp>
 //
-//     const auto tree = ReflectTOML::TryParse<ZHLN::GUI::UINode>(text);
+//     const auto tree = ReflectTOML::Parse<ZHLN::GUI::UINode>(text);
 //     const auto text = ReflectTOML::SerializeTOML(tree);
 //
 // Kind, Direction and Alignment come out as quoted enumerator names, children

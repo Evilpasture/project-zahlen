@@ -153,7 +153,7 @@ std::string GetString(const ZHLN::ReflectJSON::ValueReader& reader, std::string_
     return std::string(field->GetString().value_or(""));
 }
 
-// A raw ValueReader walk rather than ReflectJSON::TryParse<FidelityScenario>:
+// A raw ValueReader walk rather than ReflectJSON::Parse<FidelityScenario>:
 // the reflected parser treats a missing key as an error by default, and the
 // suite's scenario files are not guaranteed to carry every key this harness
 // knows. Reading each field with a default accepts all of them.

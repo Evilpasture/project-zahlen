@@ -761,9 +761,8 @@ struct PerformanceTestSuite {
                                      auto         trans = registry.Get<ZHLN::Components::TransformComponent>(e);
                                      auto         phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
                                      if (trans && phys) {
-                                         JPH::RVec3 pos;
-                                         if (physicsContext.TryGetBodyPosition(phys->physicsHandle, pos)) {
-                                             trans->position = JPH::Vec3(pos);
+                                         if (const auto pos = physicsContext.BodyPosition(phys->physicsHandle)) {
+                                             trans->position = JPH::Vec3(*pos);
                                          }
                                      }
                                  }

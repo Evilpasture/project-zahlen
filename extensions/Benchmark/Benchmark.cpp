@@ -207,12 +207,12 @@ void LogicBenchmark::Step(float fixedDt) {
         }
         ++bodies;
 
-        JPH::RVec3 position;
-        if (!physics.TryGetBodyPosition(physicsComponent->physicsHandle, position)) {
+        const auto position = physics.BodyPosition(physicsComponent->physicsHandle);
+        if (!position) {
             continue;
         }
         if (auto transform = registry.Get<Components::TransformComponent>(entity)) {
-            transform->position = static_cast<JPH::Vec3>(position);
+            transform->position = static_cast<JPH::Vec3>(*position);
         }
     }
 
