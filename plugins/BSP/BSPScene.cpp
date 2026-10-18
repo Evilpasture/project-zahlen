@@ -277,13 +277,22 @@ auto DescribeScene(const BSPMap& map, std::string_view virtualPath, const Import
             Scene::SceneLight light;
             light.name = entity.Find("targetname").empty() ? std::string(className) : std::string(entity.Find("targetname"));
 
-            // Sun, not a point at infinity: the engine's directional light is
-            // placed at the sky and shoots along -direction, so a Source sun
-            // direction is stored negated. The light_environment entity's
-            // origin is a mapper hint, not the light's position.
+            // Sun, not a point at infinity: LightComponent::direction is the
+            // toward-the-sun vector -- RenderSystem places the shadow camera at
+            // shadowCenter + direction * FarOffset and shading takes NdotL
+            // against it directly. AngleDirection already returns that vector
+            // for light_environment (Source's sun angles point AT the sun: this
+            // map's pitch -62 is a sun 62 degrees above the horizon, and
+            // -sin(-62deg) > 0), while the same formula on light_spot is the
+            // beam's travel direction, which the Spot branch below stores
+            // as-is. Negating the sun vector here aimed the directional light
+            // into the ground: NdotL_sun evaluated to zero on every up-facing
+            // surface and both the world and the 3D-skybox composite rendered
+            // their unlit ambient only. The light_environment entity's origin
+            // is a mapper hint, not the light's position.
             if (lightKind == LightEntityKind::Sun) {
                 light.type     = "Sun";
-                light.direction = {-sunDirection.GetX(), -sunDirection.GetY(), -sunDirection.GetZ()};
+                light.direction = {sunDirection.GetX(), sunDirection.GetY(), sunDirection.GetZ()};
                 light.position = {0.0f, 0.0f, 0.0f};
                 // Calibration: Source's stock 200-brightness sun maps onto the
                 // engine's LightingSystem default of 180, and the exposure the

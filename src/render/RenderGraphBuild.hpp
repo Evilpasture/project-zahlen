@@ -52,7 +52,6 @@ using ScenePushConstants = Slang::ScenePassPushConstants;
         .enableRTR   = (impl.frames.tlas[impl.presenter.frameIndex] && (settings.rayTracing.enableReflections || settings.rayTracing.enableShadows)) ?
                            settings.post.enableRTR :
                            0,
-        ._pad        = {},
     };
 }
 
@@ -115,11 +114,10 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::GBufferResolvePass {.cull = self.culling, .csg = self.csg, .particles = self.meshParticles, .frame = self},
         Passes::DecalPass {.decals = self.decals, .frame = self}, Passes::ViewmodelPass {.frame = self}, Passes::TranslucentPrePass {.frame = self},
         Passes::ComputePass<Passes::GtaoDesc> {.frame = self, .pc = pc}, Passes::ComputePass<Passes::DdgiTraceDesc> {.frame = self},
-        Passes::ComputePass<Passes::DdgiUpdateDesc> {.frame = self},
-        Passes::ComputePass<Passes::RtShadowDesc> {.frame = self},
+        Passes::ComputePass<Passes::DdgiUpdateDesc> {.frame = self}, Passes::ComputePass<Passes::RtShadowDesc> {.frame = self},
         Passes::AtrousDenoisePass<
-            "ShadowDenoise", Shaders::ShadowDenoise, Res_RtShadowMask, Res_ShadowDenoiseA, Res_ShadowDenoiseB, Res_RtShadowHistory,
-            ShadowAtrousPushConstants, Passes::ShadowDenoiseGate> {.frame = self},
+            "ShadowDenoise", Shaders::ShadowDenoise, Res_RtShadowMask, Res_ShadowDenoiseA, Res_ShadowDenoiseB, Res_RtShadowHistory, ShadowAtrousPushConstants,
+            Passes::ShadowDenoiseGate> {.frame = self},
         Passes::ClusteredLightingPass {.post = self.post, .frame = self, .pc = pc}, Passes::ComputePass<Passes::RtrHalfTraceDesc> {.frame = self},
         Passes::ComputePass<Passes::RtgiHalfTraceDesc> {.frame = self},
         Passes::AtrousDenoisePass<
@@ -132,7 +130,8 @@ template <AAMode Mode, typename GetSwapchainImageT>
         Passes::OpaqueSceneCopyPass {.impl = self}, Passes::ForwardPass {.forward = self.forward, .frame = self},
         Passes::AtrousDenoisePass<
             "HdrDenoise", Shaders::HdrDenoise, Res_HdrSceneColor, Res_DenoiseA, Res_DenoiseB, void, HdrAtrousPushConstants, Passes::HdrDenoiseGate> {
-            .frame = self},
+            .frame = self
+        },
         Passes::BloomPass {.frame = self}
     );
 
@@ -140,20 +139,22 @@ template <AAMode Mode, typename GetSwapchainImageT>
         if constexpr (Mode == AAMode::TAA) {
             return Vk::MakePassPack(
                 Passes::FullscreenPass<
-                    "TAA", Shaders::Taa, Shaders::Modules::TaaPS, Res_AccumCurrent, TAAPushConstants, decltype(kTaaPrepare), Res_HdrSceneColor,
-                    Res_Velocity, Res_Depth, Res_AccumPrevious> {.frame = self, .pipeline = self.antiAliasing.taa, .prepare = kTaaPrepare}
+                    "TAA", Shaders::Taa, Shaders::Modules::TaaPS, Res_AccumCurrent, TAAPushConstants, decltype(kTaaPrepare), Res_HdrSceneColor, Res_Velocity,
+                    Res_Depth, Res_AccumPrevious> {.frame = self, .pipeline = self.antiAliasing.taa, .prepare = kTaaPrepare}
             );
         } else if constexpr (Mode == AAMode::FXAA) {
             return Vk::MakePassPack(
                 Passes::FullscreenPass<
                     "FXAA", Shaders::Fxaa, Shaders::Modules::FxaaPS, Res_AccumCurrent, FXAAPushConstants, decltype(kFxaaPrepare), Res_HdrSceneColor> {
-                    .frame = self, .pipeline = self.antiAliasing.fxaa, .prepare = kFxaaPrepare}
+                    .frame = self, .pipeline = self.antiAliasing.fxaa, .prepare = kFxaaPrepare
+                }
             );
         } else if constexpr (Mode == AAMode::MLAA) {
             return Vk::MakePassPack(
                 Passes::FullscreenPass<
                     "MLAA", Shaders::Mlaa, Shaders::Modules::MlaaPS, Res_AccumCurrent, MLAAPushConstants, decltype(kMlaaPrepare), Res_HdrSceneColor> {
-                    .frame = self, .pipeline = self.antiAliasing.mlaa, .prepare = kMlaaPrepare}
+                    .frame = self, .pipeline = self.antiAliasing.mlaa, .prepare = kMlaaPrepare
+                }
             );
         } else if constexpr (Mode == AAMode::SMAA) {
             return Vk::MakePassPack(

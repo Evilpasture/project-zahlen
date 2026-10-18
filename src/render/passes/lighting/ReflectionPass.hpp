@@ -29,7 +29,9 @@ struct ReflectionPass:
     Slang::ScenePassPushConstants pc {};
 
     void operator()(Vk::RasterPassContextBase& ctx) const noexcept {
-        frame.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(frame), pc);
+        Slang::ScenePassPushConstants push = pc;
+        push.translucentSurface = SurfaceTag::kTranslucentSurface;
+        frame.reflectionPipeline.Dispatch(ctx, SurfaceTag::Resolve(frame), push);
     }
 };
 

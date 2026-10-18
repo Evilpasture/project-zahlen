@@ -15,7 +15,11 @@ public struct ScenePassPushConstants {
     public int giSamples;
     public int enableSSR;
     public int enableRTR;
-    public int _pad;
+    // 1 when the dispatch composites the translucent G-buffer (the
+    // "TransReflection" pass): pixels holding no translucent surface mirror the
+    // opaque scene color instead of re-running the sky fill, which the opaque
+    // reflection pass already composited.
+    public int translucentSurface;
 };
 
 public struct DescriptorHeapPushData {

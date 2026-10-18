@@ -29,7 +29,7 @@ struct PushConstants {
     int giSamples;
     int enableSSR;
     int enableRTR;
-    int _pad;
+    int translucentSurface;
 };
 [vk::push_constant]
 PushConstants pc;
@@ -343,6 +343,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float viewDepth = 250.0f;
 
     if (depth >= 1.0f) {
+        // The translucent composite exists only where the prepass drew a
+        // translucent surface. Everywhere else its job is to mirror the opaque
+        // scene (what a transmitted ray sees behind the glass), never to
+        // re-trace the sky fill -- the opaque pass already composited that, and
+        // an all-sky full-screen trace here was the frame's costliest pass.
+        if (pc.translucentSurface != 0) {
+            return float4(texInput.SampleLevel(pointSampler, input.uv, 0).rgb, 1.0f);
+        }
         if (frame.environmentMode == 2) {
             return float4(0.0f, 0.0f, 0.0f, 0.0f);
         }

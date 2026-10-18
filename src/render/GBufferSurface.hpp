@@ -19,6 +19,9 @@ struct OpaqueSurface {
     using Sheen      = Res_Sheen;
     using Anisotropy = Res_Anisotropy;
 
+    // Mirrors ScenePassPushConstants::translucentSurface for this G-buffer.
+    static constexpr int kTranslucentSurface = 0;
+
     [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
         return {
             .depth      = Vk::Assume<Vk::ShaderRead<Depth>>(impl.presenter.depthTarget).Raw(),
@@ -34,6 +37,9 @@ struct TranslucentSurface {
     using Normals    = Res_TransNorm;
     using Sheen      = Res_TransSheen;
     using Anisotropy = Res_TransAnisotropy;
+
+    // Mirrors ScenePassPushConstants::translucentSurface for this G-buffer.
+    static constexpr int kTranslucentSurface = 1;
 
     [[nodiscard]] static auto Resolve(RenderFrameContext& impl) noexcept -> GBufferSurface {
         return {
