@@ -25,7 +25,7 @@ struct ChannelTestSuite {
 
     struct Tests {
         // --- 1. Basic Push, TryPop & Size ---
-        std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
+        static std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
             ZHLN::Channel<int> chan;
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
@@ -38,13 +38,21 @@ struct ChannelTestSuite {
 
             auto val = chan.TryPop();
             ZHLN::Test::ExpectTrue(val.has_value());
-            ZHLN::Test::ExpectEq(*val, 10);
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 10);
+            }
 
+            val = chan.TryPop();
             ZHLN::Test::ExpectTrue(val.has_value());
-            ZHLN::Test::ExpectEq(*val, 20);
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 20);
+            }
 
+            val = chan.TryPop();
             ZHLN::Test::ExpectTrue(val.has_value());
-            ZHLN::Test::ExpectEq(*val, 30);
+            if (val) {
+                ZHLN::Test::ExpectEq(*val, 30);
+            }
 
             // Pop on empty channel should safely fail without stalling
             ZHLN::Test::ExpectFalse(chan.TryPop().has_value());
@@ -54,7 +62,7 @@ struct ChannelTestSuite {
         }
 
         // --- 2. Concurrent Producer-Consumer over TaskSystem ---
-        std::expected<void, ZHLN::ErrorCode> concurrent_channel_streaming() {
+        static std::expected<void, ZHLN::ErrorCode> concurrent_channel_streaming() {
             ZHLN::Channel<int> chan;
             constexpr int      kTotalMessages = 1000;
             std::atomic<int>   receivedSum {0};
@@ -91,6 +99,6 @@ struct ChannelTestSuite {
 
 // Exported for the threading group binary (RunThreadingTests.cpp), which
 // aggregates every suite in this directory through Runner::RunDeferred.
-auto RunChannelSuite() -> ZHLN::Test::TestStats {
+static auto RunChannelSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<ChannelTestSuite>();
 }
