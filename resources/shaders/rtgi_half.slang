@@ -49,7 +49,11 @@ float3 DirectSunFallback(float3 hitPos, float3 hitNormal, float3 baseColor, floa
     shadowRay.TMax      = 300.0f;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> shadowQuery;
-    shadowQuery.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, shadowRay);
+    // Main world only (kRayMaskWorld). The background layer is scenery the
+    // rasterizer composites, not a GI participant: the miniscape surrounds the
+    // player, so a 0xFF mask let every GI/shadow ray hit the skybox city and
+    // its ground -- false shadowing and fireflies on every world surface.
+    shadowQuery.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, shadowRay);
     while (shadowQuery.Proceed()) {
     }
 
@@ -59,7 +63,14 @@ float3 DirectSunFallback(float3 hitPos, float3 hitNormal, float3 baseColor, floa
     return ClampFireflies(baseColor * diffuseWeight * frame.sunRadiance.xyz * (nDotL / PI), MAX_GI_LUM);
 }
 
-float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal, float3 viewDirection) {
+// sunResolved: the hit normal came from the triangle itself. When it did not
+// (a BLAS without position data, or a degenerate triangle) the normal falls
+// back to +Y, and DirectSunFallback would then light that unknown surface as if
+// it faced the sun -- full sun radiance on a wall the world itself renders in
+// shadow, which is exactly the isolated bright sample the GI buffer sprouts.
+// The ambient term still applies: it is bounded by the sky/SH level, so an
+// unresolved normal can tint a sample but cannot turn it into a firefly.
+float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal, float3 viewDirection, bool sunResolved) {
     float3 baseColor = max(hitInst.baseColorFactor.rgb, float3(0.0f));
     float3 emissive  = max(hitInst.emissiveFactor.rgb, float3(0.0f));
     if (hitInst.isUnlit) {
@@ -86,7 +97,9 @@ float3 FallbackHitRadiance(InstanceData hitInst, float3 hitPos, float3 hitNormal
         (1.0f - metallic);
     float3 ambientIrradiance = SampleDDGIOrSH(hitPos, hitNormal, viewDirection, frame, texDdgiIrradiance, texDdgiDistance, clampSampler);
     float3 outgoing = baseColor * diffuseWeight * ambientIrradiance;
-    outgoing += DirectSunFallback(hitPos, hitNormal, baseColor, diffuseWeight);
+    if (sunResolved) {
+        outgoing += DirectSunFallback(hitPos, hitNormal, baseColor, diffuseWeight);
+    }
     return outgoing + emissive;
 }
 
@@ -137,7 +150,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     ray.TMax      = 100.0f;
 
     RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> query;
-    query.TraceRayInline(tlas, RAY_FLAG_NONE, 0xFF, ray);
+    query.TraceRayInline(tlas, RAY_FLAG_NONE, kRayMaskWorld, ray);
     while (query.Proceed()) {
     }
 
@@ -145,7 +158,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
         float rayT = query.CommittedRayT();
         float3 hitPos = ray.Origin + ray.Direction * rayT;
-        float3 hitNormal = float3(0.0f, 1.0f, 0.0f);
+        float3 hitNormal   = float3(0.0f, 1.0f, 0.0f);
+        bool   sunResolved = false;
 
         InstanceData hitInst = g_instances[query.CommittedInstanceID()];
         if (hitInst.posAddress != 0) {
@@ -168,7 +182,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             float3 crossNormal = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
             float normalLengthSquared = dot(crossNormal, crossNormal);
             if (normalLengthSquared > 1e-7f) {
-                hitNormal = crossNormal * rsqrt(normalLengthSquared);
+                hitNormal   = crossNormal * rsqrt(normalLengthSquared);
+                sunResolved = true;
             }
         }
         if (dot(hitNormal, ray.Direction) > 0.0f) {
@@ -179,7 +194,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         // lighting made the same hit switch radiance whenever it crossed the
         // viewport, depth, or normal acceptance thresholds as the camera
         // rotated. The fallback is deterministic for a given world-space hit.
-        radiance = FallbackHitRadiance(hitInst, hitPos, hitNormal, -ray.Direction);
+        radiance = FallbackHitRadiance(hitInst, hitPos, hitNormal, -ray.Direction, sunResolved);
     } else {
         // Clustered lighting already supplies baseline SH sky and direct sun.
         // An escaped GI ray must not add that environment a second time; only

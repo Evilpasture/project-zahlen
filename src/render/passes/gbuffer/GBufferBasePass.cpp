@@ -157,8 +157,12 @@ void RecordCpuCulled(PassContext& passCtx, uint32_t drawCount, const GBufferTarg
             },
             [&](Vk::CommandEncoder& encoder, uint32_t i) {
                 const auto& drawCmd = ctx.queues.Draws()[i];
+                // The background layer draws only in BackgroundGBufferPass; a
+                // second stamp here would write the skybox into the world
+                // pass's cleared G-buffer ahead of its own pass.
                 if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
-                    drawCmd.material->pipeline == VK_NULL_HANDLE || IsForwardOnly(drawCmd.instanceData.flags)) {
+                    (drawCmd.flags & DrawFlags::Background) != DrawFlags::None || drawCmd.material->pipeline == VK_NULL_HANDLE ||
+                    IsForwardOnly(drawCmd.instanceData.flags)) {
                     return;
                 }
                 SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());

@@ -67,6 +67,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float  totalWeight = 0.0f;
     float4 nbMin       = centerValue;
     float4 nbMax       = centerValue;
+    // Same-plane neighbours only: the firefly test below must compare the
+    // centre against pixels that describe the same surface, never against a
+    // silhouette's lit side.
+    float4 nbPlaneMax  = float4(0.0f);
+    uint   nbPlane     = 0u;
 
     for (int y = -2; y <= 2; ++y) {
         for (int x = -2; x <= 2; ++x) {
@@ -100,12 +105,33 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             float weight  = WaveletKernel[x + 2] * WaveletKernel[y + 2] * wPlane * wNormal * wLuma;
 
             if (wPlane * wNormal > 0.25f) {
-                nbMin = min(nbMin, sampleValue);
-                nbMax = max(nbMax, sampleValue);
+                nbMin      = min(nbMin, sampleValue);
+                nbMax      = max(nbMax, sampleValue);
+                nbPlaneMax = max(nbPlaneMax, sampleValue);
+                ++nbPlane;
             }
 
             sum         += sampleValue * weight;
             totalWeight += weight;
+        }
+    }
+
+    // Firefly rejection. This chain averages at most 5x5 taps, so a single
+    // sample carrying several times the radiance of every neighbour that
+    // shares its plane -- a bad bounce, an unresolved hit normal, a firefly
+    // that survived the trace's own clamp -- lands in the frame as a lone
+    // bright dot, and the temporal history then pins it for as long as the
+    // camera dwells. Drop the sample instead of filtering it: alpha 0 means
+    // "no GI/reflection here" to both the composite and the temporal
+    // accumulation, so the pixel keeps the world's own lighting rather than an
+    // invented value. A real light edge cannot trigger this: the neighbours it
+    // is compared against are on the centre's own plane.
+    if (nbPlane >= 4u) {
+        float centerPeak = max(centerValue.r, max(centerValue.g, centerValue.b));
+        float planePeak  = max(nbPlaneMax.r, max(nbPlaneMax.g, nbPlaneMax.b));
+        if (centerPeak > planePeak * 2.0f + 0.02f) {
+            outColor[tid.xy] = float4(0.0f);
+            return;
         }
     }
 

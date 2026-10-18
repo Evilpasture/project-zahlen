@@ -302,7 +302,14 @@ struct ImportedMapData {
 struct SkyboxTransform {
     bool  active = false;
     float origin[3] = {0.0f, 0.0f, 0.0f}; // sky_camera origin
-    float anchor[3] = {0.0f, 0.0f, 0.0f}; // world point the sky_camera maps to
+    // World point the sky_camera maps to: the player's eye. The authored
+    // skybox ground sits BELOW the sky_camera (gm_murder_drones: 4..37 u), so
+    // the miniscape's floor always ends up below the eye and never crosses the
+    // horizon in front of the backdrop. Keep it that way -- lifting the anchor
+    // to "ground" the miniscape puts its terrain above the eye, where it
+    // rasterizes as a wall across the skybox and, being in the TLAS, falsely
+    // shadows the world's sun rays.
+    float anchor[3] = {0.0f, 0.0f, 0.0f};
     float rot[9]    = {1, 0, 0, 0, 1, 0, 0, 0, 1}; // sky_camera angles
     float scale     = 16.0f;
     // Membership: near the sky_camera in X/Y and above the z gap that separates

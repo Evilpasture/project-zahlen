@@ -42,7 +42,7 @@ bool SphereFrustumVisible(float3 center, float radius) {
     return true;
 }
 
-bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float outMinZ) {
+bool ProjectAABB(float3 center, float radius, bool background, out float4 outUvBounds, out float outMinZ) {
     outUvBounds = float4(0.0f, 0.0f, 1.0f, 1.0f);
     outMinZ     = 0.0f;
 
@@ -63,7 +63,9 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
         }
 
         float3 ndc = clipPos.xyz / clipPos.w;
-        ndc.z *= kSkyDepthSplit; // HiZ holds banded depth (see kSkyDepthSplit)
+        // HiZ holds banded depth (see kSkyDepthSplit): the world compresses
+        // into [0, split], the background layer into [split, 1].
+        ndc.z = background ? kSkyDepthSplit + ndc.z * (1.0f - kSkyDepthSplit) : ndc.z * kSkyDepthSplit;
         float2 uv  = ndc.xy * 0.5f + 0.5f;
 
         minUV = min(minUV, uv);
@@ -75,10 +77,10 @@ bool ProjectAABB(float3 center, float radius, out float4 outUvBounds, out float 
     return true;
 }
 
-bool IsHiZVisible(float3 center, float radius) {
+bool IsHiZVisible(float3 center, float radius, bool background) {
     float4 uvBounds;
     float minZ;
-    if (!ProjectAABB(center, radius, uvBounds, minZ))
+    if (!ProjectAABB(center, radius, background, uvBounds, minZ))
         return true;
 
     float2 size        = (uvBounds.zw - uvBounds.xy) * cullConstants.hizScreenSize;
@@ -101,6 +103,7 @@ void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
             return;
 
         InstanceData inst = g_instances[index];
+        const bool  isBackground = (inst.flags & kInstanceFlagBackground) != 0u;
         float3 center     = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
         float scaleX      = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
         float scaleY      = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
@@ -111,7 +114,7 @@ void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
         bool pass1Visible   = false;
 
         if (frustumVisible) {
-            pass1Visible = IsHiZVisible(center, radius);
+            pass1Visible = IsHiZVisible(center, radius, isBackground);
             if (!pass1Visible) {
                 uint candidateSlot;
                 InterlockedAdd(g_secondPassCount[0], 1, candidateSlot);
@@ -136,13 +139,14 @@ void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
 
         uint index        = g_secondPassCandidates[candidateIdx];
         InstanceData inst = g_instances[index];
+        const bool  isBackground = (inst.flags & kInstanceFlagBackground) != 0u;
         float3 center     = mul(inst.world, float4(inst.localCenter, 1.0f)).xyz;
         float scaleX      = length(float3(inst.world._m00, inst.world._m10, inst.world._m20));
         float scaleY      = length(float3(inst.world._m01, inst.world._m11, inst.world._m21));
         float scaleZ      = length(float3(inst.world._m02, inst.world._m12, inst.world._m22));
         float radius      = inst.cullRadius * max(scaleX, max(scaleY, scaleZ));
 
-        bool pass2Visible = IsHiZVisible(center, radius);
+        bool pass2Visible = IsHiZVisible(center, radius, isBackground);
 
         DrawIndirectCommand cmd;
         cmd.vertexCount           = inst.indexCount > 0 ? inst.indexCount : inst.vertexCount;

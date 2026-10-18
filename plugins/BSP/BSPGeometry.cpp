@@ -571,6 +571,11 @@ void ParseVec3(std::string_view text, float out[3]) {
 
 } // namespace
 
+namespace {
+// Source's standing view height (VEC_VIEW): the sky_camera maps to the eye.
+constexpr float kSourceViewHeight = 64.0f;
+} // namespace
+
 auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
     SkyboxTransform t;
 
@@ -608,6 +613,11 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
         const std::string_view cls = entity.Find("classname");
         if (cls.starts_with("info_player")) {
             ParseVec3(entity.Find("origin"), t.anchor);
+            // Source composes the 3D skybox around the view origin, not around
+            // the spawn's feet: the sky_camera maps to the player's EYE.
+            // Anchoring at the feet drops the whole miniscape by 64 units and
+            // is what the removed "ground" lift used to paper over.
+            t.anchor[2] += kSourceViewHeight;
             break;
         }
     }
@@ -651,29 +661,17 @@ auto MakeSkyboxTransform(const BSPMap& map) noexcept -> SkyboxTransform {
         }
     }
 
-    // Ground alignment: Source composes the skybox against the player's eye at
-    // 1:1 scale, but the scaled miniscape's own ground sits a little below the
-    // world's terrain when placed statically ("a little bit buried"). Lift the
-    // whole transform so the miniscape's ground plane (the placed-z p20 of its
-    // face centroids) lands at the anchor's ground level.
-    {
-        std::vector<float> placedZ;
-        placedZ.reserve(map.faces.size() / 2);
-        for (const DFace& face: map.faces) {
-            const auto c = FaceCentroidSource(map, face);
-            const float p[3] = {c[0], c[1], c[2]};
-            if (!IsSkyboxPoint(t, p)) {
-                continue;
-            }
-            placedZ.push_back(t.anchor[2] + (c[2] - t.origin[2]) * t.scale);
-        }
-        if (placedZ.size() >= 16) {
-            const size_t      k = placedZ.size() / 5; // ~p20
-            std::nth_element(placedZ.begin(), placedZ.begin() + static_cast<long>(k), placedZ.end());
-            const float groundZ = t.anchor[2];
-            t.anchor[2] += groundZ - placedZ[k];
-        }
-    }
+    // No ground-alignment lift. Source maps the sky_camera to the player's eye
+    // and draws the miniscape 1:1 around it; the authored skybox ground sits
+    // 4..37 source units BELOW the sky_camera (gm_murder_drones: floor at
+    // z 3040..3073, camera at 3077), i.e. 1.6..15 m below the eye -- that is
+    // what keeps a skybox floor from ever rising above the horizon and cutting
+    // the backdrop. A percentile over all placed face centroids cannot express
+    // that rule: 8,845 concrete wall faces outvote the 34 floor faces, the p20
+    // lands inside the wall band, and the resulting lift (+208 u on this map)
+    // pushed the snow terrain to +273 u -- above the 193 u eye line, where the
+    // ground becomes a wall in front of the skybox city. The authored offset
+    // is the correct one; the transform only maps source space to world space.
     return t;
 }
 
