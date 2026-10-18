@@ -7,14 +7,7 @@
 
 namespace ZHLN::Passes {
 
-struct DecalPushConstants {
-    JPH::Mat44 worldMatrix;
-    JPH::Mat44 clipToLocal;
-    uint32_t   albedoIndex;
-    uint32_t   normalIndex;
-    float      roughness;
-    float      metallic;
-};
+using DecalPushConstants = Slang::DecalPushConstants;
 static_assert(GpuAbi::ScenePassPayload<DecalPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void DecalPass::operator()(Vk::RasterPassContextBase& ctx) const noexcept {

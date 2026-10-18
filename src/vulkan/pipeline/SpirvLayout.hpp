@@ -79,13 +79,16 @@ class SpirvTypes {
     static constexpr uint16_t kSpirvDecorationOffset         = 35;
     static constexpr uint32_t kSpirvStoragePushConstant      = 9;
 
-    static constexpr uint32_t kTypeCapacity        = 256;
-    static constexpr uint32_t kMemberCapacity      = 512;
-    static constexpr uint32_t kNameCapacity        = 192;
-    static constexpr uint32_t kMemberNameCapacity  = 384;
-    static constexpr uint32_t kStrideCapacity      = 128;
-    static constexpr uint32_t kDecorationCapacity  = 384;
-    static constexpr uint32_t kConstantCapacity    = 512;
+    static constexpr uint32_t kTypeCapacity        = 512;
+    static constexpr uint32_t kMemberCapacity      = 1024;
+    static constexpr uint32_t kNameCapacity        = 768;
+    // The tables below carry the ABI module's own names and decorations: the
+    // push-payload migration grew the generated inventory from 27 to 49
+    // types, and the module now spells 555 names and 479 decorations.
+    static constexpr uint32_t kMemberNameCapacity  = 640;
+    static constexpr uint32_t kStrideCapacity      = 256;
+    static constexpr uint32_t kDecorationCapacity  = 640;
+    static constexpr uint32_t kConstantCapacity    = 768;
     static constexpr uint32_t kVariableCapacity    = 32;
 
     constexpr SpirvTypes() noexcept = default;

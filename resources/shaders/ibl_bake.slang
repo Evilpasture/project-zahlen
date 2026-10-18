@@ -1,22 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import gpu_buffer;
 import sampling;
-
-public struct IBLBakePush {
-    public uint64_t outAddr;
-    public uint width;
-    public uint height;
-    public float roughness;
-    public uint face;
-    public uint sampleCount;
-    public uint hasRadiance;
-    public float4 skyZenith;
-    public float4 skyHorizon;
-    public float4 skyGround;
-    public float4 sunDir;
-};
 
 [vk::push_constant]
 IBLBakePush pc;

@@ -9,9 +9,7 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct SmaaPushConstants {
-    JPH::Float4 rtMetrics;
-};
+using SmaaPushConstants = Slang::SmaaPushConstants;
 static_assert(GpuAbi::ScenePassPayload<SmaaPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 [[nodiscard]] auto MetricsOf(VkExtent2D extent) noexcept {

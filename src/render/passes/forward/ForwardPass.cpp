@@ -11,19 +11,10 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct ParticleRenderPushConstants {
-    VkDeviceAddress          particleBufferAddr;
-    Slang::ParticleAlignment alignment;
-    uint32_t                 textureIndex;
-};
+using ParticleRenderPushConstants = Slang::ParticleRenderPushConstants;
 static_assert(GpuAbi::ScenePassPayload<ParticleRenderPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
-struct LinePushConstants {
-    JPH::Mat44      viewProj;
-    VkDeviceAddress vertexBufferAddress;
-};
-static_assert(sizeof(LinePushConstants) == 80);
-static_assert(offsetof(LinePushConstants, vertexBufferAddress) == 64);
+using LinePushConstants = Slang::LinePushConstants;
 
 } // namespace
 

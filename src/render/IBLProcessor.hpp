@@ -127,15 +127,17 @@ class IBLProcessor {
         ZHLN::defer cleanupStaging([&] { stagedInput->Destroy(impl.allocator); });
 
         // 4. Descriptor Heap Setups
-        const auto        toVec4 = [](std::span<const float, 4> v) { return JPH::Vec4(v[0], v[1], v[2], v[3]); };
+        const auto        toFloat4 = [](std::span<const float, 4> v) { return JPH::Float4 {v[0], v[1], v[2], v[3]}; };
+        const JPH::Vec3  sunDir3 = JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized();
+        const JPH::Float4 sunDir4 {sunDir3.GetX(), sunDir3.GetY(), sunDir3.GetZ(), 0.0f};
         const IBLBakePush basePush {
             .outAddr     = hasPreparedSH ? 0 : impl.ctx.BufferAddress(shBuffer.Handle()),
             .sampleCount = 16384,
             .hasRadiance = hasRadiance ? 1u : 0u,
-            .skyZenith   = toVec4(sky.skyZenith),
-            .skyHorizon  = toVec4(sky.skyHorizon),
-            .skyGround   = toVec4(sky.skyGround),
-            .sunDir      = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f),
+            .skyZenith   = toFloat4(sky.skyZenith),
+            .skyHorizon  = toFloat4(sky.skyHorizon),
+            .skyGround   = toFloat4(sky.skyGround),
+            .sunDir      = sunDir4,
         };
 
         impl.heapManager.BeginImmediate();
@@ -437,28 +439,11 @@ class IBLProcessor {
         }
     }
 
-    struct BRDFLUTPush {
-        uint32_t width       = 0;
-        uint32_t height      = 0;
-        uint32_t sampleCount = 0;
-    };
+using BRDFLUTPush = Slang::BRDFLUTPush;
     static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>);
 
-    struct IBLBakePush {
-        uint64_t  outAddr     = 0;
-        uint32_t  width       = 0;
-        uint32_t  height      = 0;
-        float     roughness   = 0.0f;
-        uint32_t  face        = 0;
-        uint32_t  sampleCount = 0;
-        uint32_t  hasRadiance = 0;
-        JPH::Vec4 skyZenith   = JPH::Vec4::sZero();
-        JPH::Vec4 skyHorizon  = JPH::Vec4::sZero();
-        JPH::Vec4 skyGround   = JPH::Vec4::sZero();
-        JPH::Vec4 sunDir      = JPH::Vec4::sZero();
-    };
+using IBLBakePush = Slang::IBLBakePush;
     static_assert(GpuAbi::ScenePassPayload<IBLBakePush>);
-    static_assert(sizeof(IBLBakePush) == 96);
 };
 
 } // namespace ZHLN

@@ -1,16 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import ddgi_common;
 import pbr_helpers;
 import uniforms;
 
-struct DdgiUpdatePushConstants {
-    uint  totalProbes;
-    uint  raysPerProbe;
-    float hysteresis;
-    float depthSharpness;
-};
 [vk::push_constant]
 DdgiUpdatePushConstants pc;
 

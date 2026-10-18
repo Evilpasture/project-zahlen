@@ -1,3 +1,4 @@
+import gpu_push_constants;
 import uniforms;
 struct VSOutput {
     float4 pos : SV_Position;
@@ -18,11 +19,8 @@ Texture2D<float2> texVelocity;
 SamplerState smp;
 ConstantBuffer<FrameUniforms> frame;
 
-struct PushConstants {
-    float feedback;
-};
 [vk::push_constant]
-PushConstants pc;
+TAAPushConstants pc;
 
 float3 RGBToYCoCg(float3 rgb) {
     float Y  = dot(rgb, float3(0.25f, 0.50f, 0.25f));

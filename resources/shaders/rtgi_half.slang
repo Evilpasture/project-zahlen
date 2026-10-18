@@ -1,16 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-struct RtgiHalfPushConstants {
-    uint2 halfRes;
-    uint2 _pad;
-};
 [vk::push_constant]
 RtgiHalfPushConstants pc;
 

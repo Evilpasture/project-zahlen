@@ -7,13 +7,7 @@
 
 namespace ZHLN::Passes {
 
-struct HiZPushConstants {
-    float    rcpSrcWidth;
-    float    rcpSrcHeight;
-    uint32_t srcWidth;
-    uint32_t srcHeight;
-    uint32_t isFirstPass;
-};
+using HiZPushConstants = Slang::HiZPushConstants;
 static_assert(GpuAbi::ScenePassPayload<HiZPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void HiZGeneratePass::operator()(VkCommandBuffer cmd) const noexcept {

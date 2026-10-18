@@ -172,14 +172,19 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // extras for undeclared variables are legal, missing ones are not
     // (VUID-VkGraphicsPipelineCreateInfo-flags-11312).
     const auto buildSceneBlock = [this](uint32_t set) {
-        return Vk::HeapMappingBuilder(heapManager)
-            .Sampler(set, 0, globalSamplerSlot)
-            .UniformBufferAddress(set, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-            .StorageBufferAddress(set, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
-            .StorageBufferAddress(set, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
-            .StorageBufferAddress(set, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
-            .StorageBufferAddress(set, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
-            .StorageBufferAddress(set, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
+        auto builder = Vk::HeapMappingBuilder(heapManager);
+        std::move(builder).Sampler(set, 0, globalSamplerSlot);
+        // The six frame addresses: binding numbers and push offsets come from
+        // the generated metadata (the Slang field <-> binding association),
+        // not a positional six-element convention.
+        for (const auto& entry : Slang::kFrameAddressMeta) {
+            if (entry.uniformBuffer) {
+                std::move(builder).UniformBufferAddress(set, entry.binding, entry.offset);
+            } else {
+                std::move(builder).StorageBufferAddress(set, entry.binding, entry.offset);
+            }
+        }
+        return std::move(builder)
             .SampledImage(set, 7, iblPrefilteredSlot)
             .SampledImage(set, 8, iblBrdfLutSlot)
             .Sampler(set, 9, clampSamplerSlot)

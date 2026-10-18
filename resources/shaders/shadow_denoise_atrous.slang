@@ -1,19 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import gpu_push_constants;
 import math.math;
 import pbr_helpers;
 import uniforms;
 
-struct AtrousPushConstants {
-    uint  stepSize;
-    float phiDepth;
-    float phiNormal;
-    float temporalWeight;
-};
-
 [vk::push_constant]
-AtrousPushConstants pc;
+ShadowAtrousPushConstants pc;
 
 Texture2D<float> inShadow;
 Texture2D<float> texDepth;

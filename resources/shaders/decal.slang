@@ -1,15 +1,8 @@
 
+import gpu_push_constants;
 import common;
 import pbr_helpers;
 
-struct DecalPushConstants {
-    float4x4 worldMatrix;
-    float4x4 clipToLocal;
-    uint albedoIndex;
-    uint normalIndex;
-    float roughness;
-    float metallic;
-};
 [vk::push_constant]
 DecalPushConstants pc;
 

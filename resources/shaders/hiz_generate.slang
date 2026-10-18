@@ -1,14 +1,8 @@
 
-struct PushConstants {
-    float rcpSrcWidth;
-    float rcpSrcHeight;
-    uint srcWidth;
-    uint srcHeight;
-    uint isFirstPass;
-};
+import gpu_push_constants;
 
 [vk::push_constant]
-PushConstants pc;
+HiZPushConstants pc;
 
 Texture2D<float> inDepth;
 RWTexture2D<float> outDepth;

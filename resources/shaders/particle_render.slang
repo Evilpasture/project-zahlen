@@ -1,4 +1,5 @@
 
+import gpu_push_constants;
 import common;
 import gpu_buffer;
 import uniforms;
@@ -10,13 +11,8 @@ struct Particle {
     float4 params;
 };
 
-struct RenderPushConstants {
-    uint64_t particleBufferAddr;
-    ParticleAlignment alignment;
-    uint textureIndex;
-};
 [vk::push_constant]
-RenderPushConstants pc;
+ParticleRenderPushConstants pc;
 
 
 struct ParticleVSOutput {

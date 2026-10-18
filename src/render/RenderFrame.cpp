@@ -50,14 +50,32 @@ template <typename... Ptrs>
 } // namespace
 
 auto RenderFrameContext::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> {
-    return {
-        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle()),
-        ctx.BufferAddress(morphDeltasBuffer.Handle()),
-    };
+    std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount> addresses {};
+    for (const auto& entry : Slang::kFrameAddressMeta) {
+        // Engine policy: which CPU resource serves each named field. Field
+        // placement (offset, binding, order) is generated metadata; this
+        // choice is not.
+        addresses[static_cast<size_t>(entry.field)] = [&]() noexcept -> VkDeviceAddress {
+            switch (entry.field) {
+                case Slang::FrameAddressField::frameAddress:
+                    return ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle());
+                case Slang::FrameAddressField::lightsAddress:
+                    return ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle());
+                case Slang::FrameAddressField::instancesAddress:
+                    return ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle());
+                case Slang::FrameAddressField::jointsAddress:
+                    return ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle());
+                case Slang::FrameAddressField::previousJointsAddress:
+                    return ctx.BufferAddress(frames.jointBuffers[Vk::PreviousFrameSlot(presenter.frameIndex)].Handle());
+                case Slang::FrameAddressField::morphDeltasAddress:
+                    return ctx.BufferAddress(morphDeltasBuffer.Handle());
+                case Slang::FrameAddressField::COUNT:
+                    break;
+            }
+            return VkDeviceAddress {0};
+        }();
+    }
+    return addresses;
 }
 
 void RenderFrameContext::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept {

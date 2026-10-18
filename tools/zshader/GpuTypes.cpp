@@ -66,6 +66,8 @@ namespace {
 constexpr std::string_view kAbiGlobal  = "abi";
 constexpr std::string_view kAbiWrapper = "GpuAbiTypes";
 constexpr std::string_view kEntryPoint = "CSMain";
+constexpr std::string_view kSceneGlobal = "scene";
+constexpr std::string_view kHeapStruct  = "DescriptorHeapPushData";
 
 // GPU enums are declared with an explicit uint underlying type in Slang. The
 // walk accepts their reflected four-byte layouts and uint32_t-valued cases only;
@@ -620,7 +622,43 @@ auto EmitEnum(std::string& out, const EnumDef& def) -> void {
     );
 }
 
-auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef> enums) -> std::string {
+// One frame-address relationship: a DescriptorHeapPushData word paired with
+// the GlobalSceneRegistry buffer binding it carries. Both halves come from
+// reflection -- the words from the generated struct's 8-byte members in
+// declaration order, the bindings from the scene ParameterBlock's buffer
+// members in declaration order -- so neither side is restated here. The rows
+// carry both names so a reorder of either declaration regenerates visibly,
+// and src/render/GpuAbi.cpp pins the pairs against silent reordering.
+struct FrameAddressRow {
+    std::string pushField {};
+    std::string registryField {};
+    uint32_t    binding = 0;
+    uint32_t    offset  = 0;
+    bool        uniformBuffer = false;
+};
+
+auto EmitFrameAddresses(std::string& out, std::span<const FrameAddressRow> rows) -> void {
+    std::format_to(std::back_inserter(out), "\n// The frame-address run: field placement is generated (above), CPU resource\n// selection is engine policy (src/render/RenderFrame.cpp).\nenum class FrameAddressField : uint32_t {{\n");
+    for (const FrameAddressRow& row: rows) {
+        std::format_to(std::back_inserter(out), "    {},\n", row.pushField);
+    }
+    std::format_to(std::back_inserter(out), "    COUNT,\n}};\n\nstruct FrameAddressMeta {{\n    FrameAddressField   field;\n    ::std::string_view  pushField;\n    ::std::string_view  registryField;\n    uint32_t            binding;\n    uint32_t            offset;\n    bool                uniformBuffer;\n}};\n\ninline constexpr uint32_t kFrameAddressCount = {};\ninline constexpr ::std::array<FrameAddressMeta, {}> kFrameAddressMeta = {{{{\n", rows.size(), rows.size());
+    for (const FrameAddressRow& row: rows) {
+        std::format_to(
+            std::back_inserter(out),
+            "    {{FrameAddressField::{}, \"{}\", \"{}\", {}u, {}u, {}}},\n",
+            row.pushField,
+            row.pushField,
+            row.registryField,
+            row.binding,
+            row.offset,
+            row.uniformBuffer ? "true" : "false"
+        );
+    }
+    std::format_to(std::back_inserter(out), "}}}};\n");
+}
+
+auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef> enums, std::span<const FrameAddressRow> frameRows) -> std::string {
     std::string text {kStructsPreamble};
     for (const EnumDef& def: enums) {
         EmitEnum(text, def);
@@ -656,6 +694,7 @@ auto EmitStructsHeader(std::span<const StructDef> defs, std::span<const EnumDef>
             );
         }
     }
+    EmitFrameAddresses(text, frameRows);
     EmitInventory(text, defs);
     return text;
 }
@@ -712,11 +751,15 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         Fail("gpu types: '{}' declares globals without a layout; it is not the gpu_abi module", options.module);
     }
     slang::VariableLayoutReflection* abi = nullptr;
+    slang::VariableLayoutReflection* scene = nullptr;
     for (unsigned i: std::views::iota(0u, globalsLayout->getFieldCount())) {
         slang::VariableLayoutReflection* field = globalsLayout->getFieldByIndex(i);
         const char*                       name  = field->getName();
         if (name != nullptr && std::string_view {name} == kAbiGlobal) {
             abi = field;
+        }
+        if (name != nullptr && std::string_view {name} == kSceneGlobal) {
+            scene = field;
         }
     }
     if (abi == nullptr) {
@@ -770,11 +813,114 @@ void RunGpuTypesMode(const GpuTypesOptions& options) {
         structs.push_back(std::move(built.definition));
     }
 
+    // The frame-address relationship, generated rather than hand-paired: the
+    // DescriptorHeapPushData 8-byte words (from the struct walk above) against
+    // the scene ParameterBlock's buffer bindings (name + binding index from
+    // this reflection), both in declaration order. A mismatch fails here; the
+    // emitted rows carry both names so either side reordering is visible in
+    // the generated file, and src/render/GpuAbi.cpp pins the pairs.
+    if (scene == nullptr) {
+        Fail("gpu types: '{}' declares no '{}' global; the frame-address metadata has no binding side", options.module, kSceneGlobal);
+    }
+    slang::TypeLayoutReflection* sceneLayout = scene->getTypeLayout();
+    if (sceneLayout->getType()->getKind() != slang::TypeReflection::Kind::ParameterBlock) {
+        Fail(
+            "gpu types: '{}.{}' is a {}, not the ParameterBlock wrapper",
+            options.module,
+            kSceneGlobal,
+            KindName(sceneLayout->getType()->getKind())
+        );
+    }
+    slang::TypeLayoutReflection* registryLayout = sceneLayout->getElementTypeLayout();
+
+    const StructDef* heapDef = nullptr;
+    for (const StructDef& def: structs) {
+        if (def.name == kHeapStruct) {
+            heapDef = &def;
+        }
+    }
+    if (heapDef == nullptr) {
+        Fail("gpu types: '{}' wraps no '{}'; the frame-address metadata has no field side", options.module, kHeapStruct);
+    }
+
+    std::vector<FrameAddressRow> frameRows;
+    uint32_t                     registryIndex = 0;
+    for (unsigned i: std::views::iota(0u, registryLayout->getFieldCount())) {
+        slang::VariableLayoutReflection* member      = registryLayout->getFieldByIndex(i);
+        slang::TypeLayoutReflection*     memberLayout = member->getTypeLayout();
+        const slang::TypeReflection::Kind kind        = memberLayout->getType()->getKind();
+        const SlangResourceShape          shape       = memberLayout->getType()->getResourceShape();
+        const bool uniformBuffer = kind == slang::TypeReflection::Kind::ConstantBuffer;
+        const bool storageBuffer = kind == slang::TypeReflection::Kind::Resource
+                                   && (shape & SLANG_RESOURCE_BASE_SHAPE_MASK) == SLANG_STRUCTURED_BUFFER;
+        if (!uniformBuffer && !storageBuffer) {
+            continue;
+        }
+        if (registryIndex >= static_cast<uint32_t>(heapDef->fields.size())) {
+            break;
+        }
+        const char* memberName = member->getName();
+        if (memberName == nullptr || memberName[0] == '\0') {
+            Fail("gpu types: '{}.{}' member {} is unnamed; the frame-address rows name both halves", options.module, kSceneGlobal, i);
+        }
+        frameRows.push_back(FrameAddressRow {
+            .pushField      = {},
+            .registryField  = memberName,
+            .binding        = member->getBindingIndex(),
+            .offset         = 0,
+            .uniformBuffer  = uniformBuffer,
+        });
+        ++registryIndex;
+    }
+
+    {
+        std::vector<const Field*> words;
+        for (const Field& field: heapDef->fields) {
+            if (!field.isPad && field.size == sizeof(uint64_t)) {
+                words.push_back(&field);
+            }
+        }
+        if (words.size() != frameRows.size()) {
+            Fail(
+                "gpu types: DescriptorHeapPushData declares {} 8-byte words but {} has {} buffer bindings; the frame-address run is one word per binding",
+                words.size(),
+                kSceneGlobal,
+                frameRows.size()
+            );
+        }
+        for (size_t i = 0; i < words.size(); ++i) {
+            frameRows[i].pushField = words[i]->name;
+            frameRows[i].offset    = words[i]->offset;
+        }
+    }
+
     std::vector<StructDef> defs;
     defs.reserve(nested.size() + structs.size());
-    std::ranges::move(nested, std::back_inserter(defs));
-    std::ranges::move(structs, std::back_inserter(defs));
-    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs, enums));
+    for (std::vector<StructDef>* bucket: {&nested, &structs}) {
+        for (StructDef& candidate: *bucket) {
+            const auto existing = std::ranges::find_if(defs, [&candidate](const StructDef& d) { return d.name == candidate.name; });
+            if (existing == defs.end()) {
+                defs.push_back(std::move(candidate));
+                continue;
+            }
+            // A type reachable twice -- a wrapper member another payload also
+            // holds (ParticleEmitterParams under ComputePushConstants and the
+            // emitter member) -- is one type and is emitted once. The same
+            // name with a different shape is a lie rather than a duplicate,
+            // and fails here.
+            if (existing->size != candidate.size || existing->fields.size() != candidate.fields.size()) {
+                Fail("gpu types: '{}' is reachable twice with different shapes ({} vs {} bytes)", candidate.name, existing->size, candidate.size);
+            }
+            for (size_t i = 0; i < existing->fields.size(); ++i) {
+                const Field& a = existing->fields[i];
+                const Field& b = candidate.fields[i];
+                if (a.name != b.name || a.offset != b.offset || a.size != b.size || a.isPad != b.isPad) {
+                    Fail("gpu types: '{}' is reachable twice and member {} does not agree between the paths", candidate.name, i);
+                }
+            }
+        }
+    }
+    WriteFileIfChanged(options.outStructs, EmitStructsHeader(defs, enums, frameRows));
     WriteFileIfChanged(options.outSpv, spvBytes);
     std::println("zshader: gpu types: {} struct(s), {} enum(s) from {}", defs.size(), enums.size(), options.module);
 }

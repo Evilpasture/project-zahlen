@@ -1,14 +1,11 @@
 
+import gpu_push_constants;
 import ddgi_common;
 import gpu_buffer;
 import instance_data;
 import pbr_helpers;
 import uniforms;
 
-struct RtrHalfPushConstants {
-    uint2 halfRes;
-    uint2 _pad;
-};
 [vk::push_constant]
 RtrHalfPushConstants pc;
 

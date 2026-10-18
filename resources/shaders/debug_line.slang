@@ -8,16 +8,12 @@
 // leaves this shader with no descriptor set at all -- no heap mapping, no
 // binding table, nothing for the host to reflect.
 
+import gpu_push_constants;
 import gpu_buffer;
 
 struct LineVertex {
     float3 position;
     uint   color; // packed RGBA8, host side Math::PackColor
-};
-
-struct LinePushConstants {
-    float4x4 viewProj;
-    uint64_t vertexBufferAddress;
 };
 
 [vk::push_constant]

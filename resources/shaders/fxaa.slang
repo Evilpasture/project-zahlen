@@ -1,4 +1,6 @@
 
+import gpu_push_constants;
+
 struct VSOutput {
     float4 pos : SV_Position;
     float2 uv : TEXCOORD0;
@@ -13,17 +15,8 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-struct PushConstants {
-    float rcpFrameX;
-    float rcpFrameY;
-    float subpix;
-    float edgeThreshold;
-    float edgeThresholdMin;
-    float _pad;
-};
-
 [vk::push_constant]
-PushConstants pc;
+FXAAPushConstants pc;
 
 Texture2D<float4> texInput;
 SamplerState smp;

@@ -143,11 +143,7 @@ auto PostProcessFeature::Build(RenderContext::Impl& impl) -> std::expected<void,
 #endif
 
 auto PostProcessFeature::BakeSMAALUTs(RenderContext::Impl& impl) -> std::expected<void, ErrorCode> {
-    struct SMAALUTPush {
-        uint32_t width  = 0;
-        uint32_t height = 0;
-        uint32_t mode   = 0;
-    };
+using SMAALUTPush = Slang::SMAALUTPush;
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
     return Vk::CreateHeapComputePass(impl.ctx.Device(), shader, impl.bakeHeapBindings.GetInfo(), impl.bakeHeapBindings.indexPushOffset, &impl.pipelineBinaries)

@@ -13,9 +13,7 @@ namespace ZHLN::Passes {
 
 namespace {
 
-struct ShadowTilePush {
-    JPH::Mat44 viewProj;
-};
+using ShadowTilePush = Slang::ShadowTilePush;
 static_assert(GpuAbi::ScenePassPayload<ShadowTilePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 constexpr uint32_t kCascadeSlot    = 0;

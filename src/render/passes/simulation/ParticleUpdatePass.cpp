@@ -6,12 +6,7 @@
 
 namespace ZHLN::Passes {
 
-struct alignas(16) ComputePushConstants {
-    VkDeviceAddress       particleBufferAddr;
-    uint32_t              particleCount;
-    float                 deltaTime;
-    ParticleEmitterParams p;
-};
+using ComputePushConstants = Slang::ComputePushConstants;
 static_assert(GpuAbi::ScenePassPayload<ComputePushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
 void ParticleUpdatePass::operator()(VkCommandBuffer cmd) const noexcept {
