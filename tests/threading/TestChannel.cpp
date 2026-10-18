@@ -99,6 +99,6 @@ struct ChannelTestSuite {
 
 // Exported for the threading group binary (RunThreadingTests.cpp), which
 // aggregates every suite in this directory through Runner::RunDeferred.
-static auto RunChannelSuite() -> ZHLN::Test::TestStats {
+auto RunChannelSuite() -> ZHLN::Test::TestStats {
     return ZHLN::Test::RunSuite<ChannelTestSuite>();
 }
