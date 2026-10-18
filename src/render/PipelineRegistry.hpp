@@ -28,13 +28,11 @@ enum class MaterialPipelineFamily : uint8_t { Deferred, Forward };
 class PipelineRegistry {
   public:
     PipelineRegistry(
-        Vk::Context&           ctx,
+        Vk::Context&             ctx,
         Vk::PipelineBinaryStore& pipelineBinaries,
-        Vk::HeapMappingBundle& sceneHeapMappings,
-        Vk::GPUDiagnostics&    gpuDiagnostics,
-        Vk::DeletionQueue&     deletionQueue
-    ) noexcept:
-        _ctx(ctx), _pipelineBinaries(pipelineBinaries), _heapMappings(sceneHeapMappings), _diagnostics(gpuDiagnostics), _deletionQueue(deletionQueue) {
+        Vk::HeapMappingBundle&   sceneHeapMappings,
+        Vk::DeletionQueue&       deletionQueue
+    ) noexcept: _ctx(ctx), _pipelineBinaries(pipelineBinaries), _heapMappings(sceneHeapMappings), _deletionQueue(deletionQueue) {
     }
     ~PipelineRegistry() {
         RetireAll();
@@ -129,7 +127,6 @@ class PipelineRegistry {
             _meshVariantAttempted[index] = true;
         }
 
-        RegisterShaderModules<ShaderModule>();
         const Vk::PipelineCreateBindings bindings {
             .vertexMapping   = &_heapMappings.info,
             .fragmentMapping = &_heapMappings.info,
@@ -183,21 +180,12 @@ class PipelineRegistry {
         };
     }
 
-    template <Vk::GraphicsShaderModule ShaderModule>
-    void RegisterShaderModules() const noexcept {
-        ShaderModule::ForEachModule([this](auto moduleTag) {
-            using Module = typename decltype(moduleTag)::type;
-            _diagnostics.RegisterShader(Vk::CreateShaderDesc<Module>(), Module::EntryPoint);
-        });
-    }
-
     void LogMeshPipelineFallback(ErrorCode error) const noexcept;
 
-    Vk::Context&           _ctx;
-    Vk::PipelineBinaryStore& _pipelineBinaries;
-    Vk::HeapMappingBundle& _heapMappings;
-    Vk::GPUDiagnostics&    _diagnostics;
-    Vk::DeletionQueue&     _deletionQueue;
+    Vk::Context&                                    _ctx;
+    Vk::PipelineBinaryStore&                        _pipelineBinaries;
+    Vk::HeapMappingBundle&                          _heapMappings;
+    Vk::DeletionQueue&                              _deletionQueue;
     std::array<Vk::Pipeline, kPipelineVariantCount> _sharedPipelines {};
     std::array<bool, kPipelineVariantCount>         _meshVariantAttempted {};
 

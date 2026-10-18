@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include "ComputePassResources.hpp"
 #include "DrawCommands.hpp"
 #include "DrawQueueManager.hpp"
 #include "FrameContext.hpp"
@@ -12,14 +13,6 @@
 #include "GpuAbi.hpp"
 #include "GpuLayout.hpp"
 #include "PassPayloads.hpp"
-#include "ComputePassResources.hpp"
-#include "passes/aa/AntiAliasingResources.hpp"
-#include "passes/culling/CullingResources.hpp"
-#include "passes/SceneDrawResources.hpp"
-#include "passes/forward/ForwardResources.hpp"
-#include "passes/gbuffer/DecalResources.hpp"
-#include "passes/postprocess/PostProcessResources.hpp"
-#include "passes/simulation/ParticleUpdateResources.hpp"
 #include "PipelineFormats.hpp"
 #include "PipelineRegistry.hpp"
 #include "PresentationTarget.hpp"
@@ -36,6 +29,13 @@
 #include "features/ShadowRenderer.hpp"
 #include "features/VolumetricFogSystem.hpp"
 #include "graph/RenderGraph.hpp"
+#include "passes/SceneDrawResources.hpp"
+#include "passes/aa/AntiAliasingResources.hpp"
+#include "passes/culling/CullingResources.hpp"
+#include "passes/forward/ForwardResources.hpp"
+#include "passes/gbuffer/DecalResources.hpp"
+#include "passes/postprocess/PostProcessResources.hpp"
+#include "passes/simulation/ParticleUpdateResources.hpp"
 #include "pipeline/ComputePass.hpp"
 #include "pipeline/FullscreenPass.hpp"
 #include "pipelines/ReflectionPipeline.hpp"
@@ -121,7 +121,7 @@ struct SceneResources {
 namespace Resource {
 }
 
-struct RenderContext::Impl : RenderFrameContext {
+struct RenderContext::Impl: RenderFrameContext {
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
@@ -144,7 +144,7 @@ struct RenderContext::Impl : RenderFrameContext {
     Vk::PipelineBinaryStore                                       pipelineBinaries;
     PresentationMode                                              presentationMode = PresentationMode::NativeSwapchain;
     Vk::CommandPools<Vk::kFramesInFlight, Vk::QueueType::Compute> computePools;
-    mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
+    mutable Vk::CommandRing<Vk::QueueType::Compute, 8>            computeCmdRing;
 
     std::unique_ptr<Vk::SubmittedStagingWork> submittedStaging;
     bool                                      frameOpen = false;
@@ -169,13 +169,13 @@ struct RenderContext::Impl : RenderFrameContext {
     // for CSG, the pair for mesh particles.
     CsgResources          csg;
     MeshParticlePipelines meshParticles;
-    Vk::HeapPassBindings bakeHeapBindings;
-    Vk::HeapPassBindings iblBakeHeapBindings;
-    Vk::HeapPassBindings volumetricClearHeapBindings;
-    Vk::HeapPassBindings volumetricFogInjectHeapBindings;
-    Vk::HeapPassBindings volumetricLightInjectHeapBindings;
-    Vk::HeapPassBindings volumetricIntegrationHeapBindings;
-    Vk::HeapPassBindings volumetricTemporalHeapBindings;
+    Vk::HeapPassBindings  bakeHeapBindings;
+    Vk::HeapPassBindings  iblBakeHeapBindings;
+    Vk::HeapPassBindings  volumetricClearHeapBindings;
+    Vk::HeapPassBindings  volumetricFogInjectHeapBindings;
+    Vk::HeapPassBindings  volumetricLightInjectHeapBindings;
+    Vk::HeapPassBindings  volumetricIntegrationHeapBindings;
+    Vk::HeapPassBindings  volumetricTemporalHeapBindings;
 
     Vk::SamplerConfig globalSamplerConfig {};
     Vk::SamplerConfig clampSamplerConfig = Vk::SamplerConfig::LinearClampToEdge();
@@ -203,9 +203,9 @@ struct RenderContext::Impl : RenderFrameContext {
     ComputePassResources compute;
 
     struct EmitterStorage {
-        BufferHandle buffer = BufferHandle::Invalid;
-        uint32_t     capacity = 0;
-        uint64_t     lastSeenFrame = 0;
+        BufferHandle buffer                  = BufferHandle::Invalid;
+        uint32_t     capacity                = 0;
+        uint64_t     lastSeenFrame           = 0;
         bool         allocationWarningLogged = false;
     };
     using EmitterStorageMap = HashMap<uint64_t, EmitterStorage>;
@@ -216,18 +216,14 @@ struct RenderContext::Impl : RenderFrameContext {
     ParticleUpdateResources particleUpdate;
 
     // Decals, and the forward pass's lines and billboard particles.
-    DecalResources   decals;
-    ForwardResources forward;
+    DecalResources               decals;
+    ForwardResources             forward;
     std::span<const LineSegment> pendingLines {};
 
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
 
-    std::expected<void, ErrorCode> AllocateLineVertexBuffers(
-        size_t                     maxVertices,
-        PerFrame<Vk::Buffer>&      bufs,
-        PerFrame<VkDeviceAddress>& addrs
-    ) noexcept;
+    std::expected<void, ErrorCode> AllocateLineVertexBuffers(size_t maxVertices, PerFrame<Vk::Buffer>& bufs, PerFrame<VkDeviceAddress>& addrs) noexcept;
 
     std::expected<void, ErrorCode> InitSceneHeaps(const Vk::SamplerConfig& globalSamplerValue, const Vk::SamplerConfig& clampSamplerValue) noexcept;
     void                           BuildSceneHeapMappings() noexcept;
@@ -270,17 +266,17 @@ struct RenderContext::Impl : RenderFrameContext {
     UIRenderer uiRenderer;
 
     struct RenderTexture {
-        Vk::ImageSlice       image {};
+        Vk::ImageSlice image {};
 
         Vk::AttachmentView   attachmentView;
-        Vk::AttachmentLayout layout        = Vk::AttachmentLayout::Undefined;
-        bool                 drawn         = false;
+        Vk::AttachmentLayout layout = Vk::AttachmentLayout::Undefined;
+        bool                 drawn  = false;
     };
     std::unordered_map<TextureHandle, RenderTexture> renderTextures;
 
     static inline std::atomic<uint64_t> nextRendererId {1};
-    uint64_t                            rendererId = nextRendererId.fetch_add(1, std::memory_order::relaxed);
-    uint64_t                            frameSerial = 0;
+    uint64_t                            rendererId      = nextRendererId.fetch_add(1, std::memory_order::relaxed);
+    uint64_t                            frameSerial     = 0;
     uint64_t                            nextAcquisition = 1;
     struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
@@ -323,10 +319,9 @@ struct RenderContext::Impl : RenderFrameContext {
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
-    [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride)
-        -> BufferHandle;
-    void EvictInactiveEmitters() noexcept;
-    void ClearEmitterBuffers() noexcept;
+    [[nodiscard]] auto EnsureEmitterStorage(EmitterStorageMap& emitters, uint64_t emitterId, uint32_t maxParticles, size_t particleStride) -> BufferHandle;
+    void               EvictInactiveEmitters() noexcept;
+    void               ClearEmitterBuffers() noexcept;
 
     [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
@@ -352,13 +347,9 @@ struct RenderContext::Impl : RenderFrameContext {
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         diagnostics.gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
-    void RegisterShader(const Vk::ShaderDesc& desc, std::string_view fallbackEntry = "main") const noexcept {
-        diagnostics.gpuDiagnostics.RegisterShader(desc, fallbackEntry);
-    }
 
     Impl(PresentationTarget& target, ZHLN::Optional<FS::FileSystemWatcher&> watcher):
-        presentationTarget(target), diagnostics(ctx, watcher),
-        pipelines(ctx, pipelineBinaries, sceneHeapMappings, diagnostics.gpuDiagnostics, deletionQueue) {
+        presentationTarget(target), diagnostics(ctx, watcher), pipelines(ctx, pipelineBinaries, sceneHeapMappings, deletionQueue) {
     }
 
     ~Impl() {
@@ -464,17 +455,21 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     const auto imageConfig = Vk::ImageConfig::Texture2D({width, height}, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled);
     return Vk::Image::Create(allocator, imageConfig).and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
-        defer _([&] { allocator.DestroyImage(image); });
+        defer                       _([&] { allocator.DestroyImage(image); });
         const VkImageViewCreateInfo viewInfo = image.ViewInfo();
         heapManager.BeginImmediate();
         const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(bakeHeapBindings, Vk::Slot<"outTexture">(viewInfo));
 
-        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-            heapManager.BindHeaps(cmd);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-            pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
-        }); !immediate) [[unlikely]] {
+        if (auto immediate = Vk::ExecuteImmediate(
+                ctx, graphicsCmdRing,
+                [&](VkCommandBuffer cmd) -> auto {
+                    heapManager.BindHeaps(cmd);
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
+                    pass.DispatchHeapIndexedThreads<Modules...>(cmd, block, width, height, 1, push);
+                    Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
+                }
+            );
+            !immediate) [[unlikely]] {
             return std::unexpected(immediate.error());
         }
         return textureManager.Adopt(std::move(image), viewInfo);
@@ -482,9 +477,9 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
 }
 
 struct PassContext {
-    Vk::CommandEncoder   encoder;
-    RenderFrameContext&  ctx;
-    bool                 heapsInherited;
+    Vk::CommandEncoder  encoder;
+    RenderFrameContext& ctx;
+    bool                heapsInherited;
 
     PassContext(VkCommandBuffer cmd, RenderFrameContext& impl, bool inherited = false) noexcept: encoder(cmd), ctx(impl), heapsInherited(inherited) {
     }

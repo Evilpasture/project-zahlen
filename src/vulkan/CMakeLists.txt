@@ -1,19 +1,6 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-set(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE
-    ""
-    CACHE
-      FILEPATH
-      "Optional renderer-internal source implementing ZHLN::Vk::CreateConfiguredGPUCrashTracker"
-)
-set(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES
-    ""
-    CACHE
-      STRING
-      "Optional libraries linked only by the configured GPU diagnostics backend"
-)
-
 add_library(
   zahlen_vulkan STATIC
   ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
@@ -47,16 +34,6 @@ add_library(
   diagnostics/GPUAddressTracker.cpp
   diagnostics/GPUDiagnostics.cpp)
 set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-if(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE)
-    target_sources(zahlen_vulkan PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
-    target_compile_definitions(zahlen_vulkan
-                             PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
-    if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
-        target_link_libraries(zahlen_vulkan
-                          PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
-    endif()
-endif()
 
 option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 

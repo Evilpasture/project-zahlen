@@ -86,15 +86,11 @@ auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCo
     }
 
     const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-    diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
     return compute.skinning.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
 }
 
-auto RenderContext::Impl::AllocateLineVertexBuffers(
-    size_t                     maxVertices,
-    PerFrame<Vk::Buffer>&      bufs,
-    PerFrame<VkDeviceAddress>& addrs
-) noexcept -> std::expected<void, ErrorCode> {
+auto RenderContext::Impl::AllocateLineVertexBuffers(size_t maxVertices, PerFrame<Vk::Buffer>& bufs, PerFrame<VkDeviceAddress>& addrs) noexcept
+    -> std::expected<void, ErrorCode> {
     const size_t              bufferSize = maxVertices * sizeof(LineVertex);
     PerFrame<Vk::Buffer>      created;
     PerFrame<VkDeviceAddress> createdAddresses;
@@ -104,8 +100,7 @@ auto RenderContext::Impl::AllocateLineVertexBuffers(
         }
     });
     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-        auto res =
-            Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
+        auto res = Vk::Buffer::Create(allocator, bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU);
         if (!res) {
             return std::unexpected(res.error());
         }
@@ -128,7 +123,6 @@ auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Erro
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     return LoadAndCreateShaders(Vk::MakeStageSource<Shaders::Modules::DebugLineVS>(), Vk::MakeStageSource<Shaders::Modules::DebugLinePS>())
         .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
-
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders.View())
                 .ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT})
@@ -147,7 +141,8 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     shadowSamplerConfig = Vk::SamplerConfig::LinearClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).WithDepthCompare();
 
-    return targets.InitShadows()
+    return targets
+        .InitShadows()
 
         .and_then([&]() -> std::expected<void, ErrorCode> { return shadows.InitResources(*this); })
 
@@ -158,15 +153,17 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
 
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
-            return CreatePerFrame(allocator, sizeof(Light) * kMaxSceneLights, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU)
+            return CreatePerFrame(
+                       allocator, sizeof(Light) * kMaxSceneLights, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
+            )
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         .and_then([&](auto&& lsb) -> auto {
             frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreatePerFrame(
-                allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
-                Vk::MemoryUsage::CPUToGPU
+                       allocator, sizeof(ShadowTile) * ShadowAtlas::kMaxTiles, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::CPUToGPU
             )
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
@@ -280,7 +277,6 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCod
         }
 
         const Vk::ShaderDesc shader = Vk::CreateShaderDesc(bytes, source.entryPoint);
-        diagnostics.gpuDiagnostics.RegisterShader(shader, "CSMain");
         return compute.hangGpu.BuildHeap(ctx.Device(), shader, nullptr, 0, &pipelineBinaries);
     }();
     if (!built) {
@@ -302,7 +298,9 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(built.error());
     }
 
-    return culling.hizGeneratePass.BuildHeap(ctx.Device(), shader, culling.hizHeapBindings.GetInfo(), culling.hizHeapBindings.indexPushOffset, &pipelineBinaries);
+    return culling.hizGeneratePass.BuildHeap(
+        ctx.Device(), shader, culling.hizHeapBindings.GetInfo(), culling.hizHeapBindings.indexPushOffset, &pipelineBinaries
+    );
 }
 
 auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
@@ -357,7 +355,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return culling.cullingPass.BuildHeap(ctx.Device(), cullingShader, culling.cullingHeapBindings.GetInfo(), culling.cullingHeapBindings.indexPushOffset, &pipelineBinaries);
+            return culling.cullingPass.BuildHeap(
+                ctx.Device(), cullingShader, culling.cullingHeapBindings.GetInfo(), culling.cullingHeapBindings.indexPushOffset, &pipelineBinaries
+            );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             const auto&             physInfo     = ctx.PhysicalInfo();
@@ -419,10 +419,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .and_then([&](auto&& gcb) -> std::expected<void, ErrorCode> {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
                     for (uint32_t i = 0; i < Vk::kFramesInFlight; ++i) {
-                        if (auto immediate = Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-                                Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
-                                Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
-                            });
+                        if (auto immediate = Vk::ExecuteImmediate(
+                                ctx, graphicsCmdRing,
+                                [&](VkCommandBuffer cmd) -> void {
+                                    Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
+                                    Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
+                                }
+                            );
                             !immediate) [[unlikely]] {
                             return std::unexpected(immediate.error());
                         }
@@ -448,7 +451,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return culling.clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, culling.clusterCullingHeapBindings.GetInfo(), culling.clusterCullingHeapBindings.indexPushOffset, &pipelineBinaries
+                ctx.Device(), clusterCullingShader, culling.clusterCullingHeapBindings.GetInfo(), culling.clusterCullingHeapBindings.indexPushOffset,
+                &pipelineBinaries
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

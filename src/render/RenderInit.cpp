@@ -16,9 +16,6 @@ auto RenderContext::Impl::LoadAndCreateShaders(Vk::VertexStageSource vs, Vk::Fra
     auto vertex   = LoadShaderData(vs);
     auto fragment = LoadShaderData(ps);
 
-    diagnostics.gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(vertex.Code(), vs.entryPoint), "VSMain");
-    diagnostics.gpuDiagnostics.RegisterShader(Vk::CreateShaderDesc(fragment.Code(), ps.entryPoint), "PSMain");
-
     return Vk::OwnedShaderStages::Create(std::move(vertex), std::move(fragment), vs.entryPoint, ps.entryPoint);
 }
 
@@ -56,7 +53,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
             );
         })
         .and_then([&]() {
-
             return shadows.CompileAtlasPipeline(
                 *this, ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ShadowAtlasVS>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
             );
